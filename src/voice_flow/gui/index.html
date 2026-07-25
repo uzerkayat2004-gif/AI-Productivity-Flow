@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Flow - AI Speech Desktop App</title>
+  <title>Voice Flow - AI Speech Dictation</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="app">
@@ -22,7 +22,7 @@
 
         <nav class="nav-group">
           <div class="nav-item active" data-page="home">
-            <span class="nav-icon">⊞</span> Home
+            <span class="nav-icon">🎙️</span> Dictation
           </div>
           <div class="nav-item" data-page="insights">
             <span class="nav-icon">📊</span> Insights
@@ -48,32 +48,43 @@
     <!-- MAIN CONTENT VIEW -->
     <main class="main-content">
 
-      <!-- PAGE 1: HOME -->
+      <!-- PAGE 1: HOME / DICTATION HISTORY & METRICS -->
       <section id="page-home" class="page-view">
         <div class="page-header">
-          <h1 class="page-title">Home & History</h1>
+          <div>
+            <h1 class="page-title">Welcome back, User</h1>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere.</p>
+          </div>
+
+          <!-- TOP METRICS CARD -->
+          <div class="metrics-row">
+            <div class="metric-pill">
+              <span class="metric-val" id="stat-total-words">0</span>
+              <span class="metric-lbl">Total Words</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-val" id="stat-wpm">108</span>
+              <span class="metric-lbl">WPM Speed</span>
+            </div>
+            <div class="metric-pill">
+              <span class="metric-val" id="stat-streak">1</span>
+              <span class="metric-lbl">Day Streak</span>
+            </div>
+          </div>
         </div>
 
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-header">Total Words Dictated</div>
-            <div class="stat-value" id="stat-total-words">0 <span class="stat-unit">words</span></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">Speaking Speed</div>
-            <div class="stat-value" id="stat-wpm">108 <span class="stat-unit">wpm</span></div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">Daily Streak</div>
-            <div class="stat-value" id="stat-streak">1 <span class="stat-unit">day</span></div>
+        <!-- SEARCH BAR & SECTION HEADER -->
+        <div class="history-controls">
+          <div class="history-title">DICTATION HISTORY</div>
+          <div class="search-box">
+            <span style="opacity: 0.5;">🔍</span>
+            <input type="text" id="history-search" placeholder="Search dictations..." oninput="filterHistory()">
           </div>
         </div>
 
-        <div class="stat-card" style="margin-top: 10px;">
-          <div class="stat-header" style="margin-bottom: 16px;">Live Dictation History</div>
-          <div id="dictations-list">
-            <!-- Dynamically populated from SQLite DB -->
-          </div>
+        <!-- LIVE DICTATION FEED (Grouped by Date) -->
+        <div id="dictations-list">
+          <!-- Dynamically populated from SQLite DB -->
         </div>
       </section>
 
@@ -179,7 +190,7 @@
 
         <!-- GENERAL TAB -->
         <div id="set-tab-general">
-          <h2 style="font-size: 22px; margin-bottom: 20px; font-family: var(--font-serif);">General Settings</h2>
+          <h2 style="font-size: 22px; margin-bottom: 20px;">General Settings</h2>
 
           <div class="setting-row">
             <div class="setting-info">
@@ -202,7 +213,7 @@
 
         <!-- SYSTEM TAB -->
         <div id="set-tab-system" style="display: none;">
-          <h2 style="font-size: 22px; margin-bottom: 20px; font-family: var(--font-serif);">System Settings</h2>
+          <h2 style="font-size: 22px; margin-bottom: 20px;">System Settings</h2>
 
           <div class="setting-row">
             <div class="setting-info">
@@ -229,7 +240,7 @@
 
         <!-- API KEYS TAB -->
         <div id="set-tab-apikeys" style="display: none;">
-          <h2 style="font-size: 22px; margin-bottom: 8px; font-family: var(--font-serif);">Google Gemini API Keys Pool</h2>
+          <h2 style="font-size: 22px; margin-bottom: 8px;">Google Gemini API Keys Pool</h2>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Add your free Gemini API keys here. Voice Flow load-balances between them automatically.</p>
 
           <div style="display: flex; gap: 10px; margin-bottom: 16px;">
