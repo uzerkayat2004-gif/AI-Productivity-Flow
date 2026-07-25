@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Flow - AI Speech Dictation</title>
+  <title>Voice Flow - AI Speech Desktop App</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="app">
@@ -22,7 +22,7 @@
 
         <nav class="nav-group">
           <div class="nav-item active" data-page="home">
-            <span class="nav-icon">🎙️</span> Dictation
+            <span class="nav-icon">⊞</span> Home
           </div>
           <div class="nav-item" data-page="insights">
             <span class="nav-icon">📊</span> Insights
@@ -48,37 +48,33 @@
     <!-- MAIN CONTENT VIEW -->
     <main class="main-content">
 
-      <!-- PAGE 1: HOME / DICTATION HISTORY & METRICS -->
+      <!-- PAGE 1: HOME PAGE -->
       <section id="page-home" class="page-view">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Welcome back, User</h1>
-            <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere.</p>
-          </div>
 
-          <!-- TOP METRICS CARD -->
-          <div class="metrics-row">
-            <div class="metric-pill">
-              <span class="metric-val" id="stat-total-words">0</span>
-              <span class="metric-lbl">Total Words</span>
-            </div>
-            <div class="metric-pill">
-              <span class="metric-val" id="stat-wpm">108</span>
-              <span class="metric-lbl">WPM Speed</span>
-            </div>
-            <div class="metric-pill">
-              <span class="metric-val" id="stat-streak">1</span>
-              <span class="metric-lbl">Day Streak</span>
-            </div>
+        <!-- STRETCHED METRICS PANEL -->
+        <div class="stretched-metrics-banner">
+          <div class="metric-block">
+            <div class="metric-val" id="stat-total-words">39.5K</div>
+            <div class="metric-lbl">Total Words</div>
+          </div>
+          <div class="metric-divider"></div>
+          <div class="metric-block">
+            <div class="metric-val" id="stat-wpm">145</div>
+            <div class="metric-lbl">WPM Speed</div>
+          </div>
+          <div class="metric-divider"></div>
+          <div class="metric-block">
+            <div class="metric-val" id="stat-streak">1</div>
+            <div class="metric-lbl">Day Streak</div>
           </div>
         </div>
 
-        <!-- SEARCH BAR & SECTION HEADER -->
+        <!-- SEARCH BAR & FEED HEADER -->
         <div class="history-controls">
-          <div class="history-title">DICTATION HISTORY</div>
+          <div class="history-title">RECENT DICTATIONS</div>
           <div class="search-box">
             <span style="opacity: 0.5;">🔍</span>
-            <input type="text" id="history-search" placeholder="Search dictations..." oninput="filterHistory()">
+            <input type="text" id="history-search" placeholder="Search transcripts..." oninput="filterHistory()">
           </div>
         </div>
 
@@ -97,7 +93,7 @@
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-header">Words Per Minute</div>
-            <div class="stat-value">108 <span class="stat-unit">wpm</span></div>
+            <div class="stat-value">145 <span class="stat-unit">wpm</span></div>
             <div class="insights-gauge-container">
               <span class="gauge-badge">Top 2% Speed</span>
             </div>
