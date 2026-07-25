@@ -14,10 +14,18 @@
     <!-- LEFT NAVIGATION SIDEBAR -->
     <aside class="sidebar" id="main-sidebar">
       <div>
+        <!-- BRAND HEADER WITH SIDEBAR TOGGLE BUTTON MOVED TO PRO LABEL POSITION -->
         <div class="brand">
-          <div class="brand-icon">VF</div>
-          <span class="brand-title">Voice Flow</span>
-          <span class="brand-badge">Pro</span>
+          <div class="brand-left">
+            <div class="brand-icon">VF</div>
+            <span class="brand-title">Voice Flow</span>
+          </div>
+          <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar (Expand/Collapse)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
         </div>
 
         <nav class="nav-group">
@@ -47,16 +55,6 @@
 
     <!-- MAIN CONTENT VIEW -->
     <main class="main-content">
-
-      <!-- TOP HEADER BAR WITH SIDEBAR TOGGLE BUTTON -->
-      <header class="top-header-bar">
-        <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar (Expand/Collapse)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="9" y1="3" x2="9" y2="21"></line>
-          </svg>
-        </button>
-      </header>
 
       <!-- PAGE 1: HOME PAGE -->
       <section id="page-home" class="page-view">
@@ -360,7 +358,7 @@
     </div>
   </div>
 
-  <!-- SUB-DIALOG 2: VIZPROFLOW PERFECT KEYS - MICROPHONE (4 OPTIONS + FOOTER) -->
+  <!-- SUB-DIALOG 2: VIZPROFLOW PERFECT KEYS - MICROPHONE -->
   <div id="mic-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
     <div class="perfect-keys-card">
       <div class="perfect-keys-header">
