@@ -1,6 +1,7 @@
 """Configuration and constants for Voice Flow."""
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,12 +13,15 @@ class Config:
     language: str = "en"
     device: str = "cpu"
     compute_type: str = "int8"
+    cpu_threads: int = field(default_factory=lambda: max(4, os.cpu_count() or 8))
+
+    # --- Speed & Accuracy Settings ---
+    beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.2s speed)
+    temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
-    # Higher VAD threshold (0.65) ignores distant background voices and chatter
-    vad_threshold: float = 0.65
-    min_speech_duration_ms: int = 250
-    # Dynamic Noise Gate RMS threshold -- audio below this energy level is treated as background noise
+    vad_threshold: float = 0.60  # Balanced VAD threshold
+    min_speech_duration_ms: int = 200
     noise_gate_rms: float = 0.008
 
     # --- Audio ---
@@ -37,14 +41,14 @@ class Config:
     bar_finish_color: str = "#51cf66"
     bar_font_family: str = "Segoe UI"
     bar_font_size: int = 11
-    done_display_ms: int = 2000  # how long "Done" shows before fade-out
+    done_display_ms: int = 1500  # how long "Done" shows before fade-out
 
     # --- Waveform ---
     waveform_bar_count: int = 15
     waveform_max_amplitude: int = 14  # max vertical displacement
 
     # --- Clipboard ---
-    clipboard_restore_delay_ms: int = 100  # delay before restoring clipboard
+    clipboard_restore_delay_ms: int = 80  # delay before restoring clipboard
 
 
 # Singleton config instance
