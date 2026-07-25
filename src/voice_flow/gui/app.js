@@ -2,12 +2,166 @@
 
 let allHistoryRecords = [];
 
+// Style Configuration & Scenarios (Matching Video with Distinct Custom Messages)
+const STYLE_DATA = {
+  personal: {
+    heroTitle: "This style applies in personal messengers",
+    heroDesc: "Style formatting applies instantly across personal desktop messaging apps.",
+    appIcons: `<span class="app-icon-pill">💬 WhatsApp</span><span class="app-icon-pill">✈️ Telegram</span><span class="app-icon-pill">👾 Discord</span><span class="app-icon-pill">📸 Instagram</span>`,
+    cards: [
+      {
+        id: "personal_formal",
+        name: "Formal.",
+        subtitle: "Caps + Punctuation",
+        sample: "Hey, are you free for lunch tomorrow? Let's do 12:30 PM if that works for you.",
+        avatar: "J"
+      },
+      {
+        id: "personal_casual",
+        name: "Casual",
+        subtitle: "Caps + Less punctuation",
+        sample: "Hey are you free for lunch tomorrow? Let's do 12:30 if that works for you",
+        avatar: "J"
+      },
+      {
+        id: "personal_very_casual",
+        name: "very casual",
+        subtitle: "No Caps + Less punctuation",
+        sample: "hey are you free for lunch tomorrow let's do 12 if that works for you",
+        avatar: "J"
+      }
+    ]
+  },
+  work: {
+    heroTitle: "This style applies in workplace messengers",
+    heroDesc: "Style formatting applies instantly across Slack, Microsoft Teams, and LinkedIn.",
+    appIcons: `<span class="app-icon-pill">💼 Slack</span><span class="app-icon-pill">🟦 Teams</span><span class="app-icon-pill">💼 LinkedIn</span>`,
+    cards: [
+      {
+        id: "work_formal",
+        name: "Formal.",
+        subtitle: "Caps + Punctuation",
+        sample: "John Doe 9:45 AM\nHey, if you're free, let's chat about the great results.",
+        avatar: "J"
+      },
+      {
+        id: "work_casual",
+        name: "Casual",
+        subtitle: "Caps + Less punctuation",
+        sample: "John Doe 9:45 AM\nHey, if you're free let's chat about the great results",
+        avatar: "J"
+      },
+      {
+        id: "work_excited",
+        name: "Excited!",
+        subtitle: "More exclamations",
+        sample: "John Doe 9:45 AM\nHey, if you're free, let's chat about the great results!",
+        avatar: "J"
+      }
+    ]
+  },
+  email: {
+    heroTitle: "This style applies in all major email apps",
+    heroDesc: "Style formatting applies across Outlook, Gmail, Mailbird, and Windows Mail.",
+    appIcons: `<span class="app-icon-pill">✉️ Outlook</span><span class="app-icon-pill">📨 Gmail</span><span class="app-icon-pill">📮 Windows Mail</span>`,
+    cards: [
+      {
+        id: "email_formal",
+        name: "Formal.",
+        subtitle: "Caps + Punctuation",
+        sample: "To: Alex Doe\n\nHi Alex,\n\nIt was great talking with you today. Looking forward to our next chat.\n\nBest,\nMary",
+        avatar: "M"
+      },
+      {
+        id: "email_casual",
+        name: "Casual",
+        subtitle: "Caps + Less punctuation",
+        sample: "To: Alex Doe\n\nHi Alex, it was great talking with you today. Looking forward to our next chat.\n\nBest,\nMary",
+        avatar: "M"
+      },
+      {
+        id: "email_excited",
+        name: "Excited!",
+        subtitle: "More exclamations",
+        sample: "To: Alex Doe\n\nHi Alex,\n\nIt was great talking with you today! Looking forward to our next chat!\n\nBest,\nMary",
+        avatar: "M"
+      }
+    ]
+  },
+  other: {
+    heroTitle: "This style applies in all other apps",
+    heroDesc: "Style formatting applies across Notion, Word, Google Docs, and ChatGPT.",
+    appIcons: `<span class="app-icon-pill">📄 Notion</span><span class="app-icon-pill">📝 Word</span><span class="app-icon-pill">🤖 ChatGPT</span>`,
+    cards: [
+      {
+        id: "other_formal",
+        name: "Formal.",
+        subtitle: "Caps + Punctuation",
+        sample: "So far, I am enjoying the new workout routine.\n\nI am excited for tomorrow's workout, especially after a full night of rest.",
+        avatar: "A"
+      },
+      {
+        id: "other_casual",
+        name: "Casual",
+        subtitle: "Caps + Less punctuation",
+        sample: "So far I am enjoying the new workout routine.\n\nI am excited for tomorrow's workout especially after a full night of rest.",
+        avatar: "A"
+      },
+      {
+        id: "other_excited",
+        name: "Excited!",
+        subtitle: "More exclamations",
+        sample: "So far, I am enjoying the new workout routine!\n\nI am excited for tomorrow's workout, especially after a full night of rest!",
+        avatar: "A"
+      }
+    ]
+  },
+  autocleanup: {
+    heroTitle: "Auto Cleanup applies to all your dictations",
+    heroDesc: "Choose the level of cleanup that's automatically applied every time, across all apps.",
+    appIcons: `<span class="app-icon-pill">✨ None</span><span class="app-icon-pill">✨ Light</span><span class="app-icon-pill">✨ Medium</span>`,
+    cards: [
+      {
+        id: "cleanup_none",
+        name: "None",
+        subtitle: "Transcribes exactly what you said, including mistakes",
+        sample: "hey joey, we still on for coffee? I think we maybe should leave earlier to make it there in time there might um traffic. What are you thinking?",
+        avatar: "V"
+      },
+      {
+        id: "cleanup_light",
+        name: "Light",
+        subtitle: "Cleans up filler words and grammar",
+        sample: "Hey Joey, are we still on for coffee? I think we should leave earlier to make it there in time. There might be traffic. What are you thinking?",
+        avatar: "V"
+      },
+      {
+        id: "cleanup_medium",
+        name: "Medium",
+        subtitle: "Edits for clarity and conciseness",
+        sample: "Hey Joey, are we still on for coffee? We should leave earlier; there might be traffic. What do you think?",
+        avatar: "V"
+      }
+    ]
+  }
+};
+
+let currentStyleCategory = "personal";
+let selectedStyles = {
+  personal: "personal_very_casual",
+  work: "work_casual",
+  email: "email_formal",
+  other: "other_formal",
+  autocleanup: "cleanup_light"
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   initNavigation();
   loadHistory();
   loadInsights();
   loadDictionary();
   loadMicrophones();
+  renderStyleCategory("personal");
 
   // Real-time auto-refresh polling every 3 seconds
   setInterval(() => {
@@ -50,7 +204,54 @@ function switchPage(pageId) {
     if (pageId === "home") loadHistory();
     if (pageId === "insights") loadInsights();
     if (pageId === "dictionary") loadDictionary();
+    if (pageId === "style") renderStyleCategory(currentStyleCategory);
   }
+}
+
+// Style Page Category Switcher
+function switchStyleTab(categoryKey, el) {
+  currentStyleCategory = categoryKey;
+  document.querySelectorAll("#style-tabs-nav .tab-btn").forEach(btn => btn.classList.remove("active"));
+  if (el) el.classList.add("active");
+  renderStyleCategory(categoryKey);
+}
+
+function renderStyleCategory(categoryKey) {
+  const data = STYLE_DATA[categoryKey];
+  if (!data) return;
+
+  // Render Hero Banner
+  document.getElementById("style-hero-title").textContent = data.heroTitle;
+  document.getElementById("style-hero-desc").textContent = data.heroDesc;
+  document.getElementById("style-hero-icons").innerHTML = data.appIcons;
+
+  // Render 3 Cards
+  const grid = document.getElementById("style-cards-grid");
+  if (!grid) return;
+
+  const currentSelectedId = selectedStyles[categoryKey];
+
+  grid.innerHTML = data.cards.map(card => {
+    const isSelected = card.id === currentSelectedId;
+    return `
+      <div class="style-card ${isSelected ? 'selected' : ''}" onclick="selectStyleCard('${categoryKey}', '${card.id}')">
+        <div>
+          <div class="style-card-name">${escapeHtml(card.name)}</div>
+          <div class="style-card-subtitle">${escapeHtml(card.subtitle)}</div>
+          <div class="sample-chat-bubble">${escapeHtml(card.sample)}</div>
+        </div>
+        <div class="sample-avatar">
+          <div class="avatar-circle">${card.avatar}</div>
+          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Preview Style</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function selectStyleCard(categoryKey, cardId) {
+  selectedStyles[categoryKey] = cardId;
+  renderStyleCategory(categoryKey);
 }
 
 // Fetch and render Dictation History from SQLite Database

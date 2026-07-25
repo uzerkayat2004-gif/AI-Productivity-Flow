@@ -182,22 +182,37 @@
       <!-- PAGE 4: STYLE PAGE -->
       <section id="page-style" class="page-view" style="display: none;">
         <div class="page-header">
-          <h1 class="page-title">App Writing Styles</h1>
+          <h1 class="page-title">Style</h1>
         </div>
 
-        <div class="stat-card" style="margin-bottom: 20px;">
-          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">Automatic App Detection</h3>
-          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-            Voice Flow automatically detects which Windows application you are typing into (Outlook, Slack, WhatsApp, Chrome, Notion) and applies custom formatting and capitalization rules for that app.
-          </p>
+        <!-- STYLE CATEGORY TABS HEADER -->
+        <div class="tabs-header" id="style-tabs-nav">
+          <button class="tab-btn active" onclick="switchStyleTab('personal', this)">Personal messages</button>
+          <button class="tab-btn" onclick="switchStyleTab('work', this)">Work messages</button>
+          <button class="tab-btn" onclick="switchStyleTab('email', this)">Email</button>
+          <button class="tab-btn" onclick="switchStyleTab('other', this)">Other</button>
+          <button class="tab-btn" onclick="switchStyleTab('autocleanup', this)">Auto cleanup</button>
         </div>
 
-        <div class="tabs-header">
-          <button class="tab-btn active">Smart Auto-Cleanup (Default)</button>
-          <button class="tab-btn">Work Messages (Slack / Teams)</button>
-          <button class="tab-btn">Email & Formal (Outlook)</button>
-          <button class="tab-btn">Casual Chat (WhatsApp)</button>
+        <!-- HERO BANNER CARD -->
+        <div class="style-hero-banner" id="style-hero-banner">
+          <div class="style-hero-text">
+            <h3 class="style-hero-title" id="style-hero-title">This style applies in personal messengers</h3>
+            <p class="style-hero-desc" id="style-hero-desc">Style formatting applies instantly across all desktop messengers.</p>
+          </div>
+          <div class="style-hero-app-icons" id="style-hero-icons">
+            <span class="app-icon-pill">💬 WhatsApp</span>
+            <span class="app-icon-pill">✈️ Telegram</span>
+            <span class="app-icon-pill">👾 Discord</span>
+            <span class="app-icon-pill">📸 Instagram</span>
+          </div>
         </div>
+
+        <!-- STYLE CARDS GRID (3 CARDS PER CATEGORY) -->
+        <div class="style-cards-grid" id="style-cards-grid">
+          <!-- Dynamically populated per tab -->
+        </div>
+
       </section>
 
     </main>
