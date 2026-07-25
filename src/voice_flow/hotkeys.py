@@ -98,6 +98,8 @@ class InputTriggerListener:
                 if not self._is_recording:
                     self._middle_pressed = True
                     self._on_start()
+            if self._mouse_listener:
+                self._mouse_listener.suppress_event()
             return False  # Blocks middle click down (prevents drag autoscroll icon)
 
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
@@ -105,6 +107,8 @@ class InputTriggerListener:
                 if self._middle_pressed and self._is_recording:
                     self._middle_pressed = False
                     self._on_finish()
+            if self._mouse_listener:
+                self._mouse_listener.suppress_event()
             return False  # Blocks middle click up
 
         # Return True for ALL other events (normal mouse wheel rotation 0x020A, left/right click, movement)
@@ -113,7 +117,7 @@ class InputTriggerListener:
     def _on_mouse_click(
         self, x: int, y: int, button: mouse.Button, pressed: bool
     ) -> None:
-        """Fallback mouse callback."""
+        """Dummy callback for pynput mouse listener."""
         pass
 
     # -- Internal Keyboard Callbacks --
