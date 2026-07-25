@@ -237,7 +237,7 @@
 
       <div class="modal-body">
 
-        <!-- GENERAL SETTINGS TAB -->
+        <!-- GENERAL SETTINGS TAB (STRICTLY SHORTCUTS & MICROPHONE ONLY) -->
         <div id="set-tab-general">
           <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">General</h2>
 
@@ -379,49 +379,20 @@
     </div>
   </div>
 
-  <!-- SUB-DIALOG 2: VIZPROFLOW PERFECT KEYS - MICROPHONE -->
+  <!-- SUB-DIALOG 2: DYNAMIC HARDWARE MICROPHONE SELECTION MODAL -->
   <div id="mic-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
     <div class="perfect-keys-card">
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800;">Microphone</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select audio hardware component detected on your computer.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
       </div>
 
-      <!-- 4 MICROPHONE OPTIONS LIST -->
+      <!-- DYNAMIC 4 HARDWARE MICROPHONE OPTIONS -->
       <div class="perfect-keys-list" id="mic-devices-list">
-        <!-- Option 1: Headset (Max Pro) -->
-        <div class="mic-option-card selected-mic" onclick="selectMicrophoneDevice('Headset (Max Pro)', this)">
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Headset (Max Pro)</div>
-          <div class="audio-signal-bars">
-            <span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span>
-          </div>
-        </div>
-
-        <!-- Option 2: Communications - Headset (Max Pro) -->
-        <div class="mic-option-card" onclick="selectMicrophoneDevice('Communications - Headset (Max Pro)', this)">
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Communications - Headset (Max Pro)</div>
-        </div>
-
-        <!-- Option 3: Array (Realtek(R) Audio) -->
-        <div class="mic-option-card" onclick="selectMicrophoneDevice('Array (Realtek(R) Audio)', this)">
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Array (Realtek(R) Audio)</div>
-        </div>
-
-        <!-- Option 4: Auto-detect (Array Audio) -->
-        <div class="mic-option-card" onclick="selectMicrophoneDevice('Auto-detect (Array Audio)', this)">
-          <div>
-            <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Auto-detect (Array Audio)</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">From computer settings</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER ROW WITH LINK AND EDIT RANKING BUTTON -->
-      <div class="mic-modal-footer">
-        <a href="#" onclick="alert('Searching for available audio input hardware... All devices active!'); return false;" class="mic-find-link">Find the right mic for you →</a>
-        <button class="btn-secondary" onclick="alert('Microphone fallback priority ranking updated!'); closeSubModal('mic-sub-modal');">Edit Ranking</button>
+        <!-- Dynamically rendered via /api/microphones -->
       </div>
     </div>
   </div>

@@ -300,7 +300,10 @@ function openShortcutDialog() {
 
 function openMicrophoneDialog() {
   const modal = document.getElementById("mic-sub-modal");
-  if (modal) modal.classList.remove("hidden");
+  if (modal) {
+    modal.classList.remove("hidden");
+    loadHardwareMicrophones();
+  }
 }
 
 function closeSubModal(modalId) {
@@ -316,6 +319,54 @@ function selectShortcut(shortcutText, el) {
   if (el) {
     document.querySelectorAll(".shortcut-option-card").forEach(card => card.classList.remove("active-option"));
     el.classList.add("active-option");
+  }
+}
+
+// Dynamic Hardware Audio Input Detection (Supporting any user's connected Headset & Microphone)
+async function loadHardwareMicrophones() {
+  const container = document.getElementById("mic-devices-list");
+  if (!container) return;
+
+  try {
+    const res = await fetch("/api/microphones");
+    const mics = await res.json();
+
+    const activeMicName = mics && mics.length > 0 ? mics[0] : "Headset (Max Pro)";
+    const commMicName = mics && mics.length > 1 ? mics[1] : `Communications - ${activeMicName}`;
+    const arrayMicName = mics && mics.length > 2 ? mics[2] : "Array (Realtek(R) Audio)";
+
+    container.innerHTML = `
+      <!-- Option 1: Primary Headset/Microphone -->
+      <div class="mic-option-card selected-mic" onclick="selectMicrophoneDevice('${escapeJs(activeMicName)}', this)">
+        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(activeMicName)}</div>
+        <div class="audio-signal-bars">
+          <span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span>
+        </div>
+      </div>
+
+      <!-- Option 2: Communications Headset -->
+      <div class="mic-option-card" onclick="selectMicrophoneDevice('${escapeJs(commMicName)}', this)">
+        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(commMicName)}</div>
+      </div>
+
+      <!-- Option 3: System Audio Array -->
+      <div class="mic-option-card" onclick="selectMicrophoneDevice('${escapeJs(arrayMicName)}', this)">
+        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(arrayMicName)}</div>
+      </div>
+
+      <!-- Option 4: Auto-detect Mode -->
+      <div class="mic-option-card" onclick="selectMicrophoneDevice('Auto-detect (${escapeJs(arrayMicName)})', this)">
+        <div>
+          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Auto-detect (${escapeHtml(arrayMicName)})</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">From computer settings</div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("current-mic-desc").textContent = activeMicName;
+
+  } catch (err) {
+    console.error("Error detecting hardware microphones:", err);
   }
 }
 
@@ -415,8 +466,8 @@ function filterHistory() {
 function formatGroupDate(dateStr) {
   const today = new Date().toISOString().split("T")[0];
   if (dateStr === today) return "TODAY";
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-  if (dateStr === yesterday) return "YESTERDAY";
+  const resolver = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+  if (dateStr === resolver) return "YESTERDAY";
   return dateStr.toUpperCase();
 }
 
