@@ -161,6 +161,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadHistory();
   loadInsights();
   loadDictionary();
+  loadSavedApiKeys();
   renderStyleCategory("personal");
   startFloatingBarStartupSequence();
 
@@ -170,6 +171,28 @@ document.addEventListener("DOMContentLoaded", () => {
     loadInsights();
   }, 3000);
 });
+
+// Load persistent API keys from SQLite storage on startup
+async function loadSavedApiKeys() {
+  try {
+    const res = await fetch("/api/apikeys/list");
+    const keysMap = await res.json();
+    if (!keysMap) return;
+
+    for (const [provider, keyVal] of Object.entries(keysMap)) {
+      const inputEl = document.getElementById(`key-input-${provider}`);
+      const badgeContainer = document.getElementById(`status-badge-${provider}`);
+      if (inputEl && keyVal) {
+        inputEl.value = keyVal;
+        if (badgeContainer) {
+          badgeContainer.innerHTML = `<span class="status-badge status-connected">✓ Connected</span>`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error loading saved API keys:", err);
+  }
+}
 
 // Startup sequence for Wispr Flow Bar Marker
 function startFloatingBarStartupSequence() {

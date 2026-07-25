@@ -35,7 +35,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif self.path == "/api/dictionary":
             self.send_json_response(storage.get_dictionary_words())
         elif self.path == "/api/apikeys/list":
-            self.send_json_response(config.get_api_keys())
+            self.send_json_response(storage.get_all_api_keys())
         elif self.path == "/api/microphones":
             try:
                 devices = sd.query_devices()
@@ -71,6 +71,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             key = data.get("key", "").strip()
             result = self.verify_api_key(provider, key)
             if result["success"]:
+                storage.save_api_key(key, provider)
                 config.add_api_key(key)
             self.send_json_response(result)
 
@@ -91,8 +92,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif self.path == "/api/apikeys/add":
             data = json.loads(body)
             key = data.get("key", "").strip()
-            success = config.add_api_key(key)
-            self.send_json_response({"success": success, "keys": config.get_api_keys()})
+            provider = data.get("provider", "gemini")
+            success = storage.save_api_key(key, provider)
+            config.add_api_key(key)
+            self.send_json_response({"success": success, "keys": storage.get_all_api_keys()})
 
         else:
             self.send_error(404, "Endpoint not found")
@@ -129,17 +132,16 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 req = urllib.request.Request(url, headers={"Authorization": f"Token {key}"})
                 with urllib.request.urlopen(req, timeout=5) as response:
                     if response.status == 200:
-                        return {"success": True, "message": "Deepgram API Verified! Nova-2 speech model active."}
+                        return {"success": True, "message": "Deepgram API Verified! Nova-3 speech model active."}
 
             elif provider == "openai":
                 url = "https://api.openai.com/v1/models"
                 req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
                 with urllib.request.urlopen(req, timeout=5) as response:
                     if response.status == 200:
-                        return {"success": True, "message": "OpenAI API Verified! Whisper-1 & TTS models ready."}
+                        return {"success": True, "message": "OpenAI API Verified! gpt-realtime-2 & TTS models ready."}
 
             else:
-                # Default validation fallback for any other valid format
                 if len(key) >= 12:
                     return {"success": True, "message": f"{provider.capitalize()} API Key Verified! Voice model active."}
                 return {"success": False, "error": f"Invalid key length for {provider}"}

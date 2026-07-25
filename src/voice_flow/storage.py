@@ -1,5 +1,5 @@
 """Persistent SQLite Storage Engine for Voice Flow.
-Stores dictation history, custom dictionary terms, app-specific style rules, and insights metrics.
+Stores dictation history, custom dictionary terms, app-specific style rules, insights metrics, and API keys.
 """
 
 from __future__ import annotations
@@ -106,7 +106,6 @@ class StorageEngine:
             conn.commit()
             record_id = cursor.lastrowid
 
-        # Auto-extract potential proper nouns & capitalized technical terms to enrich Dictionary
         self._auto_extract_dictionary_words(words_list)
 
         return DictationRecord(
@@ -122,11 +121,9 @@ class StorageEngine:
         )
 
     def _auto_extract_dictionary_words(self, words: list[str]) -> None:
-        """Auto-detect capitalized proper nouns & tech terms and add to dictionary."""
         stop_words = {"The", "A", "An", "In", "On", "At", "To", "For", "Of", "With", "And", "Or", "But", "If", "So", "My", "This", "That", "It", "We", "You", "I", "He", "She", "They"}
         for i, word in enumerate(words):
             clean = re.sub(r"[^\w\-]", "", word)
-            # Find capitalized words (excluding start of sentence stop words)
             if clean and clean[0].isupper() and len(clean) > 2:
                 if i > 0 or clean not in stop_words:
                     self.add_dictionary_word(clean, category="Auto-Captured")
@@ -140,18 +137,14 @@ class StorageEngine:
 
     def get_insights(self) -> dict[str, Any]:
         with self._get_conn() as conn:
-            # Total words
             total_words = conn.execute("SELECT COALESCE(SUM(word_count), 0) FROM history").fetchone()[0]
-            # Average WPM (pure math, no hardcoded fallbacks)
             avg_wpm = conn.execute("SELECT COALESCE(AVG(wpm_speed), 0) FROM history").fetchone()[0]
 
-            # App usage breakdown
             cursor = conn.execute(
                 "SELECT app_name, COUNT(*) as count, SUM(word_count) as total_words FROM history GROUP BY app_name ORDER BY count DESC"
             )
             app_breakdown = [dict(row) for row in cursor.fetchall()]
 
-            # Streak calculation
             cursor = conn.execute("SELECT DISTINCT DATE(timestamp) as date_val FROM history ORDER BY date_val DESC")
             dates = [row["date_val"] for row in cursor.fetchall()]
 
@@ -206,6 +199,29 @@ class StorageEngine:
             conn.execute("DELETE FROM dictionary WHERE word = ?", (word,))
             conn.commit()
             return True
+
+    # --- API Keys Persistence API ---
+
+    def save_api_key(self, api_key: str, provider: str = "gemini") -> bool:
+        key_clean = api_key.strip()
+        if not key_clean:
+            return False
+        now = datetime.datetime.now().isoformat()
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO api_keys (api_key, provider, created_at) VALUES (?, ?, ?)",
+                    (key_clean, provider, now),
+                )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def get_all_api_keys(self) -> dict[str, str]:
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT provider, api_key FROM api_keys")
+            return {row["provider"]: row["api_key"] for row in cursor.fetchall()}
 
 
 # Singleton Storage Instance
