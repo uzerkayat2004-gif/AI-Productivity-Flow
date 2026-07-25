@@ -8,6 +8,12 @@ document.addEventListener("DOMContentLoaded", () => {
   loadInsights();
   loadDictionary();
   loadMicrophones();
+
+  // Real-time auto-refresh polling every 3 seconds
+  setInterval(() => {
+    loadHistory();
+    loadInsights();
+  }, 3000);
 });
 
 // Navigation between sidebar pages
@@ -39,7 +45,7 @@ function switchPage(pageId) {
   }
 }
 
-// Fetch and render Dictation History
+// Fetch and render Dictation History from SQLite Database
 async function loadHistory() {
   const container = document.getElementById("dictations-list");
   if (!container) return;
@@ -47,7 +53,12 @@ async function loadHistory() {
   try {
     const res = await fetch("/api/history");
     allHistoryRecords = await res.json();
-    renderHistoryFeed(allHistoryRecords);
+    
+    // Only re-render if user is not currently typing in search box
+    const searchInput = document.getElementById("history-search");
+    if (!searchInput || !searchInput.value.trim()) {
+      renderHistoryFeed(allHistoryRecords);
+    }
   } catch (err) {
     console.error("Error loading dictation history:", err);
   }
@@ -125,14 +136,14 @@ function formatGroupDate(dateStr) {
   return dateStr.toUpperCase();
 }
 
-// Fetch and render Insights & Metrics
+// Fetch and render Insights & Metrics from SQLite Database
 async function loadInsights() {
   try {
     const res = await fetch("/api/insights");
     const data = await res.json();
 
     document.getElementById("stat-total-words").textContent = (data.total_words || 0).toLocaleString();
-    document.getElementById("stat-wpm").textContent = data.avg_wpm || 108;
+    document.getElementById("stat-wpm").textContent = data.avg_wpm || 145;
     document.getElementById("stat-streak").textContent = data.streak || 1;
 
     // Render App usage breakdown
