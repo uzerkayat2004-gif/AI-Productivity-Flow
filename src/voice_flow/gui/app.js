@@ -16,6 +16,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 3000);
 });
 
+// Sidebar Toggle (Expand / Collapse)
+function toggleSidebar() {
+  const sidebar = document.getElementById("main-sidebar");
+  if (sidebar) {
+    sidebar.classList.toggle("collapsed");
+  }
+}
+
 // Navigation between sidebar pages
 function initNavigation() {
   const navItems = document.querySelectorAll(".sidebar .nav-item[data-page]");
@@ -70,10 +78,10 @@ function renderHistoryFeed(records) {
 
   if (!records || records.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 50px; color: var(--text-muted);">
-        <div style="font-size: 36px; margin-bottom: 12px;">🎙️</div>
-        <div style="font-weight: 700; font-size: 16px; color: var(--text-main);">No dictations yet</div>
-        <div style="font-size: 13px; margin-top: 6px;">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to speak anywhere on Windows!</div>
+      <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
+        <div style="font-size: 42px; margin-bottom: 12px;">🎙️</div>
+        <div style="font-weight: 800; font-size: 17px; color: var(--text-main);">No dictations recorded yet</div>
+        <div style="font-size: 13px; margin-top: 6px;">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!</div>
       </div>
     `;
     return;
@@ -142,44 +150,100 @@ async function loadInsights() {
     const res = await fetch("/api/insights");
     const data = await res.json();
 
-    document.getElementById("stat-total-words").textContent = (data.total_words || 0).toLocaleString();
-    document.getElementById("stat-wpm").textContent = data.avg_wpm || 145;
-    document.getElementById("stat-streak").textContent = data.streak || 1;
+    const totalWords = data.total_words || 0;
+    const avgWpm = data.avg_wpm || 0;
+    const streak = data.streak || 0;
 
-    // Render App usage breakdown
-    const usageContainer = document.getElementById("insights-app-breakdown");
-    if (usageContainer && data.app_breakdown) {
-      const totalDictations = data.app_breakdown.reduce((acc, a) => acc + a.count, 0) || 1;
-      usageContainer.innerHTML = data.app_breakdown.map(app => {
-        const pct = Math.round((app.count / totalDictations) * 100);
-        return `
-          <div class="usage-item">
-            <div class="usage-label"><span>📱 ${escapeHtml(app.app_name)}</span><span>${pct}% (${app.total_words} words)</span></div>
-            <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${pct}%;"></div></div>
-          </div>
-        `;
-      }).join("");
+    // Home Banner Metrics
+    document.getElementById("stat-total-words").textContent = totalWords > 1000 ? (totalWords / 1000).toFixed(1) + "K" : totalWords;
+    document.getElementById("stat-wpm").textContent = avgWpm;
+    document.getElementById("stat-streak").textContent = streak;
+
+    // Insights Page Cards
+    const insightsWpm = document.getElementById("insights-wpm");
+    if (insightsWpm) insightsWpm.textContent = avgWpm;
+
+    const insightsTotalWords = document.getElementById("insights-total-words");
+    if (insightsTotalWords) insightsTotalWords.textContent = totalWords.toLocaleString();
+
+    const insightsDesktopWords = document.getElementById("insights-desktop-words");
+    if (insightsDesktopWords) insightsDesktopWords.textContent = totalWords.toLocaleString() + " words";
+
+    const insightsStreakTitle = document.getElementById("insights-streak-title");
+    if (insightsStreakTitle) insightsStreakTitle.textContent = `${streak} day streak`;
+
+    const insightsLongestStreak = document.getElementById("insights-longest-streak");
+    if (insightsLongestStreak) insightsLongestStreak.textContent = Math.max(streak, 0);
+
+    // Fixes calculation
+    const wordFixes = Math.round(totalWords * 0.08);
+    const dictFixes = Math.round(totalWords * 0.03);
+    document.getElementById("insights-fixes-total").textContent = wordFixes + dictFixes;
+    document.getElementById("insights-words-corrected").textContent = wordFixes;
+    document.getElementById("insights-dict-fixes").textContent = dictFixes;
+
+    // Speed Badge
+    const badge = document.getElementById("insights-speed-badge");
+    if (badge) {
+      if (avgWpm > 120) badge.textContent = "Top 0.5% Speed";
+      else if (avgWpm > 80) badge.textContent = "Top 5% Speed";
+      else if (avgWpm > 0) badge.textContent = "Active Speed";
+      else badge.textContent = "Ready to record";
     }
 
-    renderHeatmap();
+    // App Usage Breakdown List
+    const usageContainer = document.getElementById("insights-app-breakdown");
+    if (usageContainer) {
+      if (!data.app_breakdown || data.app_breakdown.length === 0) {
+        usageContainer.innerHTML = `
+          <div style="font-size: 13px; color: var(--text-muted); padding: 12px 0;">No desktop app dictation data yet. Start dictating to see usage breakdowns automatically!</div>
+        `;
+      } else {
+        const totalDictations = data.app_breakdown.reduce((acc, a) => acc + a.count, 0) || 1;
+        usageContainer.innerHTML = data.app_breakdown.map(app => {
+          const pct = Math.round((app.count / totalDictations) * 100);
+          const icon = getAppIcon(app.app_name);
+          return `
+            <div class="usage-item">
+              <div class="usage-label"><span>${icon} ${escapeHtml(app.app_name)}</span><span>${pct}% (${app.total_words} words)</span></div>
+              <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${pct}%;"></div></div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+
+    renderHeatmap(totalWords);
 
   } catch (err) {
     console.error("Error loading insights:", err);
   }
 }
 
-function renderHeatmap() {
+function getAppIcon(appName) {
+  const name = appName.toLowerCase();
+  if (name.includes("chrome") || name.includes("edge") || name.includes("brave")) return "🤖 AI Prompts";
+  if (name.includes("whatsapp") || name.includes("telegram")) return "💬 Personal Messages";
+  if (name.includes("outlook") || name.includes("gmail")) return "✉️ Emails";
+  if (name.includes("slack") || name.includes("teams")) return "💼 Work Messages";
+  if (name.includes("notion") || name.includes("word") || name.includes("docs")) return "📄 Documents";
+  return "♾️ Other Tasks";
+}
+
+function renderHeatmap(totalWords) {
   const grid = document.getElementById("heatmap-grid");
   if (!grid) return;
   grid.innerHTML = "";
   for (let i = 0; i < 64; i++) {
     const cell = document.createElement("div");
     cell.className = "heatmap-cell";
-    const rand = Math.random();
-    if (rand > 0.8) cell.classList.add("level-4");
-    else if (rand > 0.6) cell.classList.add("level-3");
-    else if (rand > 0.4) cell.classList.add("level-2");
-    else if (rand > 0.25) cell.classList.add("level-1");
+    if (totalWords > 0) {
+      const rand = Math.random();
+      if (rand > 0.85) cell.classList.add("level-4");
+      else if (rand > 0.7) cell.classList.add("level-3");
+      else if (rand > 0.5) cell.classList.add("level-2");
+      else if (rand > 0.35) cell.classList.add("level-1");
+    }
     grid.appendChild(cell);
   }
 }
