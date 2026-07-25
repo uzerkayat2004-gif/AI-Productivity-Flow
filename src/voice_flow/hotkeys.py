@@ -1,7 +1,8 @@
-"""Global hotkey and mouse event listeners for Voice Flow.
+"""Global input listeners for Voice Flow using pynput with Win32 message filtering.
 
-Uses native Win32 mouse hook for middle-click suppression with zero cursor lag.
-Prevents Windows Start Menu from opening when Win+Ctrl or Ctrl+Win is pressed.
+- Triggers dictation on middle mouse button hold/release (scroll button click).
+- Suppresses native middle-click drag autoscroll icon while keeping normal wheel scrolling working 100%.
+- Triggers dictation on Ctrl+Win / Win+Ctrl shortcut while suppressing Start menu popup.
 """
 
 from __future__ import annotations
@@ -11,11 +12,17 @@ import logging
 import threading
 from typing import Callable
 
-from pynput import keyboard
-
-from voice_flow.mouse_hook import NativeMiddleClickHook
+from pynput import keyboard, mouse
 
 log = logging.getLogger(__name__)
+
+# Win32 Mouse Message IDs
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
+WM_MBUTTONDBLCLK = 0x0209
+WM_NCMBUTTONDOWN = 0x00A7
+WM_NCMBUTTONUP = 0x00A8
+WM_NCMBUTTONDBLCLK = 0x00A9
 
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
@@ -43,55 +50,71 @@ class InputTriggerListener:
         self._on_finish = on_finish
         self._on_cancel = on_cancel
 
-        self._mouse_hook: NativeMiddleClickHook | None = None
+        self._mouse_listener: mouse.Listener | None = None
         self._key_listener: keyboard.Listener | None = None
 
         self._is_recording = False
         self._pressed_keys: set[keyboard.Key | keyboard.KeyCode] = set()
+        self._middle_pressed = False
         self._hotkey_triggered = False
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        """Start native mouse hook and keyboard listener."""
-        self._mouse_hook = NativeMiddleClickHook(
-            on_press=self._handle_mouse_press,
-            on_release=self._handle_mouse_release,
+        """Start listening for mouse and keyboard events."""
+        self._mouse_listener = mouse.Listener(
+            on_click=self._on_mouse_click,
+            win32_event_filter=self._win32_mouse_filter,
         )
         self._key_listener = keyboard.Listener(
             on_press=self._on_key_press,
             on_release=self._on_key_release,
         )
 
-        self._mouse_hook.start()
+        self._mouse_listener.start()
         self._key_listener.start()
-        log.info("Global input listeners started (Native Win32 mouse hook active).")
+        log.info("[INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).")
 
     def stop(self) -> None:
         """Stop input listeners."""
-        if self._mouse_hook is not None:
-            self._mouse_hook.stop()
-            self._mouse_hook = None
+        if self._mouse_listener is not None:
+            self._mouse_listener.stop()
+            self._mouse_listener = None
         if self._key_listener is not None:
             self._key_listener.stop()
             self._key_listener = None
-        log.info("Input listeners stopped.")
+        log.info("[INPUT] Input listeners stopped.")
 
     def set_recording_state(self, recording: bool) -> None:
-        """Inform listener of the current recording state."""
+        """Inform listener of current recording state."""
         with self._lock:
             self._is_recording = recording
 
-    # -- Mouse Hook Callbacks --
+    # -- Win32 Mouse Filter --
 
-    def _handle_mouse_press(self) -> None:
-        with self._lock:
-            if not self._is_recording:
-                self._on_start()
+    def _win32_mouse_filter(self, msg: int, data: object) -> bool:
+        """Selectively intercepts middle button clicks to trigger dictation and block drag autoscroll."""
+        if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
+            with self._lock:
+                if not self._is_recording:
+                    self._middle_pressed = True
+                    self._on_start()
+            return False  # Blocks middle click down (prevents drag autoscroll icon)
 
-    def _handle_mouse_release(self) -> None:
-        with self._lock:
-            if self._is_recording:
-                self._on_finish()
+        elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
+            with self._lock:
+                if self._middle_pressed and self._is_recording:
+                    self._middle_pressed = False
+                    self._on_finish()
+            return False  # Blocks middle click up
+
+        # Return True for ALL other events (normal mouse wheel rotation 0x020A, left/right click, movement)
+        return True
+
+    def _on_mouse_click(
+        self, x: int, y: int, button: mouse.Button, pressed: bool
+    ) -> None:
+        """Fallback mouse callback."""
+        pass
 
     # -- Internal Keyboard Callbacks --
 
@@ -119,7 +142,6 @@ class InputTriggerListener:
         )
 
         if win_pressed and ctrl_pressed:
-            # Suppress Windows Start menu by sending dummy key event
             _suppress_win_start_menu()
 
             with self._lock:
