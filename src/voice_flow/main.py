@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import sys
 import threading
 import tkinter as tk
+
+# Reconfigure stdout/stderr to UTF-8 with safe error handling to prevent Windows encoding crashes
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
@@ -14,7 +21,7 @@ from voice_flow.injector import inject_text
 from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.transcriber import Transcriber
 
-# Setup logging
+# Setup logging with clean ASCII output
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -49,9 +56,7 @@ class VoiceFlowApp:
     def run(self) -> None:
         """Start the Voice Flow application."""
         log.info("=" * 50)
-        log.info("  Voice Flow — Wispr Flow-like Dictation")
-        log.info("  Using Windows built-in speech recognition")
-        log.info("  No model downloads required!")
+        log.info("  Voice Flow -- Wispr Flow-like Dictation")
         log.info("=" * 50)
         log.info("")
         log.info("Trigger methods:")
@@ -80,7 +85,7 @@ class VoiceFlowApp:
         if self.audio.is_recording:
             return
 
-        log.info("🎙️ Recording started.")
+        log.info("[RECORDING] Started.")
         self.audio.start()
         self.listener.set_recording_state(True)
         self.overlay.show_recording()
@@ -93,7 +98,7 @@ class VoiceFlowApp:
         if not self.audio.is_recording:
             return
 
-        log.info("⏹️ Recording finished. Processing...")
+        log.info("[RECORDING] Finished. Processing...")
         self.listener.set_recording_state(False)
         audio_data = self.audio.stop()
         self.overlay.show_processing()
@@ -109,7 +114,7 @@ class VoiceFlowApp:
 
     def _do_cancel_recording(self) -> None:
         if self.audio.is_recording:
-            log.info("❌ Recording cancelled.")
+            log.info("[RECORDING] Cancelled.")
             self.audio.cancel()
             self.listener.set_recording_state(False)
 

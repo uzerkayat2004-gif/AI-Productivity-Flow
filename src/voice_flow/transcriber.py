@@ -30,7 +30,7 @@ class Transcriber:
     """Pre-loaded base.en Whisper model with audio normalization for high accuracy."""
 
     def __init__(self) -> None:
-        log.info("⚡ Loading high-accuracy speech model ('base.en')...")
+        log.info("[MODEL] Loading high-accuracy speech model ('base.en')...")
         # Pre-load base.en model in int8 for maximum accuracy & speed (~0.3s inference)
         self.model = WhisperModel(
             "base.en",
@@ -38,7 +38,7 @@ class Transcriber:
             compute_type="int8",
             cpu_threads=4,
         )
-        log.info("⚡ High-accuracy model ready!")
+        log.info("[MODEL] High-accuracy model ready!")
 
     def transcribe(self, audio: NDArray[np.float32]) -> str:
         """Transcribe audio with volume boosting and speech priming."""
@@ -77,7 +77,6 @@ class Transcriber:
 
         result = " ".join(parts).strip()
 
-        # Post-processing: capitalizations & cleanups
         if result:
             log.info("Transcribed: '%s'", result)
         else:
