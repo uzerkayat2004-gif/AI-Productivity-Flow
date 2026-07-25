@@ -1,4 +1,4 @@
-"""Quick end-to-end test: record 4 seconds of audio and try to transcribe."""
+"""Quick speed test: record 4 seconds of audio and measure transcription time."""
 import sys
 import time
 import logging
@@ -11,8 +11,14 @@ from voice_flow.transcriber import Transcriber
 
 print()
 print("=" * 50)
-print("  Voice Flow - Speech Recognition Test")
+print("  Voice Flow - Ultra-Fast Speed Test")
 print("=" * 50)
+print()
+
+t0 = time.time()
+transcriber = Transcriber()
+print(f"Model init time: {time.time() - t0:.2f}s")
+
 print()
 print(">>> Recording 4 seconds... SPEAK NOW! <<<")
 print()
@@ -24,21 +30,16 @@ audio = recorder.stop()
 
 duration = len(audio) / 16000
 max_amp = float(np.max(np.abs(audio))) if len(audio) > 0 else 0
-print(f"Recorded: {len(audio)} samples ({duration:.1f}s)")
-print(f"Max amplitude: {max_amp:.4f}")
+print(f"Recorded: {len(audio)} samples ({duration:.1f}s, Max Amp: {max_amp:.4f})")
 
-if max_amp < 0.01:
-    print()
-    print("WARNING: Very low audio level! Please speak louder or check mic volume.")
-    sys.exit(1)
-
-print()
 print("Transcribing...")
-transcriber = Transcriber()
+t_start = time.time()
 text = transcriber.transcribe(audio)
+elapsed = time.time() - t_start
 
 print()
+print(f"⚡ TRANSCRIPTION COMPLETED IN: {elapsed:.3f} SECONDS!")
 if text:
     print(f"✅ SUCCESS! Transcribed text: '{text}'")
 else:
-    print("❌ No speech detected. Try speaking clearly into your mic.")
+    print("❌ No speech detected.")
