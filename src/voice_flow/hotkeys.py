@@ -14,11 +14,11 @@ from pynput import keyboard, mouse
 
 log = logging.getLogger(__name__)
 
-# Win32 Mouse Message IDs for Middle Button
+# Win32 Mouse Message IDs
 WM_MBUTTONDOWN = 0x0207
 WM_MBUTTONUP = 0x0208
-WM_NCMBUTTONDOWN = 0x020A
-WM_NCMBUTTONUP = 0x020B
+WM_NCMBUTTONDOWN = 0x00A7
+WM_NCMBUTTONUP = 0x00A8
 
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
@@ -36,11 +36,10 @@ def _suppress_win_start_menu() -> None:
 class InputTriggerListener:
     """Listens for global mouse (middle button) and keyboard (Win+Ctrl / Ctrl+Win) events.
 
-    Suppresses native middle-click action and prevents Windows Start Menu from popping up.
+    Suppresses native middle-click drag autoscroll while allowing normal mouse wheel scrolling.
     """
 
     def __init__(
-
         self,
         on_start: Callable[[], None],
         on_finish: Callable[[], None],
@@ -93,25 +92,22 @@ class InputTriggerListener:
     # -- Win32 Mouse Event Filter --
 
     def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Suppresses native middle click so scroll button click only triggers dictation."""
+        """Suppresses native middle click drag autoscroll while allowing normal wheel scrolling."""
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN):
             with self._lock:
                 if not self._is_recording:
                     self._middle_pressed = True
                     self._on_start()
-            if self._mouse_listener:
-                self._mouse_listener.suppress_event()
-            return False
+            return False  # Block middle click down (prevents drag autoscroll icon)
 
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
             with self._lock:
                 if self._middle_pressed and self._is_recording:
                     self._middle_pressed = False
                     self._on_finish()
-            if self._mouse_listener:
-                self._mouse_listener.suppress_event()
-            return False
+            return False  # Block middle click up
 
+        # Return True for ALL other events (WM_MOUSEWHEEL 0x020A, WM_MOUSEMOVE, left/right click)
         return True
 
     def _on_mouse_click(
