@@ -1,8 +1,10 @@
-"""Audio capture module — records microphone input using sounddevice."""
+"""Audio capture module — records microphone input and exports WAV files."""
 
 from __future__ import annotations
 
+import io
 import threading
+import wave
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -73,6 +75,24 @@ class AudioRecorder:
     def cancel(self) -> None:
         """Stop recording and discard the buffer."""
         self.stop()  # just discard the return value
+
+    @staticmethod
+    def save_wav(audio: NDArray[np.float32], path: str) -> None:
+        """Save a float32 audio array as a 16-bit PCM WAV file.
+
+        Args:
+            audio: 1-D float32 array, values in [-1.0, 1.0].
+            path: Output file path (e.g. 'C:/temp/recording.wav').
+        """
+        # Clip and convert float32 → int16
+        audio_clipped = np.clip(audio, -1.0, 1.0)
+        audio_int16 = (audio_clipped * 32767).astype(np.int16)
+
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(config.channels)
+            wf.setsampwidth(2)  # 16-bit = 2 bytes
+            wf.setframerate(config.sample_rate)
+            wf.writeframes(audio_int16.tobytes())
 
     # -- internal --
 

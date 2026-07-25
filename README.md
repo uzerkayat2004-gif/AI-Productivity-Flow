@@ -1,6 +1,6 @@
 # Voice Flow
 
-**Voice Flow** is an open-source, local AI voice dictation tool for Windows. It provides a seamless, Wispr Flow-style dictation experience using offline speech recognition with OpenAI's Whisper model.
+**Voice Flow** is an open-source voice dictation tool for Windows that remaps the built-in Windows speech recognition to work like Wispr Flow — press a button, speak, text appears.
 
 ## Features
 
@@ -8,7 +8,8 @@
 - ⚡ **Instant Trigger**:
   - **Mouse Scroll Button (Middle Click)**: Press and hold to dictate, release to transcribe and paste.
   - **`Win + Ctrl`**: Global keyboard shortcut toggle.
-- 🔒 **100% Offline & Private**: Powered by `faster-whisper` running locally on your computer.
+  - **`Esc`**: Cancel recording.
+- 🔒 **Uses Windows Built-in Speech Recognition**: No AI model downloads. Uses the same `System.Speech.Recognition` engine that's already on every Windows PC.
 - 🎯 **Works Everywhere**: Direct text injection into any input field, text editor, browser, or IDE via clipboard paste.
 - 🚫 **No Focus Stealing**: Floating bar uses Windows `WS_EX_NOACTIVATE` window styling so keyboard focus stays in your active application.
 
@@ -26,24 +27,18 @@
    cd voice-flow
    ```
 
-2. Install dependencies using `uv` (or standard `pip`):
+2. Install dependencies:
    ```bash
-   uv sync
-   # or with pip:
    pip install -e .
    ```
 
+That's it — no model downloads, no API keys, nothing else.
+
 ## Usage
 
-Run Voice Flow:
-
 ```bash
-uv run voice-flow
-# or:
 python -m voice_flow.main
 ```
-
-Upon first launch, `faster-whisper` will automatically download the Whisper `base` model (~140 MB). Subsequents runs use the cached model fully offline.
 
 ### Controls
 
@@ -51,14 +46,23 @@ Upon first launch, `faster-whisper` will automatically download the Whisper `bas
 |---|---|
 | **Start / Hold Dictation** | Press & hold **Mouse Scroll Button** (Middle click) |
 | **Finish & Paste** | Release Mouse Scroll Button, or press `✓` on the bar |
-| **Keyboard Shortcut** | Press `Win + Ctrl` |
+| **Keyboard Shortcut** | Press `Win + Ctrl` to toggle recording |
 | **Cancel Dictation** | Press `Esc`, or press `✕` on the bar |
+
+## How It Works
+
+1. Press trigger → floating bar appears, microphone starts recording.
+2. Speak naturally.
+3. Release trigger → audio is sent to Windows' built-in `System.Speech.Recognition` engine (the same one behind Win+H, already installed).
+4. Transcribed text is pasted into whatever window/field has focus via clipboard.
+5. Bar shows "Done" then fades away.
+
+No internet, no model downloads, no subscription.
 
 ## Configuration
 
 Edit `src/voice_flow/config.py` to customize:
-- `model_size`: `'tiny'`, `'base'`, `'small'`, or `'medium'`
-- `language`: `'en'` (or auto-detect)
+- `language`: Speech recognition culture (default: `'en-US'`)
 - Bar colors, dimensions, and screen position
 
 ## License

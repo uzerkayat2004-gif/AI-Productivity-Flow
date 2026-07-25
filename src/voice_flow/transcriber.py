@@ -1,46 +1,56 @@
-"""Transcription module — wraps faster-whisper for offline speech-to-text."""
+"""Transcription module — uses Windows built-in System.Speech.Recognition via PowerShell.
+
+No model downloads required. Uses the same speech engine that powers Win+H voice typing.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
-import sys
-from typing import TYPE_CHECKING
+import os
+import subprocess
+import tempfile
 
 import numpy as np
+from numpy.typing import NDArray
 
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
+from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
 
 log = logging.getLogger(__name__)
 
+# PowerShell script that uses .NET System.Speech.Recognition for dictation.
+# This assembly is built into every Windows installation — zero downloads.
+_PS_SCRIPT = r"""
+param([string]$WavPath, [string]$Culture)
+
+Add-Type -AssemblyName System.Speech
+
+$recognizer = New-Object System.Speech.Recognition.SpeechRecognitionEngine($Culture)
+$recognizer.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+$recognizer.SetInputToWaveFile($WavPath)
+
+$results = @()
+try {
+    while ($true) {
+        $result = $recognizer.Recognize()
+        if ($null -eq $result) { break }
+        $results += $result.Text
+    }
+} catch {}
+
+$recognizer.Dispose()
+
+# Output as JSON for clean parsing
+@{ text = ($results -join ' ') } | ConvertTo-Json -Compress
+"""
+
 
 class Transcriber:
-    """Lazy-loads a faster-whisper model and transcribes audio buffers."""
-
-    def __init__(self) -> None:
-        self._model = None
-
-    def load_model(self) -> None:
-        """Load the whisper model. Called once at startup (may download ~140 MB)."""
-        from faster_whisper import WhisperModel
-
-        log.info(
-            "Loading Whisper model '%s' (device=%s, compute=%s)...",
-            config.model_size,
-            config.device,
-            config.compute_type,
-        )
-        self._model = WhisperModel(
-            config.model_size,
-            device=config.device,
-            compute_type=config.compute_type,
-        )
-        log.info("Model loaded successfully.")
+    """Transcribes audio using Windows built-in speech recognition (System.Speech)."""
 
     def transcribe(self, audio: NDArray[np.float32]) -> str:
-        """Transcribe a float32 audio buffer and return the cleaned text.
+        """Transcribe a float32 audio buffer using Windows speech recognition.
 
         Args:
             audio: 1-D float32 array, 16 kHz mono.
@@ -48,31 +58,61 @@ class Transcriber:
         Returns:
             The transcribed text string, stripped and cleaned.
         """
-        if self._model is None:
-            self.load_model()
-
         if audio.size == 0:
             return ""
 
-        # faster-whisper expects float32, 16 kHz
-        segments, info = self._model.transcribe(
-            audio,
-            language=config.language,
-            beam_size=5,
-            vad_filter=True,  # skip silence segments
-            vad_parameters=dict(
-                min_silence_duration_ms=500,
-                speech_pad_ms=200,
-            ),
-        )
+        # Save audio to a temporary WAV file
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="vf_")
+        os.close(tmp_fd)
 
-        # Collect all segment texts
-        parts: list[str] = []
-        for segment in segments:
-            text = segment.text.strip()
-            if text:
-                parts.append(text)
+        try:
+            AudioRecorder.save_wav(audio, tmp_path)
 
-        result = " ".join(parts).strip()
-        log.info("Transcribed: %s", result[:80] + ("..." if len(result) > 80 else ""))
-        return result
+            # Call PowerShell with the System.Speech script
+            log.info("Recognizing speech with Windows Speech Engine...")
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    _PS_SCRIPT,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "WavPath": tmp_path, "Culture": config.language},
+            )
+
+            # Parse the result
+            if result.returncode != 0:
+                log.error("PowerShell recognition failed: %s", result.stderr.strip())
+                return ""
+
+            stdout = result.stdout.strip()
+            if not stdout:
+                log.info("No speech detected.")
+                return ""
+
+            data = json.loads(stdout)
+            text = data.get("text", "").strip()
+            log.info(
+                "Transcribed: %s", text[:80] + ("..." if len(text) > 80 else "")
+            )
+            return text
+
+        except subprocess.TimeoutExpired:
+            log.error("Speech recognition timed out.")
+            return ""
+        except json.JSONDecodeError:
+            log.error("Failed to parse recognition output.")
+            return ""
+        except Exception:
+            log.exception("Error during transcription.")
+            return ""
+        finally:
+            # Clean up temp WAV file
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass

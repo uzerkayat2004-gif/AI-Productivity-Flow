@@ -48,16 +48,21 @@ class VoiceFlowApp:
 
     def run(self) -> None:
         """Start the Voice Flow application."""
-        log.info("Starting Voice Flow...")
-        log.info("Trigger methods enabled:")
+        log.info("=" * 50)
+        log.info("  Voice Flow — Wispr Flow-like Dictation")
+        log.info("  Using Windows built-in speech recognition")
+        log.info("  No model downloads required!")
+        log.info("=" * 50)
+        log.info("")
+        log.info("Trigger methods:")
         log.info("  1. Press & hold Mouse Scroll Button (Middle Click)")
-        log.info("  2. Press Win + Ctrl keyboard combination")
+        log.info("  2. Press Win + Ctrl keyboard shortcut")
+        log.info("  3. Press Esc to cancel recording")
+        log.info("")
+        log.info("Ready. Waiting for input...")
 
         # Start input listeners
         self.listener.start()
-
-        # Pre-warm transcriber model in background thread
-        threading.Thread(target=self._preload_model, daemon=True).start()
 
         # Run tkinter event loop
         try:
@@ -65,25 +70,17 @@ class VoiceFlowApp:
         except KeyboardInterrupt:
             self.shutdown()
 
-    def _preload_model(self) -> None:
-        """Pre-load Whisper model so first transcription is fast."""
-        try:
-            self.transcriber.load_model()
-        except Exception:
-            log.exception("Failed to preload Whisper model.")
-
     # -- State Transitions (called from input listeners / overlay buttons) --
 
     def start_recording(self) -> None:
         """Start recording audio and show overlay bar."""
-        # Ensure UI updates happen on tkinter thread
         self.root.after(0, self._do_start_recording)
 
     def _do_start_recording(self) -> None:
         if self.audio.is_recording:
             return
 
-        log.info("Recording started.")
+        log.info("🎙️ Recording started.")
         self.audio.start()
         self.listener.set_recording_state(True)
         self.overlay.show_recording()
@@ -96,7 +93,7 @@ class VoiceFlowApp:
         if not self.audio.is_recording:
             return
 
-        log.info("Recording finished. Processing...")
+        log.info("⏹️ Recording finished. Processing...")
         self.listener.set_recording_state(False)
         audio_data = self.audio.stop()
         self.overlay.show_processing()
@@ -112,14 +109,14 @@ class VoiceFlowApp:
 
     def _do_cancel_recording(self) -> None:
         if self.audio.is_recording:
-            log.info("Recording cancelled.")
+            log.info("❌ Recording cancelled.")
             self.audio.cancel()
             self.listener.set_recording_state(False)
 
         self.overlay.hide()
 
     def _process_and_inject(self, audio_data: object) -> None:
-        """Worker thread function: transcribes audio and injects text."""
+        """Worker thread: transcribes audio and injects text."""
         try:
             text = self.transcriber.transcribe(audio_data)
             if text:

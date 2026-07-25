@@ -1,22 +1,19 @@
 """Configuration and constants for Voice Flow."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class Config:
     """User-configurable settings."""
 
-    # --- Whisper Model ---
-    model_size: str = "base"
-    language: str = "en"
-    device: str = "cpu"
-    compute_type: str = "int8"
-
     # --- Audio ---
     sample_rate: int = 16000
     channels: int = 1
     block_size: int = 1024  # frames per audio callback
+
+    # --- Speech Recognition ---
+    language: str = "en-US"  # Windows speech recognition culture
 
     # --- Overlay Bar ---
     bar_width: int = 320
