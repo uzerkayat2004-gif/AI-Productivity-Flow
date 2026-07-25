@@ -198,7 +198,7 @@
         <div class="style-hero-banner" id="style-hero-banner">
           <div class="style-hero-text">
             <h3 class="style-hero-title" id="style-hero-title">This style applies in personal messengers</h3>
-            <p class="style-hero-desc" id="style-hero-desc">Style formatting applies instantly across all desktop messengers.</p>
+            <p class="style-hero-desc" id="style-hero-desc">Style formatting applies instantly across personal desktop messaging apps.</p>
           </div>
           <div class="style-hero-app-icons" id="style-hero-icons">
             <span class="app-icon-pill">💬 WhatsApp</span>
@@ -218,11 +218,11 @@
     </main>
   </div>
 
-  <!-- SETTINGS MODAL -->
+  <!-- ENLARGED SETTINGS MODAL -->
   <div id="settings-modal" class="modal-overlay hidden">
-    <div class="modal-card">
+    <div class="modal-card modal-card-large">
       <div class="modal-sidebar">
-        <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">SETTINGS</div>
+        <div style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;">SETTINGS</div>
         <div class="nav-item active" onclick="switchSettingsTab('general', this)">⚙️ General</div>
         <div class="nav-item" onclick="switchSettingsTab('system', this)">💻 System</div>
         <div class="nav-item" onclick="switchSettingsTab('apikeys', this)">🔑 API Keys Pool</div>
@@ -230,59 +230,88 @@
 
       <div class="modal-body">
 
-        <!-- GENERAL TAB -->
+        <!-- GENERAL SETTINGS TAB -->
         <div id="set-tab-general">
-          <h2 style="font-size: 22px; margin-bottom: 20px;">General Settings</h2>
+          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">General</h2>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-title">Dictation Shortcuts</span>
-              <span class="setting-desc">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to speak.</span>
+          <div class="settings-group-card">
+            <!-- Shortcuts Row -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-title">Shortcuts</span>
+                <span class="setting-desc">Hold <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> or <kbd class="kbd-pill">Middle Click</kbd> and speak.</span>
+              </div>
+              <button class="btn-secondary" onclick="openShortcutDialog()">Change</button>
             </div>
-            <button class="btn-secondary">Configured</button>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-title">Audio Input Microphone</span>
-              <span class="setting-desc">Select physical microphone device</span>
+            <!-- Microphone Row -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-title">Microphone</span>
+                <span class="setting-desc" id="current-mic-desc">Headset (Max Pro / Default Microphone)</span>
+              </div>
+              <button class="btn-secondary" onclick="openMicrophoneDialog()">Change</button>
             </div>
-            <select id="mic-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); outline: none;">
-              <!-- Populated from hardware -->
-            </select>
+
+            <!-- Dictation Languages Row -->
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-title">Dictation Languages</span>
+                <span class="setting-desc" id="current-lang-desc">English (US / Auto-detect)</span>
+              </div>
+              <button class="btn-secondary" onclick="openLanguageDialog()">Change</button>
+            </div>
+
+            <!-- App Language Selector -->
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <span class="setting-title">App Language</span>
+                <span class="setting-desc">Select your preferred Voice Flow interface language</span>
+              </div>
+              <select id="app-lang-select" onchange="changeAppLanguage(this.value)" class="custom-select">
+                <option value="en">English (US)</option>
+                <option value="de">German (Deutsch)</option>
+                <option value="es">Spanish (Español)</option>
+                <option value="fr">French (Français)</option>
+                <option value="hi">Hindi (हिंदी)</option>
+                <option value="ja">Japanese (日本語)</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <!-- SYSTEM TAB -->
         <div id="set-tab-system" style="display: none;">
-          <h2 style="font-size: 22px; margin-bottom: 20px;">System Settings</h2>
+          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">System Settings</h2>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-title">Launch Voice Flow on Windows Startup</span>
-              <span class="setting-desc">Start dictation listener when Windows boots up.</span>
+          <div class="settings-group-card">
+            <div class="setting-row">
+              <div class="setting-info">
+                <span class="setting-title">Launch Voice Flow on Windows Startup</span>
+                <span class="setting-desc">Start dictation listener when Windows boots up.</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" checked>
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            <label class="toggle-switch">
-              <input type="checkbox" checked>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-title">Show Floating Waveform Bar</span>
-              <span class="setting-desc">Display animated pill bar during dictation.</span>
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <span class="setting-title">Show Floating Waveform Bar</span>
+                <span class="setting-desc">Display animated pill bar during dictation.</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" checked>
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            <label class="toggle-switch">
-              <input type="checkbox" checked>
-              <span class="toggle-slider"></span>
-            </label>
           </div>
         </div>
 
         <!-- API KEYS TAB -->
         <div id="set-tab-apikeys" style="display: none;">
-          <h2 style="font-size: 22px; margin-bottom: 8px;">Google Gemini API Keys Pool</h2>
+          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 8px;">Google Gemini API Keys Pool</h2>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Add your free Gemini API keys here. Voice Flow load-balances between them automatically.</p>
 
           <div style="display: flex; gap: 10px; margin-bottom: 16px;">

@@ -773,6 +773,7 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .btn-secondary:hover {
@@ -781,7 +782,7 @@ body {
   border-color: var(--primary-orange-border);
 }
 
-/* Modal Overlay */
+/* Modal Overlay & Enlarged Card */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -802,25 +803,86 @@ body {
 
 .modal-card {
   background-color: white;
-  width: 720px;
-  max-height: 85vh;
+  width: 760px;
+  max-height: 88vh;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   display: flex;
   overflow: hidden;
 }
 
+.modal-card-large {
+  width: 860px;
+  min-height: 560px;
+}
+
 .modal-sidebar {
   width: 220px;
   background-color: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
-  padding: 24px 16px;
+  padding: 28px 20px;
 }
 
 .modal-body {
   flex: 1;
-  padding: 28px 32px;
+  padding: 32px 36px;
   overflow-y: auto;
+}
+
+.settings-group-card {
+  background-color: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 20px;
+}
+
+/* Setting Rows */
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.setting-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.kbd-pill {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+.custom-select {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  background-color: white;
+  color: var(--text-main);
 }
 
 /* Toggle Switch */
@@ -865,29 +927,4 @@ input:checked + .toggle-slider {
 
 input:checked + .toggle-slider:before {
   transform: translateX(20px);
-}
-
-/* Setting Rows */
-.setting-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.setting-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.setting-title {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.setting-desc {
-  font-size: 12px;
-  color: var(--text-muted);
 }

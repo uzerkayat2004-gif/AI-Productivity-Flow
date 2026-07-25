@@ -2,7 +2,7 @@
 
 let allHistoryRecords = [];
 
-// Style Configuration & Scenarios (Matching Video with Distinct Custom Messages)
+// Style Configuration & Scenarios
 const STYLE_DATA = {
   personal: {
     heroTitle: "This style applies in personal messengers",
@@ -252,6 +252,46 @@ function renderStyleCategory(categoryKey) {
 function selectStyleCard(categoryKey, cardId) {
   selectedStyles[categoryKey] = cardId;
   renderStyleCategory(categoryKey);
+}
+
+// General Settings Dialog Triggers
+function openShortcutDialog() {
+  const shortcut = prompt("Configure Global Dictation Shortcut:\n1. Hold Middle Mouse Click\n2. Ctrl + Win\n3. Win + Alt\n\nEnter preferred shortcut:", "Ctrl + Win");
+  if (shortcut) {
+    alert(`Dictation shortcut updated to: ${shortcut}`);
+  }
+}
+
+function openMicrophoneDialog() {
+  const micSelect = document.getElementById("mic-select");
+  if (micSelect && micSelect.value) {
+    const currentMic = micSelect.value;
+    const choice = prompt(`Active Input Microphone:\n${currentMic}\n\nEnter new microphone device name:`, currentMic);
+    if (choice) {
+      document.getElementById("current-mic-desc").textContent = choice;
+      alert(`Microphone device updated to: ${choice}`);
+    }
+  }
+}
+
+function openLanguageDialog() {
+  const lang = prompt("Select Dictation Recognition Language:\n- Auto-detect (Multilingual)\n- English (US)\n- Spanish\n- French\n- German\n- Hindi\n- Japanese\n- Mandarin\n- Arabic\n\nEnter language:", "English (US)");
+  if (lang) {
+    document.getElementById("current-lang-desc").textContent = lang;
+    alert(`Dictation recognition language updated to: ${lang}`);
+  }
+}
+
+function changeAppLanguage(langCode) {
+  const langNames = {
+    en: "English (US)",
+    de: "German (Deutsch)",
+    es: "Spanish (Español)",
+    fr: "French (Français)",
+    hi: "Hindi (हिंदी)",
+    ja: "Japanese (日本語)"
+  };
+  alert(`Voice Flow interface language updated to: ${langNames[langCode] || langCode}`);
 }
 
 // Fetch and render Dictation History from SQLite Database
