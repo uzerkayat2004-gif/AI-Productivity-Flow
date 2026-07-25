@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any
@@ -66,23 +67,6 @@ class StorageEngine:
                 )
             """)
 
-            # Seed default dictionary terms if empty
-            cursor = conn.execute("SELECT COUNT(*) FROM dictionary")
-            if cursor.fetchone()[0] == 0:
-                default_words = [
-                    ("Voice Flow", "Personal"),
-                    ("Whisper", "Personal"),
-                    ("Samir", "Personal"),
-                    ("Sara", "Personal"),
-                    ("Karol", "Personal"),
-                    ("Spyder", "Personal"),
-                ]
-                now = datetime.datetime.now().isoformat()
-                conn.executemany(
-                    "INSERT INTO dictionary (word, category, created_at) VALUES (?, ?, ?)",
-                    [(w, c, now) for w, c in default_words],
-                )
-
             # Table 3: System API Keys
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -105,7 +89,8 @@ class StorageEngine:
         duration_sec: float = 2.0,
         style_mode: str = "smart_clean",
     ) -> DictationRecord:
-        words = len(polished_text.split())
+        words_list = polished_text.split()
+        words = len(words_list)
         minutes = max(0.05, duration_sec / 60.0)
         wpm = int(words / minutes) if words > 0 else 0
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -121,6 +106,9 @@ class StorageEngine:
             conn.commit()
             record_id = cursor.lastrowid
 
+        # Auto-extract potential proper nouns & capitalized technical terms to enrich Dictionary
+        self._auto_extract_dictionary_words(words_list)
+
         return DictationRecord(
             id=record_id,
             timestamp=now_str,
@@ -133,6 +121,16 @@ class StorageEngine:
             style_mode=style_mode,
         )
 
+    def _auto_extract_dictionary_words(self, words: list[str]) -> None:
+        """Auto-detect capitalized proper nouns & tech terms and add to dictionary."""
+        stop_words = {"The", "A", "An", "In", "On", "At", "To", "For", "Of", "With", "And", "Or", "But", "If", "So", "My", "This", "That", "It", "We", "You", "I", "He", "She", "They"}
+        for i, word in enumerate(words):
+            clean = re.sub(r"[^\w\-]", "", word)
+            # Find capitalized words (excluding start of sentence stop words)
+            if clean and clean[0].isupper() and len(clean) > 2:
+                if i > 0 or clean not in stop_words:
+                    self.add_dictionary_word(clean, category="Auto-Captured")
+
     def get_recent_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             cursor = conn.execute(
@@ -144,7 +142,7 @@ class StorageEngine:
         with self._get_conn() as conn:
             # Total words
             total_words = conn.execute("SELECT COALESCE(SUM(word_count), 0) FROM history").fetchone()[0]
-            # Average WPM
+            # Average WPM (pure math, no hardcoded fallbacks)
             avg_wpm = conn.execute("SELECT COALESCE(AVG(wpm_speed), 0) FROM history").fetchone()[0]
 
             # App usage breakdown
@@ -174,7 +172,7 @@ class StorageEngine:
 
             return {
                 "total_words": total_words,
-                "avg_wpm": int(avg_wpm) if avg_wpm else 108,
+                "avg_wpm": int(avg_wpm) if avg_wpm else 0,
                 "streak": streak,
                 "app_breakdown": app_breakdown,
             }

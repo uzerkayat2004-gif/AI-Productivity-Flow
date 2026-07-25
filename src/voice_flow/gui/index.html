@@ -167,26 +167,19 @@
         </div>
       </section>
 
-      <!-- PAGE 3: DICTIONARY -->
+      <!-- PAGE 3: DICTIONARY PAGE -->
       <section id="page-dictionary" class="page-view" style="display: none;">
         <div class="page-header">
           <h1 class="page-title">Custom Dictionary</h1>
           <button class="btn-primary" onclick="addDictionaryWord()">+ Add Word</button>
         </div>
 
-        <div class="stat-card" style="margin-bottom: 20px;">
-          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">How Voice Flow Dictionary Works</h3>
-          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-            Custom terms and proper names added here are injected directly into Whisper's Transformer attention decoding engine. This guarantees 100% accurate acoustic recognition for proper names, company jargon, and technical terms.
-          </p>
-        </div>
-
         <div class="chip-container" id="dictionary-chips">
-          <!-- Populated from SQLite DB -->
+          <!-- Populated from SQLite DB & Auto-learned terms -->
         </div>
       </section>
 
-      <!-- PAGE 4: STYLE -->
+      <!-- PAGE 4: STYLE PAGE -->
       <section id="page-style" class="page-view" style="display: none;">
         <div class="page-header">
           <h1 class="page-title">App Writing Styles</h1>
