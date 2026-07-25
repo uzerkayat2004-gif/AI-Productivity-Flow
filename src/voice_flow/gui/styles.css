@@ -384,6 +384,68 @@ body {
   font-size: 12px;
 }
 
+/* VizProFlow Perfect Keys Sub-Modal Cards */
+.perfect-keys-card {
+  background-color: white;
+  width: 540px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+}
+
+.perfect-keys-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.close-icon-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.close-icon-btn:hover {
+  color: var(--primary-orange);
+}
+
+.perfect-keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.shortcut-option-card {
+  background-color: var(--bg-sidebar);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shortcut-option-card:hover {
+  border-color: var(--primary-orange-border);
+  background-color: var(--primary-orange-light);
+}
+
+.shortcut-option-card.active-option {
+  border-color: var(--primary-orange);
+  background-color: #fffaf7;
+}
+
 /* History Controls & Search Bar */
 .history-controls {
   display: flex;

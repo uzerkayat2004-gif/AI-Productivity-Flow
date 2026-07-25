@@ -254,44 +254,73 @@ function selectStyleCard(categoryKey, cardId) {
   renderStyleCategory(categoryKey);
 }
 
-// General Settings Dialog Triggers
+// VizProFlow Perfect Keys Sub-Modals (Shortcuts & Microphone)
 function openShortcutDialog() {
-  const shortcut = prompt("Configure Global Dictation Shortcut:\n1. Hold Middle Mouse Click\n2. Ctrl + Win\n3. Win + Alt\n\nEnter preferred shortcut:", "Ctrl + Win");
-  if (shortcut) {
-    alert(`Dictation shortcut updated to: ${shortcut}`);
-  }
+  const modal = document.getElementById("shortcuts-sub-modal");
+  if (modal) modal.classList.remove("hidden");
 }
 
 function openMicrophoneDialog() {
-  const micSelect = document.getElementById("mic-select");
-  if (micSelect && micSelect.value) {
-    const currentMic = micSelect.value;
-    const choice = prompt(`Active Input Microphone:\n${currentMic}\n\nEnter new microphone device name:`, currentMic);
-    if (choice) {
-      document.getElementById("current-mic-desc").textContent = choice;
-      alert(`Microphone device updated to: ${choice}`);
-    }
+  const modal = document.getElementById("mic-sub-modal");
+  if (modal) {
+    modal.classList.remove("hidden");
+    renderMicrophoneDevices();
   }
 }
 
-function openLanguageDialog() {
-  const lang = prompt("Select Dictation Recognition Language:\n- Auto-detect (Multilingual)\n- English (US)\n- Spanish\n- French\n- German\n- Hindi\n- Japanese\n- Mandarin\n- Arabic\n\nEnter language:", "English (US)");
-  if (lang) {
-    document.getElementById("current-lang-desc").textContent = lang;
-    alert(`Dictation recognition language updated to: ${lang}`);
+function closeSubModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) modal.classList.add("hidden");
+}
+
+function selectShortcut(shortcutText, el) {
+  const desc = document.getElementById("current-shortcut-text");
+  if (desc) {
+    desc.innerHTML = `Hold <kbd class="kbd-pill">${shortcutText}</kbd> and speak.`;
+  }
+  if (el) {
+    document.querySelectorAll(".shortcut-option-card").forEach(card => card.classList.remove("active-option"));
+    el.classList.add("active-option");
   }
 }
 
-function changeAppLanguage(langCode) {
-  const langNames = {
-    en: "English (US)",
-    de: "German (Deutsch)",
-    es: "Spanish (Español)",
-    fr: "French (Français)",
-    hi: "Hindi (हिंदी)",
-    ja: "Japanese (日本語)"
-  };
-  alert(`Voice Flow interface language updated to: ${langNames[langCode] || langCode}`);
+async function renderMicrophoneDevices() {
+  const container = document.getElementById("mic-devices-list");
+  if (!container) return;
+
+  try {
+    const res = await fetch("/api/microphones");
+    const mics = await res.json();
+
+    container.innerHTML = mics.map((m, idx) => `
+      <div class="shortcut-option-card ${idx === 0 ? 'active-option' : ''}" onclick="selectMicrophoneDevice('${escapeJs(m)}', this)">
+        <div>
+          <div style="font-size: 14px; font-weight: 700;">${escapeHtml(m)}</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Hardware Audio Input Device</div>
+        </div>
+        <div style="font-size: 12px; font-weight: 700; color: var(--primary-orange);">${idx === 0 ? '✓ Selected' : ''}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    container.innerHTML = `
+      <div class="shortcut-option-card active-option">
+        <div>
+          <div style="font-size: 14px; font-weight: 700;">Headset (Max Pro / Default Microphone)</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Default Windows Audio Input</div>
+        </div>
+        <div style="font-size: 12px; font-weight: 700; color: var(--primary-orange);">✓ Selected</div>
+      </div>
+    `;
+  }
+}
+
+function selectMicrophoneDevice(micName, el) {
+  const desc = document.getElementById("current-mic-desc");
+  if (desc) desc.textContent = micName;
+  if (el) {
+    document.querySelectorAll("#mic-devices-list .shortcut-option-card").forEach(c => c.classList.remove("active-option"));
+    el.classList.add("active-option");
+  }
 }
 
 // Fetch and render Dictation History from SQLite Database

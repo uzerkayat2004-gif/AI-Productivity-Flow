@@ -230,52 +230,27 @@
 
       <div class="modal-body">
 
-        <!-- GENERAL SETTINGS TAB -->
+        <!-- GENERAL SETTINGS TAB (STRICTLY SHORTCUTS & MICROPHONE ONLY) -->
         <div id="set-tab-general">
           <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">General</h2>
 
           <div class="settings-group-card">
-            <!-- Shortcuts Row -->
+            <!-- 1. Shortcuts Row -->
             <div class="setting-row">
               <div class="setting-info">
                 <span class="setting-title">Shortcuts</span>
-                <span class="setting-desc">Hold <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> or <kbd class="kbd-pill">Middle Click</kbd> and speak.</span>
+                <span class="setting-desc" id="current-shortcut-text">Hold <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> or <kbd class="kbd-pill">Middle Click</kbd> and speak.</span>
               </div>
               <button class="btn-secondary" onclick="openShortcutDialog()">Change</button>
             </div>
 
-            <!-- Microphone Row -->
-            <div class="setting-row">
+            <!-- 2. Microphone Row -->
+            <div class="setting-row" style="border-bottom: none;">
               <div class="setting-info">
                 <span class="setting-title">Microphone</span>
                 <span class="setting-desc" id="current-mic-desc">Headset (Max Pro / Default Microphone)</span>
               </div>
               <button class="btn-secondary" onclick="openMicrophoneDialog()">Change</button>
-            </div>
-
-            <!-- Dictation Languages Row -->
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-title">Dictation Languages</span>
-                <span class="setting-desc" id="current-lang-desc">English (US / Auto-detect)</span>
-              </div>
-              <button class="btn-secondary" onclick="openLanguageDialog()">Change</button>
-            </div>
-
-            <!-- App Language Selector -->
-            <div class="setting-row" style="border-bottom: none;">
-              <div class="setting-info">
-                <span class="setting-title">App Language</span>
-                <span class="setting-desc">Select your preferred Voice Flow interface language</span>
-              </div>
-              <select id="app-lang-select" onchange="changeAppLanguage(this.value)" class="custom-select">
-                <option value="en">English (US)</option>
-                <option value="de">German (Deutsch)</option>
-                <option value="es">Spanish (Español)</option>
-                <option value="fr">French (Français)</option>
-                <option value="hi">Hindi (हिंदी)</option>
-                <option value="ja">Japanese (日本語)</option>
-              </select>
             </div>
           </div>
         </div>
@@ -324,6 +299,84 @@
           <button class="btn-primary" onclick="closeSettings()">Save & Close</button>
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- SUB-DIALOG 1: VIZPROFLOW PERFECT KEYS - SHORTCUTS -->
+  <div id="shortcuts-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
+    <div class="perfect-keys-card">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;">Shortcuts</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose your preferred shortcuts for using Voice Flow.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('shortcuts-sub-modal')">✕</button>
+      </div>
+
+      <div class="perfect-keys-list">
+        <!-- Option 1: Hands-Free Mode -->
+        <div class="shortcut-option-card active-option" onclick="selectShortcut('Middle Click / Ctrl + Win', this)">
+          <div>
+            <div style="font-size: 14px; font-weight: 700;">Hands-free mode</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Dictate hands-free by pressing this hotkey to start and stop</div>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <kbd class="kbd-pill">Middle Click</kbd>
+            <kbd class="kbd-pill">Ctrl</kbd>
+            <kbd class="kbd-pill">Win</kbd>
+          </div>
+        </div>
+
+        <!-- Option 2: Press Enter -->
+        <div class="shortcut-option-card" onclick="selectShortcut('Win + Alt', this)">
+          <div>
+            <div style="font-size: 14px; font-weight: 700;">Press Enter</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Trigger enter with a mouse shortcut or another key to send messages faster</div>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <kbd class="kbd-pill">Win</kbd>
+            <kbd class="kbd-pill">Alt</kbd>
+          </div>
+        </div>
+
+        <!-- Option 3: Command Mode -->
+        <div class="shortcut-option-card" onclick="selectShortcut('Ctrl + Win + Alt', this)">
+          <div>
+            <div style="font-size: 14px; font-weight: 700;">Command Mode</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select text and ask Voice Flow to refine formatting</div>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <kbd class="kbd-pill">Ctrl</kbd>
+            <kbd class="kbd-pill">Win</kbd>
+            <kbd class="kbd-pill">Alt</kbd>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <button class="btn-secondary" onclick="selectShortcut('Middle Click / Ctrl + Win', null); closeSubModal('shortcuts-sub-modal');">Reset to Default</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUB-DIALOG 2: VIZPROFLOW PERFECT KEYS - MICROPHONE -->
+  <div id="mic-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
+    <div class="perfect-keys-card">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;">Microphone</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select active physical audio input device.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
+      </div>
+
+      <div class="perfect-keys-list" id="mic-devices-list">
+        <!-- Dynamically populated physical microphone list -->
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <button class="btn-primary" onclick="closeSubModal('mic-sub-modal')">Save Microphone</button>
       </div>
     </div>
   </div>
