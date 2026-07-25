@@ -160,7 +160,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadHistory();
   loadInsights();
   loadDictionary();
-  loadMicrophones();
   renderStyleCategory("personal");
 
   // Real-time auto-refresh polling every 3 seconds
@@ -262,10 +261,7 @@ function openShortcutDialog() {
 
 function openMicrophoneDialog() {
   const modal = document.getElementById("mic-sub-modal");
-  if (modal) {
-    modal.classList.remove("hidden");
-    renderMicrophoneDevices();
-  }
+  if (modal) modal.classList.remove("hidden");
 }
 
 function closeSubModal(modalId) {
@@ -284,43 +280,14 @@ function selectShortcut(shortcutText, el) {
   }
 }
 
-async function renderMicrophoneDevices() {
-  const container = document.getElementById("mic-devices-list");
-  if (!container) return;
-
-  try {
-    const res = await fetch("/api/microphones");
-    const mics = await res.json();
-
-    container.innerHTML = mics.map((m, idx) => `
-      <div class="shortcut-option-card ${idx === 0 ? 'active-option' : ''}" onclick="selectMicrophoneDevice('${escapeJs(m)}', this)">
-        <div>
-          <div style="font-size: 14px; font-weight: 700;">${escapeHtml(m)}</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Hardware Audio Input Device</div>
-        </div>
-        <div style="font-size: 12px; font-weight: 700; color: var(--primary-orange);">${idx === 0 ? '✓ Selected' : ''}</div>
-      </div>
-    `).join("");
-  } catch (err) {
-    container.innerHTML = `
-      <div class="shortcut-option-card active-option">
-        <div>
-          <div style="font-size: 14px; font-weight: 700;">Headset (Max Pro / Default Microphone)</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Default Windows Audio Input</div>
-        </div>
-        <div style="font-size: 12px; font-weight: 700; color: var(--primary-orange);">✓ Selected</div>
-      </div>
-    `;
-  }
-}
-
 function selectMicrophoneDevice(micName, el) {
   const desc = document.getElementById("current-mic-desc");
   if (desc) desc.textContent = micName;
   if (el) {
-    document.querySelectorAll("#mic-devices-list .shortcut-option-card").forEach(c => c.classList.remove("active-option"));
-    el.classList.add("active-option");
+    document.querySelectorAll("#mic-devices-list .mic-option-card").forEach(c => c.classList.remove("selected-mic"));
+    el.classList.add("selected-mic");
   }
+  closeSubModal('mic-sub-modal');
 }
 
 // Fetch and render Dictation History from SQLite Database
@@ -569,21 +536,6 @@ async function removeDictionaryWord(word) {
     loadDictionary();
   } catch (err) {
     console.error("Error removing dictionary word:", err);
-  }
-}
-
-// Microphones Picker
-async function loadMicrophones() {
-  const select = document.getElementById("mic-select");
-  if (!select) return;
-
-  try {
-    const res = await fetch("/api/microphones");
-    const mics = await res.json();
-
-    select.innerHTML = mics.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
-  } catch (err) {
-    select.innerHTML = `<option>Default System Microphone</option>`;
   }
 }
 

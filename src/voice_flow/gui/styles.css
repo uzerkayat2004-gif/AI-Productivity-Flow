@@ -387,7 +387,7 @@ body {
 /* VizProFlow Perfect Keys Sub-Modal Cards */
 .perfect-keys-card {
   background-color: white;
-  width: 540px;
+  width: 520px;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: 24px 28px;
@@ -420,7 +420,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 340px;
+  max-height: 360px;
   overflow-y: auto;
 }
 
@@ -444,6 +444,65 @@ body {
 .shortcut-option-card.active-option {
   border-color: var(--primary-orange);
   background-color: #fffaf7;
+}
+
+/* Microphone Specific Option Card */
+.mic-option-card {
+  background-color: var(--bg-sidebar);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mic-option-card:hover {
+  background-color: #f3f0e9;
+}
+
+.mic-option-card.selected-mic {
+  border-color: #9333ea;
+  background-color: #fdf4ff;
+}
+
+.audio-signal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+}
+
+.audio-signal-bars .bar {
+  width: 3px;
+  height: 100%;
+  background-color: #d8b4fe;
+  border-radius: 2px;
+}
+
+.audio-signal-bars .bar.active {
+  background-color: #9333ea;
+}
+
+.mic-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 14px;
+}
+
+.mic-find-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: #7e22ce;
+  text-decoration: none;
+}
+
+.mic-find-link:hover {
+  text-decoration: underline;
 }
 
 /* History Controls & Search Bar */
