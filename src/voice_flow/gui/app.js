@@ -215,6 +215,42 @@ function toggleHandsFreeRecording() {
   }
 }
 
+// Live Voice Model API Key Testing with Green Checkmarks & Exact Error Badges
+async function testVoiceModel(providerKey) {
+  const keyInput = document.getElementById(`key-input-${providerKey}`);
+  const modelSelect = document.getElementById(`model-select-${providerKey}`);
+  const badgeContainer = document.getElementById(`status-badge-${providerKey}`);
+
+  if (!keyInput || !badgeContainer) return;
+  const keyVal = keyInput.value.trim();
+
+  if (!keyVal) {
+    badgeContainer.innerHTML = `<span class="status-badge status-error">✕ Key is empty</span>`;
+    return;
+  }
+
+  badgeContainer.innerHTML = `<span class="status-badge" style="background:#f3f4f6; color:#4b5563;">Testing...</span>`;
+
+  try {
+    const selectedModel = modelSelect ? modelSelect.value : "";
+    const res = await fetch("/api/apikeys/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: providerKey, key: keyVal, model: selectedModel }),
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      badgeContainer.innerHTML = `<span class="status-badge status-connected">✓ Connected</span>`;
+    } else {
+      badgeContainer.innerHTML = `<span class="status-badge status-error" title="${escapeHtml(data.error)}">✕ ${escapeHtml(data.error)}</span>`;
+    }
+
+  } catch (err) {
+    badgeContainer.innerHTML = `<span class="status-badge status-error">✕ ${escapeHtml(err.message)}</span>`;
+  }
+}
+
 // System Toggle for Floating Flow Bar Visibility
 function toggleFlowBarVisibility(isVisible) {
   const bar = document.getElementById("floating-flow-bar");
@@ -650,27 +686,6 @@ async function removeDictionaryWord(word) {
     loadDictionary();
   } catch (err) {
     console.error("Error removing dictionary word:", err);
-  }
-}
-
-// API Key Management (Strictly inside Settings)
-async function addApiKey() {
-  const input = document.getElementById("api-key-input");
-  if (!input || !input.value.trim()) return;
-
-  try {
-    const res = await fetch("/api/apikeys/add", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: input.value.trim() }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      alert("Google Gemini API Key added to pool!");
-      input.value = "";
-    }
-  } catch (err) {
-    console.error("Error adding API key:", err);
   }
 }
 

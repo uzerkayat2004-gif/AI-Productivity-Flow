@@ -45,6 +45,143 @@ body {
   background-color: var(--bg-main);
 }
 
+/* API Providers Split Grid (5 on Left, 5 on Right) */
+.api-providers-two-column-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.provider-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.provider-card-box {
+  background-color: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.provider-card-box:hover {
+  border-color: var(--primary-orange-border);
+  box-shadow: var(--shadow-md);
+}
+
+.provider-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.provider-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-logo {
+  font-size: 18px;
+}
+
+.provider-name-text {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.get-key-link {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-orange);
+  text-decoration: none;
+  background-color: var(--primary-orange-light);
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--primary-orange-border);
+  transition: all 0.15s ease;
+}
+
+.get-key-link:hover {
+  background-color: var(--primary-orange);
+  color: white;
+}
+
+.model-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-select-dropdown {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  background-color: white;
+  color: var(--text-main);
+  outline: none;
+}
+
+.key-input-field {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  font-family: monospace;
+  font-size: 12px;
+  outline: none;
+  background-color: white;
+}
+
+.key-input-field:focus {
+  border-color: var(--primary-orange);
+}
+
+.provider-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-badge {
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.status-badge.status-connected {
+  background-color: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.status-badge.status-error {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Minimal Wispr Flow Bar Marker (With Microphone Symbol & Click Activation) */
 .wispr-flow-bar-marker {
   position: fixed;
@@ -1025,8 +1162,8 @@ body {
 }
 
 .modal-card-large {
-  width: 860px;
-  min-height: 560px;
+  width: 960px;
+  min-height: 600px;
 }
 
 .modal-sidebar {
