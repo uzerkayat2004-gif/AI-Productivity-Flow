@@ -1,70 +1,55 @@
-# Voice Flow
+# 🎙️ Voice Flow — AI Speech Desktop Application
 
-**Voice Flow** is an open-source voice dictation tool for Windows that remaps the built-in Windows speech recognition to work like Wispr Flow — press a button, speak, text appears.
+**Voice Flow** is a high-performance, real-time AI speech-to-text dictation application for Windows, featuring a native desktop interface, floating Wispr Flow-style overlay bar, 100% hardware audio routing, 2026 voice model API integrations, and direct Microsoft Excel spreadsheet cell navigation.
 
-## Features
+---
 
-- 🎙️ **Wispr Flow Experience**: Floating dark pill overlay with animated waveform, cancel (✕), and finish (✓) buttons.
-- ⚡ **Instant Trigger**:
-  - **Mouse Scroll Button (Middle Click)**: Press and hold to dictate, release to transcribe and paste.
-  - **`Win + Ctrl`**: Global keyboard shortcut toggle.
-  - **`Esc`**: Cancel recording.
-- 🔒 **Uses Windows Built-in Speech Recognition**: No AI model downloads. Uses the same `System.Speech.Recognition` engine that's already on every Windows PC.
-- 🎯 **Works Everywhere**: Direct text injection into any input field, text editor, browser, or IDE via clipboard paste.
-- 🚫 **No Focus Stealing**: Floating bar uses Windows `WS_EX_NOACTIVATE` window styling so keyboard focus stays in your active application.
+## 🌟 Key Features
 
-## Prerequisites
+1. **Floating Wispr Flow Bar Marker (`[ ─── ]`)**:
+   - Always-on-top system-wide overlay bar with 10-second startup initialization sequence (`Starting... 10s` -> `Ready to do this and all`).
+   - Click-to-activate dictation mode (`🎙️ Dictating... Click to stop`).
 
-- Windows 10 / 11
-- Python >= 3.10
-- Microphone
+2. **100% Hardware Microphone Device Selection**:
+   - Hardware audio routing using `sounddevice.InputStream(device=...)` bypassing Windows Microsoft Sound Mapper. Supports `Headphones`, `LK`, `Headset (Max Pro)`.
 
-## Installation
+3. **2026 Voice Model & API Keys Hub (10 Providers, 5 Left / 5 Right)**:
+   - ✨ **Google Gemini**: `gemini-3.1-flash-live`, `gemini-3.1-flash-tts`, `gemini-3.5-live-translate`, `gemini-2.5-flash-tts`, `gemini-2.0-flash`
+   - ⚡ **Groq Audio**: `whisper-large-v3-turbo`, `whisper-large-v3`, `distil-whisper-large-v3-en`, `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`
+   - 🎙️ **ElevenLabs Voice**: `eleven_v3`, `eleven_flash_v2_5`, `eleven_multilingual_v2`, `eleven_turbo_v2_5`, `eleven_english_v2`
+   - 🎧 **Deepgram Speech**: `nova-3`, `flux`, `aura-2`, `aura-asteria-en`, `nova-2-general`
+   - 🤖 **OpenAI Voice**: `gpt-realtime-2`, `gpt-realtime-whisper`, `gpt-realtime-translate`, `whisper-1`, `tts-1-hd`
+   - 🗣️ **AssemblyAI**: `universal-2`, `universal-1`, `conformer-2`, `slam-1`, `conformer-1`
+   - 🤗 **Hugging Face Voice**: `fixie-ai/ultravox-v0_5`, `openai/whisper-large-v3-turbo`, `kyutai/moshiko-pytorch`, `suno/bark`, `coqui/XTTS-v2`
+   - ☁️ **Cloudflare Workers Voice AI**: `@cf/deepgram/nova-3`, `@cf/myshell/melotts`, `@cf/openai/whisper-large-v3-turbo`
+   - 🤝 **Together Voice AI**: `cartesia/sonic-multilingual`, `hexgrad/kokoro-v0_19`, `togethercomputer/whisper-large-v3`
+   - 🚀 **Replicate Voice**: `victor-upx/kokoro-tts`, `coqui/xtts-v2`, `replicate/whisp-v3`
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/your-username/voice-flow.git
-   cd voice-flow
-   ```
+4. **Microsoft Excel & Spreadsheet Integration**:
+   - Automatic active window detection for Excel, CSVs, and spreadsheets.
+   - Spoken table commands (`"next cell"`, `"tab"`, `"next row"`, `"new line"`) are instantly converted into tabbed/newline clipboard data for effortless multi-cell entry.
 
-2. Install dependencies:
-   ```bash
-   pip install -e .
-   ```
+5. **Persistent SQLite Storage**:
+   - Dictation history, custom dictionary terms, and verified API keys are stored in `~/.voice_flow/voice_flow.db` and preserved across sessions.
 
-That's it — no model downloads, no API keys, nothing else.
+6. **Windows Startup Auto-Launch**:
+   - Registers in Windows Registry `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` so the floating bar appears automatically when you start your laptop.
 
-## Usage
+---
 
+## 🚀 How to Run
+
+### Method 1: Double-Click Batch File
+Double click `run_voice_flow.bat` in the project root.
+
+### Method 2: Command Line
 ```bash
-python -m voice_flow.main
+python -m voice_flow.gui.desktop_launcher
 ```
 
-### Controls
+---
 
-| Action | Control |
-|---|---|
-| **Start / Hold Dictation** | Press & hold **Mouse Scroll Button** (Middle click) |
-| **Finish & Paste** | Release Mouse Scroll Button, or press `✓` on the bar |
-| **Keyboard Shortcut** | Press `Win + Ctrl` to toggle recording |
-| **Cancel Dictation** | Press `Esc`, or press `✕` on the bar |
-
-## How It Works
-
-1. Press trigger → floating bar appears, microphone starts recording.
-2. Speak naturally.
-3. Release trigger → audio is sent to Windows' built-in `System.Speech.Recognition` engine (the same one behind Win+H, already installed).
-4. Transcribed text is pasted into whatever window/field has focus via clipboard.
-5. Bar shows "Done" then fades away.
-
-No internet, no model downloads, no subscription.
-
-## Configuration
-
-Edit `src/voice_flow/config.py` to customize:
-- `language`: Speech recognition culture (default: `'en-US'`)
-- Bar colors, dimensions, and screen position
-
-## License
-
-MIT License
+## 🛠️ Requirements
+- Windows 10 / 11
+- Python 3.10+
+- Dependencies: `sounddevice`, `pyautogui`, `pyperclip`, `pywebview`, `pynput`
