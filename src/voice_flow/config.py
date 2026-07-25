@@ -1,7 +1,10 @@
 """Configuration and constants for Voice Flow."""
 
 import os
+import sqlite3
 from dataclasses import dataclass, field
+
+DB_PATH = os.path.join(os.path.expanduser("~"), ".voice_flow", "voice_flow.db")
 
 
 @dataclass
@@ -20,35 +23,61 @@ class Config:
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
-    vad_threshold: float = 0.60  # Balanced VAD threshold
+    vad_threshold: float = 0.60
     min_speech_duration_ms: int = 200
     noise_gate_rms: float = 0.008
 
     # --- Audio ---
     sample_rate: int = 16000
     channels: int = 1
-    block_size: int = 1024  # frames per audio callback
+    block_size: int = 1024
 
     # --- Overlay Bar ---
     bar_width: int = 360
     bar_height: int = 52
-    bar_bottom_margin: int = 60  # px from bottom of screen
+    bar_bottom_margin: int = 60
     bar_corner_radius: int = 26
     bar_bg: str = "#161627"
     bar_fg: str = "#e8e8f0"
-    bar_accent: str = "#7c6cf6"  # purple accent for waveform
+    bar_accent: str = "#ff6b00"  # Vibrant orange accent
     bar_cancel_color: str = "#ff6b6b"
     bar_finish_color: str = "#51cf66"
     bar_font_family: str = "Segoe UI"
     bar_font_size: int = 11
-    done_display_ms: int = 1500  # how long "Done" shows before fade-out
+    done_display_ms: int = 1500
 
     # --- Waveform ---
     waveform_bar_count: int = 15
-    waveform_max_amplitude: int = 14  # max vertical displacement
+    waveform_max_amplitude: int = 14
 
-    # --- Clipboard ---
-    clipboard_restore_delay_ms: int = 80  # delay before restoring clipboard
+    def get_api_keys(self) -> list[str]:
+        """Fetch list of user API keys from database."""
+        if not os.path.exists(DB_PATH):
+            return []
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.execute("SELECT api_key FROM api_keys ORDER BY id ASC")
+            keys = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            return keys
+        except Exception:
+            return []
+
+    def add_api_key(self, api_key: str) -> bool:
+        """Add new API key to database."""
+        if not api_key or not api_key.strip():
+            return False
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT OR IGNORE INTO api_keys (api_key, created_at) VALUES (?, datetime('now'))",
+                (api_key.strip(),),
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except Exception:
+            return False
 
 
 # Singleton config instance

@@ -1,5 +1,5 @@
 """Ultra-fast, high-accuracy local transcription module using faster-whisper (base.en model)
-optimized for multi-core CPU execution and sub-200ms turnaround time.
+with dictionary prompt-biasing and multi-core CPU execution.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from voice_flow.config import config
+from voice_flow.dictionary import dictionary_engine
 
 log = logging.getLogger(__name__)
 
@@ -23,12 +24,12 @@ def _apply_noise_gate_and_normalize(audio: NDArray[np.float32]) -> NDArray[np.fl
     rms = float(np.sqrt(np.mean(audio**2)))
     max_amp = float(np.max(np.abs(audio)))
 
-    # Noise Gate: If total audio energy is below the close-speech threshold, attenuate it
+    # Noise Gate
     if rms < config.noise_gate_rms:
-        log.info("Audio below noise gate threshold (RMS %.4f < %.4f). Attenuating background audio.", rms, config.noise_gate_rms)
+        log.info("Audio below noise gate threshold (RMS %.4f < %.4f).", rms, config.noise_gate_rms)
         return (audio * 0.2).astype(np.float32)
 
-    # Normalize primary speaker voice up to standard 0.90 peak (max gain scale 2.5x)
+    # Normalize volume peak
     if max_amp > 0.01:
         scale = min(2.5, 0.90 / max_amp)
         return (audio * scale).astype(np.float32)
@@ -37,7 +38,7 @@ def _apply_noise_gate_and_normalize(audio: NDArray[np.float32]) -> NDArray[np.fl
 
 
 class Transcriber:
-    """Pre-loaded base.en Whisper model optimized for multi-core CPU execution."""
+    """Pre-loaded base.en Whisper model with dictionary prompt biasing."""
 
     def __init__(self) -> None:
         log.info("[MODEL] Loading speech model ('%s') with %d CPU threads...", config.model_size, config.cpu_threads)
@@ -45,12 +46,12 @@ class Transcriber:
             config.model_size,
             device=config.device,
             compute_type=config.compute_type,
-            cpu_threads=config.cpu_threads,  # Utilizes all available logical CPU cores (12 cores)
+            cpu_threads=config.cpu_threads,
         )
         log.info("[MODEL] Ultra-fast speech engine ready!")
 
     def transcribe(self, audio: NDArray[np.float32]) -> str:
-        """Transcribe audio with sub-200ms latency and high accuracy."""
+        """Transcribe audio with dictionary initial_prompt biasing."""
         if audio.size == 0:
             log.warning("Empty audio buffer, nothing to transcribe.")
             return ""
@@ -60,18 +61,19 @@ class Transcriber:
             log.warning("Audio too short (%.1fs), skipping.", duration)
             return ""
 
-        # Step 1: Fast gain normalization
         clean_audio = _apply_noise_gate_and_normalize(audio)
 
-        log.info("Transcribing %.1fs audio on %d CPU threads...", duration, config.cpu_threads)
+        # Get dictionary initial prompt biasing
+        initial_prompt = dictionary_engine.get_initial_prompt()
 
-        # Step 2: Ultra-fast decoding with full CPU multi-threading and beam_size=1
+        log.info("Transcribing %.1fs audio on %d CPU threads with dictionary biasing...", duration, config.cpu_threads)
+
         segments, _ = self.model.transcribe(
             clean_audio,
             beam_size=config.beam_size,
             temperature=config.temperature,
             language=config.language,
-            initial_prompt="Hello, this is clear English dictation.",
+            initial_prompt=initial_prompt,
             vad_filter=True,
             vad_parameters=dict(
                 threshold=config.vad_threshold,
@@ -88,10 +90,4 @@ class Transcriber:
                 parts.append(text)
 
         result = " ".join(parts).strip()
-
-        if result:
-            log.info("Transcribed: '%s'", result)
-        else:
-            log.info("No speech detected.")
-
         return result

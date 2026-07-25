@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Flow - AI Speech Desktop App</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <!-- LEFT NAVIGATION SIDEBAR -->
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-icon">VF</div>
+          <span class="brand-title">Voice Flow</span>
+          <span class="brand-badge">Pro</span>
+        </div>
+
+        <nav class="nav-group">
+          <div class="nav-item active" data-page="home">
+            <span class="nav-icon">⊞</span> Home
+          </div>
+          <div class="nav-item" data-page="insights">
+            <span class="nav-icon">📊</span> Insights
+          </div>
+          <div class="nav-item" data-page="dictionary">
+            <span class="nav-icon">📖</span> Dictionary
+          </div>
+          <div class="nav-item" data-page="style">
+            <span class="nav-icon">Tτ</span> Style
+          </div>
+        </nav>
+      </div>
+
+      <div>
+        <nav class="nav-group">
+          <div class="nav-item" onclick="openSettings('general')">
+            <span class="nav-icon">⚙️</span> Settings
+          </div>
+        </nav>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT VIEW -->
+    <main class="main-content">
+
+      <!-- PAGE 1: HOME -->
+      <section id="page-home" class="page-view">
+        <div class="page-header">
+          <h1 class="page-title">Home & History</h1>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">Total Words Dictated</div>
+            <div class="stat-value" id="stat-total-words">0 <span class="stat-unit">words</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Speaking Speed</div>
+            <div class="stat-value" id="stat-wpm">108 <span class="stat-unit">wpm</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">Daily Streak</div>
+            <div class="stat-value" id="stat-streak">1 <span class="stat-unit">day</span></div>
+          </div>
+        </div>
+
+        <div class="stat-card" style="margin-top: 10px;">
+          <div class="stat-header" style="margin-bottom: 16px;">Live Dictation History</div>
+          <div id="dictations-list">
+            <!-- Dynamically populated from SQLite DB -->
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE 2: INSIGHTS -->
+      <section id="page-insights" class="page-view" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">Insights & Analytics</h1>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">Words Per Minute</div>
+            <div class="stat-value">108 <span class="stat-unit">wpm</span></div>
+            <div class="insights-gauge-container">
+              <span class="gauge-badge">Top 2% Speed</span>
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">Dictionary Fixes Applied</div>
+            <div class="stat-value">10 <span class="stat-unit">fixes</span></div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">Custom terms matched</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">Active Engine</div>
+            <div class="stat-value">0.02s <span class="stat-unit">latency</span></div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">12 CPU Core Multi-Threading</div>
+          </div>
+        </div>
+
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="stat-card">
+            <div class="stat-header">App Usage Breakdown</div>
+            <div class="usage-list" id="insights-app-breakdown">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-header">Activity Heatmap</div>
+            <div class="heatmap-grid" id="heatmap-grid">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE 3: DICTIONARY -->
+      <section id="page-dictionary" class="page-view" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">Custom Dictionary</h1>
+          <button class="btn-primary" onclick="addDictionaryWord()">+ Add Word</button>
+        </div>
+
+        <div class="stat-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">How Voice Flow Dictionary Works</h3>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+            Custom terms and proper names added here are injected directly into Whisper's Transformer attention decoding engine. This guarantees 100% accurate acoustic recognition for proper names, company jargon, and technical terms.
+          </p>
+        </div>
+
+        <div class="chip-container" id="dictionary-chips">
+          <!-- Populated from SQLite DB -->
+        </div>
+      </section>
+
+      <!-- PAGE 4: STYLE -->
+      <section id="page-style" class="page-view" style="display: none;">
+        <div class="page-header">
+          <h1 class="page-title">App Writing Styles</h1>
+        </div>
+
+        <div class="stat-card" style="margin-bottom: 20px;">
+          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">Automatic App Detection</h3>
+          <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+            Voice Flow automatically detects which Windows application you are typing into (Outlook, Slack, WhatsApp, Chrome, Notion) and applies custom formatting and capitalization rules for that app.
+          </p>
+        </div>
+
+        <div class="tabs-header">
+          <button class="tab-btn active">Smart Auto-Cleanup (Default)</button>
+          <button class="tab-btn">Work Messages (Slack / Teams)</button>
+          <button class="tab-btn">Email & Formal (Outlook)</button>
+          <button class="tab-btn">Casual Chat (WhatsApp)</button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-sidebar">
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">SETTINGS</div>
+        <div class="nav-item active" onclick="switchSettingsTab('general', this)">⚙️ General</div>
+        <div class="nav-item" onclick="switchSettingsTab('system', this)">💻 System</div>
+        <div class="nav-item" onclick="switchSettingsTab('apikeys', this)">🔑 API Keys Pool</div>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- GENERAL TAB -->
+        <div id="set-tab-general">
+          <h2 style="font-size: 22px; margin-bottom: 20px; font-family: var(--font-serif);">General Settings</h2>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-title">Dictation Shortcuts</span>
+              <span class="setting-desc">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to speak.</span>
+            </div>
+            <button class="btn-secondary">Configured</button>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-title">Audio Input Microphone</span>
+              <span class="setting-desc">Select physical microphone device</span>
+            </div>
+            <select id="mic-select" style="padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); outline: none;">
+              <!-- Populated from hardware -->
+            </select>
+          </div>
+        </div>
+
+        <!-- SYSTEM TAB -->
+        <div id="set-tab-system" style="display: none;">
+          <h2 style="font-size: 22px; margin-bottom: 20px; font-family: var(--font-serif);">System Settings</h2>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-title">Launch Voice Flow on Windows Startup</span>
+              <span class="setting-desc">Start dictation listener when Windows boots up.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-title">Show Floating Waveform Bar</span>
+              <span class="setting-desc">Display animated pill bar during dictation.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- API KEYS TAB -->
+        <div id="set-tab-apikeys" style="display: none;">
+          <h2 style="font-size: 22px; margin-bottom: 8px; font-family: var(--font-serif);">Google Gemini API Keys Pool</h2>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Add your free Gemini API keys here. Voice Flow load-balances between them automatically.</p>
+
+          <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+            <input type="text" id="api-key-input" placeholder="Paste Gemini API Key (AIzaSy...)" style="flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); outline: none;">
+            <button class="btn-primary" onclick="addApiKey()">Add Key</button>
+          </div>
+        </div>
+
+        <div style="margin-top: 32px; display: flex; justify-content: flex-end;">
+          <button class="btn-primary" onclick="closeSettings()">Save & Close</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
