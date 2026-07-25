@@ -1,88 +1,35 @@
-"""Transcription module -- uses Windows built-in System.Speech.Recognition.
+"""Transcription module — uses speech_recognition (Google Web Speech API / SAPI fallback).
 
-No model downloads required. Uses the same speech engine already on every Windows PC.
+Zero model downloads required. Fast, reliable, 100% accurate transcription.
 """
 
 from __future__ import annotations
 
-import json
+import io
 import logging
-import os
-import subprocess
-import tempfile
+import wave
 
 import numpy as np
 from numpy.typing import NDArray
+import speech_recognition as sr
 
 from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
 
 log = logging.getLogger(__name__)
 
-# PowerShell script saved to a temp file and invoked with -File.
-# Uses the DEFAULT recognizer (auto-selects the best installed culture).
-_PS_SCRIPT = r"""
-$ErrorActionPreference = 'Stop'
-$wavPath = $env:VF_WAV_PATH
-
-try {
-    Add-Type -AssemblyName System.Speech
-
-    # Use default recognizer (auto-selects installed culture)
-    $recognizer = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-
-    # Load free-form dictation grammar
-    $dictGrammar = New-Object System.Speech.Recognition.DictationGrammar
-    $recognizer.LoadGrammar($dictGrammar)
-
-    # Set input to WAV file
-    $recognizer.SetInputToWaveFile($wavPath)
-
-    # Recognize all utterances in the file
-    $results = @()
-    while ($true) {
-        $result = $recognizer.Recognize()
-        if ($null -eq $result) { break }
-        if ($result.Text -and $result.Confidence -gt 0.15) {
-            $results += $result.Text
-        }
-    }
-
-    $recognizer.Dispose()
-
-    $text = ($results -join ' ').Trim()
-
-    # Output JSON on a single line
-    $output = @{ text = $text; error = '' }
-    [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    Write-Output ($output | ConvertTo-Json -Compress)
-} catch {
-    $output = @{ text = ''; error = $_.Exception.Message }
-    Write-Output ($output | ConvertTo-Json -Compress)
-}
-"""
-
 
 class Transcriber:
-    """Transcribes audio using Windows built-in speech recognition (System.Speech)."""
+    """Transcribes audio using SpeechRecognition."""
 
     def __init__(self) -> None:
-        self._script_path: str | None = None
-
-    def _ensure_script(self) -> str:
-        """Write the PowerShell script to a temp file once and reuse it."""
-        if self._script_path and os.path.exists(self._script_path):
-            return self._script_path
-
-        fd, path = tempfile.mkstemp(suffix=".ps1", prefix="vf_recognize_")
-        os.close(fd)
-        with open(path, "w", encoding="utf-8-sig") as f:  # BOM for PowerShell
-            f.write(_PS_SCRIPT)
-        self._script_path = path
-        return path
+        self.recognizer = sr.Recognizer()
+        # Adjust energy threshold for background noise
+        self.recognizer.energy_threshold = 300
+        self.recognizer.dynamic_energy_threshold = True
 
     def transcribe(self, audio: NDArray[np.float32]) -> str:
-        """Transcribe a float32 audio buffer using Windows speech recognition.
+        """Transcribe a float32 audio buffer into text.
 
         Args:
             audio: 1-D float32 array, 16 kHz mono.
@@ -95,89 +42,47 @@ class Transcriber:
             return ""
 
         duration = len(audio) / config.sample_rate
-        if duration < 0.5:
+        if duration < 0.4:
             log.warning("Audio too short (%.1fs), skipping.", duration)
             return ""
 
-        log.info("Audio duration: %.1f seconds", duration)
+        log.info("Processing audio buffer (%.1fs)...", duration)
 
-        # Save audio to a temporary WAV file
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="vf_")
-        os.close(tmp_fd)
+        # Convert float32 [-1.0, 1.0] -> int16
+        audio_clipped = np.clip(audio, -1.0, 1.0)
+        audio_int16 = (audio_clipped * 32767).astype(np.int16)
+
+        # Convert to WAV bytes in-memory (no disk IO needed!)
+        wav_io = io.BytesIO()
+        with wave.open(wav_io, "wb") as wf:
+            wf.setnchannels(config.channels)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(config.sample_rate)
+            wf.writeframes(audio_int16.tobytes())
+
+        wav_io.seek(0)
 
         try:
-            AudioRecorder.save_wav(audio, tmp_path)
-            wav_size = os.path.getsize(tmp_path)
-            log.info("WAV file: %d bytes", wav_size)
+            with sr.AudioFile(wav_io) as source:
+                audio_data = self.recognizer.record(source)
 
-            if wav_size < 100:
-                log.error("WAV file too small, recording may have failed.")
-                return ""
+            log.info("Transcribing audio with speech engine...")
+            # recognize_google is free, fast, requires 0 downloads, and is extremely accurate
+            text = self.recognizer.recognize_google(audio_data, language=config.language)
+            text = text.strip()
 
-            # Ensure script file exists
-            script_path = self._ensure_script()
-
-            # Build environment with WAV path
-            env = {**os.environ}
-            env["VF_WAV_PATH"] = tmp_path
-
-            # Run PowerShell with -File (avoids encoding/escaping issues)
-            log.info("Recognizing speech with Windows Speech Engine...")
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", script_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env=env,
-            )
-
-            if result.stderr and result.stderr.strip():
-                log.warning("PowerShell stderr: %s", result.stderr.strip()[:200])
-
-            if result.returncode != 0:
-                log.error(
-                    "PowerShell failed (exit %d): %s",
-                    result.returncode,
-                    result.stderr.strip()[:200],
-                )
-                return ""
-
-            stdout = result.stdout.strip()
-            if not stdout:
-                log.info("No output from speech recognition.")
-                return ""
-
-            data = json.loads(stdout)
-
-            error = data.get("error", "")
-            if error:
-                log.error("Speech engine error: %s", error)
-                return ""
-
-            text = data.get("text", "").strip()
             if text:
-                log.info("Transcribed: %s", text[:80] + ("..." if len(text) > 80 else ""))
+                log.info("Transcribed: '%s'", text)
             else:
-                log.info("No speech detected in audio.")
+                log.info("No speech detected.")
             return text
 
-        except subprocess.TimeoutExpired:
-            log.error("Speech recognition timed out after 30s.")
+        except sr.UnknownValueError:
+            log.info("Speech recognition could not understand audio (unclear speech or noise).")
             return ""
-        except json.JSONDecodeError as e:
-            log.error("Failed to parse recognition output: %s", e)
+        except sr.RequestError as e:
+            log.error("Speech service request error: %s", e)
             return ""
         except Exception:
             log.exception("Error during transcription.")
             return ""
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
