@@ -233,7 +233,7 @@
         <div style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;">SETTINGS</div>
         <div class="nav-item active" onclick="switchSettingsTab('general', this)">⚙️ General</div>
         <div class="nav-item" onclick="switchSettingsTab('system', this)">💻 System</div>
-        <div class="nav-item" onclick="switchSettingsTab('apikeys', this)">🔑 Voice Models & API Keys</div>
+        <div class="nav-item" onclick="switchSettingsTab('apikeys', this)">🔑 2026 Voice Models Hub</div>
       </div>
 
       <div class="modal-body">
@@ -304,17 +304,17 @@
           </div>
         </div>
 
-        <!-- API KEYS & VOICE MODELS HUB (5 PROVIDERS LEFT, 5 PROVIDERS RIGHT) -->
+        <!-- API KEYS & VOICE MODELS HUB (5 PROVIDERS LEFT, 5 PROVIDERS RIGHT - LATEST 2026 BASE MODELS) -->
         <div id="set-tab-apikeys" style="display: none;">
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 4px;">10 Best Free Voice Model API Providers</h2>
-          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Configure free API keys for transcription, voice modification, & audio generation. Test your key to verify connection.</p>
+          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 4px;">10 Best Free Voice Model API Providers (July 2026)</h2>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Configure free API keys for transcripts, voice modification, & audio generation. Test your key to verify connection.</p>
 
           <div class="api-providers-two-column-grid">
 
             <!-- LEFT COLUMN (5 PROVIDERS) -->
             <div class="provider-column">
 
-              <!-- 1. Google Gemini AI Studio -->
+              <!-- 1. Google Gemini (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -325,8 +325,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-gemini" class="model-select-dropdown">
-                    <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash (Ultra-fast Voice Polish)</option>
-                    <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro (Complex Audio & Formatting)</option>
+                    <option value="gemini-3.1-flash-live">gemini-3.1-flash-live (2026 Real-time Voice)</option>
+                    <option value="gemini-3.1-flash-tts">gemini-3.1-flash-tts (2026 Low Latency TTS)</option>
+                    <option value="gemini-3.5-live-translate">gemini-3.5-live-translate (Live Audio Translation)</option>
+                    <option value="gemini-2.5-flash-tts">gemini-2.5-flash-tts (Expressive Voice)</option>
+                    <option value="gemini-2.0-flash">gemini-2.0-flash (Multimodal Speech)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-gemini" placeholder="Paste Gemini API Key (AIzaSy...)" class="key-input-field">
@@ -336,7 +339,7 @@
                 </div>
               </div>
 
-              <!-- 2. Groq Audio AI -->
+              <!-- 2. Groq Audio AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -347,8 +350,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-groq" class="model-select-dropdown">
-                    <option value="whisper-large-v3">Whisper-large-v3 (Sub-100ms Speech-to-Text)</option>
-                    <option value="whisper-large-v3-turbo">Whisper-large-v3-turbo (Ultra-fast)</option>
+                    <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (Sub-50ms STT)</option>
+                    <option value="whisper-large-v3">whisper-large-v3 (Multilingual Speech)</option>
+                    <option value="distil-whisper-large-v3-en">distil-whisper-large-v3-en (Fast STT)</option>
+                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Voice Polish)</option>
+                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (Fast Voice NLP)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-groq" placeholder="Paste Groq API Key (gsk_...)" class="key-input-field">
@@ -358,7 +364,7 @@
                 </div>
               </div>
 
-              <!-- 3. ElevenLabs Voice AI -->
+              <!-- 3. ElevenLabs Voice AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -369,8 +375,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-elevenlabs" class="model-select-dropdown">
-                    <option value="eleven_multilingual_v2">Eleven Multilingual v2 (TTS Audio Generation)</option>
-                    <option value="eleven_turbo_v2_5">Eleven Turbo v2.5 (Low Latency Voice)</option>
+                    <option value="eleven_v3">eleven_v3 (2026 Flagship Expressive TTS)</option>
+                    <option value="eleven_flash_v2_5">eleven_flash_v2_5 (Real-time Voice Agents)</option>
+                    <option value="eleven_multilingual_v2">eleven_multilingual_v2 (TTS Generation)</option>
+                    <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (High-speed Speech)</option>
+                    <option value="eleven_english_v2">eleven_english_v2 (Studio Quality)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-elevenlabs" placeholder="Paste ElevenLabs Key (xi-...)" class="key-input-field">
@@ -380,7 +389,7 @@
                 </div>
               </div>
 
-              <!-- 4. Deepgram Speech -->
+              <!-- 4. Deepgram Speech AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -391,8 +400,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-deepgram" class="model-select-dropdown">
-                    <option value="nova-2-general">Nova-2 General (Speech-to-Text)</option>
-                    <option value="aura-asteria-en">Aura Text-to-Speech Audio Model</option>
+                    <option value="nova-3">nova-3 (2026 Enterprise Multilingual STT)</option>
+                    <option value="flux">flux (2026 Turn-taking Conversational STT)</option>
+                    <option value="aura-2">aura-2 (2026 Enterprise Low-latency TTS)</option>
+                    <option value="aura-asteria-en">aura-asteria-en (Expressive TTS)</option>
+                    <option value="nova-2-general">nova-2-general (High-accuracy STT)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-deepgram" placeholder="Paste Deepgram Key (deepgram_...)" class="key-input-field">
@@ -402,7 +414,7 @@
                 </div>
               </div>
 
-              <!-- 5. OpenAI Voice -->
+              <!-- 5. OpenAI Voice AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -413,8 +425,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-openai" class="model-select-dropdown">
-                    <option value="whisper-1">Whisper-1 (Speech Recognition)</option>
-                    <option value="tts-1-hd">TTS-1-HD (Realistic Audio Generation)</option>
+                    <option value="gpt-realtime-2">gpt-realtime-2 (2026 Flagship Voice Reasoning)</option>
+                    <option value="gpt-realtime-whisper">gpt-realtime-whisper (2026 Streaming STT)</option>
+                    <option value="gpt-realtime-translate">gpt-realtime-translate (Live Voice Translation)</option>
+                    <option value="whisper-1">whisper-1 (Speech Recognition)</option>
+                    <option value="tts-1-hd">tts-1-hd (Realistic Audio Generation)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-openai" placeholder="Paste OpenAI API Key (sk-...)" class="key-input-field">
@@ -429,7 +444,7 @@
             <!-- RIGHT COLUMN (5 PROVIDERS) -->
             <div class="provider-column">
 
-              <!-- 6. AssemblyAI Speech -->
+              <!-- 6. AssemblyAI Speech (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -440,8 +455,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-assemblyai" class="model-select-dropdown">
-                    <option value="universal-1">Universal-1 (Speech Understanding)</option>
-                    <option value="conformer-2">Conformer-2 Transcripts</option>
+                    <option value="universal-2">universal-2 (2026 Speech Understanding)</option>
+                    <option value="universal-1">universal-1 (High Accuracy STT)</option>
+                    <option value="conformer-2">conformer-2 (Streaming STT)</option>
+                    <option value="slam-1">slam-1 (Speech Language Audio Model)</option>
+                    <option value="conformer-1">conformer-1 (Standard STT)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-assemblyai" placeholder="Paste AssemblyAI Key..." class="key-input-field">
@@ -451,7 +469,7 @@
                 </div>
               </div>
 
-              <!-- 7. Hugging Face Voice -->
+              <!-- 7. Hugging Face Voice (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -462,8 +480,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-huggingface" class="model-select-dropdown">
-                    <option value="openai/whisper-large-v3">openai/whisper-large-v3</option>
-                    <option value="suno/bark">suno/bark (TTS Audio Gen)</option>
+                    <option value="fixie-ai/ultravox-v0_5">fixie-ai/ultravox-v0_5 (2026 Speech LLM)</option>
+                    <option value="openai/whisper-large-v3-turbo">openai/whisper-large-v3-turbo</option>
+                    <option value="kyutai/moshiko-pytorch">kyutai/moshiko-pytorch (Duplex Voice)</option>
+                    <option value="suno/bark">suno/bark (TTS Audio Generation)</option>
+                    <option value="coqui/XTTS-v2">coqui/XTTS-v2 (Voice Clone)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-huggingface" placeholder="Paste HF User Token (hf_...)" class="key-input-field">
@@ -473,7 +494,7 @@
                 </div>
               </div>
 
-              <!-- 8. Cloudflare Voice AI -->
+              <!-- 8. Cloudflare Voice AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -484,7 +505,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-cloudflare" class="model-select-dropdown">
+                    <option value="@cf/deepgram/nova-3">@cf/deepgram/nova-3 (2026 Edge STT)</option>
+                    <option value="@cf/myshell/melotts">@cf/myshell/melotts (Ultra-fast Edge TTS)</option>
+                    <option value="@cf/openai/whisper-large-v3-turbo">@cf/openai/whisper-large-v3-turbo</option>
                     <option value="@cf/openai/whisper">@cf/openai/whisper Edge STT</option>
+                    <option value="@cf/meta/m2m100-1.2b">@cf/meta/m2m100-1.2b (Voice Translate)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-cloudflare" placeholder="Paste Cloudflare Token..." class="key-input-field">
@@ -494,7 +519,7 @@
                 </div>
               </div>
 
-              <!-- 9. Together Voice AI -->
+              <!-- 9. Together Voice AI (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -505,7 +530,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-together" class="model-select-dropdown">
-                    <option value="togethercomputer/whisper-large-v3">Whisper-large-v3 Together</option>
+                    <option value="cartesia/sonic-multilingual">cartesia/sonic-multilingual (2026 Low Latency TTS)</option>
+                    <option value="hexgrad/kokoro-v0_19">hexgrad/kokoro-v0_19 (Lightweight TTS)</option>
+                    <option value="togethercomputer/whisper-large-v3">whisper-large-v3 Cloud STT</option>
+                    <option value="meta-llama/Llama-3.3-70B-Instruct-Turbo">Llama-3.3-70B-Instruct-Turbo</option>
+                    <option value="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo">Llama-3.1-8B-Instruct-Turbo</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-together" placeholder="Paste Together AI Key..." class="key-input-field">
@@ -515,7 +544,7 @@
                 </div>
               </div>
 
-              <!-- 10. Replicate Voice -->
+              <!-- 10. Replicate Voice (2026 Models) -->
               <div class="provider-card-box">
                 <div class="provider-header-row">
                   <div class="provider-title-group">
@@ -526,7 +555,11 @@
                 </div>
                 <div class="model-selector-row">
                   <select id="model-select-replicate" class="model-select-dropdown">
+                    <option value="victor-upx/kokoro-tts">victor-upx/kokoro-tts (2026 TTS Audio Gen)</option>
                     <option value="coqui/xtts-v2">coqui/xtts-v2 (Voice Clone & TTS)</option>
+                    <option value="replicate/whisp-v3">replicate/whisp-v3 Cloud STT</option>
+                    <option value="suno-ai/bark">suno-ai/bark (Audio Generation)</option>
+                    <option value="cjwbw/seamless_communication">seamless_communication (Speech-to-Speech)</option>
                   </select>
                 </div>
                 <input type="password" id="key-input-replicate" placeholder="Paste Replicate Token (r8_...)" class="key-input-field">
