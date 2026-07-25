@@ -170,7 +170,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 3000);
 });
 
-// 10-Second Startup Sequence for Floating Flow Bar Widget
+// Startup sequence for Wispr Flow Bar Marker
 function startFloatingBarStartupSequence() {
   const barText = document.getElementById("flow-bar-text");
   const barDot = document.getElementById("flow-bar-status-dot");
@@ -186,7 +186,7 @@ function startFloatingBarStartupSequence() {
       barText.textContent = `Starting... ${countdown}s`;
     } else {
       clearInterval(timer);
-      barText.textContent = "Ready to Dictate";
+      barText.textContent = "Ready to do this and all";
       barDot.className = "pill-indicator-dot ready";
     }
   }, 1000);
