@@ -1,7 +1,7 @@
-"""Global hotkey and mouse event listeners for Voice Flow with event suppression.
+"""Global hotkey and mouse event listeners for Voice Flow.
 
-Suppresses middle-click drag autoscroll while allowing normal mouse wheel scrolling
-and preventing Windows Start Menu popups.
+Uses native Win32 mouse hook for middle-click suppression with zero cursor lag.
+Prevents Windows Start Menu from opening when Win+Ctrl or Ctrl+Win is pressed.
 """
 
 from __future__ import annotations
@@ -11,17 +11,11 @@ import logging
 import threading
 from typing import Callable
 
-from pynput import keyboard, mouse
+from pynput import keyboard
+
+from voice_flow.mouse_hook import NativeMiddleClickHook
 
 log = logging.getLogger(__name__)
-
-# Win32 Mouse Message IDs for Middle Button
-WM_MBUTTONDOWN = 0x0207
-WM_MBUTTONUP = 0x0208
-WM_MBUTTONDBLCLK = 0x0209
-WM_NCMBUTTONDOWN = 0x00A7
-WM_NCMBUTTONUP = 0x00A8
-WM_NCMBUTTONDBLCLK = 0x00A9
 
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
@@ -37,10 +31,7 @@ def _suppress_win_start_menu() -> None:
 
 
 class InputTriggerListener:
-    """Listens for global mouse (middle button) and keyboard (Win+Ctrl / Ctrl+Win) events.
-
-    Suppresses native middle-click drag autoscroll while allowing normal mouse wheel scrolling.
-    """
+    """Listens for global mouse (middle button) and keyboard (Win+Ctrl / Ctrl+Win) events."""
 
     def __init__(
         self,
@@ -52,37 +43,34 @@ class InputTriggerListener:
         self._on_finish = on_finish
         self._on_cancel = on_cancel
 
-        self._mouse_listener: mouse.Listener | None = None
+        self._mouse_hook: NativeMiddleClickHook | None = None
         self._key_listener: keyboard.Listener | None = None
 
         self._is_recording = False
         self._pressed_keys: set[keyboard.Key | keyboard.KeyCode] = set()
-        self._middle_pressed = False
         self._hotkey_triggered = False
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        """Start listening for inputs with suppress=True to block middle-click drag autoscroll."""
-        self._mouse_listener = mouse.Listener(
-            on_click=self._on_mouse_click,
-            win32_event_filter=self._win32_mouse_filter,
-            suppress=True,  # REQUIRED on Windows for win32_event_filter return False to block OS messages
+        """Start native mouse hook and keyboard listener."""
+        self._mouse_hook = NativeMiddleClickHook(
+            on_press=self._handle_mouse_press,
+            on_release=self._handle_mouse_release,
         )
         self._key_listener = keyboard.Listener(
             on_press=self._on_key_press,
             on_release=self._on_key_release,
-            win32_event_filter=self._win32_key_filter,
         )
 
-        self._mouse_listener.start()
+        self._mouse_hook.start()
         self._key_listener.start()
-        log.info("Global input listeners started (Middle-click drag autoscroll suppressed).")
+        log.info("Global input listeners started (Native Win32 mouse hook active).")
 
     def stop(self) -> None:
         """Stop input listeners."""
-        if self._mouse_listener is not None:
-            self._mouse_listener.stop()
-            self._mouse_listener = None
+        if self._mouse_hook is not None:
+            self._mouse_hook.stop()
+            self._mouse_hook = None
         if self._key_listener is not None:
             self._key_listener.stop()
             self._key_listener = None
@@ -93,38 +81,17 @@ class InputTriggerListener:
         with self._lock:
             self._is_recording = recording
 
-    # -- Win32 Mouse Event Filter --
+    # -- Mouse Hook Callbacks --
 
-    def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Selectively suppresses middle button messages to block drag autoscroll icon."""
-        if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
-            with self._lock:
-                if not self._is_recording:
-                    self._middle_pressed = True
-                    self._on_start()
-            return False  # Returning False with suppress=True BLOCKS middle-click down from reaching Windows
+    def _handle_mouse_press(self) -> None:
+        with self._lock:
+            if not self._is_recording:
+                self._on_start()
 
-        elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
-            with self._lock:
-                if self._middle_pressed and self._is_recording:
-                    self._middle_pressed = False
-                    self._on_finish()
-            return False  # Returning False with suppress=True BLOCKS middle-click up from reaching Windows
-
-        # Return True for ALL other events (normal mouse wheel rotation 0x020A, left/right click, motion)
-        return True
-
-    def _on_mouse_click(
-        self, x: int, y: int, button: mouse.Button, pressed: bool
-    ) -> None:
-        """Dummy callback for pynput mouse listener."""
-        pass
-
-    # -- Win32 Keyboard Event Filter --
-
-    def _win32_key_filter(self, msg: int, data: object) -> bool:
-        """Low-level keyboard filter."""
-        return True
+    def _handle_mouse_release(self) -> None:
+        with self._lock:
+            if self._is_recording:
+                self._on_finish()
 
     # -- Internal Keyboard Callbacks --
 
