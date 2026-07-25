@@ -43,38 +43,44 @@ class FloatingOverlayBar:
 
     def __init__(
         self,
-        root: tk.Tk,
-        on_cancel: Callable[[], None],
-        on_finish: Callable[[], None],
-        get_audio_level: Callable[[], float],
+        root: tk.Tk | None = None,
+        on_cancel: Callable[[], None] | None = None,
+        on_finish: Callable[[], None] | None = None,
+        get_audio_level: Callable[[], float] | None = None,
     ) -> None:
-        self.root = root
-        self.on_cancel = on_cancel
-        self.on_finish = on_finish
-        self.get_audio_level = get_audio_level
+        self.own_root = False
+        if root is None:
+            self.root = tk.Tk()
+            self.root.withdraw()
+            self.own_root = True
+        else:
+            self.root = root
+
+        self.on_cancel = on_cancel or (lambda: None)
+        self.on_finish = on_finish or (lambda: None)
+        self.get_audio_level = get_audio_level or (lambda: 0.0)
+
+        self.on_cancel_click = None
+        self.on_finish_click = None
 
         self.state = "HIDDEN"  # HIDDEN, RECORDING, PROCESSING, DONE
         self._anim_phase = 0.0
         self._hover_zone: str | None = None  # "cancel", "finish", or None
 
-        # Dimensions — wider and taller for a premium feel
         self.width = 360
         self.height = 52
         self.padding = 16
 
-        # Window setup
-        self.win = tk.Toplevel(root)
+        self.win = tk.Toplevel(self.root)
         self.win.withdraw()
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
-        self.win.attributes("-alpha", 0.95)  # Slight translucency
+        self.win.attributes("-alpha", 0.95)
 
-        # Transparent background key
         self._trans_color = "#010101"
         self.win.config(bg=self._trans_color)
         self.win.attributes("-transparentcolor", self._trans_color)
 
-        # Canvas
         self.canvas = tk.Canvas(
             self.win,
             width=self.width,
@@ -86,22 +92,22 @@ class FloatingOverlayBar:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Event bindings
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<Motion>", self._on_motion)
         self.canvas.bind("<Leave>", self._on_leave)
 
         self._position_window()
-        # Defer Win32 styling until window is mapped
         self.win.bind("<Map>", self._on_map)
 
+    def run_loop(self) -> None:
+        """Start the Tkinter event loop for floating overlay bar."""
+        self.root.mainloop()
+
     def _on_map(self, _event: tk.Event) -> None:
-        """Apply Win32 styles after window is mapped."""
         self._apply_win32_styles()
         self.win.unbind("<Map>")
 
     def _position_window(self) -> None:
-        """Position the bar at bottom-center of primary display."""
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         x = (screen_w - self.width) // 2
@@ -109,7 +115,6 @@ class FloatingOverlayBar:
         self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
 
     def _apply_win32_styles(self) -> None:
-        """Apply Win32 WS_EX_NOACTIVATE so window never steals keyboard focus."""
         try:
             self.win.update_idletasks()
             hwnd = ctypes.windll.user32.GetParent(self.win.winfo_id())
@@ -123,7 +128,9 @@ class FloatingOverlayBar:
 
     # -- Public State API --
 
-    def show_recording(self) -> None:
+    def show_recording(self, level_provider: Callable[[], float] | None = None) -> None:
+        if level_provider:
+            self.get_audio_level = level_provider
         self.state = "RECORDING"
         self._anim_phase = 0.0
         self._position_window()
@@ -137,7 +144,7 @@ class FloatingOverlayBar:
         self.state = "PROCESSING"
         self._anim_phase = 0.0
 
-    def show_done(self) -> None:
+    def show_done(self, text: str = "") -> None:
         self.state = "DONE"
         self._anim_phase = 0.0
         self._draw()
@@ -150,7 +157,6 @@ class FloatingOverlayBar:
     # -- Mouse Events --
 
     def _get_zone(self, x: int) -> str | None:
-        """Determine which interactive zone the cursor is in."""
         if x < 52:
             return "cancel"
         if x > self.width - 52:
@@ -162,17 +168,21 @@ class FloatingOverlayBar:
             return
         zone = self._get_zone(event.x)
         if zone == "cancel":
-            self.on_cancel()
+            if self.on_cancel_click:
+                self.on_cancel_click()
+            else:
+                self.on_cancel()
         elif zone == "finish":
-            self.on_finish()
+            if self.on_finish_click:
+                self.on_finish_click()
+            else:
+                self.on_finish()
 
     def _on_motion(self, event: tk.Event) -> None:
         zone = self._get_zone(event.x)
         if zone != self._hover_zone:
             self._hover_zone = zone
-            if zone == "cancel":
-                self.canvas.config(cursor="hand2")
-            elif zone == "finish":
+            if zone in ("cancel", "finish"):
                 self.canvas.config(cursor="hand2")
             else:
                 self.canvas.config(cursor="arrow")
@@ -189,7 +199,7 @@ class FloatingOverlayBar:
         self._anim_phase += 0.12
         self._draw()
         if self.state in ("RECORDING", "PROCESSING"):
-            self.root.after(33, self._animate)  # ~30 fps
+            self.root.after(33, self._animate)
 
     # -- Drawing --
 
@@ -198,7 +208,6 @@ class FloatingOverlayBar:
         c.delete("all")
         w, h = self.width, self.height
 
-        # 1. Draw pill background with subtle border
         self._draw_pill(2, 2, w - 2, h - 2, h // 2 - 2, self.BG, self.BORDER_COLOR)
 
         if self.state == "RECORDING":
@@ -212,20 +221,12 @@ class FloatingOverlayBar:
         c = self.canvas
         cy = h / 2
 
-        # Cancel button (✕) — left side
         cancel_color = self.CANCEL_HOVER if self._hover_zone == "cancel" else self.CANCEL_NORMAL
         cx_cancel = 28
         size = 6
-        c.create_line(
-            cx_cancel - size, cy - size, cx_cancel + size, cy + size,
-            fill=cancel_color, width=2, capstyle="round",
-        )
-        c.create_line(
-            cx_cancel + size, cy - size, cx_cancel - size, cy + size,
-            fill=cancel_color, width=2, capstyle="round",
-        )
+        c.create_line(cx_cancel - size, cy - size, cx_cancel + size, cy + size, fill=cancel_color, width=2, capstyle="round")
+        c.create_line(cx_cancel + size, cy - size, cx_cancel - size, cy + size, fill=cancel_color, width=2, capstyle="round")
 
-        # Waveform bars — center
         level = self.get_audio_level()
         num_bars = 15
         bar_width = 3
@@ -235,130 +236,50 @@ class FloatingOverlayBar:
 
         for i in range(num_bars):
             bx = start_x + i * (bar_width + bar_gap)
-
-            # Sine wave + audio level for natural wave motion
             wave = math.sin(self._anim_phase * 1.5 + i * 0.5)
-            # Bars near center are taller
             center_factor = 1.0 - abs(i - num_bars / 2) / (num_bars / 2) * 0.5
             bar_h = 4 + abs(wave) * (3 + level * 14) * center_factor
 
-            # Color interpolation based on level
-            if level > 0.3:
-                color = self.WAVEFORM_HOT
-            elif level > 0.05:
-                color = self.WAVEFORM_ACTIVE
-            else:
-                color = self.WAVEFORM_BASE
+            color = self.WAVEFORM_HOT if level > 0.3 else (self.WAVEFORM_ACTIVE if level > 0.05 else self.WAVEFORM_BASE)
+            c.create_rectangle(bx, cy - bar_h / 2, bx + bar_width, cy + bar_h / 2, fill=color, outline="", width=0)
 
-            # Draw rounded bar
-            c.create_rectangle(
-                bx, cy - bar_h / 2,
-                bx + bar_width, cy + bar_h / 2,
-                fill=color, outline="", width=0,
-            )
-
-        # Finish button (✓) — right side
         finish_color = self.FINISH_HOVER if self._hover_zone == "finish" else self.FINISH_NORMAL
         cx_finish = w - 28
-        c.create_line(
-            cx_finish - 7, cy, cx_finish - 2, cy + 5,
-            fill=finish_color, width=2.5, capstyle="round",
-        )
-        c.create_line(
-            cx_finish - 2, cy + 5, cx_finish + 7, cy - 5,
-            fill=finish_color, width=2.5, capstyle="round",
-        )
+        c.create_line(cx_finish - 7, cy, cx_finish - 2, cy + 5, fill=finish_color, width=2.5, capstyle="round")
+        c.create_line(cx_finish - 2, cy + 5, cx_finish + 7, cy - 5, fill=finish_color, width=2.5, capstyle="round")
 
     def _draw_processing(self, w: int, h: int) -> None:
         c = self.canvas
         cy = h / 2
-
-        # Animated dots
-        num_dots = 3
         dot_text = "·" * (int(self._anim_phase * 3) % 4)
-
-        # Sparkle icon ✦
         sparkle_x = w / 2 - 55
         alpha = abs(math.sin(self._anim_phase * 2))
         sparkle_color = self.PROCESSING_ACCENT if alpha > 0.5 else self.TEXT_DIM
 
-        c.create_text(
-            sparkle_x, cy,
-            text="✦",
-            fill=sparkle_color,
-            font=(config.bar_font_family, 12),
-            anchor="center",
-        )
-
-        c.create_text(
-            w / 2 + 5, cy,
-            text=f"Transcribing{dot_text}",
-            fill=self.TEXT_PRIMARY,
-            font=(config.bar_font_family, 11),
-            anchor="center",
-        )
+        c.create_text(sparkle_x, cy, text="✦", fill=sparkle_color, font=(config.bar_font_family, 12), anchor="center")
+        c.create_text(w / 2 + 5, cy, text=f"Transcribing{dot_text}", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 11), anchor="center")
 
     def _draw_done(self, w: int, h: int) -> None:
         c = self.canvas
         cy = h / 2
-
-        # Checkmark circle
         circle_x = w / 2 - 45
         r = 8
-        c.create_oval(
-            circle_x - r, cy - r, circle_x + r, cy + r,
-            fill=self.DONE_GREEN, outline="",
-        )
-        # White checkmark inside circle
-        c.create_line(
-            circle_x - 3, cy, circle_x - 1, cy + 3,
-            fill="white", width=2, capstyle="round",
-        )
-        c.create_line(
-            circle_x - 1, cy + 3, circle_x + 4, cy - 3,
-            fill="white", width=2, capstyle="round",
-        )
+        c.create_oval(circle_x - r, cy - r, circle_x + r, cy + r, fill=self.DONE_GREEN, outline="")
+        c.create_line(circle_x - 3, cy, circle_x - 1, cy + 3, fill="white", width=2, capstyle="round")
+        c.create_line(circle_x - 1, cy + 3, circle_x + 4, cy - 3, fill="white", width=2, capstyle="round")
+        c.create_text(w / 2 + 10, cy, text="Done", fill=self.DONE_GREEN, font=(config.bar_font_family, 12, "bold"), anchor="center")
 
-        c.create_text(
-            w / 2 + 10, cy,
-            text="Done",
-            fill=self.DONE_GREEN,
-            font=(config.bar_font_family, 12, "bold"),
-            anchor="center",
-        )
-
-    # -- Helpers --
-
-    def _draw_pill(
-        self,
-        x1: float, y1: float, x2: float, y2: float,
-        radius: float, fill_color: str, border_color: str,
-    ) -> None:
-        """Draw a smooth pill/capsule shape with optional border."""
+    def _draw_pill(self, x1: float, y1: float, x2: float, y2: float, radius: float, fill_color: str, border_color: str) -> None:
         r = radius
-        # Border
         pts_outer = self._pill_points(x1, y1, x2, y2, r)
         self.canvas.create_polygon(pts_outer, fill=border_color, smooth=True)
-        # Fill (inset by 1px for border effect)
         pts_inner = self._pill_points(x1 + 1, y1 + 1, x2 - 1, y2 - 1, r - 1)
         self.canvas.create_polygon(pts_inner, fill=fill_color, smooth=True)
 
     @staticmethod
-    def _pill_points(
-        x1: float, y1: float, x2: float, y2: float, r: float
-    ) -> list[float]:
-        """Generate smooth polygon points for a pill/capsule shape."""
+    def _pill_points(x1: float, y1: float, x2: float, y2: float, r: float) -> list[float]:
         return [
-            x1 + r, y1,
-            x2 - r, y1,
-            x2, y1,
-            x2, y1 + r,
-            x2, y2 - r,
-            x2, y2,
-            x2 - r, y2,
-            x1 + r, y2,
-            x1, y2,
-            x1, y2 - r,
-            x1, y1 + r,
-            x1, y1,
+            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
         ]
