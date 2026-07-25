@@ -50,9 +50,9 @@ class VoiceFlowApp:
 
         # Connect Input Trigger Listener
         self.hotkeys = InputTriggerListener(
-            on_press_callback=self._on_dictation_start,
-            on_release_callback=self._on_dictation_finish,
-            on_cancel_callback=self._on_dictation_cancel,
+            on_start=self._on_dictation_start,
+            on_finish=self._on_dictation_finish,
+            on_cancel=self._on_dictation_cancel,
         )
 
         # Connect Overlay Action Buttons
