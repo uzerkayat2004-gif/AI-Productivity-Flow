@@ -114,6 +114,12 @@ class InputTriggerListener:
 
         return True
 
+    def _on_mouse_click(
+        self, x: int, y: int, button: mouse.Button, pressed: bool
+    ) -> None:
+        """Dummy callback for pynput mouse listener (filtering handled by _win32_mouse_filter)."""
+        pass
+
     # -- Win32 Keyboard Event Filter --
 
     def _win32_key_filter(self, msg: int, data: object) -> bool:
