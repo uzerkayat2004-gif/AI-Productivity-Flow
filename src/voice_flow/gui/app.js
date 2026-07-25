@@ -161,6 +161,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadInsights();
   loadDictionary();
   renderStyleCategory("personal");
+  startFloatingBarStartupSequence();
 
   // Real-time auto-refresh polling every 3 seconds
   setInterval(() => {
@@ -168,6 +169,44 @@ document.addEventListener("DOMContentLoaded", () => {
     loadInsights();
   }, 3000);
 });
+
+// 10-Second Startup Sequence for Floating Flow Bar Widget
+function startFloatingBarStartupSequence() {
+  const barText = document.getElementById("flow-bar-text");
+  const barDot = document.getElementById("flow-bar-status-dot");
+  if (!barText || !barDot) return;
+
+  let countdown = 10;
+  barText.textContent = `Starting... ${countdown}s`;
+  barDot.className = "pill-indicator-dot";
+
+  const timer = setInterval(() => {
+    countdown--;
+    if (countdown > 0) {
+      barText.textContent = `Starting... ${countdown}s`;
+    } else {
+      clearInterval(timer);
+      barText.textContent = "Ready to Dictate";
+      barDot.className = "pill-indicator-dot ready";
+    }
+  }, 1000);
+}
+
+// System Toggle for Floating Flow Bar Visibility
+function toggleFlowBarVisibility(isVisible) {
+  const bar = document.getElementById("floating-flow-bar");
+  if (bar) {
+    if (isVisible) {
+      bar.classList.remove("hidden-bar");
+    } else {
+      bar.classList.add("hidden-bar");
+    }
+  }
+}
+
+function toggleSystemSetting(settingKey, isChecked) {
+  console.log(`System setting [${settingKey}] updated to:`, isChecked);
+}
 
 // Sidebar Toggle (Expand / Collapse)
 function toggleSidebar() {

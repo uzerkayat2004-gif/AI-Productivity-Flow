@@ -14,7 +14,7 @@
     <!-- LEFT NAVIGATION SIDEBAR -->
     <aside class="sidebar" id="main-sidebar">
       <div>
-        <!-- BRAND HEADER WITH SIDEBAR TOGGLE BUTTON MOVED TO PRO LABEL POSITION -->
+        <!-- BRAND HEADER WITH SIDEBAR TOGGLE BUTTON AT PRO LABEL POSITION -->
         <div class="brand">
           <div class="brand-left">
             <div class="brand-icon">VF</div>
@@ -216,6 +216,14 @@
     </main>
   </div>
 
+  <!-- FLOATING FLOW BAR PILL WIDGET (CENTER BOTTOM OF SCREEN) -->
+  <div id="floating-flow-bar" class="floating-flow-bar-widget">
+    <div class="flow-pill-content">
+      <span class="pill-indicator-dot" id="flow-bar-status-dot"></span>
+      <span class="pill-text" id="flow-bar-text">Starting... 10s</span>
+    </div>
+  </div>
+
   <!-- ENLARGED SETTINGS MODAL -->
   <div id="settings-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card-large">
@@ -228,7 +236,7 @@
 
       <div class="modal-body">
 
-        <!-- GENERAL SETTINGS TAB (STRICTLY SHORTCUTS & MICROPHONE ONLY) -->
+        <!-- GENERAL SETTINGS TAB -->
         <div id="set-tab-general">
           <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">General</h2>
 
@@ -253,29 +261,41 @@
           </div>
         </div>
 
-        <!-- SYSTEM TAB -->
+        <!-- SYSTEM TAB (MATCHING USER SCREENSHOT EXACTLY) -->
         <div id="set-tab-system" style="display: none;">
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">System Settings</h2>
+          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 6px;">System</h2>
+          <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 20px;">App settings</div>
 
           <div class="settings-group-card">
+            <!-- Toggle 1: Launch app at login -->
             <div class="setting-row">
               <div class="setting-info">
-                <span class="setting-title">Launch Voice Flow on Windows Startup</span>
-                <span class="setting-desc">Start dictation listener when Windows boots up.</span>
+                <span class="setting-title">Launch app at login</span>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" checked>
+                <input type="checkbox" id="toggle-login" checked onchange="toggleSystemSetting('login', this.checked)">
                 <span class="toggle-slider"></span>
               </label>
             </div>
 
-            <div class="setting-row" style="border-bottom: none;">
+            <!-- Toggle 2: Show Flow Bar at all times -->
+            <div class="setting-row">
               <div class="setting-info">
-                <span class="setting-title">Show Floating Waveform Bar</span>
-                <span class="setting-desc">Display animated pill bar during dictation.</span>
+                <span class="setting-title">Show Flow Bar at all times</span>
               </div>
               <label class="toggle-switch">
-                <input type="checkbox" checked>
+                <input type="checkbox" id="toggle-flow-bar" checked onchange="toggleFlowBarVisibility(this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <!-- Toggle 3: Show app in dock -->
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <span class="setting-title">Show app in dock</span>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-dock" checked onchange="toggleSystemSetting('dock', this.checked)">
                 <span class="toggle-slider"></span>
               </label>
             </div>
