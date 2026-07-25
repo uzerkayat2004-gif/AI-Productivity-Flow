@@ -1,5 +1,7 @@
 """Configuration and constants for Voice Flow."""
 
+from __future__ import annotations
+
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -27,10 +29,15 @@ class Config:
     min_speech_duration_ms: int = 200
     noise_gate_rms: float = 0.008
 
-    # --- Audio ---
+    # --- Audio Hardware Input Selection ---
     sample_rate: int = 16000
     channels: int = 1
     block_size: int = 1024
+    selected_mic_device: str | int | None = None  # Selected hardware mic device index/name
+
+    # --- Hotkeys & Shortcuts ---
+    push_to_talk_shortcut: str = "Ctrl+Win"
+    hands_free_shortcut: str = "Middle Click / Ctrl+Win"
 
     # --- Overlay Bar ---
     bar_width: int = 360

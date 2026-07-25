@@ -45,19 +45,19 @@ body {
   background-color: var(--bg-main);
 }
 
-/* Minimal Wispr Flow Bar Marker (Expands on Hover) */
+/* Minimal Wispr Flow Bar Marker (With Microphone Symbol & Click Activation) */
 .wispr-flow-bar-marker {
   position: fixed;
   bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 999;
-  width: 54px;
-  height: 6px;
-  background: rgba(28, 25, 23, 0.85);
+  width: 64px;
+  height: 14px;
+  background: rgba(28, 25, 23, 0.88);
   backdrop-filter: blur(12px);
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
   cursor: pointer;
   overflow: hidden;
@@ -65,14 +65,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
 }
 
 .wispr-flow-bar-marker.hidden-bar {
   display: none !important;
 }
 
+.mic-symbol-icon {
+  font-size: 11px;
+  opacity: 0.9;
+  transition: transform 0.2s ease;
+}
+
 .wispr-bar-line {
-  width: 24px;
+  width: 18px;
   height: 2px;
   background-color: rgba(255, 255, 255, 0.6);
   border-radius: 2px;
@@ -91,11 +98,11 @@ body {
 
 /* Hover Expansion State */
 .wispr-flow-bar-marker:hover {
-  width: 210px;
-  height: 32px;
-  border-radius: 16px;
-  background: rgba(28, 25, 23, 0.95);
-  border-color: rgba(255, 107, 0, 0.4);
+  width: 220px;
+  height: 34px;
+  border-radius: 17px;
+  background: rgba(28, 25, 23, 0.96);
+  border-color: rgba(255, 107, 0, 0.45);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 14px rgba(255, 107, 0, 0.25);
   padding: 0 14px;
 }
@@ -109,6 +116,25 @@ body {
   transform: scale(1);
 }
 
+/* Active Recording State */
+.wispr-flow-bar-marker.recording-active {
+  width: 230px !important;
+  height: 36px !important;
+  border-radius: 18px !important;
+  background: rgba(28, 25, 23, 0.98) !important;
+  border-color: var(--primary-orange) !important;
+  box-shadow: 0 0 20px rgba(255, 107, 0, 0.5) !important;
+}
+
+.wispr-flow-bar-marker.recording-active .wispr-bar-line {
+  display: none;
+}
+
+.wispr-flow-bar-marker.recording-active .flow-pill-content {
+  opacity: 1 !important;
+  transform: scale(1) !important;
+}
+
 .pill-indicator-dot {
   width: 8px;
   height: 8px;
@@ -118,12 +144,24 @@ body {
   flex-shrink: 0;
 }
 
+.pill-indicator-dot.recording {
+  background-color: var(--primary-orange);
+  box-shadow: 0 0 12px var(--primary-orange);
+  animation: pulseDot 0.6s infinite ease-in-out;
+}
+
 .pill-text {
   font-size: 12px;
   font-weight: 700;
   color: #f5f5f4;
   letter-spacing: 0.3px;
   white-space: nowrap;
+}
+
+@keyframes pulseDot {
+  0% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0.4; transform: scale(0.85); }
 }
 
 /* --- Sidebar --- */
@@ -557,25 +595,6 @@ body {
 
 .audio-signal-bars .bar.active {
   background-color: #9333ea;
-}
-
-.mic-modal-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 24px;
-  padding-top: 14px;
-}
-
-.mic-find-link {
-  font-size: 13px;
-  font-weight: 600;
-  color: #7e22ce;
-  text-decoration: none;
-}
-
-.mic-find-link:hover {
-  text-decoration: underline;
 }
 
 /* History Controls & Search Bar */

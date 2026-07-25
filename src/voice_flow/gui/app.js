@@ -1,6 +1,7 @@
 // Voice Flow Desktop App - Real Data Controller
 
 let allHistoryRecords = [];
+let isHandsFreeRecording = false;
 
 // Style Configuration & Scenarios
 const STYLE_DATA = {
@@ -192,6 +193,28 @@ function startFloatingBarStartupSequence() {
   }, 1000);
 }
 
+// Click Floating Bar to Toggle Hands-Free Recording Mode Automatically!
+function toggleHandsFreeRecording() {
+  const bar = document.getElementById("floating-flow-bar");
+  const barText = document.getElementById("flow-bar-text");
+  const barDot = document.getElementById("flow-bar-status-dot");
+  if (!bar) return;
+
+  isHandsFreeRecording = !isHandsFreeRecording;
+
+  if (isHandsFreeRecording) {
+    bar.classList.add("recording-active");
+    if (barDot) barDot.className = "pill-indicator-dot recording";
+    if (barText) barText.textContent = "🎙️ Dictating... Click to stop";
+  } else {
+    bar.classList.remove("recording-active");
+    if (barDot) barDot.className = "pill-indicator-dot ready";
+    if (barText) barText.textContent = "Ready to do this and all";
+    loadHistory();
+    loadInsights();
+  }
+}
+
 // System Toggle for Floating Flow Bar Visibility
 function toggleFlowBarVisibility(isVisible) {
   const bar = document.getElementById("floating-flow-bar");
@@ -311,18 +334,22 @@ function closeSubModal(modalId) {
   if (modal) modal.classList.add("hidden");
 }
 
-function selectShortcut(shortcutText, el) {
-  const desc = document.getElementById("current-shortcut-text");
-  if (desc) {
-    desc.innerHTML = `Hold <kbd class="kbd-pill">${shortcutText}</kbd> and speak.`;
-  }
+function selectShortcutMode(modeName, el) {
   if (el) {
-    document.querySelectorAll(".shortcut-option-card").forEach(card => card.classList.remove("active-option"));
+    document.querySelectorAll("#shortcuts-sub-modal .shortcut-option-card").forEach(card => card.classList.remove("active-option"));
     el.classList.add("active-option");
   }
 }
 
-// Dynamic Hardware Audio Input Detection (Supporting any user's connected Headset & Microphone)
+function changePushToTalkKey() {
+  const newKey = prompt("Enter new Push to Talk hotkey combination:", "Ctrl+Win");
+  if (newKey && newKey.trim()) {
+    document.getElementById("ptt-current-kbd").textContent = newKey.trim();
+    document.getElementById("ptt-display-kbd").textContent = newKey.trim();
+  }
+}
+
+// Dynamic Hardware Audio Input Detection & Hardware Routing
 async function loadHardwareMicrophones() {
   const container = document.getElementById("mic-devices-list");
   if (!container) return;
@@ -331,52 +358,49 @@ async function loadHardwareMicrophones() {
     const res = await fetch("/api/microphones");
     const mics = await res.json();
 
-    const activeMicName = mics && mics.length > 0 ? mics[0] : "Headset (Max Pro)";
-    const commMicName = mics && mics.length > 1 ? mics[1] : `Communications - ${activeMicName}`;
-    const arrayMicName = mics && mics.length > 2 ? mics[2] : "Array (Realtek(R) Audio)";
+    if (!mics || mics.length === 0) {
+      mics.push({ index: 0, name: "Headset (Max Pro)" });
+    }
 
-    container.innerHTML = `
-      <!-- Option 1: Primary Headset/Microphone -->
-      <div class="mic-option-card selected-mic" onclick="selectMicrophoneDevice('${escapeJs(activeMicName)}', this)">
-        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(activeMicName)}</div>
-        <div class="audio-signal-bars">
-          <span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span>
+    container.innerHTML = mics.map((mic, i) => {
+      const isFirst = i === 0;
+      return `
+        <div class="mic-option-card ${isFirst ? 'selected-mic' : ''}" onclick="selectMicrophoneDevice('${escapeJs(mic.name)}', ${mic.index}, this)">
+          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(mic.name)}</div>
+          ${isFirst ? `
+            <div class="audio-signal-bars">
+              <span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span>
+            </div>
+          ` : ''}
         </div>
-      </div>
+      `;
+    }).join("");
 
-      <!-- Option 2: Communications Headset -->
-      <div class="mic-option-card" onclick="selectMicrophoneDevice('${escapeJs(commMicName)}', this)">
-        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(commMicName)}</div>
-      </div>
-
-      <!-- Option 3: System Audio Array -->
-      <div class="mic-option-card" onclick="selectMicrophoneDevice('${escapeJs(arrayMicName)}', this)">
-        <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(arrayMicName)}</div>
-      </div>
-
-      <!-- Option 4: Auto-detect Mode -->
-      <div class="mic-option-card" onclick="selectMicrophoneDevice('Auto-detect (${escapeJs(arrayMicName)})', this)">
-        <div>
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">Auto-detect (${escapeHtml(arrayMicName)})</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">From computer settings</div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById("current-mic-desc").textContent = activeMicName;
+    document.getElementById("current-mic-desc").textContent = mics[0].name;
 
   } catch (err) {
     console.error("Error detecting hardware microphones:", err);
   }
 }
 
-function selectMicrophoneDevice(micName, el) {
+async function selectMicrophoneDevice(micName, micIndex, el) {
   const desc = document.getElementById("current-mic-desc");
   if (desc) desc.textContent = micName;
   if (el) {
     document.querySelectorAll("#mic-devices-list .mic-option-card").forEach(c => c.classList.remove("selected-mic"));
     el.classList.add("selected-mic");
   }
+
+  try {
+    await fetch("/api/microphones/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: micName, index: micIndex }),
+    });
+  } catch (err) {
+    console.error("Error setting active microphone:", err);
+  }
+
   closeSubModal('mic-sub-modal');
 }
 

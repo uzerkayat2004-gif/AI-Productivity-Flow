@@ -37,8 +37,8 @@ class AudioRecorder:
         """Current audio RMS level (0.0–1.0), used for waveform animation."""
         return self._level
 
-    def start(self) -> None:
-        """Start capturing audio from the default microphone."""
+    def start(self, device: str | int | None = None) -> None:
+        """Start capturing audio from selected hardware microphone."""
         with self._lock:
             if self._recording:
                 return
@@ -46,13 +46,19 @@ class AudioRecorder:
             self._level = 0.0
             self._recording = True
 
-        self._stream = sd.InputStream(
-            samplerate=config.sample_rate,
-            channels=config.channels,
-            dtype="float32",
-            blocksize=config.block_size,
-            callback=self._audio_callback,
-        )
+        target_device = device if device is not None else config.selected_mic_device
+
+        kwargs = {
+            "samplerate": config.sample_rate,
+            "channels": config.channels,
+            "dtype": "float32",
+            "blocksize": config.block_size,
+            "callback": self._audio_callback,
+        }
+        if target_device is not None:
+            kwargs["device"] = target_device
+
+        self._stream = sd.InputStream(**kwargs)
         self._stream.start()
 
     def stop(self) -> NDArray[np.float32]:
@@ -78,13 +84,7 @@ class AudioRecorder:
 
     @staticmethod
     def save_wav(audio: NDArray[np.float32], path: str) -> None:
-        """Save a float32 audio array as a 16-bit PCM WAV file.
-
-        Args:
-            audio: 1-D float32 array, values in [-1.0, 1.0].
-            path: Output file path (e.g. 'C:/temp/recording.wav').
-        """
-        # Clip and convert float32 → int16
+        """Save a float32 audio array as a 16-bit PCM WAV file."""
         audio_clipped = np.clip(audio, -1.0, 1.0)
         audio_int16 = (audio_clipped * 32767).astype(np.int16)
 
@@ -108,7 +108,5 @@ class AudioRecorder:
             if not self._recording:
                 return
             self._buffer.append(indata.copy())
-            # Compute RMS for waveform visualization
             rms = float(np.sqrt(np.mean(indata**2)))
-            # Normalize — typical speech RMS is 0.01–0.15
             self._level = min(1.0, rms / 0.12)

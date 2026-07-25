@@ -216,8 +216,9 @@
     </main>
   </div>
 
-  <!-- FLOATING WISPR FLOW BAR PILL MARKER (EXPANDS ON HOVER) -->
-  <div id="floating-flow-bar" class="wispr-flow-bar-marker" title="Wispr Flow Bar">
+  <!-- FLOATING WISPR FLOW BAR PILL MARKER (WITH MICROPHONE SYMBOL & CLICK-TO-ACTIVATE HANDS-FREE) -->
+  <div id="floating-flow-bar" class="wispr-flow-bar-marker" title="Click bar to start Hands-Free dictation" onclick="toggleHandsFreeRecording()">
+    <span class="mic-symbol-icon">🎙️</span>
     <div class="wispr-bar-line"></div>
     <div class="flow-pill-content">
       <span class="pill-indicator-dot" id="flow-bar-status-dot"></span>
@@ -246,7 +247,7 @@
             <div class="setting-row">
               <div class="setting-info">
                 <span class="setting-title">Shortcuts</span>
-                <span class="setting-desc" id="current-shortcut-text">Hold <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> or <kbd class="kbd-pill">Middle Click</kbd> and speak.</span>
+                <span class="setting-desc" id="current-shortcut-text">Hands-Free: <kbd class="kbd-pill">Middle Click</kbd> + <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> | Push to Talk: <kbd class="kbd-pill" id="ptt-display-kbd">Ctrl+Win</kbd></span>
               </div>
               <button class="btn-secondary" onclick="openShortcutDialog()">Change</button>
             </div>
@@ -255,7 +256,7 @@
             <div class="setting-row" style="border-bottom: none;">
               <div class="setting-info">
                 <span class="setting-title">Microphone</span>
-                <span class="setting-desc" id="current-mic-desc">Headset (Max Pro)</span>
+                <span class="setting-desc" id="current-mic-desc">Detecting...</span>
               </div>
               <button class="btn-secondary" onclick="openMicrophoneDialog()">Change</button>
             </div>
@@ -322,59 +323,46 @@
     </div>
   </div>
 
-  <!-- SUB-DIALOG 1: VIZPROFLOW PERFECT KEYS - SHORTCUTS -->
+  <!-- SUB-DIALOG 1: SHORTCUTS SELECTION MODAL (HANDS-FREE MODE & PUSH TO TALK) -->
   <div id="shortcuts-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
     <div class="perfect-keys-card">
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800;">Shortcuts</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose your preferred shortcuts for using Voice Flow.</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Configure your dictation activation shortcuts.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('shortcuts-sub-modal')">✕</button>
       </div>
 
       <div class="perfect-keys-list">
         <!-- Option 1: Hands-Free Mode -->
-        <div class="shortcut-option-card active-option" onclick="selectShortcut('Middle Click / Ctrl + Win', this)">
+        <div class="shortcut-option-card active-option" onclick="selectShortcutMode('Hands-Free Mode', this)">
           <div>
-            <div style="font-size: 14px; font-weight: 700;">Hands-free mode</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Dictate hands-free by pressing this hotkey to start and stop</div>
+            <div style="font-size: 14px; font-weight: 700;">Hands-Free Mode</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Click floating bar or press hotkey to start & stop dictating</div>
           </div>
-          <div style="display: flex; gap: 6px; align-items: center;">
+          <div style="display: flex; gap: 4px; align-items: center;">
             <kbd class="kbd-pill">Middle Click</kbd>
             <kbd class="kbd-pill">Ctrl</kbd>
             <kbd class="kbd-pill">Win</kbd>
           </div>
         </div>
 
-        <!-- Option 2: Press Enter -->
-        <div class="shortcut-option-card" onclick="selectShortcut('Win + Alt', this)">
+        <!-- Option 2: Push to Talk (With Change Button) -->
+        <div class="shortcut-option-card" onclick="selectShortcutMode('Push to Talk', this)">
           <div>
-            <div style="font-size: 14px; font-weight: 700;">Press Enter</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Trigger enter with a mouse shortcut or another key to send messages faster</div>
+            <div style="font-size: 14px; font-weight: 700;">Push to Talk</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Hold button while speaking, release to transcribe instantly</div>
           </div>
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <kbd class="kbd-pill">Win</kbd>
-            <kbd class="kbd-pill">Alt</kbd>
-          </div>
-        </div>
-
-        <!-- Option 3: Command Mode -->
-        <div class="shortcut-option-card" onclick="selectShortcut('Ctrl + Win + Alt', this)">
-          <div>
-            <div style="font-size: 14px; font-weight: 700;">Command Mode</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select text and ask Voice Flow to refine formatting</div>
-          </div>
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <kbd class="kbd-pill">Ctrl</kbd>
-            <kbd class="kbd-pill">Win</kbd>
-            <kbd class="kbd-pill">Alt</kbd>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <kbd class="kbd-pill" id="ptt-current-kbd">Ctrl+Win</kbd>
+            <button class="btn-secondary" style="padding: 4px 10px; font-size: 11px;" onclick="event.stopPropagation(); changePushToTalkKey()">Change Key</button>
           </div>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
-        <button class="btn-secondary" onclick="selectShortcut('Middle Click / Ctrl + Win', null); closeSubModal('shortcuts-sub-modal');">Reset to Default</button>
+      <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+        <button class="btn-primary" onclick="closeSubModal('shortcuts-sub-modal')">Save Shortcuts</button>
       </div>
     </div>
   </div>
@@ -385,7 +373,7 @@
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800;">Microphone</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select audio hardware component detected on your computer.</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select hardware microphone input device detected on your computer.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
       </div>

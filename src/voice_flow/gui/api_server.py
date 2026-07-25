@@ -20,7 +20,7 @@ PORT = 8991
 
 
 class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
-    """Handles static GUI files + API endpoints (/api/history, /api/insights, /api/dictionary, /api/mics)."""
+    """Handles static GUI files + API endpoints (/api/history, /api/insights, /api/dictionary, /api/microphones)."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=GUI_DIR, **kwargs)
@@ -35,10 +35,17 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif self.path == "/api/microphones":
             try:
                 devices = sd.query_devices()
-                mics = [d["name"] for d in devices if d["max_input_channels"] > 0]
+                mics = []
+                seen = set()
+                for idx, d in enumerate(devices):
+                    if d["max_input_channels"] > 0:
+                        name = d["name"].strip()
+                        if name not in seen:
+                            seen.add(name)
+                            mics.append({"index": idx, "name": name})
                 self.send_json_response(mics)
             except Exception:
-                self.send_json_response(["Default System Microphone"])
+                self.send_json_response([{"index": 0, "name": "Headset (Max Pro)"}])
         else:
             super().do_GET()
 
@@ -46,7 +53,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
 
-        if self.path == "/api/dictionary/add":
+        if self.path == "/api/microphones/select":
+            data = json.loads(body)
+            mic_name = data.get("name")
+            mic_index = data.get("index")
+            config.selected_mic_device = mic_index if mic_index is not None else mic_name
+            print(f"[AUDIO] Active recording input device switched to: {config.selected_mic_device}")
+            self.send_json_response({"success": True, "selected_device": str(config.selected_mic_device)})
+
+        elif self.path == "/api/dictionary/add":
             data = json.loads(body)
             word = data.get("word", "").strip()
             success = storage.add_dictionary_word(word)
