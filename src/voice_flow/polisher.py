@@ -31,7 +31,7 @@ SELF_CORRECT_PATTERNS = [
 
 
 class TextPolisher:
-    """Intelligent AI Text Cleaning Engine."""
+    """Intelligent AI Text Cleaning & Polish Engine."""
 
     def __init__(self) -> None:
         pass
@@ -41,15 +41,18 @@ class TextPolisher:
         if not raw_text or not raw_text.strip():
             return ""
 
-        # Step 1: Check if Google Gemini API keys are configured in database/config
-        api_keys = config.get_api_keys()
-        if api_keys:
-            polished_api = self._polish_with_gemini_pool(raw_text, api_keys, style_instruction)
+        # Step 1: Fetch saved API keys from SQLite storage
+        try:
+            saved_keys = storage.get_all_api_keys()
+        except Exception:
+            saved_keys = {}
+
+        if saved_keys:
+            polished_api = self._polish_with_api_pool(raw_text, saved_keys, style_instruction)
             if polished_api:
-                # Apply dictionary post-processing
                 return dictionary_engine.apply_dictionary_post_processing(polished_api)
 
-        # Step 2: Built-in instant zero-latency NLP polisher
+        # Step 2: Built-in instant zero-latency NLP polisher fallback
         cleaned = raw_text.strip()
 
         # Remove filler words
@@ -71,36 +74,81 @@ class TextPolisher:
 
         # Apply dictionary post-processing
         final_text = dictionary_engine.apply_dictionary_post_processing(cleaned)
-        log.info("Polished: '%s' -> '%s'", raw_text, final_text)
+        log.info("Polished (built-in NLP): '%s' -> '%s'", raw_text, final_text)
         return final_text
 
-    def _polish_with_gemini_pool(
-        self, raw_text: str, api_keys: list[str], style_instruction: str
+    def _polish_with_api_pool(
+        self, raw_text: str, api_keys: dict[str, str], style_instruction: str
     ) -> str | None:
-        """Rotate through pool of Gemini API keys for AI polishing."""
+        """Rotate through pool of user API keys (Gemini, Groq, OpenAI) for AI polishing."""
         prompt = (
-            f"You are Voice Flow AI dictation assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like'), "
-            f"fixing grammar, resolving self-corrections, and formatting capitalization. Do not add intro/outro comments.\n"
+            f"You are Voice Flow AI dictation assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
+            f"fixing grammar, resolving self-corrections, formatting line breaks, and capitalizing properly. Do NOT add commentary or quotes.\n"
             f"Style guidance: {style_instruction}\n\n"
-            f"Spoken text: '{raw_text}'"
+            f"Spoken text: {raw_text}"
         )
 
-        for i, key in enumerate(api_keys):
+        # 1. Try Gemini Key
+        if "gemini" in api_keys and api_keys["gemini"].strip():
+            key = api_keys["gemini"].strip()
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
                 payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
-                req = urllib.request.Request(
-                    url, data=payload, headers={"Content-Type": "application/json"}
-                )
-
+                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=3.5) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                     if text:
-                        log.info("[GEMINI API Key %d] Successfully polished speech text!", i + 1)
+                        log.info("[AI POLISH - Gemini] Polished speech text successfully!")
                         return text
             except Exception as e:
-                log.warning("[GEMINI API Key %d] Failed or rate limited (%s). Trying next key...", i + 1, e)
+                log.warning("[AI POLISH - Gemini] Failed (%s), trying next provider...", e)
+
+        # 2. Try Groq Key
+        if "groq" in api_keys and api_keys["groq"].strip():
+            key = api_keys["groq"].strip()
+            try:
+                url = "https://api.groq.com/openai/v1/chat/completions"
+                payload = json.dumps({
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=payload, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"
+                })
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["choices"][0]["message"]["content"].strip()
+                    if text:
+                        log.info("[AI POLISH - Groq] Polished speech text successfully!")
+                        return text
+            except Exception as e:
+                log.warning("[AI POLISH - Groq] Failed (%s), trying next provider...", e)
+
+        # 3. Try OpenAI Key
+        if "openai" in api_keys and api_keys["openai"].strip():
+            key = api_keys["openai"].strip()
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                payload = json.dumps({
+                    "model": "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2
+                }).encode("utf-8")
+                req = urllib.request.Request(url, data=payload, headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {key}"
+                })
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["choices"][0]["message"]["content"].strip()
+                    if text:
+                        log.info("[AI POLISH - OpenAI] Polished speech text successfully!")
+                        return text
+            except Exception as e:
+                log.warning("[AI POLISH - OpenAI] Failed (%s)...", e)
 
         return None
 
