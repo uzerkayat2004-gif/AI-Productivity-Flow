@@ -48,14 +48,9 @@ class FloatingOverlayBar:
         on_finish: Callable[[], None] | None = None,
         get_audio_level: Callable[[], float] | None = None,
     ) -> None:
-        self.own_root = False
-        if root is None:
-            self.root = tk.Tk()
-            self.root.withdraw()
-            self.own_root = True
-        else:
-            self.root = root
-
+        self.root = root
+        self.win = None
+        self.canvas = None
         self.on_cancel = on_cancel or (lambda: None)
         self.on_finish = on_finish or (lambda: None)
         self.get_audio_level = get_audio_level or (lambda: 0.0)
@@ -63,13 +58,18 @@ class FloatingOverlayBar:
         self.on_cancel_click = None
         self.on_finish_click = None
 
-        self.state = "HIDDEN"  # HIDDEN, RECORDING, PROCESSING, DONE
+        self.state = "HIDDEN"  # HIDDEN, READY, RECORDING, PROCESSING, DONE
         self._anim_phase = 0.0
         self._hover_zone: str | None = None  # "cancel", "finish", or None
 
         self.width = 360
         self.height = 52
         self.padding = 16
+
+    def _init_tk(self) -> None:
+        if self.root is None:
+            self.root = tk.Tk()
+            self.root.withdraw()
 
         self.win = tk.Toplevel(self.root)
         self.win.withdraw()
@@ -104,6 +104,8 @@ class FloatingOverlayBar:
 
     def run_loop(self) -> None:
         """Start the Tkinter event loop for floating overlay bar."""
+        self._init_tk()
+        self.show_ready()
         self.root.mainloop()
 
     def _on_map(self, _event: tk.Event) -> None:
@@ -131,41 +133,63 @@ class FloatingOverlayBar:
 
     # -- Public State API --
 
+    def _run_on_ui(self, func: Callable[[], None]) -> None:
+        if self.root and self.win:
+            try:
+                self.root.after(0, func)
+            except Exception:
+                pass
+
     def show_ready(self) -> None:
         """Display the idle system-wide floating bar (ready state)."""
-        self.state = "READY"
-        self._anim_phase = 0.0
-        self.win.deiconify()
-        self.win.lift()
-        self.win.attributes("-topmost", True)
-        self._apply_win32_styles()
-        self._draw()
+        def _do():
+            if not self.win: return
+            self.state = "READY"
+            self._anim_phase = 0.0
+            self.win.deiconify()
+            self.win.lift()
+            self.win.attributes("-topmost", True)
+            self._apply_win32_styles()
+            self._draw()
+        self._run_on_ui(_do)
 
     def show_recording(self, level_provider: Callable[[], float] | None = None) -> None:
         if level_provider:
             self.get_audio_level = level_provider
-        self.state = "RECORDING"
-        self._anim_phase = 0.0
-        self._position_window()
-        self.win.deiconify()
-        self.win.lift()
-        self.win.attributes("-topmost", True)
-        self._apply_win32_styles()
-        self._animate()
+        def _do():
+            if not self.win: return
+            self.state = "RECORDING"
+            self._anim_phase = 0.0
+            self._position_window()
+            self.win.deiconify()
+            self.win.lift()
+            self.win.attributes("-topmost", True)
+            self._apply_win32_styles()
+            self._animate()
+        self._run_on_ui(_do)
 
     def show_processing(self) -> None:
-        self.state = "PROCESSING"
-        self._anim_phase = 0.0
+        def _do():
+            if not self.win: return
+            self.state = "PROCESSING"
+            self._anim_phase = 0.0
+        self._run_on_ui(_do)
 
     def show_done(self, text: str = "") -> None:
-        self.state = "DONE"
-        self._anim_phase = 0.0
-        self._draw()
-        self.root.after(config.done_display_ms, self.hide)
+        def _do():
+            if not self.win: return
+            self.state = "DONE"
+            self._anim_phase = 0.0
+            self._draw()
+            self.root.after(config.done_display_ms, self.show_ready)
+        self._run_on_ui(_do)
 
     def hide(self) -> None:
-        self.state = "HIDDEN"
-        self.win.withdraw()
+        def _do():
+            if not self.win: return
+            self.state = "HIDDEN"
+            self.win.withdraw()
+        self._run_on_ui(_do)
 
     # -- Mouse Events & Dragging --
 
