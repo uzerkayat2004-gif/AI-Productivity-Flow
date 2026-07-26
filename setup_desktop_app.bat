@@ -15,7 +15,8 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [2/3] Generating Desktop Shortcut & Start Menu Icons...
+echo [2/3] Generating Background Launcher, Desktop Shortcut ^& Start Menu Icons...
+python scratch/generate_launcher.py
 python scratch/create_desktop_shortcut.py
 
 echo.
