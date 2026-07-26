@@ -17,24 +17,18 @@ log = logging.getLogger(__name__)
 
 
 def _apply_noise_gate_and_normalize(audio: NDArray[np.float32]) -> NDArray[np.float32]:
-    """Filter background room noise & normalize primary speaker voice."""
+    """Normalize primary speaker voice to optimal peak amplitude."""
     if audio.size == 0:
         return audio
 
-    rms = float(np.sqrt(np.mean(audio**2)))
-    max_amp = float(np.max(np.abs(audio)))
+    clean = audio.flatten()
+    max_amp = float(np.max(np.abs(clean)))
 
-    # Noise Gate
-    if rms < config.noise_gate_rms:
-        log.info("Audio below noise gate threshold (RMS %.4f < %.4f).", rms, config.noise_gate_rms)
-        return (audio * 0.2).astype(np.float32)
+    if max_amp > 0.0003:
+        scale = min(25.0, 0.85 / max_amp)
+        return (clean * scale).astype(np.float32)
 
-    # Normalize volume peak
-    if max_amp > 0.01:
-        scale = min(2.5, 0.90 / max_amp)
-        return (audio * scale).astype(np.float32)
-
-    return audio
+    return clean
 
 
 class Transcriber:
@@ -83,11 +77,21 @@ class Transcriber:
             ),
         )
 
-        parts: list[str] = []
-        for segment in segments:
-            text = segment.text.strip()
-            if text:
-                parts.append(text)
-
+        parts: list[str] = [s.text.strip() for s in segments if s.text.strip()]
         result = " ".join(parts).strip()
+
+        # Fallback if VAD filter was overly aggressive on quiet audio
+        if not result:
+            log.info("VAD filter returned empty, retrying with direct audio fallback...")
+            fallback_segments, _ = self.model.transcribe(
+                clean_audio,
+                beam_size=config.beam_size,
+                temperature=config.temperature,
+                language=config.language,
+                initial_prompt=initial_prompt,
+                vad_filter=False,
+            )
+            parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
+            result = " ".join(parts).strip()
+
         return result
