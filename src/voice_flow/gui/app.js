@@ -1,4 +1,9 @@
 // Voice Flow Desktop App - Real Data Controller
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
 
 let allHistoryRecords = [];
 let isHandsFreeRecording = false;
