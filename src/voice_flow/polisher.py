@@ -134,7 +134,10 @@ class TextPolisher:
                             "contents": [{"parts": [{"text": prompt}]}],
                             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
                         }).encode("utf-8")
-                        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                        req = urllib.request.Request(url, data=payload, headers={
+                            "Content-Type": "application/json",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        })
                         with urllib.request.urlopen(req, timeout=3.5) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             try:
@@ -169,7 +172,8 @@ class TextPolisher:
                         }).encode("utf-8")
                         req = urllib.request.Request(ep_url, data=payload, headers={
                             "Content-Type": "application/json",
-                            "Authorization": f"Bearer {key}"
+                            "Authorization": f"Bearer {key}",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         })
                         with urllib.request.urlopen(req, timeout=8.0) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
