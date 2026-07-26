@@ -149,9 +149,35 @@ class VoiceFlowApp:
                 log.error("Error processing dictation: %s", e, exc_info=True)
                 self.overlay.hide()
 
+    def _watch_gui_state_file(self) -> None:
+        """Monitor ~/.voice_flow/recording_state.json for recording toggle events from GUI."""
+        import json
+        import os
+        state_file = os.path.join(os.path.expanduser("~"), ".voice_flow", "recording_state.json")
+        last_mtime = 0
+        while True:
+            time.sleep(0.2)
+            try:
+                if os.path.exists(state_file):
+                    mtime = os.path.getmtime(state_file)
+                    if mtime > last_mtime:
+                        last_mtime = mtime
+                        with open(state_file, "r") as f:
+                            data = json.load(f)
+                        gui_recording = data.get("recording", False)
+                        if gui_recording and not self.is_recording:
+                            self._on_dictation_start()
+                        elif not gui_recording and self.is_recording:
+                            self._on_dictation_finish()
+            except Exception:
+                pass
+
     def run(self) -> None:
         log.info("Starting input trigger hooks...")
         self.hotkeys.start()
+
+        # Start GUI recording state watcher
+        threading.Thread(target=self._watch_gui_state_file, daemon=True).start()
 
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
