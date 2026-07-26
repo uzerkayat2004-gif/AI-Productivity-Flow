@@ -65,6 +65,7 @@ class VoiceFlowApp:
 
         log.info("[RECORDING] Dictation triggered!")
         self.is_recording = True
+        self.hotkeys.set_recording_state(True)
 
         # Clear audio buffer & start audio capture stream
         self.audio.start()
@@ -78,6 +79,7 @@ class VoiceFlowApp:
 
         log.info("[PROCESSING] Dictation finished, stopping recording stream...")
         self.is_recording = False
+        self.hotkeys.set_recording_state(False)
 
         # Stop audio recording stream & fetch float32 numpy audio buffer
         audio_buffer = self.audio.stop()
@@ -85,7 +87,7 @@ class VoiceFlowApp:
 
         if duration < 0.3 or audio_buffer.size == 0:
             log.info("Recording too short (%.2fs), ignoring.", duration)
-            self.overlay.hide()
+            self.overlay.show_ready()
             return
 
         # Show Processing state on floating bar
@@ -100,13 +102,14 @@ class VoiceFlowApp:
 
     def _on_dictation_cancel(self) -> None:
         if not self.is_recording:
-            self.overlay.hide()
+            self.overlay.show_ready()
             return
 
         log.info("[CANCELLED] Dictation cancelled by user.")
         self.is_recording = False
+        self.hotkeys.set_recording_state(False)
         self.audio.stop()
-        self.overlay.hide()
+        self.overlay.show_ready()
 
     def _process_dictation_pipeline(self, audio_buffer, duration: float) -> None:
         with self.processing_lock:

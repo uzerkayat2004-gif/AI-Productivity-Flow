@@ -96,19 +96,16 @@ class InputTriggerListener:
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
             with self._lock:
                 if not self._is_recording:
-                    self._middle_pressed = True
                     self._is_recording = True
                     self._on_start()
+                else:
+                    self._is_recording = False
+                    self._on_finish()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False  # Blocks middle click down (prevents drag autoscroll icon)
 
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
-            with self._lock:
-                if self._middle_pressed or self._is_recording:
-                    self._middle_pressed = False
-                    self._is_recording = False
-                    self._on_finish()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False  # Blocks middle click up
