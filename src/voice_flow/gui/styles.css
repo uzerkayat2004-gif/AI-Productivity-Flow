@@ -997,21 +997,29 @@ body {
 /* Heatmap Calendar Matrix */
 .heatmap-grid {
   display: grid;
-  grid-template-columns: repeat(16, 1fr);
-  gap: 4px;
-  margin-top: 12px;
+  grid-template-columns: repeat(14, 1fr);
+  gap: 6px;
+  margin-top: 14px;
 }
 
 .heatmap-cell {
   aspect-ratio: 1;
-  background-color: #f3f4f6;
-  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  cursor: pointer;
 }
 
-.heatmap-cell.level-1 { background-color: #ffe6d5; }
-.heatmap-cell.level-2 { background-color: #ffb888; }
-.heatmap-cell.level-3 { background-color: #ff8833; }
-.heatmap-cell.level-4 { background-color: #ff6b00; }
+.heatmap-cell:hover {
+  transform: scale(1.2);
+  border-color: var(--primary-orange);
+}
+
+.heatmap-cell.level-1 { background-color: rgba(255, 107, 0, 0.25); border-color: rgba(255, 107, 0, 0.35); }
+.heatmap-cell.level-2 { background-color: rgba(255, 107, 0, 0.50); border-color: rgba(255, 107, 0, 0.65); }
+.heatmap-cell.level-3 { background-color: rgba(255, 107, 0, 0.80); border-color: var(--primary-orange); }
+.heatmap-cell.level-4 { background-color: #ff6b00; border-color: #ff8833; box-shadow: 0 0 8px rgba(255, 107, 0, 0.5); }
 
 .heatmap-legend {
   display: flex;
@@ -1025,12 +1033,12 @@ body {
 
 .legend-cells {
   display: flex;
-  gap: 3px;
+  gap: 4px;
 }
 
 .legend-cells .heatmap-cell {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 /* Tabs Header */

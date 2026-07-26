@@ -111,14 +111,14 @@
             <div class="stat-header">WORDS PER MINUTE</div>
             <div class="stat-value"><span id="insights-wpm">0</span> <span class="stat-unit">wpm</span></div>
             <div class="insights-gauge-container">
-              <div class="arc-gauge">
-                <svg viewBox="0 0 100 100">
-                  <!-- Background Track -->
-                  <path d="M 20 80 A 45 45 0 1 1 80 80" fill="none" stroke="var(--primary-orange-light)" stroke-width="8" stroke-linecap="round" />
-                  <!-- Progress Fill -->
-                  <path id="gauge-fill" d="M 20 80 A 45 45 0 1 1 80 80" fill="none" stroke="var(--primary-orange)" stroke-width="8" stroke-linecap="round" style="stroke-dasharray: 283; stroke-dashoffset: 283; transition: stroke-dashoffset 1s ease-out;" />
+              <div class="arc-gauge" style="position: relative; width: 140px; height: 75px; display: flex; justify-content: center; align-items: flex-end;">
+                <svg viewBox="0 0 120 70" style="width: 140px; height: 75px;">
+                  <!-- Background Track (180deg arc) -->
+                  <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="rgba(255, 107, 0, 0.15)" stroke-width="9" stroke-linecap="round" />
+                  <!-- Progress Fill (180deg arc) -->
+                  <path id="gauge-fill" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="var(--primary-orange)" stroke-width="9" stroke-linecap="round" style="stroke-dasharray: 141.37; stroke-dashoffset: 141.37; transition: stroke-dashoffset 1s ease-out;" />
                 </svg>
-                <span class="gauge-badge" id="insights-speed-badge">Speed Tracker</span>
+                <span class="gauge-badge" id="insights-speed-badge" style="position: absolute; bottom: 0; transform: translateY(50%);">Top 0.5% Speed</span>
               </div>
             </div>
           </div>
@@ -177,34 +177,6 @@
           </div>
         </div>
 
-        <!-- WISPR FLOW "YOUR VOICE" COMMUNICATION PROFILE & SHARE CARD -->
-        <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-top: 16px;">
-          <!-- "YOUR VOICE" COMMUNICATION PROFILE -->
-          <div class="stat-card" style="background: linear-gradient(135deg, rgba(255, 107, 0, 0.08) 0%, rgba(18, 20, 32, 0.6) 100%); border: 1px solid rgba(255, 107, 0, 0.2);">
-            <div class="stat-header-row" style="margin-bottom: 12px;">
-              <div class="stat-header" style="color: var(--primary-orange);">YOUR VOICE PROFILE</div>
-              <span class="gauge-badge" style="background: rgba(255, 107, 0, 0.15); color: var(--primary-orange); border: 1px solid var(--primary-orange);" id="insights-archetype-badge">The Tech Strategist</span>
-            </div>
-            <div class="fixes-breakdown-list" style="gap: 10px;">
-              <div class="fix-sub-row"><span>Peak Dictation Hours:</span> <strong id="insights-peak-hours" style="color: #fff;">2:00 PM – 5:00 PM</strong></div>
-              <div class="fix-sub-row"><span>Dictation Multiplier:</span> <strong id="insights-multiplier" style="color: var(--primary-orange);">3.4x Faster than Typing</strong></div>
-              <div class="fix-sub-row"><span>Vocabulary Status:</span> <strong id="insights-vocab-status" style="color: #4cd964;">Unlocked (Custom Terms Active)</strong></div>
-            </div>
-          </div>
-
-          <!-- SHAREABLE PRODUCTIVITY CARD -->
-          <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between;">
-            <div>
-              <div class="stat-header" style="margin-bottom: 8px;">SHARE YOUR PRODUCTIVITY</div>
-              <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;" id="insights-share-preview">
-                I dictated <strong style="color: #fff;" id="share-words-val">3.3K words</strong> & saved <strong style="color: var(--primary-orange);" id="share-time-val">1.4 hours</strong> with Voice Flow! 🚀
-              </div>
-            </div>
-            <button class="btn-primary" style="margin-top: 14px; width: 100%; padding: 9px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="copyProductivityShareCard()">
-              <span>📋</span> Copy Share Card
-            </button>
-          </div>
-        </div>
       </section>
 
       <!-- PAGE 3: DICTIONARY PAGE (WISPR FLOW GOLD STANDARD) -->

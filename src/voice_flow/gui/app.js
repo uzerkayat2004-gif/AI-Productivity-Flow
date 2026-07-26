@@ -732,7 +732,7 @@ async function loadInsights() {
       }
     }
 
-    renderHeatmap(totalWords);
+    renderHeatmap(data.daily_activity || []);
 
   } catch (err) {
     console.error("Error loading insights:", err);
@@ -769,35 +769,42 @@ function updateSpeedGauge(wpm) {
   const gaugeFill = document.getElementById("gauge-fill");
   if (!gaugeFill) return;
 
-  // Max WPM for the gauge is 160
   const maxWpm = 160;
   const clampedWpm = Math.min(Math.max(wpm, 0), maxWpm);
-
-  // Dash array length for the SVG circle (approx 283 for r=45)
-  const dashArray = 283;
-  // Calculate percentage (0 to 0.75 for a 3/4 circle arc)
-  const percentage = (clampedWpm / maxWpm) * 0.75;
-  const dashOffset = dashArray - (dashArray * percentage);
+  // Total arc length for 180-degree semi-circle (r=45) is pi * 45 = 141.37
+  const totalArcLength = 141.37;
+  const pct = clampedWpm / maxWpm;
+  const dashOffset = totalArcLength - (totalArcLength * pct);
 
   gaugeFill.style.strokeDashoffset = dashOffset;
 }
 
-function renderHeatmap(totalWords) {
+function renderHeatmap(dailyActivityData) {
   const grid = document.getElementById("heatmap-grid");
   if (!grid) return;
   grid.innerHTML = "";
-  // 64 activity matrix cells
-  for (let i = 0; i < 64; i++) {
+
+  // Render a clean 28-cell activity matrix (4 weeks of activity)
+  const activityList = Array.isArray(dailyActivityData) ? dailyActivityData : [];
+
+  for (let i = 27; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split("T")[0];
+    const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
+
+    const match = activityList.find(a => a.date === dateStr);
+    const wordCount = match ? match.words : 0;
+
     const cell = document.createElement("div");
     cell.className = "heatmap-cell";
-    if (totalWords > 0) {
-      // Deterministic activity simulation based on index and word count
-      const activityScore = (i * 17 + totalWords) % 10;
-      if (activityScore > 8) cell.classList.add("level-4");
-      else if (activityScore > 6) cell.classList.add("level-3");
-      else if (activityScore > 4) cell.classList.add("level-2");
-      else if (activityScore > 2) cell.classList.add("level-1");
-    }
+    cell.title = `${dayName}, ${dateStr}: ${wordCount} words spoken`;
+
+    if (wordCount > 500) cell.classList.add("level-4");
+    else if (wordCount > 250) cell.classList.add("level-3");
+    else if (wordCount > 100) cell.classList.add("level-2");
+    else if (wordCount > 0) cell.classList.add("level-1");
+
     grid.appendChild(cell);
   }
 }
