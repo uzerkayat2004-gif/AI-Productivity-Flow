@@ -1,6 +1,6 @@
 @echo off
-title Voice Flow - AI Speech System & Desktop Application
-echo Starting Voice Flow AI Speech System Engine & Interface...
+title Voice Flow - AI Speech System ^& Desktop Application
+echo Starting Voice Flow AI Speech System Engine ^& Interface...
 cd /d "%~dp0"
 cd src
 start "" python -m voice_flow.main
