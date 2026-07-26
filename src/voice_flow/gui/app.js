@@ -398,15 +398,18 @@ function renderStyleCategory(categoryKey) {
   grid.innerHTML = data.cards.map(card => {
     const isSelected = card.id === currentSelectedId;
     return `
-      <div class="style-card ${isSelected ? 'selected' : ''}" onclick="selectStyleCard('${categoryKey}', '${card.id}')">
-        <div>
-          <div class="style-card-name">${escapeHtml(card.name)}</div>
-          <div class="style-card-subtitle">${escapeHtml(card.subtitle)}</div>
-          <div class="sample-chat-bubble">${escapeHtml(card.sample)}</div>
+      <div class="style-card ${isSelected ? 'selected active-preset-card' : ''}" onclick="selectStyleCard('${categoryKey}', '${card.id}')">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+          <div>
+            <div class="style-card-name">${escapeHtml(card.name)}</div>
+            <div class="style-card-subtitle">${escapeHtml(card.subtitle)}</div>
+          </div>
+          ${isSelected ? `<span class="selected-preset-badge">✓ Selected</span>` : `<span class="select-preset-action">Select</span>`}
         </div>
-        <div class="sample-avatar">
+        <div class="sample-chat-bubble">${escapeHtml(card.sample)}</div>
+        <div class="sample-avatar" style="margin-top: 12px;">
           <div class="avatar-circle">${card.avatar}</div>
-          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Preview Style</span>
+          <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Active Preset Pattern</span>
         </div>
       </div>
     `;
@@ -719,44 +722,113 @@ function renderHeatmap(totalWords) {
   }
 }
 
-// Dictionary Management
+// Dictionary Management (Wispr Flow Gold Standard)
+let allDictionaryWords = [];
+let activeDictCategory = "all";
+
 async function loadDictionary() {
   const chipContainer = document.getElementById("dictionary-chips");
   if (!chipContainer) return;
 
   try {
     const res = await fetch("/api/dictionary");
-    const words = await res.json();
+    allDictionaryWords = await res.json();
 
-    chipContainer.innerHTML = `
-      <button class="btn-primary" onclick="addDictionaryWord()" style="padding: 6px 14px; font-size: 13px;">+ Add Word</button>
-      ${words.map(w => `
-        <span class="chip">
-          ${escapeHtml(w)}
-          <span onclick="removeDictionaryWord('${escapeJs(w)}')" style="cursor: pointer; opacity: 0.7; margin-left: 4px;">✕</span>
-        </span>
-      `).join("")}
-    `;
+    const counterBadge = document.getElementById("dict-counter-badge");
+    if (counterBadge) counterBadge.textContent = `${allDictionaryWords.length} Term${allDictionaryWords.length === 1 ? '' : 's'}`;
+
+    renderDictionaryFilteredChips();
   } catch (err) {
     console.error("Error loading dictionary:", err);
   }
 }
 
-async function addDictionaryWord() {
-  const word = prompt("Enter custom word, proper name, or company jargon:");
-  if (!word || !word.trim()) return;
+function filterDictionaryChips() {
+  renderDictionaryFilteredChips();
+}
+
+function filterDictionaryCategory(cat, el) {
+  activeDictCategory = cat;
+  document.querySelectorAll(".dict-tags-nav .dict-tag-btn").forEach(btn => btn.classList.remove("active"));
+  if (el) el.classList.add("active");
+  renderDictionaryFilteredChips();
+}
+
+function getWordCategoryTag(word) {
+  const w = word.trim();
+  if (w.toUpperCase() === w && w.length <= 6) return "acronyms";
+  if (w.includes(" ") || /^[A-Z][a-z]+ [A-Z][a-z]+/.test(w)) return "names";
+  if (["api", "graphql", "sql", "json", "python", "typescript", "react", "whisper", "voiceflow", "vpn", "http"].some(k => w.toLowerCase().includes(k))) return "technical";
+  return "brands";
+}
+
+function renderDictionaryFilteredChips() {
+  const chipContainer = document.getElementById("dictionary-chips");
+  if (!chipContainer) return;
+
+  const queryEl = document.getElementById("dictionary-search-input");
+  const query = queryEl ? queryEl.value.toLowerCase().trim() : "";
+
+  let filtered = allDictionaryWords;
+
+  if (query) {
+    filtered = filtered.filter(w => w.toLowerCase().includes(query));
+  }
+
+  if (activeDictCategory !== "all") {
+    filtered = filtered.filter(w => getWordCategoryTag(w) === activeDictCategory);
+  }
+
+  if (!filtered || filtered.length === 0) {
+    chipContainer.innerHTML = `
+      <div style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-muted);">
+        <div style="font-size: 32px; margin-bottom: 8px;">📖</div>
+        <div style="font-weight: 700; font-size: 15px; color: var(--text-main);">No terms match your search</div>
+        <div style="font-size: 12px; margin-top: 4px;">Type a word above and click "+ Add Word" to add it to your Personal Dictionary.</div>
+      </div>
+    `;
+    return;
+  }
+
+  chipContainer.innerHTML = filtered.map(w => {
+    const catTag = getWordCategoryTag(w);
+    let icon = "⚡";
+    if (catTag === "technical") icon = "💻";
+    if (catTag === "names") icon = "👤";
+    if (catTag === "brands") icon = "🏢";
+
+    return `
+      <span class="chip-item">
+        <span style="opacity: 0.65; margin-right: 4px; font-size: 11px;">${icon}</span>
+        <span class="chip-term-text">${escapeHtml(w)}</span>
+        <span onclick="removeDictionaryWord('${escapeJs(w)}')" class="chip-delete-btn" title="Remove term">✕</span>
+      </span>
+    `;
+  }).join("");
+}
+
+async function addDictionaryWordFromInput() {
+  const inputEl = document.getElementById("dictionary-add-input");
+  if (!inputEl) return;
+  const word = inputEl.value.trim();
+  if (!word) return;
 
   try {
     const res = await fetch("/api/dictionary/add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word: word.trim() }),
+      body: JSON.stringify({ word }),
     });
     await res.json();
+    inputEl.value = "";
     loadDictionary();
   } catch (err) {
     console.error("Error adding dictionary word:", err);
   }
+}
+
+async function addDictionaryWord() {
+  addDictionaryWordFromInput();
 }
 
 async function removeDictionaryWord(word) {

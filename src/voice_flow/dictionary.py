@@ -38,38 +38,40 @@ class DictionaryEngine:
         return prompt
 
     def apply_dictionary_post_processing(self, text: str) -> str:
-        """Fuzzy match words in transcribed text against dictionary terms.
-        Replaces phonetic approximations (e.g. 'Spider' -> 'Spyder', 'Sameer' -> 'Samir').
-        """
-        if not text or not self.words:
+        """Enforce exact user casing and phonetic fuzzy replacement for all dictionary terms."""
+        if not text:
+            return text
+
+        self.refresh_words()
+        if not self.words:
             return text
 
         result = text
         for dict_word in self.words:
-            dict_lower = dict_word.lower()
+            w_strip = dict_word.strip()
+            if not w_strip:
+                continue
 
-            # Skip single short common words
+            dict_lower = w_strip.lower()
             if dict_lower in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}:
                 continue
 
-            # Only fix casing if dict_word is multi-word or has special casing (e.g. VoiceFlow, API, ChatGPT)
-            has_special_casing = " " in dict_word or dict_word.isupper() or any(c.isupper() for c in dict_word[1:])
-            if has_special_casing:
-                pattern = re.compile(r"\b" + re.escape(dict_word) + r"\b", re.IGNORECASE)
-                if pattern.search(result):
-                    result = pattern.sub(dict_word, result)
-                    continue
+            # Case-insensitive word boundary substitution to guarantee exact user casing
+            pattern = re.compile(r"\b" + re.escape(w_strip) + r"\b", re.IGNORECASE)
+            if pattern.search(result):
+                result = pattern.sub(w_strip, result)
+                continue
 
-            # Check for close phonetic matches (only for terms with length >= 5)
-            if len(dict_word) >= 5:
+            # Fuzzy phonetic match for terms >= 4 chars
+            if len(w_strip) >= 4:
                 tokens = re.findall(r"\b\w+\b", result)
                 for token in tokens:
-                    if len(token) >= 5 and token.lower() != dict_lower:
+                    if len(token) >= 4 and token.lower() != dict_lower:
                         ratio = difflib.SequenceMatcher(None, token.lower(), dict_lower).ratio()
-                        if ratio >= 0.88:
-                            log.info("Fuzzy dictionary correction: '%s' -> '%s' (ratio %.2f)", token, dict_word, ratio)
+                        if ratio >= 0.85:
+                            log.info("Fuzzy dictionary correction: '%s' -> '%s' (ratio %.2f)", token, w_strip, ratio)
                             token_pattern = re.compile(r"\b" + re.escape(token) + r"\b")
-                            result = token_pattern.sub(dict_word, result)
+                            result = token_pattern.sub(w_strip, result)
 
         return result
 

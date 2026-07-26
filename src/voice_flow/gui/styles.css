@@ -1789,4 +1789,88 @@ input:checked + .toggle-slider:before {
   margin-top: 2px;
 }
 
+/* Dictionary & Style Extensions */
+.dict-counter-badge {
+  background: rgba(124, 58, 237, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dict-tag-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dict-tag-btn.active, .dict-tag-btn:hover {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.chip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.chip-item:hover {
+  border-color: #a78bfa;
+  background: rgba(124, 58, 237, 0.15);
+}
+
+.chip-delete-btn {
+  cursor: pointer;
+  opacity: 0.6;
+  font-size: 11px;
+  margin-left: 4px;
+  transition: opacity 0.2s ease;
+}
+
+.chip-delete-btn:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.selected-preset-badge {
+  font-size: 11px;
+  font-weight: 800;
+  background: #10b981;
+  color: white;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.select-preset-action {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.06);
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.active-preset-card {
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.25) !important;
+}
+
 
