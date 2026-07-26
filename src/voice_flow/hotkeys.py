@@ -97,10 +97,11 @@ class InputTriggerListener:
             with self._lock:
                 if not self._is_recording:
                     self._is_recording = True
-                    self._on_start()
+                    # MUST dispatch to thread — Win32 hooks timeout after ~300ms
+                    threading.Thread(target=self._on_start, daemon=True).start()
                 else:
                     self._is_recording = False
-                    self._on_finish()
+                    threading.Thread(target=self._on_finish, daemon=True).start()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False
@@ -148,15 +149,15 @@ class InputTriggerListener:
                 if not self._hotkey_triggered:
                     self._hotkey_triggered = True
                     if not self._is_recording:
-                        self._on_start()
+                        threading.Thread(target=self._on_start, daemon=True).start()
                     else:
-                        self._on_finish()
+                        threading.Thread(target=self._on_finish, daemon=True).start()
 
         # Escape key cancels recording
         if key == keyboard.Key.esc:
             with self._lock:
                 if self._is_recording:
-                    self._on_cancel()
+                    threading.Thread(target=self._on_cancel, daemon=True).start()
 
     def _on_key_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
         if key is None:

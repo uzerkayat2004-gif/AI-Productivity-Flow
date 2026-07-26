@@ -84,31 +84,36 @@ class VoiceFlowApp:
         self.overlay.show_recording(level_provider=lambda: self.audio.level)
 
     def _on_dictation_finish(self) -> None:
-        if not self.is_recording:
-            return
+        try:
+            if not self.is_recording:
+                return
 
-        log.info("[PROCESSING] Dictation finished, stopping recording stream...")
-        self.is_recording = False
-        self.hotkeys.set_recording_state(False)
+            log.info("[PROCESSING] Dictation finished, stopping recording stream...")
+            self.is_recording = False
+            self.hotkeys.set_recording_state(False)
 
-        # Stop audio recording stream & fetch float32 numpy audio buffer
-        audio_buffer = self.audio.stop()
-        duration = len(audio_buffer) / config.sample_rate if audio_buffer.size > 0 else 0.0
+            # Stop audio recording stream & fetch float32 numpy audio buffer
+            audio_buffer = self.audio.stop()
+            duration = len(audio_buffer) / config.sample_rate if audio_buffer.size > 0 else 0.0
+            log.info("[AUDIO] Got %d samples (%.2fs), peak=%.4f", audio_buffer.size, duration, float(max(abs(audio_buffer))) if audio_buffer.size > 0 else 0.0)
 
-        if duration < 0.3 or audio_buffer.size == 0:
-            log.info("Recording too short (%.2fs), ignoring.", duration)
+            if duration < 0.3 or audio_buffer.size == 0:
+                log.info("Recording too short (%.2fs), ignoring.", duration)
+                self.overlay.show_ready()
+                return
+
+            # Show Processing state on floating bar
+            self.overlay.show_processing()
+
+            # Dispatch speech transcription & AI polish asynchronously
+            threading.Thread(
+                target=self._process_dictation_pipeline,
+                args=(audio_buffer, duration),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            log.error("[FINISH ERROR] %s", e, exc_info=True)
             self.overlay.show_ready()
-            return
-
-        # Show Processing state on floating bar
-        self.overlay.show_processing()
-
-        # Dispatch speech transcription & AI polish asynchronously
-        threading.Thread(
-            target=self._process_dictation_pipeline,
-            args=(audio_buffer, duration),
-            daemon=True,
-        ).start()
 
     def _on_dictation_cancel(self) -> None:
         if not self.is_recording:
