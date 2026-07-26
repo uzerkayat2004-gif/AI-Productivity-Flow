@@ -35,6 +35,9 @@ class Config:
     block_size: int = 1024
     selected_mic_device: str | int | None = None  # Selected hardware mic device index/name
 
+    # --- Clipboard Injection ---
+    clipboard_restore_delay_ms: int = 250  # Delay before restoring clipboard after paste
+
     # --- Hotkeys & Shortcuts ---
     push_to_talk_shortcut: str = "Ctrl+Win"
     hands_free_shortcut: str = "Middle Click / Ctrl+Win"

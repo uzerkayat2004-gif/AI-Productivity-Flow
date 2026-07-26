@@ -105,7 +105,7 @@ class StyleEngine:
     def __init__(self) -> None:
         self.default_style = "auto_cleanup"
 
-    def get_style_for_current_app(property) -> tuple[str, str, dict[str, str]]:
+    def get_style_for_current_app(self) -> tuple[str, str, dict[str, str]]:
         app_title, exe_name = get_active_app_info()
         category = detect_app_category(app_title, exe_name)
         preset = STYLE_PRESETS.get(category, STYLE_PRESETS["auto_cleanup"])

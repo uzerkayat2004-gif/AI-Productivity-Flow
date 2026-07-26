@@ -225,6 +225,13 @@ function toggleHandsFreeRecording() {
 
   isHandsFreeRecording = !isHandsFreeRecording;
 
+  // Notify backend to start/stop recording
+  fetch("/api/record/toggle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recording: isHandsFreeRecording }),
+  }).catch(err => console.error("Error toggling recording:", err));
+
   if (isHandsFreeRecording) {
     bar.classList.add("recording-active");
     if (barDot) barDot.className = "pill-indicator-dot recording";
@@ -288,6 +295,11 @@ function toggleFlowBarVisibility(isVisible) {
 
 function toggleSystemSetting(settingKey, isChecked) {
   console.log(`System setting [${settingKey}] updated to:`, isChecked);
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: settingKey, value: isChecked }),
+  }).catch(err => console.error("Error saving setting:", err));
 }
 
 // Sidebar Toggle (Expand / Collapse)
@@ -405,6 +417,11 @@ function changePushToTalkKey() {
   if (newKey && newKey.trim()) {
     document.getElementById("ptt-current-kbd").textContent = newKey.trim();
     document.getElementById("ptt-display-kbd").textContent = newKey.trim();
+    fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "push_to_talk_shortcut", value: newKey.trim() }),
+    }).catch(err => console.error("Error saving shortcut:", err));
   }
 }
 
@@ -476,6 +493,9 @@ async function loadHistory() {
     const searchInput = document.getElementById("history-search");
     if (!searchInput || !searchInput.value.trim()) {
       renderHistoryFeed(allHistoryRecords);
+    } else {
+      // Re-filter with current search term so live data updates are visible
+      filterHistory();
     }
   } catch (err) {
     console.error("Error loading dictation history:", err);
@@ -721,7 +741,24 @@ function openSettings(tab = "general") {
   }
 }
 
-function closeSettings() {
+async function closeSettings() {
+  // Auto-save any non-empty API keys that haven't been tested yet
+  const keyInputs = document.querySelectorAll('[id^="key-input-"]');
+  for (const input of keyInputs) {
+    const keyVal = input.value.trim();
+    if (keyVal) {
+      const providerKey = input.id.replace('key-input-', '');
+      try {
+        await fetch("/api/apikeys/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: providerKey, key: keyVal }),
+        });
+      } catch (err) {
+        console.error(`Error auto-saving ${providerKey} key:`, err);
+      }
+    }
+  }
   const modal = document.getElementById("settings-modal");
   if (modal) modal.classList.add("hidden");
 }

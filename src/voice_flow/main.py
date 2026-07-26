@@ -70,7 +70,7 @@ class VoiceFlowApp:
         self.audio.start()
 
         # Show Floating Waveform Bar with live volume callback
-        self.overlay.show_recording(level_provider=self.audio.get_rms_level)
+        self.overlay.show_recording(level_provider=lambda: self.audio.level)
 
     def _on_dictation_finish(self) -> None:
         if not self.is_recording:
@@ -80,7 +80,8 @@ class VoiceFlowApp:
         self.is_recording = False
 
         # Stop audio recording stream & fetch float32 numpy audio buffer
-        audio_buffer, duration = self.audio.stop()
+        audio_buffer = self.audio.stop()
+        duration = len(audio_buffer) / config.sample_rate if audio_buffer.size > 0 else 0.0
 
         if duration < 0.3 or audio_buffer.size == 0:
             log.info("Recording too short (%.2fs), ignoring.", duration)

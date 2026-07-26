@@ -77,6 +77,15 @@ class StorageEngine:
                 )
             """)
 
+            # Table 4: User Settings (key-value store)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    value TEXT,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
     # --- History API ---
@@ -222,6 +231,52 @@ class StorageEngine:
         with self._get_conn() as conn:
             cursor = conn.execute("SELECT provider, api_key FROM api_keys")
             return {row["provider"]: row["api_key"] for row in cursor.fetchall()}
+
+    # --- Settings Persistence API ---
+
+    def save_setting(self, key: str, value: Any) -> bool:
+        """Save or update a setting in the database."""
+        if not key:
+            return False
+        import json as _json
+        now = datetime.datetime.now().isoformat()
+        val_str = _json.dumps(value) if not isinstance(value, str) else value
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                    (key, val_str, now),
+                )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Retrieve a setting value by key."""
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            if row is None:
+                return default
+            import json as _json
+            try:
+                return _json.loads(row["value"])
+            except (ValueError, TypeError):
+                return row["value"]
+
+    def get_all_settings(self) -> dict[str, Any]:
+        """Retrieve all settings as a dictionary."""
+        import json as _json
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT key, value FROM settings")
+            result = {}
+            for row in cursor.fetchall():
+                try:
+                    result[row["key"]] = _json.loads(row["value"])
+                except (ValueError, TypeError):
+                    result[row["key"]] = row["value"]
+            return result
 
 
 # Singleton Storage Instance

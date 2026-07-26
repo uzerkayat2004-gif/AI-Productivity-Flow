@@ -97,8 +97,40 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             config.add_api_key(key)
             self.send_json_response({"success": success, "keys": storage.get_all_api_keys()})
 
+        elif self.path == "/api/record/toggle":
+            data = json.loads(body)
+            recording = data.get("recording", False)
+            # Signal the main engine via a shared state file
+            import tempfile
+            state_file = os.path.join(os.path.expanduser("~"), ".voice_flow", "recording_state.json")
+            os.makedirs(os.path.dirname(state_file), exist_ok=True)
+            with open(state_file, "w") as f:
+                json.dump({"recording": recording}, f)
+            print(f"[RECORD] Hands-free recording {'STARTED' if recording else 'STOPPED'} via GUI")
+            self.send_json_response({"success": True, "recording": recording})
+
+        elif self.path == "/api/settings/update":
+            data = json.loads(body)
+            key = data.get("key", "")
+            value = data.get("value")
+            if key:
+                storage.save_setting(key, value)
+                # Update live config if it's a known config field
+                if hasattr(config, key):
+                    setattr(config, key, value)
+                print(f"[SETTINGS] {key} = {value}")
+            self.send_json_response({"success": True, "key": key, "value": value})
+
         else:
             self.send_error(404, "Endpoint not found")
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
 
     def verify_api_key(self, provider: str, key: str) -> dict:
         """Perform live test against AI & Voice Provider API endpoints."""
