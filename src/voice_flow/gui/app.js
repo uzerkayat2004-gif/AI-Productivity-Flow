@@ -354,6 +354,7 @@ function switchPage(pageId) {
     if (pageId === "insights") loadInsights();
     if (pageId === "dictionary") loadDictionary();
     if (pageId === "style") renderStyleCategory(currentStyleCategory);
+    if (pageId === "providers") loadProvidersOverview();
   }
 }
 
@@ -804,3 +805,348 @@ function escapeHtml(str) {
 function escapeJs(str) {
   return str.replace(/'/g, "\\'").replace(/\n/g, "\\n");
 }
+
+// =========================================================
+// AI PROVIDERS & MULTI-KEY CONNECTION MANAGER CONTROLLER
+// =========================================================
+
+const ALL_PROVIDERS_CONFIG = {
+  gemini: { name: "Google Gemini", logo: "✨", keyLink: "https://aistudio.google.com/app/apikey" },
+  openai: { name: "OpenAI Voice", logo: "🤖", keyLink: "https://platform.openai.com/api-keys" },
+  groq: { name: "Groq Audio", logo: "⚡", keyLink: "https://console.groq.com/keys" },
+  anthropic: { name: "Anthropic", logo: "🅰️", keyLink: "https://console.anthropic.com/" },
+  deepseek: { name: "DeepSeek", logo: "🐋", keyLink: "https://platform.deepseek.com/api_keys" },
+  alibaba: { name: "Alibaba DashScope", logo: "🟠", keyLink: "https://dashscope.console.aliyun.com/" },
+  zenmux: { name: "Zenmux", logo: "🟢", keyLink: "https://zenmux.ai/" },
+  elevenlabs: { name: "ElevenLabs Voice", logo: "🎙️", keyLink: "https://elevenlabs.io/app/settings/api-keys" },
+  deepgram: { name: "Deepgram Speech", logo: "🎧", keyLink: "https://console.deepgram.com/" },
+  cloudflare: { name: "Cloudflare AI", logo: "☁️", keyLink: "https://dash.cloudflare.com/profile/api-tokens" },
+  together: { name: "Together AI", logo: "🤝", keyLink: "https://api.together.ai/settings/api-keys" },
+  replicate: { name: "Replicate Voice", logo: "🚀", keyLink: "https://replicate.com/account/api-tokens" },
+  ollama: { name: "Ollama (Local)", logo: "🦙", keyLink: "http://localhost:11434" },
+  chutes: { name: "Chutes AI", logo: "⚡", keyLink: "https://chutes.ai" },
+  cerebras: { name: "Cerebras AI", logo: "🧠", keyLink: "https://cloud.cerebras.ai" }
+};
+
+let currentSelectedProvider = null;
+let currentProviderData = null;
+
+async function loadProvidersOverview() {
+  const container = document.getElementById("providers-grid-container");
+  if (!container) return;
+
+  document.getElementById("providers-view-overview").style.display = "block";
+  document.getElementById("providers-view-detail").style.display = "none";
+
+  try {
+    const res = await fetch("/api/providers/overview");
+    const data = await res.json();
+    const allConns = data.connections || {};
+
+    container.innerHTML = Object.entries(ALL_PROVIDERS_CONFIG).map(([pid, cfg]) => {
+      const conns = allConns[pid] || [];
+      const activeConns = conns.filter(c => c.is_active);
+      const isConnected = activeConns.length > 0;
+      const connCountText = isConnected ? `${activeConns.length} Connected` : "No connections";
+
+      return `
+        <div class="provider-card-item" onclick="openProviderDetail('${pid}')">
+          <div class="provider-card-left">
+            <div class="provider-card-logo">${cfg.logo}</div>
+            <div class="provider-card-info">
+              <span class="provider-card-name">${escapeHtml(cfg.name)}</span>
+              <span class="provider-card-status">
+                <span class="status-dot-indicator ${isConnected ? 'connected' : ''}"></span>
+                ${connCountText}
+              </span>
+            </div>
+          </div>
+          <label class="toggle-switch" onclick="event.stopPropagation()">
+            <input type="checkbox" ${isConnected ? 'checked' : ''} onchange="toggleProviderMaster('${pid}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("Error loading providers overview:", err);
+  }
+}
+
+function filterProvidersList() {
+  const q = (document.getElementById("provider-search")?.value || "").toLowerCase();
+  document.querySelectorAll(".provider-card-item").forEach(card => {
+    const name = card.querySelector(".provider-card-name")?.textContent?.toLowerCase() || "";
+    card.style.display = name.includes(q) ? "flex" : "none";
+  });
+}
+
+async function openProviderDetail(providerId) {
+  currentSelectedProvider = providerId;
+  const cfg = ALL_PROVIDERS_CONFIG[providerId] || { name: providerId, logo: "🔌", keyLink: "#" };
+
+  document.getElementById("providers-view-overview").style.display = "none";
+  document.getElementById("providers-view-detail").style.display = "block";
+
+  document.getElementById("detail-provider-name").textContent = cfg.name;
+  document.getElementById("detail-provider-logo").textContent = cfg.logo;
+  document.getElementById("detail-get-key-link").href = cfg.keyLink;
+
+  loadProviderDetails(providerId);
+}
+
+function closeProviderDetail() {
+  currentSelectedProvider = null;
+  loadProvidersOverview();
+}
+
+async function loadProviderDetails(providerId) {
+  try {
+    const res = await fetch(`/api/providers/details?provider=${providerId}`);
+    const data = await res.json();
+    currentProviderData = data;
+
+    const conns = data.connections || [];
+    document.getElementById("detail-conn-count").textContent = `${conns.length} connection${conns.length === 1 ? '' : 's'}`;
+    const modeSelect = document.getElementById("load-balance-mode-select");
+    if (modeSelect) modeSelect.value = data.mode || "priority";
+
+    const connListEl = document.getElementById("detail-connections-list");
+    if (connListEl) {
+      if (conns.length === 0) {
+        connListEl.innerHTML = `
+          <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px; border: 1px dashed var(--border-color); border-radius: 8px;">
+            No connection keys configured yet. Click <strong>+ Add Connection</strong> above to add your first API key for multi-key failover.
+          </div>
+        `;
+      } else {
+        connListEl.innerHTML = conns.map(c => `
+          <div class="connection-item-card">
+            <div class="conn-left-info">
+              <input type="checkbox" ${c.is_active ? 'checked' : ''} onchange="toggleProviderConn(${c.id}, this.checked)">
+              <div>
+                <div class="conn-name-group">
+                  <span class="conn-name">${escapeHtml(c.name)}</span>
+                  ${c.is_active ? '<span class="active-pill-badge">+ active</span>' : ''}
+                  <span class="priority-pill-badge">Priority #${c.priority}</span>
+                </div>
+                <div class="conn-key-preview">Key: ${escapeHtml(c.api_key.substring(0, 6))}...${escapeHtml(c.api_key.substring(c.api_key.length - 4))}</div>
+                <div class="conn-status-msg ${c.last_tested_status.includes('Connected') ? 'ok' : 'err'}">${escapeHtml(c.last_tested_status)}</div>
+              </div>
+            </div>
+            <div class="conn-actions-right">
+              <button class="btn-secondary" style="padding: 4px 10px; font-size: 11px;" onclick="testSingleConn(${c.id}, '${escapeJs(c.api_key)}')">⚡ Test Key</button>
+              <button class="btn-secondary" style="padding: 4px 10px; font-size: 11px; color: #ef4444;" onclick="deleteConn(${c.id})">Delete</button>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+    const models = data.models || [];
+    const modelsGridEl = document.getElementById("detail-models-grid");
+    if (modelsGridEl) {
+      modelsGridEl.innerHTML = models.map(m => `
+        <div class="model-card-item">
+          <div>
+            <div class="model-id-text">${escapeHtml(m.model_id)}</div>
+            <div class="model-display-name">${escapeHtml(m.display_name)}</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" ${m.is_active ? 'checked' : ''} onchange="toggleModelActive(${m.id}, this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      `).join("");
+    }
+
+  } catch (err) {
+    console.error("Error loading provider details:", err);
+  }
+}
+
+async function changeLoadBalanceMode(mode) {
+  if (!currentSelectedProvider) return;
+  try {
+    await fetch("/api/providers/mode/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentSelectedProvider, mode }),
+    });
+  } catch (err) {
+    console.error("Error saving mode:", err);
+  }
+}
+
+function openAddConnectionModal() {
+  document.getElementById("conn-input-name").value = `${(ALL_PROVIDERS_CONFIG[currentSelectedProvider]?.name || "Key")} Key`;
+  document.getElementById("conn-input-key").value = "";
+  document.getElementById("conn-input-priority").value = (currentProviderData?.connections?.length || 0) + 1;
+  document.getElementById("conn-check-badge").innerHTML = "";
+
+  const modal = document.getElementById("modal-add-connection");
+  if (modal) modal.classList.remove("hidden");
+}
+
+async function testNewConnectionKey() {
+  const keyVal = document.getElementById("conn-input-key").value.trim();
+  const badgeContainer = document.getElementById("conn-check-badge");
+  if (!keyVal || !badgeContainer) return;
+
+  badgeContainer.innerHTML = `<span class="status-badge" style="background:#f3f4f6; color:#4b5563;">Testing key...</span>`;
+  try {
+    const res = await fetch("/api/providers/connections/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentSelectedProvider, key: keyVal }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      badgeContainer.innerHTML = `<span class="status-badge status-connected">✓ Valid & Verified!</span>`;
+    } else {
+      badgeContainer.innerHTML = `<span class="status-badge status-error">✕ ${escapeHtml(data.error)}</span>`;
+    }
+  } catch (err) {
+    badgeContainer.innerHTML = `<span class="status-badge status-error">✕ ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+async function saveConnectionModal() {
+  const name = document.getElementById("conn-input-name").value.trim();
+  const key = document.getElementById("conn-input-key").value.trim();
+  const priority = parseInt(document.getElementById("conn-input-priority").value) || 1;
+
+  if (!key) {
+    alert("Please enter a valid API Key.");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/providers/connections/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentSelectedProvider, name, key, priority }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeSubModal("modal-add-connection");
+      loadProviderDetails(currentSelectedProvider);
+    } else {
+      alert("Error adding connection: " + data.error);
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function toggleProviderConn(cid, isActive) {
+  try {
+    await fetch("/api/providers/connections/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid, is_active: isActive }),
+    });
+    loadProviderDetails(currentSelectedProvider);
+  } catch (err) {
+    console.error("Error toggling connection:", err);
+  }
+}
+
+async function deleteConn(cid) {
+  if (!confirm("Are you sure you want to delete this connection key?")) return;
+  try {
+    await fetch("/api/providers/connections/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid }),
+    });
+    loadProviderDetails(currentSelectedProvider);
+  } catch (err) {
+    console.error("Error deleting connection:", err);
+  }
+}
+
+async function testSingleConn(cid, key) {
+  try {
+    const res = await fetch("/api/providers/connections/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid, provider: currentSelectedProvider, key }),
+    });
+    const data = await res.json();
+    alert(data.success ? "✓ Connection test successful! Status: 200 OK" : "✕ Test failed: " + data.error);
+    loadProviderDetails(currentSelectedProvider);
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function testCurrentProviderConnections() {
+  if (!currentProviderData || !currentProviderData.connections) return;
+  for (const c of currentProviderData.connections) {
+    await testSingleConn(c.id, c.api_key);
+  }
+}
+
+function openAddModelModal() {
+  document.getElementById("model-input-id").value = "";
+  document.getElementById("model-input-name").value = "";
+  const modal = document.getElementById("modal-add-model");
+  if (modal) modal.classList.remove("hidden");
+}
+
+async function saveCustomModelModal() {
+  const modelId = document.getElementById("model-input-id").value.trim();
+  const name = document.getElementById("model-input-name").value.trim();
+  if (!modelId) {
+    alert("Please enter a model ID.");
+    return;
+  }
+  try {
+    await fetch("/api/providers/models/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentSelectedProvider, model_id: modelId, display_name: name || modelId }),
+    });
+    closeSubModal("modal-add-model");
+    loadProviderDetails(currentSelectedProvider);
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function toggleModelActive(mid, isActive) {
+  try {
+    await fetch("/api/providers/models/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: mid, is_active: isActive }),
+    });
+  } catch (err) {
+    console.error("Error toggling model:", err);
+  }
+}
+
+function toggleAllModels(isActive) {
+  if (!currentProviderData || !currentProviderData.models) return;
+  currentProviderData.models.forEach(m => toggleModelActive(m.id, isActive));
+  loadProviderDetails(currentSelectedProvider);
+}
+
+async function testAllProviders() {
+  alert("Testing all configured provider connections...");
+  const res = await fetch("/api/providers/overview");
+  const data = await res.json();
+  const allConns = data.connections || {};
+  for (const [pid, list] of Object.entries(allConns)) {
+    for (const c of list) {
+      await fetch("/api/providers/connections/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: c.id, provider: pid, key: c.api_key }),
+      });
+    }
+  }
+  loadProvidersOverview();
+}
+

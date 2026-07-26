@@ -36,6 +36,23 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response(storage.get_dictionary_words())
         elif self.path == "/api/apikeys/list":
             self.send_json_response(storage.get_all_api_keys())
+        elif self.path.startswith("/api/providers/details"):
+            import urllib.parse
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            provider = params.get("provider", ["gemini"])[0].lower()
+            conns = storage.get_provider_connections(provider)
+            mode = storage.get_provider_load_balance_mode(provider)
+            models = storage.get_provider_models(provider)
+            self.send_json_response({
+                "provider": provider,
+                "connections": conns,
+                "mode": mode,
+                "models": models
+            })
+        elif self.path == "/api/providers/overview":
+            all_conns = storage.get_all_provider_connections()
+            self.send_json_response({"connections": all_conns})
         elif self.path == "/api/microphones":
             try:
                 devices = sd.query_devices()
@@ -125,6 +142,79 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     setattr(config, key, value)
                 print(f"[SETTINGS] {key} = {value}")
             self.send_json_response({"success": True, "key": key, "value": value})
+
+        elif self.path == "/api/providers/all":
+            all_conns = storage.get_all_provider_connections()
+            self.send_json_response({"success": True, "connections": all_conns})
+
+        elif self.path == "/api/providers/connections/add":
+            data = json.loads(body)
+            provider = data.get("provider", "gemini").lower()
+            name = data.get("name", "").strip()
+            key = data.get("key", "").strip()
+            priority = int(data.get("priority", 1))
+
+            v_res = self.verify_api_key(provider, key)
+            if v_res["success"]:
+                new_conn = storage.add_provider_connection(provider, name, key, priority)
+                self.send_json_response({"success": True, "connection": new_conn, "message": "Connection added successfully!"})
+            else:
+                self.send_json_response({"success": False, "error": v_res.get("error", "Validation failed.")})
+
+        elif self.path == "/api/providers/connections/update":
+            data = json.loads(body)
+            cid = int(data.get("id"))
+            name = data.get("name", "").strip()
+            key = data.get("key", "").strip()
+            priority = int(data.get("priority", 1))
+            success = storage.update_provider_connection(cid, name, key, priority)
+            self.send_json_response({"success": success})
+
+        elif self.path == "/api/providers/connections/toggle":
+            data = json.loads(body)
+            cid = int(data.get("id"))
+            active = bool(data.get("is_active", True))
+            success = storage.toggle_provider_connection(cid, active)
+            self.send_json_response({"success": success})
+
+        elif self.path == "/api/providers/connections/delete":
+            data = json.loads(body)
+            cid = int(data.get("id"))
+            success = storage.delete_provider_connection(cid)
+            self.send_json_response({"success": success})
+
+        elif self.path == "/api/providers/connections/test":
+            data = json.loads(body)
+            cid = data.get("id")
+            provider = data.get("provider", "gemini").lower()
+            key = data.get("key", "").strip()
+            v_res = self.verify_api_key(provider, key)
+            if cid:
+                status_str = "Connected (200 OK)" if v_res["success"] else f"Error: {v_res.get('error', 'Failed')}"
+                storage.update_connection_status(int(cid), status_str)
+            self.send_json_response(v_res)
+
+        elif self.path == "/api/providers/mode/save":
+            data = json.loads(body)
+            provider = data.get("provider", "gemini").lower()
+            mode = data.get("mode", "priority").lower()
+            success = storage.save_provider_load_balance_mode(provider, mode)
+            self.send_json_response({"success": success})
+
+        elif self.path == "/api/providers/models/add":
+            data = json.loads(body)
+            provider = data.get("provider", "gemini").lower()
+            model_id = data.get("model_id", "").strip()
+            display_name = data.get("display_name", "").strip() or model_id
+            success = storage.add_provider_model(provider, model_id, display_name)
+            self.send_json_response({"success": success, "models": storage.get_provider_models(provider)})
+
+        elif self.path == "/api/providers/models/toggle":
+            data = json.loads(body)
+            mid = int(data.get("id"))
+            active = bool(data.get("is_active", True))
+            success = storage.toggle_provider_model(mid, active)
+            self.send_json_response({"success": success})
 
         else:
             self.send_error(404, "Endpoint not found")

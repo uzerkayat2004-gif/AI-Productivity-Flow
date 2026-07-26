@@ -67,7 +67,7 @@ class StorageEngine:
                 )
             """)
 
-            # Table 3: System API Keys
+            # Table 3: System API Keys (legacy single key compatibility)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +86,96 @@ class StorageEngine:
                 )
             """)
 
+            # Table 5: Provider Multi-Key Connections
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS provider_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    api_key TEXT NOT NULL,
+                    priority INTEGER DEFAULT 1,
+                    is_active INTEGER DEFAULT 1,
+                    last_tested_status TEXT DEFAULT 'Connected',
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            # Table 6: Provider Settings (Load Balancing Mode)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS provider_settings (
+                    provider TEXT PRIMARY KEY,
+                    load_balance_mode TEXT DEFAULT 'priority',
+                    is_enabled INTEGER DEFAULT 1
+                )
+            """)
+
+            # Table 7: Provider Models
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS provider_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    UNIQUE(provider, model_id)
+                )
+            """)
+
+            conn.commit()
+
+        self._seed_default_models()
+
+    def _seed_default_models(self) -> None:
+        """Seed standard models for AI providers if not already present."""
+        seeds = {
+            "gemini": [
+                ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+                ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+                ("gemini-2.0-flash", "Gemini 2.0 Flash"),
+            ],
+            "openai": [
+                ("gpt-4o-mini", "GPT-4o Mini"),
+                ("gpt-4o", "GPT-4o"),
+                ("gpt-3.5-turbo", "GPT-3.5 Turbo"),
+            ],
+            "groq": [
+                ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
+                ("llama-3.1-8b-instant", "Llama 3.1 8B"),
+                ("whisper-large-v3-turbo", "Whisper Large v3 Turbo"),
+            ],
+            "anthropic": [
+                ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet"),
+                ("claude-3-haiku-20240307", "Claude 3 Haiku"),
+            ],
+            "deepseek": [
+                ("deepseek-chat", "DeepSeek V3"),
+                ("deepseek-reasoner", "DeepSeek R1"),
+            ],
+            "alibaba": [
+                ("qwen-turbo", "Qwen Turbo"),
+                ("qwen-plus", "Qwen Plus"),
+                ("qwen-max", "Qwen Max"),
+            ],
+            "zenmux": [
+                ("zenmux/glm-5.2-free", "GLM 5.2 Free"),
+                ("moonshot/kimi-k2.7-code-free", "Kimi K2.7 Free"),
+            ],
+            "elevenlabs": [
+                ("eleven_multilingual_v2", "Multilingual v2"),
+                ("eleven_flash_v2_5", "Flash v2.5"),
+            ],
+            "deepgram": [
+                ("nova-2-general", "Nova 2 General"),
+                ("aura-asteria-en", "Aura Asteria TTS"),
+            ]
+        }
+        with self._get_conn() as conn:
+            for provider, model_list in seeds.items():
+                for mid, mname in model_list:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO provider_models (provider, model_id, display_name, is_active) VALUES (?, ?, ?, 1)",
+                        (provider, mid, mname)
+                    )
             conn.commit()
 
     # --- History API ---
@@ -235,7 +325,119 @@ class StorageEngine:
     def get_all_api_keys(self) -> dict[str, str]:
         with self._get_conn() as conn:
             cursor = conn.execute("SELECT provider, api_key FROM api_keys")
-            return {row["provider"]: row["api_key"] for row in cursor.fetchall()}
+            res = {row["provider"]: row["api_key"] for row in cursor.fetchall()}
+            # Also include primary active keys from provider_connections
+            conns = self.get_all_provider_connections()
+            for p, clist in conns.items():
+                active = [c for c in clist if c.get("is_active")]
+                if active:
+                    res[p] = active[0]["api_key"]
+            return res
+
+    # --- Provider Multi-Key Connections API ---
+
+    def get_provider_connections(self, provider: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM provider_connections WHERE provider = ? ORDER BY priority ASC, id ASC",
+                (provider.lower(),)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_provider_connections(self) -> dict[str, list[dict[str, Any]]]:
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT * FROM provider_connections ORDER BY provider ASC, priority ASC, id ASC")
+            result: dict[str, list[dict[str, Any]]] = {}
+            for row in cursor.fetchall():
+                p = row["provider"]
+                if p not in result:
+                    result[p] = []
+                result[p].append(dict(row))
+            return result
+
+    def add_provider_connection(self, provider: str, name: str, api_key: str, priority: int = 1) -> dict[str, Any]:
+        now = datetime.datetime.now().isoformat()
+        clean_key = api_key.strip()
+        clean_name = name.strip() or f"{provider.capitalize()} Key"
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO provider_connections (provider, name, api_key, priority, is_active, last_tested_status, created_at)
+                VALUES (?, ?, ?, ?, 1, 'Connected', ?)
+                """,
+                (provider.lower(), clean_name, clean_key, priority, now)
+            )
+            conn.commit()
+            cid = cursor.lastrowid
+        self.save_api_key(clean_key, provider.lower())
+        return {"id": cid, "provider": provider.lower(), "name": clean_name, "api_key": clean_key, "priority": priority, "is_active": 1, "last_tested_status": "Connected"}
+
+    def update_provider_connection(self, cid: int, name: str, api_key: str, priority: int) -> bool:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE provider_connections SET name = ?, api_key = ?, priority = ? WHERE id = ?",
+                (name.strip(), api_key.strip(), priority, cid)
+            )
+            conn.commit()
+            return True
+
+    def toggle_provider_connection(self, cid: int, is_active: bool) -> bool:
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE provider_connections SET is_active = ? WHERE id = ?",
+                (1 if is_active else 0, cid)
+            )
+            conn.commit()
+            return True
+
+    def delete_provider_connection(self, cid: int) -> bool:
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM provider_connections WHERE id = ?", (cid,))
+            conn.commit()
+            return True
+
+    def update_connection_status(self, cid: int, status: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute("UPDATE provider_connections SET last_tested_status = ? WHERE id = ?", (status, cid))
+            conn.commit()
+
+    def get_provider_load_balance_mode(self, provider: str) -> str:
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT load_balance_mode FROM provider_settings WHERE provider = ?", (provider.lower(),))
+            row = cursor.fetchone()
+            return row["load_balance_mode"] if row else "priority"
+
+    def save_provider_load_balance_mode(self, provider: str, mode: str) -> bool:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO provider_settings (provider, load_balance_mode, is_enabled) VALUES (?, ?, 1)",
+                (provider.lower(), mode.lower())
+            )
+            conn.commit()
+            return True
+
+    def get_provider_models(self, provider: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT * FROM provider_models WHERE provider = ? ORDER BY id ASC", (provider.lower(),))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def toggle_provider_model(self, model_db_id: int, is_active: bool) -> bool:
+        with self._get_conn() as conn:
+            conn.execute("UPDATE provider_models SET is_active = ? WHERE id = ?", (1 if is_active else 0, model_db_id))
+            conn.commit()
+            return True
+
+    def add_provider_model(self, provider: str, model_id: str, display_name: str) -> bool:
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO provider_models (provider, model_id, display_name, is_active) VALUES (?, ?, ?, 1)",
+                    (provider.lower(), model_id.strip(), display_name.strip())
+                )
+                conn.commit()
+                return True
+        except Exception:
+            return False
 
     # --- Settings Persistence API ---
 

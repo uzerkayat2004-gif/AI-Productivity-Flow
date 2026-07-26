@@ -41,6 +41,9 @@
           <div class="nav-item" data-page="style">
             <span class="nav-icon">Tτ</span> <span class="nav-label">Style</span>
           </div>
+          <div class="nav-item" data-page="providers">
+            <span class="nav-icon">🔌</span> <span class="nav-label">Providers</span>
+          </div>
         </nav>
       </div>
 
@@ -209,6 +212,102 @@
         <!-- STYLE CARDS GRID (3 CARDS PER CATEGORY) -->
         <div class="style-cards-grid" id="style-cards-grid">
           <!-- Dynamically populated per tab -->
+        </div>
+
+      </section>
+
+      <!-- PAGE 5: PROVIDERS & AI MODELS MANAGER PAGE (MATCHING VIDEO EXACTLY) -->
+      <section id="page-providers" class="page-view" style="display: none;">
+
+        <!-- SUB-VIEW 1: PROVIDERS GRID OVERVIEW -->
+        <div id="providers-view-overview">
+          <div class="page-header" style="margin-bottom: 20px;">
+            <div>
+              <h1 class="page-title">Providers</h1>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">Manage your AI provider connections</p>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <div class="search-box" style="width: 240px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px;">
+                <span style="opacity: 0.5;">🔍</span>
+                <input type="text" id="provider-search" placeholder="Search providers..." oninput="filterProvidersList()">
+              </div>
+              <button class="btn-secondary" style="padding: 8px 14px; font-size: 13px;" onclick="testAllProviders()"><span style="color: #a78bfa;">⚡</span> Test All</button>
+            </div>
+          </div>
+
+          <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">API KEY PROVIDERS</div>
+
+          <div class="providers-cards-grid" id="providers-grid-container">
+            <!-- Dynamically populated provider cards -->
+          </div>
+        </div>
+
+        <!-- SUB-VIEW 2: PROVIDER DETAIL PAGE (OPENED WHEN CLICKING A PROVIDER CARD) -->
+        <div id="providers-view-detail" style="display: none;">
+          <!-- Header & Back Button -->
+          <div class="detail-header-bar">
+            <button class="btn-back" onclick="closeProviderDetail()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              <span>Back to Providers</span>
+            </button>
+
+            <div class="provider-detail-title-row">
+              <div class="provider-large-badge" id="detail-provider-logo">✨</div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <h1 class="provider-detail-title" id="detail-provider-name">Google Gemini</h1>
+                  <a href="#" target="_blank" id="detail-get-key-link" class="get-key-pill-link">🔑 Get API Key ↗</a>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="detail-conn-count">0 connections</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONNECTIONS CARD SECTION -->
+          <div class="provider-section-box">
+            <div class="section-box-header">
+              <div class="section-title-group">
+                <span class="section-box-title">Connections</span>
+              </div>
+              <div class="section-controls-group">
+                <select id="load-balance-mode-select" class="mode-select-dropdown" onchange="changeLoadBalanceMode(this.value)">
+                  <option value="priority">Priority Failover (Key #1 ➔ Key #2 ➔ Key #3)</option>
+                  <option value="round_robin">Round Robin (Load Balance Evenly)</option>
+                </select>
+                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="testCurrentProviderConnections()">⚡ Test Connections One-by-One</button>
+                <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openAddConnectionModal()">+ Add Connection</button>
+              </div>
+            </div>
+
+            <!-- Connections List -->
+            <div class="connections-list" id="detail-connections-list">
+              <!-- Dynamically populated connection items -->
+            </div>
+          </div>
+
+          <!-- AVAILABLE MODELS CARD SECTION -->
+          <div class="provider-section-box" style="margin-top: 24px;">
+            <div class="section-box-header">
+              <div class="section-title-group">
+                <span class="section-box-title">Available Models</span>
+                <select class="mode-select-dropdown" style="margin-left: 12px; font-size: 11px;">
+                  <option>Thinking: Auto</option>
+                  <option>Thinking: Enabled</option>
+                  <option>Thinking: Disabled</option>
+                </select>
+              </div>
+              <div class="section-controls-group">
+                <button class="btn-secondary" style="padding: 5px 10px; font-size: 11px;" onclick="toggleAllModels(true)">Active All</button>
+                <button class="btn-secondary" style="padding: 5px 10px; font-size: 11px;" onclick="toggleAllModels(false)">Disable All</button>
+                <button class="btn-secondary" style="padding: 5px 12px; font-size: 11px;" onclick="openAddModelModal()">+ Add Model</button>
+              </div>
+            </div>
+
+            <!-- Models Grid -->
+            <div class="models-cards-grid" id="detail-models-grid">
+              <!-- Dynamically populated model items -->
+            </div>
+          </div>
         </div>
 
       </section>
@@ -637,6 +736,80 @@
       <!-- DYNAMIC 4 HARDWARE MICROPHONE OPTIONS -->
       <div class="perfect-keys-list" id="mic-devices-list">
         <!-- Dynamically rendered via /api/microphones -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT API KEY CONNECTION MODAL -->
+  <div id="modal-add-connection" class="modal-overlay hidden" style="z-index: 1200;">
+    <div class="perfect-keys-card" style="width: 480px;">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;" id="modal-conn-title">Add API Key</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Add an API connection key with priority failover.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('modal-add-connection')">✕</button>
+      </div>
+
+      <!-- Single vs Bulk Tabs -->
+      <div class="tabs-header" style="margin: 14px 0;">
+        <button class="tab-btn active" style="padding: 6px 14px; font-size: 12px;">Single</button>
+        <button class="tab-btn" style="padding: 6px 14px; font-size: 12px; opacity: 0.5;" title="Bulk import coming soon">Bulk Add</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Connection Name</label>
+          <input type="text" id="conn-input-name" placeholder="e.g. Primary Key / Key #1" class="key-input-field" style="width: 100%;">
+        </div>
+
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">API Key</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="password" id="conn-input-key" placeholder="Paste key..." class="key-input-field" style="flex: 1;">
+            <button class="btn-secondary" style="padding: 8px 14px; font-size: 12px;" onclick="testNewConnectionKey()">Check</button>
+          </div>
+          <div id="conn-check-badge" style="margin-top: 6px;"></div>
+        </div>
+
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Priority Number (1 = First, 2 = Fallback)</label>
+          <input type="number" id="conn-input-priority" value="1" min="1" max="100" class="key-input-field" style="width: 100%;">
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+        <button class="btn-secondary" onclick="closeSubModal('modal-add-connection')">Cancel</button>
+        <button class="btn-primary" onclick="saveConnectionModal()">Save Connection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD CUSTOM MODEL MODAL -->
+  <div id="modal-add-model" class="modal-overlay hidden" style="z-index: 1200;">
+    <div class="perfect-keys-card" style="width: 440px;">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;">Add Model</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Register a custom model ID for this provider.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('modal-add-model')">✕</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Model ID</label>
+          <input type="text" id="model-input-id" placeholder="e.g. gemini-2.5-pro / gpt-4o" class="key-input-field" style="width: 100%;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Display Name</label>
+          <input type="text" id="model-input-name" placeholder="e.g. Gemini 2.5 Pro" class="key-input-field" style="width: 100%;">
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+        <button class="btn-secondary" onclick="closeSubModal('modal-add-model')">Cancel</button>
+        <button class="btn-primary" onclick="saveCustomModelModal()">Add Model</button>
       </div>
     </div>
   </div>
