@@ -32,13 +32,29 @@ def get_active_window_title() -> str:
         return ""
 
 
-def inject_text(text: str) -> bool:
-    """Paste *text* into the currently focused window."""
+def focus_target_window(hwnd: int) -> None:
+    """Restore window focus to target_hwnd before pasting."""
+    if not hwnd:
+        return
+    try:
+        if ctypes.windll.user32.IsIconic(hwnd):
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        time.sleep(0.08)
+    except Exception as e:
+        log.warning("Failed to restore focus to hwnd %d: %s", hwnd, e)
+
+
+def inject_text(text: str, target_hwnd: int | None = None) -> bool:
+    """Paste *text* into the currently focused or target window."""
     if not text:
         log.warning("inject_text called with empty text, skipping.")
         return False
 
     try:
+        if target_hwnd:
+            focus_target_window(target_hwnd)
+
         active_title = get_active_window_title()
         is_excel = any(kw in active_title.lower() for kw in ["excel", "workbook", "spreadsheet", "sheet", "csv"])
 
@@ -72,5 +88,5 @@ def inject_text(text: str) -> bool:
 class ClipboardInjector:
     """Class wrapper for Clipboard Injection."""
 
-    def paste_text(self, text: str) -> bool:
-        return inject_text(text)
+    def paste_text(self, text: str, target_hwnd: int | None = None) -> bool:
+        return inject_text(text, target_hwnd)

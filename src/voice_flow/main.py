@@ -66,7 +66,13 @@ class VoiceFlowApp:
             self._on_dictation_finish()
             return
 
-        log.info("[RECORDING] Dictation triggered!")
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd:
+            title = injector.get_active_window_title()
+            if "voice flow" not in title.lower() and "tk" not in title.lower():
+                self.target_hwnd = hwnd
+
+        log.info("[RECORDING] Dictation triggered for target hwnd %s!", getattr(self, "target_hwnd", None))
         self.is_recording = True
         self.hotkeys.set_recording_state(True)
 
@@ -149,7 +155,8 @@ class VoiceFlowApp:
                 self.overlay.show_done(polished_text)
 
                 # Step 6: Inject polished text into target application active input field
-                self.injector.paste_text(polished_text)
+                target_h = getattr(self, "target_hwnd", None)
+                self.injector.paste_text(polished_text, target_h)
 
             except Exception as e:
                 log.error("Error processing dictation: %s", e, exc_info=True)
