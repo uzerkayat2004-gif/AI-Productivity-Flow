@@ -5,6 +5,7 @@ SQLite Storage, Multi-API Key Polishing, Clipboard Injection, and Desktop GUI.
 
 from __future__ import annotations
 
+import ctypes
 import io
 import logging
 import sys
@@ -15,7 +16,7 @@ from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
 from voice_flow.dictionary import dictionary_engine
 from voice_flow.hotkeys import InputTriggerListener
-from voice_flow.injector import ClipboardInjector
+from voice_flow.injector import ClipboardInjector, get_active_window_title
 from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher
 from voice_flow.storage import storage
@@ -68,7 +69,7 @@ class VoiceFlowApp:
 
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         if hwnd:
-            title = injector.get_active_window_title()
+            title = get_active_window_title()
             if "voice flow" not in title.lower() and "tk" not in title.lower():
                 self.target_hwnd = hwnd
 
