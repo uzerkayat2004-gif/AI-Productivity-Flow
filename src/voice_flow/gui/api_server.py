@@ -296,7 +296,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
     def _check_key_format(provider: str, key: str) -> str | None:
         """Quick format checks to reject obviously wrong keys."""
         # Reject HuggingFace tokens used for other providers
-        if key.startswith("hf_"):
+        if key.startswith("hf_") and provider != "huggingface":
             return f"This looks like a HuggingFace token (starts with 'hf_'). Please enter a valid {provider.capitalize()} API key instead."
 
         # Provider-specific prefix checks

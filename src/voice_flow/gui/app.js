@@ -795,20 +795,15 @@ function escapeJs(str) {
 
 const ALL_PROVIDERS_CONFIG = {
   gemini: { name: "Google Gemini", logo: "✨", keyLink: "https://aistudio.google.com/app/apikey" },
-  openai: { name: "OpenAI Voice", logo: "🤖", keyLink: "https://platform.openai.com/api-keys" },
   groq: { name: "Groq Audio", logo: "⚡", keyLink: "https://console.groq.com/keys" },
-  anthropic: { name: "Anthropic", logo: "🅰️", keyLink: "https://console.anthropic.com/" },
-  deepseek: { name: "DeepSeek", logo: "🐋", keyLink: "https://platform.deepseek.com/api_keys" },
-  alibaba: { name: "Alibaba DashScope", logo: "🟠", keyLink: "https://dashscope.console.aliyun.com/" },
-  zenmux: { name: "Zenmux", logo: "🟢", keyLink: "https://zenmux.ai/" },
   elevenlabs: { name: "ElevenLabs Voice", logo: "🎙️", keyLink: "https://elevenlabs.io/app/settings/api-keys" },
   deepgram: { name: "Deepgram Speech", logo: "🎧", keyLink: "https://console.deepgram.com/" },
+  openai: { name: "OpenAI Voice", logo: "🤖", keyLink: "https://platform.openai.com/api-keys" },
+  assemblyai: { name: "AssemblyAI", logo: "🗣️", keyLink: "https://www.assemblyai.com/app/account" },
+  huggingface: { name: "Hugging Face", logo: "🤗", keyLink: "https://huggingface.co/settings/tokens" },
   cloudflare: { name: "Cloudflare AI", logo: "☁️", keyLink: "https://dash.cloudflare.com/profile/api-tokens" },
   together: { name: "Together AI", logo: "🤝", keyLink: "https://api.together.ai/settings/api-keys" },
-  replicate: { name: "Replicate Voice", logo: "🚀", keyLink: "https://replicate.com/account/api-tokens" },
-  ollama: { name: "Ollama (Local)", logo: "🦙", keyLink: "http://localhost:11434" },
-  chutes: { name: "Chutes AI", logo: "⚡", keyLink: "https://chutes.ai" },
-  cerebras: { name: "Cerebras AI", logo: "🧠", keyLink: "https://cloud.cerebras.ai" }
+  replicate: { name: "Replicate Voice", logo: "🚀", keyLink: "https://replicate.com/account/api-tokens" }
 };
 
 let currentSelectedProvider = null;
