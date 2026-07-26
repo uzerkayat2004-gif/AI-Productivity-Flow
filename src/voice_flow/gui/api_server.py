@@ -93,9 +93,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             data = json.loads(body)
             key = data.get("key", "").strip()
             provider = data.get("provider", "gemini")
-            success = storage.save_api_key(key, provider)
-            config.add_api_key(key)
-            self.send_json_response({"success": success, "keys": storage.get_all_api_keys()})
+            # Validate key before saving (same as /test)
+            result = self.verify_api_key(provider, key)
+            if result["success"]:
+                storage.save_api_key(key, provider)
+                config.add_api_key(key)
+                self.send_json_response({"success": True, "message": result.get("message", "Key saved!"), "keys": storage.get_all_api_keys()})
+            else:
+                self.send_json_response({"success": False, "error": result.get("error", "Invalid API key")})
 
         elif self.path == "/api/record/toggle":
             data = json.loads(body)
@@ -137,39 +142,44 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         if not key:
             return {"success": False, "error": "API key cannot be empty"}
 
+        # Pre-validate key format to catch obvious mismatches
+        format_error = self._check_key_format(provider, key)
+        if format_error:
+            return {"success": False, "error": format_error}
+
         try:
             if provider == "gemini":
                 url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
                 req = urllib.request.Request(url)
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     if response.status == 200:
                         return {"success": True, "message": "Gemini API Key Verified! Model ready for transcription polishing."}
 
             elif provider == "groq":
                 url = "https://api.groq.com/openai/v1/models"
                 req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     if response.status == 200:
                         return {"success": True, "message": "Groq API Key Verified! Whisper-large-v3 model active."}
 
             elif provider == "elevenlabs":
                 url = "https://api.elevenlabs.io/v1/voices"
                 req = urllib.request.Request(url, headers={"xi-api-key": key})
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     if response.status == 200:
                         return {"success": True, "message": "ElevenLabs Voice API Verified! TTS audio generation ready."}
 
             elif provider == "deepgram":
                 url = "https://api.deepgram.com/v1/projects"
                 req = urllib.request.Request(url, headers={"Authorization": f"Token {key}"})
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     if response.status == 200:
                         return {"success": True, "message": "Deepgram API Verified! Nova-3 speech model active."}
 
             elif provider == "openai":
                 url = "https://api.openai.com/v1/models"
                 req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=8) as response:
                     if response.status == 200:
                         return {"success": True, "message": "OpenAI API Verified! gpt-realtime-2 & TTS models ready."}
 
@@ -179,11 +189,39 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 return {"success": False, "error": f"Invalid key length for {provider}"}
 
         except urllib.error.HTTPError as e:
+            error_body = ""
+            try:
+                error_body = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            if e.code == 400 and "API_KEY_INVALID" in error_body:
+                return {"success": False, "error": f"Invalid {provider.capitalize()} API key. Please get a valid key from the provider's dashboard."}
             return {"success": False, "error": f"HTTP {e.code}: {e.reason}"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
         return {"success": False, "error": "Verification failed."}
+
+    @staticmethod
+    def _check_key_format(provider: str, key: str) -> str | None:
+        """Quick format checks to reject obviously wrong keys."""
+        # Reject HuggingFace tokens used for other providers
+        if key.startswith("hf_"):
+            return f"This looks like a HuggingFace token (starts with 'hf_'). Please enter a valid {provider.capitalize()} API key instead."
+
+        # Provider-specific prefix checks
+        if provider == "gemini" and key.startswith("sk-"):
+            return "This looks like an OpenAI key (starts with 'sk-'). Please enter a Google Gemini API key from https://aistudio.google.com/apikey"
+        if provider == "openai" and not key.startswith("sk-"):
+            return "OpenAI API keys should start with 'sk-'. Get one from https://platform.openai.com/api-keys"
+        if provider == "groq" and not key.startswith("gsk_"):
+            return "Groq API keys should start with 'gsk_'. Get one from https://console.groq.com/keys"
+
+        # Minimum length check
+        if len(key) < 20:
+            return f"API key is too short ({len(key)} chars). Valid {provider.capitalize()} keys are typically 30+ characters."
+
+        return None
 
     def send_json_response(self, data: any) -> None:
         content = json.dumps(data).encode("utf-8")
