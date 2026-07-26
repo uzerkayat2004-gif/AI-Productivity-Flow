@@ -176,6 +176,35 @@
             </div>
           </div>
         </div>
+
+        <!-- WISPR FLOW "YOUR VOICE" COMMUNICATION PROFILE & SHARE CARD -->
+        <div class="stats-grid" style="grid-template-columns: 1fr 1fr; margin-top: 16px;">
+          <!-- "YOUR VOICE" COMMUNICATION PROFILE -->
+          <div class="stat-card" style="background: linear-gradient(135deg, rgba(255, 107, 0, 0.08) 0%, rgba(18, 20, 32, 0.6) 100%); border: 1px solid rgba(255, 107, 0, 0.2);">
+            <div class="stat-header-row" style="margin-bottom: 12px;">
+              <div class="stat-header" style="color: var(--primary-orange);">YOUR VOICE PROFILE</div>
+              <span class="gauge-badge" style="background: rgba(255, 107, 0, 0.15); color: var(--primary-orange); border: 1px solid var(--primary-orange);" id="insights-archetype-badge">The Tech Strategist</span>
+            </div>
+            <div class="fixes-breakdown-list" style="gap: 10px;">
+              <div class="fix-sub-row"><span>Peak Dictation Hours:</span> <strong id="insights-peak-hours" style="color: #fff;">2:00 PM – 5:00 PM</strong></div>
+              <div class="fix-sub-row"><span>Dictation Multiplier:</span> <strong id="insights-multiplier" style="color: var(--primary-orange);">3.4x Faster than Typing</strong></div>
+              <div class="fix-sub-row"><span>Vocabulary Status:</span> <strong id="insights-vocab-status" style="color: #4cd964;">Unlocked (Custom Terms Active)</strong></div>
+            </div>
+          </div>
+
+          <!-- SHAREABLE PRODUCTIVITY CARD -->
+          <div class="stat-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div class="stat-header" style="margin-bottom: 8px;">SHARE YOUR PRODUCTIVITY</div>
+              <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5;" id="insights-share-preview">
+                I dictated <strong style="color: #fff;" id="share-words-val">3.3K words</strong> & saved <strong style="color: var(--primary-orange);" id="share-time-val">1.4 hours</strong> with Voice Flow! 🚀
+              </div>
+            </div>
+            <button class="btn-primary" style="margin-top: 14px; width: 100%; padding: 9px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="copyProductivityShareCard()">
+              <span>📋</span> Copy Share Card
+            </button>
+          </div>
+        </div>
       </section>
 
       <!-- PAGE 3: DICTIONARY PAGE (WISPR FLOW GOLD STANDARD) -->
