@@ -25,9 +25,9 @@ class Config:
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
-    vad_threshold: float = 0.60
-    min_speech_duration_ms: int = 200
-    noise_gate_rms: float = 0.008
+    vad_threshold: float = 0.35
+    min_speech_duration_ms: int = 150
+    noise_gate_rms: float = 0.002
 
     # --- Audio Hardware Input Selection ---
     sample_rate: int = 16000
