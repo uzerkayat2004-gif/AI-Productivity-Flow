@@ -230,7 +230,7 @@ class FloatingOverlayBar:
                     self.on_cancel_click()
                 else:
                     self.on_cancel()
-            elif zone == "finish":
+            else:
                 if self.on_finish_click:
                     self.on_finish_click()
                 else:

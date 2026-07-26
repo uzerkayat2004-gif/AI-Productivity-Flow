@@ -62,6 +62,8 @@ class VoiceFlowApp:
 
     def _on_dictation_start(self) -> None:
         if self.is_recording:
+            log.info("Dictation toggle triggered while recording, finishing...")
+            self._on_dictation_finish()
             return
 
         log.info("[RECORDING] Dictation triggered!")
