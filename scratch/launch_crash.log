@@ -201,3 +201,20 @@
 2026-07-26 22:38:39,476 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
 2026-07-26 22:38:39,504 [INFO] voice_flow.main: Saved dictation record #106 into SQLite history database
 2026-07-26 22:38:39,841 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (438 chars).
+2026-07-26 22:42:52,628 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
+2026-07-26 22:42:53,017 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
+2026-07-26 22:43:27,282 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
+2026-07-26 22:43:27,468 [INFO] voice_flow.audio: [AUDIO] Resampled 1509376 samples from 44100 Hz -> 16000 Hz (547620 samples)
+2026-07-26 22:43:27,489 [INFO] voice_flow.main: [AUDIO] Got 547620 samples (34.23s), peak=0.1413
+2026-07-26 22:43:27,492 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Initiating A New Conversa...' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
+2026-07-26 22:43:27,492 [INFO] voice_flow.main: Detected active app: 'Initiating A New Conversa...' (autocleanup style)
+2026-07-26 22:43:27,497 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
+2026-07-26 22:43:27,498 [INFO] voice_flow.transcriber: Transcribing 34.2s audio on 4 CPU threads with dictionary biasing...
+2026-07-26 22:43:27,498 [INFO] faster_whisper: Processing audio with duration 00:34.226
+2026-07-26 22:43:27,563 [INFO] faster_whisper: VAD filter removed 00:01.074 of audio
+2026-07-26 22:43:30,036 [INFO] voice_flow.main: STT completed in 2.544s: 'Hey, now can you check the style page? On that page we have the different different types of messages, like a personal message, work message, email, other and autoclina, and all those stuffs. Data I think not properly working. Can you make those properly working? Because this is like your preference, like how you want to page the message and all. But right now we're going to be able to make sure that you're not working on it. It's not working, can you properly set that up so that it works?'
+2026-07-26 22:43:30,748 [WARNING] voice_flow.polisher: [GEMINI gemini-2.5-flash FAILED] HTTP 429: Too Many Requests
+2026-07-26 22:43:30,748 [WARNING] voice_flow.polisher: [AI POLISH - Gemini] Connection 'Google Gemini Key' (#1) failed or rate-limited. Failing over to next key...
+2026-07-26 22:43:31,456 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
+2026-07-26 22:43:31,478 [INFO] voice_flow.main: Saved dictation record #107 into SQLite history database
+2026-07-26 22:43:31,811 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (464 chars).

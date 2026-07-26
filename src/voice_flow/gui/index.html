@@ -173,10 +173,10 @@
         <div class="dictionary-toolbar" style="display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;">
           <div class="search-box" style="flex: 1; min-width: 240px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: 10px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
             <span style="opacity: 0.5;">🔍</span>
-            <input type="text" id="dictionary-search-input" placeholder="Search dictionary terms..." oninput="filterDictionaryChips()" style="background: none; border: none; color: #fff; width: 100%; font-size: 13px; outline: none;">
+            <input type="text" id="dictionary-search-input" placeholder="Search terms or snippets..." oninput="filterDictionaryChips()" style="background: none; border: none; color: #fff; width: 100%; font-size: 13px; outline: none;">
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="text" id="dictionary-add-input" placeholder="e.g. VoiceFlow, GraphQL..." style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 14px; color: #fff; font-size: 13px; outline: none; width: 220px;" onkeydown="if(event.key==='Enter') addDictionaryWordFromInput()">
+            <input type="text" id="dictionary-add-input" placeholder="e.g. VoiceFlow, or shortcut -> text..." style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 14px; color: #fff; font-size: 13px; outline: none; width: 280px;" onkeydown="if(event.key==='Enter') addDictionaryWordFromInput()">
             <button class="btn-primary" style="padding: 8px 16px; font-size: 13px;" onclick="addDictionaryWordFromInput()">+ Add Word</button>
           </div>
         </div>
@@ -184,6 +184,7 @@
         <!-- CATEGORY TAG FILTERS -->
         <div class="dict-tags-nav" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
           <button class="dict-tag-btn active" onclick="filterDictionaryCategory('all', this)">All Terms</button>
+          <button class="dict-tag-btn" onclick="filterDictionaryCategory('snippets', this)">🚀 Snippets & Text Expansions</button>
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('technical', this)">💻 Technical Jargon</button>
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('names', this)">👤 Proper Names</button>
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('brands', this)">🏢 Brands & Products</button>

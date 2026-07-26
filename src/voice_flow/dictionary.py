@@ -41,17 +41,21 @@ class DictionaryEngine:
     def get_initial_prompt(self) -> str:
         """Construct Whisper initial_prompt string to bias Transformer decoding."""
         self._ensure_loaded()
-        # Filter terms to include genuine custom jargon / proper nouns
-        valid_words = [w for w in self.words if len(w) >= 3 and w.lower() not in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}]
+        valid_words = []
+        for w in self.words:
+            clean_w = w.split("->")[0].strip() if "->" in w else (w.split("=>")[0].strip() if "=>" in w else w.strip())
+            if len(clean_w) >= 2 and clean_w.lower() not in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}:
+                valid_words.append(clean_w)
+
         if not valid_words:
             return "Clear dictation, accurate spelling, proper names."
 
-        prompt = "Vocabulary list: " + ", ".join(valid_words) + "."
+        prompt = "Dictionary terms: " + ", ".join(valid_words) + "."
         log.info("Whisper initial_prompt biased with dictionary terms: %s", valid_words)
         return prompt
 
     def apply_dictionary_post_processing(self, text: str) -> str:
-        """Enforce exact user casing and phonetic fuzzy replacement for all dictionary terms."""
+        """Enforce exact user casing, snippet expansion, and phonetic fuzzy replacement for all dictionary terms."""
         if not text:
             return text
 
@@ -65,18 +69,32 @@ class DictionaryEngine:
             if not w_strip:
                 continue
 
+            # Support Snippets Shortcut Syntax: "myemail -> john@company.com" or "zoomlink => https://..."
+            if "->" in w_strip or "=>" in w_strip:
+                delimiter = "->" if "->" in w_strip else "=>"
+                parts = w_strip.split(delimiter)
+                if len(parts) == 2:
+                    shortcut = parts[0].strip()
+                    expansion = parts[1].strip()
+                    if shortcut and expansion:
+                        pattern = re.compile(r"(?<!\w)" + re.escape(shortcut) + r"(?!\w)", re.IGNORECASE)
+                        if pattern.search(result):
+                            result = pattern.sub(expansion, result)
+                            log.info("Snippet expansion applied: '%s' -> '%s'", shortcut, expansion)
+                        continue
+
             dict_lower = w_strip.lower()
             if dict_lower in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}:
                 continue
 
-            # Case-insensitive word boundary substitution to guarantee exact user casing
-            pattern = re.compile(r"\b" + re.escape(w_strip) + r"\b", re.IGNORECASE)
+            # Flexible non-word boundary pattern (supports hyphens like Pro-Con, dots like Node.js, spaces)
+            pattern = re.compile(r"(?<!\w)" + re.escape(w_strip) + r"(?!\w)", re.IGNORECASE)
             if pattern.search(result):
                 result = pattern.sub(w_strip, result)
                 continue
 
             # Fuzzy phonetic match for terms >= 4 chars
-            if len(w_strip) >= 4:
+            if len(w_strip) >= 4 and not any(c in w_strip for c in " -./"):
                 tokens = re.findall(r"\b\w+\b", result)
                 for token in tokens:
                     if len(token) >= 4 and token.lower() != dict_lower:

@@ -843,9 +843,10 @@ function filterDictionaryCategory(cat, el) {
 
 function getWordCategoryTag(word) {
   const w = word.trim();
+  if (w.includes("->") || w.includes("=>")) return "snippets";
   if (w.toUpperCase() === w && w.length <= 6) return "acronyms";
   if (w.includes(" ") || /^[A-Z][a-z]+ [A-Z][a-z]+/.test(w)) return "names";
-  if (["api", "graphql", "sql", "json", "python", "typescript", "react", "whisper", "voiceflow", "vpn", "http"].some(k => w.toLowerCase().includes(k))) return "technical";
+  if (["api", "graphql", "sql", "json", "python", "typescript", "react", "whisper", "voiceflow", "vpn", "http", "pro-con"].some(k => w.toLowerCase().includes(k))) return "technical";
   return "brands";
 }
 
@@ -871,7 +872,7 @@ function renderDictionaryFilteredChips() {
       <div style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-muted);">
         <div style="font-size: 32px; margin-bottom: 8px;">📖</div>
         <div style="font-weight: 700; font-size: 15px; color: var(--text-main);">No terms match your search</div>
-        <div style="font-size: 12px; margin-top: 4px;">Type a word above and click "+ Add Word" to add it to your Personal Dictionary.</div>
+        <div style="font-size: 12px; margin-top: 4px;">Type a term or snippet above (e.g. "myemail -> me@company.com") and click "+ Add Word".</div>
       </div>
     `;
     return;
@@ -880,6 +881,7 @@ function renderDictionaryFilteredChips() {
   chipContainer.innerHTML = filtered.map(w => {
     const catTag = getWordCategoryTag(w);
     let icon = "⚡";
+    if (catTag === "snippets") icon = "🚀";
     if (catTag === "technical") icon = "💻";
     if (catTag === "names") icon = "👤";
     if (catTag === "brands") icon = "🏢";
