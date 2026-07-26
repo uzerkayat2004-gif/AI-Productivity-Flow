@@ -21,16 +21,16 @@ def get_desktop_paths():
 
 desktop_paths = get_desktop_paths()
 start_menu = Path(os.path.expanduser("~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs"))
-sm_shortcut = start_menu / "Voice Flow.lnk"
+sm_shortcut = start_menu / "voiceFlow.lnk"
 dt_commands = []
 for dp in desktop_paths:
-    sc = dp / "Voice Flow.lnk"
+    sc = dp / "voiceFlow.lnk"
     dt_commands.append(f"""
 $Shortcut = $WshShell.CreateShortcut('{sc}')
 $Shortcut.TargetPath = '{vbs}'
 $Shortcut.WorkingDirectory = '{root}'
 $Shortcut.IconLocation = '{ico}'
-$Shortcut.Description = 'Voice Flow - AI Speech Desktop App'
+$Shortcut.Description = 'voiceFlow - AI Speech Desktop App'
 $Shortcut.Save()
 """)
 
@@ -43,7 +43,7 @@ $Shortcut2 = $WshShell.CreateShortcut('{sm_shortcut}')
 $Shortcut2.TargetPath = '{vbs}'
 $Shortcut2.WorkingDirectory = '{root}'
 $Shortcut2.IconLocation = '{ico}'
-$Shortcut2.Description = 'Voice Flow - AI Speech Desktop App'
+$Shortcut2.Description = 'voiceFlow - AI Speech Desktop App'
 $Shortcut2.Save()
 """
 
