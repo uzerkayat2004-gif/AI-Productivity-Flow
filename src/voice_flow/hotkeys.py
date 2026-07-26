@@ -56,6 +56,7 @@ class InputTriggerListener:
         self._lock = threading.Lock()
         self._is_recording = False
         self._hotkey_triggered = False
+        self._mbutton_press_time: float = 0.0
 
     def start(self) -> None:
         """Start listening for global mouse and keyboard events."""
@@ -91,19 +92,26 @@ class InputTriggerListener:
     # -- Win32 Mouse Filter & Callbacks --
 
     def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Selectively intercepts middle button clicks to trigger Push-to-Talk dictation."""
+        """Selectively intercepts middle button clicks — supports both Push-to-Talk Hold and Toggle Tap."""
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
             with self._lock:
+                self._mbutton_press_time = time.time()
                 if not self._is_recording:
                     self._is_recording = True
                     # MUST dispatch to thread — Win32 hooks timeout after ~300ms
                     threading.Thread(target=self._on_start, daemon=True).start()
+                else:
+                    self._is_recording = False
+                    threading.Thread(target=self._on_finish, daemon=True).start()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
             with self._lock:
-                if self._is_recording:
+                press_dur = time.time() - self._mbutton_press_time
+                # If held > 0.35s (Push-to-Talk hold), finish on release
+                # If quick tap (<0.35s), keep recording in toggle mode
+                if self._is_recording and press_dur > 0.35:
                     self._is_recording = False
                     threading.Thread(target=self._on_finish, daemon=True).start()
             if self._mouse_listener:
