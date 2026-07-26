@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+import time
 from typing import Callable
 
 from pynput import keyboard, mouse
