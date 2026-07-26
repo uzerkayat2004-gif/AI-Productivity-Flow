@@ -1,0 +1,3 @@
+[SYSTEM] Enabled Windows silent auto-startup at login.
+[API SERVER] Voice Flow Multithreaded Backend API listening on http://127.0.0.1:8991
+[GUI] Opening Voice Flow Desktop App window at http://127.0.0.1:8991/index.html...

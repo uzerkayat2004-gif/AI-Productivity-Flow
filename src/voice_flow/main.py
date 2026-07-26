@@ -23,10 +23,13 @@ from voice_flow.storage import storage
 from voice_flow.style_engine import style_engine
 from voice_flow.transcriber import Transcriber
 
-# Fix UTF-8 encoding on Windows console
+# Fix UTF-8 encoding on Windows console (only if stdout has a buffer)
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="backslashreplace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="backslashreplace")
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="backslashreplace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="backslashreplace")
+    except AttributeError:
+        pass
 
 logging.basicConfig(
     level=logging.INFO,
