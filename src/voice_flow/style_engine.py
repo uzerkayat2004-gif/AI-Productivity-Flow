@@ -14,29 +14,29 @@ log = logging.getLogger(__name__)
 # Complete style instructions dictionary matching all GUI cards
 STYLE_INSTRUCTIONS = {
     # Personal Messaging Cards
-    "personal_formal": "Format as a formal personal message. Use standard capitalization and full punctuation.",
-    "personal_casual": "Format as a casual personal chat message. Use standard capitalization, but omit trailing periods.",
-    "personal_very_casual": "Format as a very casual chat message. Use all lowercase letters and minimal punctuation.",
+    "personal_formal": "Rephrase as a formal personal message with standard capitalization and complete punctuation.",
+    "personal_casual": "Rephrase as a casual personal chat message. Keep it friendly and natural. Capitalize normally, omit unnecessary trailing periods.",
+    "personal_very_casual": "Rephrase as a very casual chat text. Use ALL LOWERCASE letters, short informal words, and no trailing punctuation.",
 
     # Work Messaging Cards
-    "work_formal": "Format as a formal work message. Use professional tone, complete sentences, proper capitalization, and full punctuation.",
-    "work_casual": "Format as a casual work message. Professional yet relaxed tone, standard capitalization, light punctuation.",
-    "work_excited": "Format as an enthusiastic work message! Use upbeat tone and exclamation marks!",
+    "work_formal": "Rephrase as a formal professional work message. Use professional vocabulary, complete sentences, and formal grammar.",
+    "work_casual": "Rephrase as a clear, concise work message for Slack/Teams. Professional yet conversational.",
+    "work_excited": "Rephrase as an enthusiastic work message! Use positive upbeat language and exclamation marks!",
 
     # Email Cards
-    "email_formal": "Format as a polished, formal email. Use complete sentences, proper capitalization, salutation, and standard punctuation.",
-    "email_casual": "Format as a casual, friendly email. Clear, concise, standard capitalization.",
-    "email_excited": "Format as an enthusiastic email! Use friendly, upbeat tone and exclamation marks!",
+    "email_formal": "Format as a formal email draft with greeting, clear body paragraphs, and professional closing.",
+    "email_casual": "Format as a casual email draft. Friendly, direct, and well-structured.",
+    "email_excited": "Format as an enthusiastic email! Friendly tone with exclamations!",
 
     # Other Apps Cards
     "other_formal": "Format as a formal document or note. Use complete sentences, clear paragraphs, and precise punctuation.",
-    "other_casual": "Format as a casual note. Relaxed tone, clear spacing, and standard capitalization.",
-    "other_excited": "Format as an energetic text! Use energetic phrasing and exclamations!",
+    "other_casual": "Format as a clean casual note. Relaxed tone and clear spacing.",
+    "other_excited": "Format as energetic text! Use vibrant phrasing and exclamation marks!",
 
     # Auto Cleanup Cards
-    "cleanup_none": "Transcribe verbatim. Preserve raw speech including filler words ('um', 'uh') and self-corrections.",
-    "cleanup_light": "Clean up filler words ('um', 'uh', 'like') and basic grammar while preserving exact phrasing.",
-    "cleanup_medium": "Polish for maximum clarity, conciseness, and readability. Remove filler words and fix awkward phrasing."
+    "cleanup_none": "Transcribe verbatim. Keep exact words without editing.",
+    "cleanup_light": "Clean up filler words ('um', 'uh', 'like', 'you know') and fix basic grammar while keeping original phrasing.",
+    "cleanup_medium": "Edit for maximum clarity, conciseness, and impact. Remove filler words, fix awkward phrasing, and make the text flow smoothly."
 }
 
 # Category defaults

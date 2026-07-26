@@ -68,10 +68,30 @@ class Transcriber:
             temperature=config.temperature,
             language=config.language,
             initial_prompt=initial_prompt,
-            vad_filter=False,
+            vad_filter=True,
+            vad_parameters=dict(
+                threshold=0.45,
+                min_speech_duration_ms=100,
+                min_silence_duration_ms=300,
+                speech_pad_ms=200,
+            ),
         )
 
         parts: list[str] = [s.text.strip() for s in segments if s.text.strip()]
         result = " ".join(parts).strip()
+
+        # Fallback if VAD filter produced empty text on close-mic speech
+        if not result and float(np.max(np.abs(clean_audio))) > 0.04:
+            log.info("VAD filter returned empty on loud speech, running direct audio fallback...")
+            fallback_segments, _ = self.model.transcribe(
+                clean_audio,
+                beam_size=config.beam_size,
+                temperature=config.temperature,
+                language=config.language,
+                initial_prompt=initial_prompt,
+                vad_filter=False,
+            )
+            parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
+            result = " ".join(parts).strip()
 
         return result
