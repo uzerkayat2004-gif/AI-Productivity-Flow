@@ -17,15 +17,15 @@ log = logging.getLogger(__name__)
 
 
 def _apply_noise_gate_and_normalize(audio: NDArray[np.float32]) -> NDArray[np.float32]:
-    """Normalize primary speaker voice to optimal peak amplitude."""
+    """Normalize primary speaker voice to optimal peak amplitude safely."""
     if audio.size == 0:
         return audio
 
     clean = audio.flatten()
     max_amp = float(np.max(np.abs(clean)))
 
-    if max_amp > 0.0003:
-        scale = min(25.0, 0.85 / max_amp)
+    if max_amp > 0.005:
+        scale = min(4.0, 0.85 / max_amp)
         return (clean * scale).astype(np.float32)
 
     return clean
@@ -51,7 +51,7 @@ class Transcriber:
             return ""
 
         duration = len(audio) / config.sample_rate
-        if duration < 0.25:
+        if duration < 0.2:
             log.warning("Audio too short (%.1fs), skipping.", duration)
             return ""
 
@@ -68,30 +68,10 @@ class Transcriber:
             temperature=config.temperature,
             language=config.language,
             initial_prompt=initial_prompt,
-            vad_filter=True,
-            vad_parameters=dict(
-                threshold=config.vad_threshold,
-                min_speech_duration_ms=config.min_speech_duration_ms,
-                min_silence_duration_ms=400,
-                speech_pad_ms=300,
-            ),
+            vad_filter=False,
         )
 
         parts: list[str] = [s.text.strip() for s in segments if s.text.strip()]
         result = " ".join(parts).strip()
-
-        # Fallback if VAD filter was overly aggressive on quiet audio
-        if not result:
-            log.info("VAD filter returned empty, retrying with direct audio fallback...")
-            fallback_segments, _ = self.model.transcribe(
-                clean_audio,
-                beam_size=config.beam_size,
-                temperature=config.temperature,
-                language=config.language,
-                initial_prompt=initial_prompt,
-                vad_filter=False,
-            )
-            parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
-            result = " ".join(parts).strip()
 
         return result
