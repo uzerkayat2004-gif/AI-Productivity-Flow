@@ -35,10 +35,13 @@ class TextPolisher:
     """Intelligent AI Text Cleaning & Polish Engine."""
 
     def __init__(self) -> None:
-        pass
+        self._rate_limited_keys: dict[str, float] = {}
 
     def polish(self, raw_text: str, style_instruction: str = "") -> str:
         """Clean and polish raw speech text."""
+        if not hasattr(self, "_rate_limited_keys"):
+            self._rate_limited_keys = {}
+
         if not raw_text or not raw_text.strip():
             return ""
 
@@ -60,7 +63,7 @@ class TextPolisher:
         for pattern, repl in FILLER_PATTERNS:
             cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
 
-        # Resolve self-corrections
+        # Handle backtracks / self corrections
         for pattern, repl in SELF_CORRECT_PATTERNS:
             cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
 
@@ -82,6 +85,9 @@ class TextPolisher:
         self, raw_text: str, api_keys: dict[str, str], style_instruction: str
     ) -> str | None:
         """Rotate through pool of user API keys and multi-connections for AI polishing with priority failover."""
+        if not hasattr(self, "_rate_limited_keys"):
+            self._rate_limited_keys = {}
+
         prompt = (
             f"You are an ultra-fast text polishing assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
             f"fixing punctuation/grammar, and capitalizing properly.\n"
