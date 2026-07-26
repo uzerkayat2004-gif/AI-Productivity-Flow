@@ -279,11 +279,24 @@ class FloatingOverlayBar:
 
     def _draw(self) -> None:
         c = self.canvas
+
+        # Step 1: Determine correct size for current state BEFORE drawing
+        if self.state == "READY":
+            if getattr(self, "_is_mouse_over", False):
+                self._set_bar_size(self.expanded_width, self.hover_height)
+            else:
+                self._set_bar_size(self.idle_width, self.idle_height)
+        elif self.state in ("RECORDING", "PROCESSING"):
+            self._set_bar_size(self.recording_width, self.hover_height)
+        elif self.state == "DONE":
+            self._set_bar_size(self.expanded_width, self.hover_height)
+
+        # Step 2: Clear and draw pill at the CORRECT size
         c.delete("all")
         w, h = self.width, self.height
-
         self._draw_pill(2, 2, w - 2, h - 2, h // 2 - 2, self.BG, self.BORDER_COLOR)
 
+        # Step 3: Draw state-specific content
         if self.state == "READY":
             self._draw_ready(w, h)
         elif self.state == "RECORDING":
@@ -294,20 +307,14 @@ class FloatingOverlayBar:
             self._draw_done(w, h)
 
     def _draw_ready(self, w: int, h: int) -> None:
-        c = self.canvas
-        cy = h / 2
-
+        # Size already set by _draw() — just draw content
         if getattr(self, "_is_mouse_over", False):
-            self._set_bar_size(self.expanded_width, self.hover_height)
-            w, h = self.width, self.height
+            c = self.canvas
             cy = h / 2
             c.create_text(w / 2, cy, text="Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10, "bold"), anchor="center")
-        else:
-            self._set_bar_size(self.idle_width, self.idle_height)
 
     def _draw_recording(self, w: int, h: int) -> None:
-        self._set_bar_size(self.recording_width, self.hover_height)
-        w, h = self.width, self.height
+        # Size already set by _draw() — just draw content
         c = self.canvas
         cy = h / 2
 
