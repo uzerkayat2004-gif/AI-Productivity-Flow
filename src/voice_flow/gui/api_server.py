@@ -34,6 +34,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response(storage.get_insights())
         elif self.path == "/api/dictionary":
             self.send_json_response(storage.get_dictionary_words())
+        elif self.path == "/api/styles/get":
+            styles = {
+                "personal": storage.get_setting("style_personal", "personal_very_casual"),
+                "work": storage.get_setting("style_work", "work_casual"),
+                "email": storage.get_setting("style_email", "email_formal"),
+                "other": storage.get_setting("style_other", "other_formal"),
+                "autocleanup": storage.get_setting("style_autocleanup", "cleanup_light"),
+            }
+            self.send_json_response(styles)
         elif self.path == "/api/apikeys/list":
             self.send_json_response(storage.get_all_api_keys())
         elif self.path.startswith("/api/providers/details"):
@@ -215,6 +224,16 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             active = bool(data.get("is_active", True))
             success = storage.toggle_provider_model(mid, active)
             self.send_json_response({"success": success})
+
+        elif self.path == "/api/styles/update":
+            data = json.loads(body)
+            cat = data.get("category")
+            sid = data.get("style_id")
+            if cat and sid:
+                storage.save_setting(f"style_{cat}", sid)
+                self.send_json_response({"success": True, "category": cat, "style_id": sid})
+            else:
+                self.send_json_response({"success": False, "error": "Invalid parameters"})
 
         else:
             self.send_error(404, "Endpoint not found")

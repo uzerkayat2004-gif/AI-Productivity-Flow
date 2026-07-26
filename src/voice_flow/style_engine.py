@@ -7,31 +7,45 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from voice_flow.storage import storage
 
 log = logging.getLogger(__name__)
 
-# Style presets matching Wispr Flow research
-STYLE_PRESETS = {
-    "personal_messaging": {
-        "name": "Casual / Personal Messages",
-        "description": "Uses natural capitalization, friendly tone, concise phrasing.",
-        "prompt_instruction": "Format as a friendly, natural chat message. Use standard capitalization and light punctuation.",
-    },
-    "work_messaging": {
-        "name": "Work Messaging",
-        "description": "Clear, professional, concise chat message for Slack/Teams.",
-        "prompt_instruction": "Format cleanly for Slack/Teams. Keep it concise, clear, and professional.",
-    },
-    "email": {
-        "name": "Email & Formal",
-        "description": "Polished complete sentences, formal tone, full punctuation.",
-        "prompt_instruction": "Format as a polished, formal email. Use complete sentences, proper capitalization, and standard punctuation.",
-    },
-    "auto_cleanup": {
-        "name": "Smart Auto-Cleanup (Default)",
-        "description": "Strips fillers (um/uh), resolves self-corrections, preserves natural voice.",
-        "prompt_instruction": "Remove filler words ('um', 'uh', 'like'), resolve self-corrections, fix basic grammar, and capitalize sentences cleanly.",
-    },
+# Complete style instructions dictionary matching all GUI cards
+STYLE_INSTRUCTIONS = {
+    # Personal Messaging Cards
+    "personal_formal": "Format as a formal personal message. Use standard capitalization and full punctuation.",
+    "personal_casual": "Format as a casual personal chat message. Use standard capitalization, but omit trailing periods.",
+    "personal_very_casual": "Format as a very casual chat message. Use all lowercase letters and minimal punctuation.",
+
+    # Work Messaging Cards
+    "work_formal": "Format as a formal work message. Use professional tone, complete sentences, proper capitalization, and full punctuation.",
+    "work_casual": "Format as a casual work message. Professional yet relaxed tone, standard capitalization, light punctuation.",
+    "work_excited": "Format as an enthusiastic work message! Use upbeat tone and exclamation marks!",
+
+    # Email Cards
+    "email_formal": "Format as a polished, formal email. Use complete sentences, proper capitalization, salutation, and standard punctuation.",
+    "email_casual": "Format as a casual, friendly email. Clear, concise, standard capitalization.",
+    "email_excited": "Format as an enthusiastic email! Use friendly, upbeat tone and exclamation marks!",
+
+    # Other Apps Cards
+    "other_formal": "Format as a formal document or note. Use complete sentences, clear paragraphs, and precise punctuation.",
+    "other_casual": "Format as a casual note. Relaxed tone, clear spacing, and standard capitalization.",
+    "other_excited": "Format as an energetic text! Use energetic phrasing and exclamations!",
+
+    # Auto Cleanup Cards
+    "cleanup_none": "Transcribe verbatim. Preserve raw speech including filler words ('um', 'uh') and self-corrections.",
+    "cleanup_light": "Clean up filler words ('um', 'uh', 'like') and basic grammar while preserving exact phrasing.",
+    "cleanup_medium": "Polish for maximum clarity, conciseness, and readability. Remove filler words and fix awkward phrasing."
+}
+
+# Category defaults
+CATEGORY_DEFAULTS = {
+    "personal": "personal_very_casual",
+    "work": "work_casual",
+    "email": "email_formal",
+    "other": "other_formal",
+    "autocleanup": "cleanup_light"
 }
 
 
@@ -49,17 +63,14 @@ def get_active_app_info() -> tuple[str, str]:
         if not hwnd:
             return ("General App", "general.exe")
 
-        # Get window text length and title
         length = user32.GetWindowTextLengthW(hwnd)
         buff = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, buff, length + 1)
         title = buff.value.strip()
 
-        # Get process ID and executable name
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
 
-        # Query process executable path
         kernel32 = ctypes.windll.kernel32
         PROCESS_QUERY_INFORMATION = 0x0400
         PROCESS_VM_READ = 0x0010
@@ -85,31 +96,36 @@ def get_active_app_info() -> tuple[str, str]:
 
 
 def detect_app_category(app_title: str, exe_name: str) -> str:
-    """Categorize app into Work Messaging, Personal Messaging, Email, or General."""
+    """Categorize app into work, personal, email, other, or autocleanup."""
     title_lower = app_title.lower()
     exe_lower = exe_name.lower()
 
-    if any(k in exe_lower or k in title_lower for k in ["slack", "teams", "discord"]):
-        return "work_messaging"
-    elif any(k in exe_lower or k in title_lower for k in ["whatsapp", "telegram", "messenger", "signal"]):
-        return "personal_messaging"
+    if any(k in exe_lower or k in title_lower for k in ["slack", "teams", "discord", "linkedin"]):
+        return "work"
+    elif any(k in exe_lower or k in title_lower for k in ["whatsapp", "telegram", "messenger", "signal", "instagram"]):
+        return "personal"
     elif any(k in exe_lower or k in title_lower for k in ["outlook", "thunderbird", "mail", "gmail"]):
         return "email"
+    elif any(k in exe_lower or k in title_lower for k in ["notion", "word", "winword", "docs", "chatgpt"]):
+        return "other"
     else:
-        return "auto_cleanup"
+        return "autocleanup"
 
 
 class StyleEngine:
-    """Style manager for applying app-specific dictation prompts."""
+    """Style manager for applying user-configured app-specific dictation prompts."""
 
-    def __init__(self) -> None:
-        self.default_style = "auto_cleanup"
-
-    def get_style_for_current_app(self) -> tuple[str, str, dict[str, str]]:
+    def get_style_for_current_app(self) -> tuple[str, str, str]:
         app_title, exe_name = get_active_app_info()
         category = detect_app_category(app_title, exe_name)
-        preset = STYLE_PRESETS.get(category, STYLE_PRESETS["auto_cleanup"])
-        return (app_title, category, preset)
+        
+        # Retrieve user selected style ID from SQLite storage for this category
+        default_style_id = CATEGORY_DEFAULTS.get(category, "cleanup_light")
+        style_id = storage.get_setting(f"style_{category}", default_style_id)
+
+        instruction = STYLE_INSTRUCTIONS.get(style_id, STYLE_INSTRUCTIONS["cleanup_light"])
+        log.info("[STYLE ENGINE] App: '%s' | Category: '%s' | Selected Style ID: '%s'", app_title, category, style_id)
+        return (app_title, category, instruction)
 
 
 # Singleton Style Engine Instance

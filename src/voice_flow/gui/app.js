@@ -162,6 +162,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadInsights();
   loadDictionary();
   loadSavedApiKeys();
+  loadStyleSettings();
   renderStyleCategory("personal");
   startFloatingBarStartupSequence();
 
@@ -171,6 +172,19 @@ document.addEventListener("DOMContentLoaded", () => {
     loadInsights();
   }, 3000);
 });
+
+async function loadStyleSettings() {
+  try {
+    const res = await fetch("/api/styles/get");
+    const data = await res.json();
+    if (data) {
+      selectedStyles = { ...selectedStyles, ...data };
+      renderStyleCategory(currentStyleCategory);
+    }
+  } catch (err) {
+    console.error("Error loading style settings:", err);
+  }
+}
 
 // Load persistent API keys from SQLite storage on startup
 async function loadSavedApiKeys() {
@@ -399,9 +413,18 @@ function renderStyleCategory(categoryKey) {
   }).join("");
 }
 
-function selectStyleCard(categoryKey, cardId) {
+async function selectStyleCard(categoryKey, cardId) {
   selectedStyles[categoryKey] = cardId;
   renderStyleCategory(categoryKey);
+  try {
+    await fetch("/api/styles/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: categoryKey, style_id: cardId }),
+    });
+  } catch (err) {
+    console.error("Error saving style selection:", err);
+  }
 }
 
 // VizProFlow Perfect Keys Sub-Modals (Shortcuts & Microphone)
