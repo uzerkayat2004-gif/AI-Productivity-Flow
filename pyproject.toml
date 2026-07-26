@@ -10,6 +10,7 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "sounddevice>=0.5.0",
     "numpy>=1.26.0",
+    "scipy>=1.11.0",
     "pynput>=1.7.7",
     "pyperclip>=1.9.0",
     "pyautogui>=0.9.54",

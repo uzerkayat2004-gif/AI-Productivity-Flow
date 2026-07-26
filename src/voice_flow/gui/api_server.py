@@ -10,7 +10,7 @@ import sys
 import threading
 import urllib.request
 import urllib.error
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
 import sounddevice as sd
 
 from voice_flow.config import config
@@ -358,8 +358,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
 
 def start_api_server() -> None:
-    httpd = HTTPServer(("127.0.0.1", PORT), VoiceFlowApiHandler)
-    print(f"[API SERVER] Voice Flow Backend API listening on http://127.0.0.1:{PORT}")
+    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), VoiceFlowApiHandler)
+    print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://127.0.0.1:{PORT}")
     httpd.serve_forever()
 
 
