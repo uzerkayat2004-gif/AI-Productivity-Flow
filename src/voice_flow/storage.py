@@ -130,43 +130,54 @@ class StorageEngine:
         seeds = {
             "gemini": [
                 ("gemini-2.5-flash", "Gemini 2.5 Flash"),
-                ("gemini-2.5-pro", "Gemini 2.5 Pro"),
                 ("gemini-2.0-flash", "Gemini 2.0 Flash"),
+                ("gemini-1.5-pro", "Gemini 1.5 Pro"),
+                ("gemini-1.5-flash", "Gemini 1.5 Flash"),
+            ],
+            "groq": [
+                ("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
+                ("llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
+                ("whisper-large-v3-turbo", "Whisper Large v3 Turbo"),
+            ],
+            "elevenlabs": [
+                ("eleven_v3", "ElevenLabs v3 Expressive"),
+                ("eleven_flash_v2_5", "ElevenLabs Flash v2.5"),
+                ("eleven_multilingual_v2", "ElevenLabs Multilingual v2"),
+            ],
+            "deepgram": [
+                ("nova-3", "Deepgram Nova 3 STT"),
+                ("flux", "Deepgram Flux Conversational"),
+                ("aura-2", "Deepgram Aura 2 TTS"),
             ],
             "openai": [
                 ("gpt-4o-mini", "GPT-4o Mini"),
-                ("gpt-4o", "GPT-4o"),
+                ("gpt-4o", "GPT-4o Flagship"),
                 ("gpt-3.5-turbo", "GPT-3.5 Turbo"),
             ],
-            "groq": [
-                ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
-                ("llama-3.1-8b-instant", "Llama 3.1 8B"),
-                ("whisper-large-v3-turbo", "Whisper Large v3 Turbo"),
+            "assemblyai": [
+                ("universal-2", "AssemblyAI Universal-2 STT"),
+                ("universal-1", "AssemblyAI Universal-1 STT"),
+                ("conformer-2", "AssemblyAI Conformer-2 STT"),
             ],
-            "anthropic": [
-                ("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet"),
-                ("claude-3-haiku-20240307", "Claude 3 Haiku"),
+            "huggingface": [
+                ("fixie-ai/ultravox-v0_5", "Ultravox v0.5 Speech LLM"),
+                ("openai/whisper-large-v3-turbo", "Whisper Large v3 Turbo"),
+                ("kyutai/moshiko-pytorch", "Moshiko Duplex Voice"),
             ],
-            "deepseek": [
-                ("deepseek-chat", "DeepSeek V3"),
-                ("deepseek-reasoner", "DeepSeek R1"),
+            "cloudflare": [
+                ("@cf/deepgram/nova-3", "Cloudflare Deepgram Nova 3"),
+                ("@cf/openai/whisper-large-v3-turbo", "Cloudflare Whisper v3"),
+                ("@cf/myshell/melotts", "Cloudflare MeloTTS"),
             ],
-            "alibaba": [
-                ("qwen-turbo", "Qwen Turbo"),
-                ("qwen-plus", "Qwen Plus"),
-                ("qwen-max", "Qwen Max"),
+            "together": [
+                ("meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Turbo"),
+                ("cartesia/sonic-multilingual", "Cartesia Sonic TTS"),
+                ("togethercomputer/whisper-large-v3", "Together Whisper v3"),
             ],
-            "zenmux": [
-                ("zenmux/glm-5.2-free", "GLM 5.2 Free"),
-                ("moonshot/kimi-k2.7-code-free", "Kimi K2.7 Free"),
-            ],
-            "elevenlabs": [
-                ("eleven_multilingual_v2", "Multilingual v2"),
-                ("eleven_flash_v2_5", "Flash v2.5"),
-            ],
-            "deepgram": [
-                ("nova-2-general", "Nova 2 General"),
-                ("aura-asteria-en", "Aura Asteria TTS"),
+            "replicate": [
+                ("victor-upx/kokoro-tts", "Kokoro TTS Generation"),
+                ("coqui/xtts-v2", "Coqui XTTS-v2 Voice Clone"),
+                ("replicate/whisp-v3", "Replicate Whisp v3"),
             ]
         }
         with self._get_conn() as conn:

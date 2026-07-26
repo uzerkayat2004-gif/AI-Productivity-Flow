@@ -82,18 +82,18 @@ class TextPolisher:
     ) -> str | None:
         """Rotate through pool of user API keys and multi-connections for AI polishing with priority failover."""
         prompt = (
-            f"You are Voice Flow AI dictation assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
-            f"fixing grammar, resolving self-corrections, formatting line breaks, and capitalizing properly. Do NOT add commentary or quotes.\n"
+            f"You are an ultra-fast text polishing assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
+            f"fixing punctuation/grammar, and capitalizing properly.\n"
+            f"CRITICAL INSTRUCTION: Output ONLY the final cleaned text. Do NOT add options, bullet points, intro text, quote marks, or explanation.\n"
             f"Style guidance: {style_instruction}\n\n"
             f"Spoken text: {raw_text}"
         )
 
         all_conns = storage.get_all_provider_connections()
-        providers = ["gemini", "groq", "openai", "anthropic", "deepseek", "alibaba", "zenmux"]
+        providers = ["gemini", "groq", "openai", "together", "deepseek", "cloudflare", "huggingface", "replicate"]
 
         for provider in providers:
             conns = all_conns.get(provider, [])
-            # If no multi-key connections in DB, fall back to single key if present
             if not conns and provider in api_keys and api_keys[provider].strip():
                 conns = [{"id": 0, "name": f"{provider.capitalize()} Default", "api_key": api_keys[provider].strip(), "priority": 1, "is_active": 1}]
 
@@ -104,7 +104,6 @@ class TextPolisher:
             mode = storage.get_provider_load_balance_mode(provider)
             log.info("[AI POLISH - %s] Found %d active connection(s). Mode: %s", provider.capitalize(), len(active_conns), mode)
 
-            # Try each connection in priority order (Failover chain: Key #1 -> Key #2 -> Key #3)
             for conn in active_conns:
                 key = conn["api_key"].strip()
                 cname = conn.get("name", "Key")
@@ -124,56 +123,52 @@ class TextPolisher:
         return None
 
     def _try_provider_call(self, provider: str, key: str, prompt: str) -> str | None:
-        """Execute HTTP request to target AI provider model endpoint."""
+        """Execute HTTP request to target AI provider model endpoint with model fallbacks."""
         try:
             if provider == "gemini":
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
-                payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
-                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    if text: return text
+                models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+                for m in models:
+                    try:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
+                        payload = json.dumps({
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.1}
+                        }).encode("utf-8")
+                        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                        with urllib.request.urlopen(req, timeout=8.0) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            if text:
+                                return text
+                    except Exception as e:
+                        log.warning("[GEMINI %s FAILED] %s", m, e)
 
-            elif provider in ("groq", "openai", "deepseek", "alibaba", "zenmux"):
+            elif provider in ("groq", "openai", "deepseek", "together"):
                 endpoints = {
-                    "groq": ("https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
-                    "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
-                    "deepseek": ("https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
-                    "alibaba": ("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", "qwen-plus"),
-                    "zenmux": ("https://zenmux.ai/api/v1/chat/completions", "zenmux/glm-5.2-free"),
+                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+                    "openai": ("https://api.openai.com/v1/chat/completions", ["gpt-4o-mini", "gpt-4o"]),
+                    "together": ("https://api.together.xyz/v1/chat/completions", ["meta-llama/Llama-3.3-70B-Instruct-Turbo"]),
+                    "deepseek": ("https://api.deepseek.com/v1/chat/completions", ["deepseek-chat"]),
                 }
-                ep_url, ep_model = endpoints[provider]
-                payload = json.dumps({
-                    "model": ep_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.2
-                }).encode("utf-8")
-                req = urllib.request.Request(ep_url, data=payload, headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {key}"
-                })
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["choices"][0]["message"]["content"].strip()
-                    if text: return text
-
-            elif provider == "anthropic":
-                url = "https://api.anthropic.com/v1/messages"
-                payload = json.dumps({
-                    "model": "claude-3-5-sonnet-20241022",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": prompt}]
-                }).encode("utf-8")
-                req = urllib.request.Request(url, data=payload, headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01"
-                })
-                with urllib.request.urlopen(req, timeout=4.0) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["content"][0]["text"].strip()
-                    if text: return text
+                ep_url, ep_models = endpoints[provider]
+                for m in ep_models:
+                    try:
+                        payload = json.dumps({
+                            "model": m,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.1
+                        }).encode("utf-8")
+                        req = urllib.request.Request(ep_url, data=payload, headers={
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {key}"
+                        })
+                        with urllib.request.urlopen(req, timeout=8.0) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            text = data["choices"][0]["message"]["content"].strip()
+                            if text:
+                                return text
+                    except Exception as e:
+                        log.warning("[%s %s FAILED] %s", provider.upper(), m, e)
 
         except Exception as e:
             log.warning("[%s API CALL FAILED] %s", provider.upper(), e)
