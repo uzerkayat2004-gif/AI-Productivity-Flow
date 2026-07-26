@@ -21,13 +21,13 @@ class Config:
     cpu_threads: int = field(default_factory=lambda: max(4, os.cpu_count() or 8))
 
     # --- Speed & Accuracy Settings ---
-    beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.2s speed)
+    beam_size: int = 5  # 5 = high-accuracy beam search decoding
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
-    vad_threshold: float = 0.35
-    min_speech_duration_ms: int = 150
-    noise_gate_rms: float = 0.002
+    vad_threshold: float = 0.30
+    min_speech_duration_ms: int = 100
+    noise_gate_rms: float = 0.001
 
     # --- Audio Hardware Input Selection ---
     sample_rate: int = 16000

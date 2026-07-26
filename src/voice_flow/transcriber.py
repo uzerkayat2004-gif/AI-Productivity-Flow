@@ -72,8 +72,8 @@ class Transcriber:
             vad_parameters=dict(
                 threshold=config.vad_threshold,
                 min_speech_duration_ms=config.min_speech_duration_ms,
-                min_silence_duration_ms=250,
-                speech_pad_ms=150,
+                min_silence_duration_ms=400,
+                speech_pad_ms=300,
             ),
         )
 

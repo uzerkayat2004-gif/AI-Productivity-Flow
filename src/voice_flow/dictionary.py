@@ -28,12 +28,13 @@ class DictionaryEngine:
     def get_initial_prompt(self) -> str:
         """Construct Whisper initial_prompt string to bias Transformer decoding."""
         self.refresh_words()
-        if not self.words:
-            return "Clear dictation and proper names."
+        # Filter terms to include genuine custom jargon / proper nouns
+        valid_words = [w for w in self.words if len(w) >= 3 and w.lower() not in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}]
+        if not valid_words:
+            return "Clear dictation, accurate spelling, proper names."
 
-        # Research-backed prompt format: List specific jargon & proper nouns
-        prompt = "Dictionary vocabulary list: " + ", ".join(self.words) + "."
-        log.info("Whisper initial_prompt biased with dictionary terms: %s", self.words)
+        prompt = "Vocabulary list: " + ", ".join(valid_words) + "."
+        log.info("Whisper initial_prompt biased with dictionary terms: %s", valid_words)
         return prompt
 
     def apply_dictionary_post_processing(self, text: str) -> str:
@@ -47,24 +48,28 @@ class DictionaryEngine:
         for dict_word in self.words:
             dict_lower = dict_word.lower()
 
-            # Find whole-word matches in text (case-insensitive regex)
-            pattern = re.compile(r"\b" + re.escape(dict_word) + r"\b", re.IGNORECASE)
-
-            # If exact word exists with wrong casing, fix casing
-            if pattern.search(result):
-                result = pattern.sub(dict_word, result)
+            # Skip single short common words
+            if dict_lower in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}:
                 continue
 
-            # Otherwise, check for close phonetic matches using difflib
-            tokens = re.findall(r"\b\w+\b", result)
-            for token in tokens:
-                if len(token) >= 3 and token.lower() != dict_lower:
-                    # Ratio > 0.80 indicates phonetic similarity
-                    ratio = difflib.SequenceMatcher(None, token.lower(), dict_lower).ratio()
-                    if ratio >= 0.80:
-                        log.info("Fuzzy dictionary correction: '%s' -> '%s' (ratio %.2f)", token, dict_word, ratio)
-                        token_pattern = re.compile(r"\b" + re.escape(token) + r"\b")
-                        result = token_pattern.sub(dict_word, result)
+            # Only fix casing if dict_word is multi-word or has special casing (e.g. VoiceFlow, API, ChatGPT)
+            has_special_casing = " " in dict_word or dict_word.isupper() or any(c.isupper() for c in dict_word[1:])
+            if has_special_casing:
+                pattern = re.compile(r"\b" + re.escape(dict_word) + r"\b", re.IGNORECASE)
+                if pattern.search(result):
+                    result = pattern.sub(dict_word, result)
+                    continue
+
+            # Check for close phonetic matches (only for terms with length >= 5)
+            if len(dict_word) >= 5:
+                tokens = re.findall(r"\b\w+\b", result)
+                for token in tokens:
+                    if len(token) >= 5 and token.lower() != dict_lower:
+                        ratio = difflib.SequenceMatcher(None, token.lower(), dict_lower).ratio()
+                        if ratio >= 0.88:
+                            log.info("Fuzzy dictionary correction: '%s' -> '%s' (ratio %.2f)", token, dict_word, ratio)
+                            token_pattern = re.compile(r"\b" + re.escape(token) + r"\b")
+                            result = token_pattern.sub(dict_word, result)
 
         return result
 

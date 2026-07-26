@@ -130,12 +130,17 @@ class StorageEngine:
         )
 
     def _auto_extract_dictionary_words(self, words: list[str]) -> None:
-        stop_words = {"The", "A", "An", "In", "On", "At", "To", "For", "Of", "With", "And", "Or", "But", "If", "So", "My", "This", "That", "It", "We", "You", "I", "He", "She", "They"}
-        for i, word in enumerate(words):
+        """Extract explicit technical jargon (e.g. ALL CAPS acronyms like API, SQL or CamelCase like VoiceFlow)."""
+        for word in words:
             clean = re.sub(r"[^\w\-]", "", word)
-            if clean and clean[0].isupper() and len(clean) > 2:
-                if i > 0 or clean not in stop_words:
-                    self.add_dictionary_word(clean, category="Auto-Captured")
+            if not clean or len(clean) < 3:
+                continue
+            # Auto-capture if ALL CAPS acronym (e.g. API, JSON, GraphQL)
+            if clean.isupper() and len(clean) >= 3:
+                self.add_dictionary_word(clean, category="Auto-Captured")
+            # Auto-capture if CamelCase (e.g. VoiceFlow, TypeScript, OpenAI)
+            elif any(c.isupper() for c in clean[1:]) and any(c.islower() for c in clean):
+                self.add_dictionary_word(clean, category="Auto-Captured")
 
     def get_recent_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
