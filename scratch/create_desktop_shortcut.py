@@ -8,28 +8,37 @@ ico = root / "src" / "voice_flow" / "gui" / "assets" / "icon.ico"
 vbs = root / "VoiceFlowLauncher.vbs"
 import winreg
 
-def get_desktop_path():
+def get_desktop_paths():
+    paths = set()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders") as key:
-            return Path(winreg.QueryValueEx(key, "Desktop")[0])
+            paths.add(Path(winreg.QueryValueEx(key, "Desktop")[0]))
     except Exception:
-        return Path(os.path.expanduser("~/Desktop"))
+        pass
+    paths.add(Path(os.path.expanduser("~/Desktop")))
+    paths.add(Path(os.path.expanduser("~/OneDrive/Desktop")))
+    return [p for p in paths if p.parent.exists()]
 
-desktop = get_desktop_path()
+desktop_paths = get_desktop_paths()
 start_menu = Path(os.path.expanduser("~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs"))
-
-dt_shortcut = desktop / "Voice Flow.lnk"
 sm_shortcut = start_menu / "Voice Flow.lnk"
-
-ps_script = f"""
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut('{dt_shortcut}')
+dt_commands = []
+for dp in desktop_paths:
+    sc = dp / "Voice Flow.lnk"
+    dt_commands.append(f"""
+$Shortcut = $WshShell.CreateShortcut('{sc}')
 $Shortcut.TargetPath = '{vbs}'
 $Shortcut.WorkingDirectory = '{root}'
 $Shortcut.IconLocation = '{ico}'
 $Shortcut.Description = 'Voice Flow - AI Speech Desktop App'
 $Shortcut.Save()
+""")
 
+dt_script_str = "\n".join(dt_commands)
+
+ps_script = f"""
+$WshShell = New-Object -ComObject WScript.Shell
+{dt_script_str}
 $Shortcut2 = $WshShell.CreateShortcut('{sm_shortcut}')
 $Shortcut2.TargetPath = '{vbs}'
 $Shortcut2.WorkingDirectory = '{root}'
