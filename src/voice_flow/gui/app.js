@@ -760,29 +760,12 @@ function openSettings(tab = "general") {
 }
 
 async function closeSettings() {
-  // Auto-save any non-empty API keys that haven't been tested yet
-  const keyInputs = document.querySelectorAll('[id^="key-input-"]');
-  for (const input of keyInputs) {
-    const keyVal = input.value.trim();
-    if (keyVal) {
-      const providerKey = input.id.replace('key-input-', '');
-      try {
-        await fetch("/api/apikeys/add", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: providerKey, key: keyVal }),
-        });
-      } catch (err) {
-        console.error(`Error auto-saving ${providerKey} key:`, err);
-      }
-    }
-  }
   const modal = document.getElementById("settings-modal");
   if (modal) modal.classList.add("hidden");
 }
 
 function switchSettingsTab(tabId, el = null) {
-  ["general", "system", "apikeys"].forEach(t => {
+  ["general", "system"].forEach(t => {
     const tabEl = document.getElementById(`set-tab-${t}`);
     if (tabEl) tabEl.style.display = t === tabId ? "block" : "none";
   });
