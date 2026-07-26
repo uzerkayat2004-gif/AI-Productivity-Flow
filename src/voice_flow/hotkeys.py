@@ -52,30 +52,29 @@ class InputTriggerListener:
 
         self._mouse_listener: mouse.Listener | None = None
         self._key_listener: keyboard.Listener | None = None
-
-        self._is_recording = False
         self._pressed_keys: set[keyboard.Key | keyboard.KeyCode] = set()
-        self._middle_pressed = False
-        self._hotkey_triggered = False
         self._lock = threading.Lock()
+        self._is_recording = False
+        self._hotkey_triggered = False
 
     def start(self) -> None:
-        """Start listening for mouse and keyboard events."""
+        """Start listening for global mouse and keyboard events."""
+        log.info("[INPUT] Initializing global mouse filter & keyboard shortcuts...")
         self._mouse_listener = mouse.Listener(
             on_click=self._on_mouse_click,
             win32_event_filter=self._win32_mouse_filter,
         )
+        self._mouse_listener.start()
+
         self._key_listener = keyboard.Listener(
             on_press=self._on_key_press,
             on_release=self._on_key_release,
         )
-
-        self._mouse_listener.start()
         self._key_listener.start()
         log.info("[INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).")
 
     def stop(self) -> None:
-        """Stop input listeners."""
+        """Stop listening for global events."""
         if self._mouse_listener is not None:
             self._mouse_listener.stop()
             self._mouse_listener = None
@@ -92,20 +91,21 @@ class InputTriggerListener:
     # -- Win32 Mouse Filter & Callbacks --
 
     def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Selectively intercepts middle button clicks to trigger dictation toggle and suppress autoscroll."""
+        """Selectively intercepts middle button clicks to trigger Push-to-Talk dictation."""
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
             with self._lock:
                 if not self._is_recording:
                     self._is_recording = True
                     # MUST dispatch to thread — Win32 hooks timeout after ~300ms
                     threading.Thread(target=self._on_start, daemon=True).start()
-                else:
-                    self._is_recording = False
-                    threading.Thread(target=self._on_finish, daemon=True).start()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
+            with self._lock:
+                if self._is_recording:
+                    self._is_recording = False
+                    threading.Thread(target=self._on_finish, daemon=True).start()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False
@@ -149,14 +149,14 @@ class InputTriggerListener:
                 if not self._hotkey_triggered:
                     self._hotkey_triggered = True
                     if not self._is_recording:
+                        self._is_recording = True
                         threading.Thread(target=self._on_start, daemon=True).start()
-                    else:
-                        threading.Thread(target=self._on_finish, daemon=True).start()
 
         # Escape key cancels recording
         if key == keyboard.Key.esc:
             with self._lock:
                 if self._is_recording:
+                    self._is_recording = False
                     threading.Thread(target=self._on_cancel, daemon=True).start()
 
     def _on_key_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
@@ -164,16 +164,16 @@ class InputTriggerListener:
             return
         self._pressed_keys.discard(key)
 
-        # Reset hotkey trigger flag when Win or Ctrl is released
+        # Release hotkey triggers finish when Win or Ctrl is released during recording
         if key in (
             keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r,
             keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
         ):
-            if any(
-                k in self._pressed_keys
-                for k in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r)
-            ):
-                _suppress_win_start_menu()
+            _suppress_win_start_menu()
 
             with self._lock:
-                self._hotkey_triggered = False
+                if self._hotkey_triggered:
+                    self._hotkey_triggered = False
+                    if self._is_recording:
+                        self._is_recording = False
+                        threading.Thread(target=self._on_finish, daemon=True).start()
