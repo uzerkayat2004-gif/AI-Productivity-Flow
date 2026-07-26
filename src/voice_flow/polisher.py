@@ -74,7 +74,7 @@ class TextPolisher:
 
         # Apply dictionary post-processing
         final_text = dictionary_engine.apply_dictionary_post_processing(cleaned)
-        log.info("Polished (built-in NLP): '%s' -> '%s'", raw_text, final_text)
+        log.info("Polished (built-in NLP): '%s' -> '%s'", cleaned, final_text)
         return final_text
 
     def _polish_with_api_pool(
@@ -92,6 +92,7 @@ class TextPolisher:
         all_conns = storage.get_all_provider_connections()
         providers = ["gemini", "groq", "openai", "together", "deepseek", "cloudflare", "huggingface", "replicate"]
 
+        now = time.time()
         for provider in providers:
             conns = all_conns.get(provider, [])
             if not conns and provider in api_keys and api_keys[provider].strip():
@@ -101,13 +102,18 @@ class TextPolisher:
             if not active_conns:
                 continue
 
-            mode = storage.get_provider_load_balance_mode(provider)
-            log.info("[AI POLISH - %s] Found %d active connection(s). Mode: %s", provider.capitalize(), len(active_conns), mode)
-
             for conn in active_conns:
                 key = conn["api_key"].strip()
                 cname = conn.get("name", "Key")
                 cid = conn.get("id", 0)
+
+                # Skip rate-limited keys instantly (0ms) during cooldown
+                if key in self._rate_limited_keys:
+                    if now < self._rate_limited_keys[key]:
+                        log.info("[AI POLISH - %s] Key '%s' in 60s cooldown, bypassing instantly...", provider.capitalize(), cname)
+                        continue
+                    else:
+                        del self._rate_limited_keys[key]
 
                 result = self._try_provider_call(provider, key, prompt)
                 if result:
@@ -117,6 +123,7 @@ class TextPolisher:
                     return result
                 else:
                     log.warning("[AI POLISH - %s] Connection '%s' (#%s) failed or rate-limited. Failing over to next key...", provider.capitalize(), cname, cid)
+                    self._rate_limited_keys[key] = now + 60.0
                     if cid > 0:
                         storage.update_connection_status(cid, "Error / Rate Limited")
 

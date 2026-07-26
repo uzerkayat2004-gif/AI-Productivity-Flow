@@ -18,7 +18,7 @@ class Config:
     language: str = "en"
     device: str = "cpu"
     compute_type: str = "int8"
-    cpu_threads: int = field(default_factory=lambda: max(4, os.cpu_count() or 8))
+    cpu_threads: int = field(default_factory=lambda: max(2, min(4, (os.cpu_count() or 8) // 2)))
 
     # --- Speed & Accuracy Settings ---
     beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
