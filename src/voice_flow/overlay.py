@@ -53,8 +53,10 @@ class FloatingOverlayBar:
         self.canvas = None
         self.on_cancel = on_cancel or (lambda: None)
         self.on_finish = on_finish or (lambda: None)
+        self.on_start = (lambda: None)
         self.get_audio_level = get_audio_level or (lambda: 0.0)
 
+        self.on_start_click = None
         self.on_cancel_click = None
         self.on_finish_click = None
 
@@ -217,10 +219,10 @@ class FloatingOverlayBar:
         self.drag_x = event.x
         self.drag_y = event.y
         if self.state == "READY":
-            if self.on_finish_click:
-                self.on_finish_click()
-            else:
-                self.on_finish()
+            if self.on_start_click:
+                self.on_start_click()
+            elif self.on_start:
+                self.on_start()
         elif self.state == "RECORDING":
             zone = self._get_zone(event.x)
             if zone == "cancel":

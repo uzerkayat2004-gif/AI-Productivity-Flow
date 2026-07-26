@@ -56,6 +56,7 @@ class VoiceFlowApp:
         )
 
         # Connect Overlay Action Buttons
+        self.overlay.on_start_click = self._on_dictation_start
         self.overlay.on_finish_click = self._on_dictation_finish
         self.overlay.on_cancel_click = self._on_dictation_cancel
 

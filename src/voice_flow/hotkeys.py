@@ -92,8 +92,15 @@ class InputTriggerListener:
     # -- Win32 Mouse Filter & Callbacks --
 
     def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Selectively suppresses native Win32 middle click autoscroll icon."""
+        """Selectively intercepts middle button clicks to trigger dictation toggle and suppress autoscroll."""
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
+            with self._lock:
+                if not self._is_recording:
+                    self._is_recording = True
+                    self._on_start()
+                else:
+                    self._is_recording = False
+                    self._on_finish()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
             return False
@@ -106,15 +113,8 @@ class InputTriggerListener:
     def _on_mouse_click(
         self, x: int, y: int, button: mouse.Button, pressed: bool
     ) -> None:
-        """Triggers dictation toggle on middle mouse button click."""
-        if button == mouse.Button.middle and pressed:
-            with self._lock:
-                if not self._is_recording:
-                    self._is_recording = True
-                    self._on_start()
-                else:
-                    self._is_recording = False
-                    self._on_finish()
+        """Dummy callback for pynput mouse listener."""
+        pass
 
     # -- Internal Keyboard Callbacks --
 
