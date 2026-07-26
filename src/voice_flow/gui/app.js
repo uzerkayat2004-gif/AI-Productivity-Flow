@@ -210,17 +210,23 @@ function startFloatingBarStartupSequence() {
       barText.textContent = `Starting... ${countdown}s`;
     } else {
       clearInterval(timer);
-      barText.textContent = "Ready to do this and all";
+      barText.textContent = "";
       barDot.className = "pill-indicator-dot ready";
     }
   }, 1000);
 
-  // Wispr Flow hover interaction
+  // Wispr Flow hover interaction — show "Click to speak" ONLY on cursor hover
   const bar = document.getElementById("floating-flow-bar");
   if (bar) {
     bar.addEventListener("mouseenter", () => {
       if (!isHandsFreeRecording) {
-        barText.textContent = "Ready to do this and all";
+        barText.textContent = "Click to speak";
+        barDot.className = "pill-indicator-dot ready";
+      }
+    });
+    bar.addEventListener("mouseleave", () => {
+      if (!isHandsFreeRecording) {
+        barText.textContent = "";
         barDot.className = "pill-indicator-dot ready";
       }
     });
@@ -250,7 +256,7 @@ function toggleHandsFreeRecording() {
   } else {
     bar.classList.remove("recording-active");
     if (barDot) barDot.className = "pill-indicator-dot ready";
-    if (barText) barText.textContent = "Ready to do this and all";
+    if (barText) barText.textContent = "";
     loadHistory();
     loadInsights();
   }

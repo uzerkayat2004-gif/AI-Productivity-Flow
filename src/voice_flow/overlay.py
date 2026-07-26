@@ -221,6 +221,8 @@ class FloatingOverlayBar:
                 else:
                     self.on_finish()
 
+        self._is_mouse_over = False
+
     def _on_drag(self, event: tk.Event) -> None:
         dx = event.x - self.drag_x
         dy = event.y - self.drag_y
@@ -229,17 +231,24 @@ class FloatingOverlayBar:
         self.win.geometry(f"+{new_x}+{new_y}")
 
     def _on_motion(self, event: tk.Event) -> None:
+        was_over = self._is_mouse_over
+        self._is_mouse_over = True
         zone = self._get_zone(event.x)
-        if zone != self._hover_zone:
+        if zone != self._hover_zone or not was_over:
             self._hover_zone = zone
             if zone in ("cancel", "finish") or self.state == "READY":
                 self.canvas.config(cursor="hand2")
             else:
                 self.canvas.config(cursor="arrow")
+            if self.state == "READY":
+                self._draw()
 
     def _on_leave(self, _event: tk.Event) -> None:
         self._hover_zone = None
+        self._is_mouse_over = False
         self.canvas.config(cursor="arrow")
+        if self.state == "READY":
+            self._draw()
 
     # -- Animation Loop --
 
@@ -272,9 +281,13 @@ class FloatingOverlayBar:
     def _draw_ready(self, w: int, h: int) -> None:
         c = self.canvas
         cy = h / 2
-        # Green indicator dot
+        # Green indicator dot + Mic icon
         c.create_oval(24, cy - 4, 32, cy + 4, fill=self.DONE_GREEN, outline="")
-        c.create_text(w / 2 + 10, cy, text="Ready to do this and all • Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10, "bold"), anchor="center")
+        c.create_text(48, cy, text="🎙️", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 11), anchor="center")
+
+        # Show "Click to speak" ONLY when cursor is moved over the bar!
+        if getattr(self, "_is_mouse_over", False):
+            c.create_text(w / 2 + 15, cy, text="Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 11, "bold"), anchor="center")
 
     def _draw_recording(self, w: int, h: int) -> None:
         c = self.canvas

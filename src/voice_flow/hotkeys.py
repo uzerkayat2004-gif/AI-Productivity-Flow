@@ -89,11 +89,25 @@ class InputTriggerListener:
         with self._lock:
             self._is_recording = recording
 
-    # -- Win32 Mouse Filter --
+    # -- Win32 Mouse Filter & Callbacks --
 
     def _win32_mouse_filter(self, msg: int, data: object) -> bool:
-        """Selectively intercepts middle button clicks to trigger dictation and block drag autoscroll."""
+        """Selectively suppresses native Win32 middle click autoscroll icon."""
         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
+            if self._mouse_listener:
+                self._mouse_listener.suppress_event()
+            return False
+        elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
+            if self._mouse_listener:
+                self._mouse_listener.suppress_event()
+            return False
+        return True
+
+    def _on_mouse_click(
+        self, x: int, y: int, button: mouse.Button, pressed: bool
+    ) -> None:
+        """Triggers dictation toggle on middle mouse button click."""
+        if button == mouse.Button.middle and pressed:
             with self._lock:
                 if not self._is_recording:
                     self._is_recording = True
@@ -101,23 +115,6 @@ class InputTriggerListener:
                 else:
                     self._is_recording = False
                     self._on_finish()
-            if self._mouse_listener:
-                self._mouse_listener.suppress_event()
-            return False  # Blocks middle click down (prevents drag autoscroll icon)
-
-        elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
-            if self._mouse_listener:
-                self._mouse_listener.suppress_event()
-            return False  # Blocks middle click up
-
-        # Return True for ALL other events (normal mouse wheel rotation 0x020A, left/right click, movement)
-        return True
-
-    def _on_mouse_click(
-        self, x: int, y: int, button: mouse.Button, pressed: bool
-    ) -> None:
-        """Dummy callback for pynput mouse listener."""
-        pass
 
     # -- Internal Keyboard Callbacks --
 
