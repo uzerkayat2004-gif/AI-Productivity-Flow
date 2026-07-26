@@ -218,3 +218,53 @@
 2026-07-26 22:43:31,456 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
 2026-07-26 22:43:31,478 [INFO] voice_flow.main: Saved dictation record #107 into SQLite history database
 2026-07-26 22:43:31,811 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (464 chars).
+2026-07-26 22:45:45,537 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
+2026-07-26 22:45:45,996 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
+2026-07-26 22:45:54,217 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
+2026-07-26 22:45:54,316 [INFO] voice_flow.audio: [AUDIO] Resampled 360448 samples from 44100 Hz -> 16000 Hz (130775 samples)
+2026-07-26 22:45:54,321 [INFO] voice_flow.main: [AUDIO] Got 130775 samples (8.17s), peak=0.0794
+2026-07-26 22:45:54,323 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Initiating A New Conversa...' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
+2026-07-26 22:45:54,323 [INFO] voice_flow.main: Detected active app: 'Initiating A New Conversa...' (autocleanup style)
+2026-07-26 22:45:54,324 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
+2026-07-26 22:45:54,324 [INFO] voice_flow.transcriber: Transcribing 8.2s audio on 4 CPU threads with dictionary biasing...
+2026-07-26 22:45:54,324 [INFO] faster_whisper: Processing audio with duration 00:08.173
+2026-07-26 22:45:54,339 [INFO] faster_whisper: VAD filter removed 00:00.792 of audio
+2026-07-26 22:45:55,294 [INFO] voice_flow.main: STT completed in 0.970s: 'Hey, what's up? This is an email from the 2.0 standby.'
+2026-07-26 22:45:56,224 [WARNING] voice_flow.polisher: [GEMINI gemini-2.5-flash FAILED] HTTP 429: Too Many Requests
+2026-07-26 22:45:56,225 [WARNING] voice_flow.polisher: [AI POLISH - Gemini] Connection 'Google Gemini Key' (#1) failed or rate-limited. Failing over to next key...
+2026-07-26 22:45:56,974 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
+2026-07-26 22:45:56,991 [INFO] voice_flow.main: Saved dictation record #108 into SQLite history database
+2026-07-26 22:45:57,313 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (54 chars).
+2026-07-26 22:46:11,667 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
+2026-07-26 22:46:12,113 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
+2026-07-26 22:46:30,993 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
+2026-07-26 22:46:31,184 [INFO] voice_flow.audio: [AUDIO] Resampled 831488 samples from 44100 Hz -> 16000 Hz (301674 samples)
+2026-07-26 22:46:31,198 [INFO] voice_flow.main: [AUDIO] Got 301674 samples (18.85s), peak=0.2001
+2026-07-26 22:46:31,201 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Initiating A New Conversa...' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
+2026-07-26 22:46:31,201 [INFO] voice_flow.main: Detected active app: 'Initiating A New Conversa...' (autocleanup style)
+2026-07-26 22:46:31,202 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
+2026-07-26 22:46:31,202 [INFO] voice_flow.transcriber: Transcribing 18.9s audio on 4 CPU threads with dictionary biasing...
+2026-07-26 22:46:31,202 [INFO] faster_whisper: Processing audio with duration 00:18.855
+2026-07-26 22:46:31,237 [INFO] faster_whisper: VAD filter removed 00:02.472 of audio
+2026-07-26 22:46:32,465 [INFO] voice_flow.main: STT completed in 1.264s: 'Hey, now can I fix the dictionary? Because the dictionary work is how the dictionary should work and how it's working right now. Can you check how the dictionary works on the WhisperFlow and how it should be working? Can you follow the set of that now?'
+2026-07-26 22:46:32,468 [INFO] voice_flow.polisher: [AI POLISH - Gemini] Key 'Google Gemini Key' in 60s cooldown, bypassing instantly...
+2026-07-26 22:46:32,830 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
+2026-07-26 22:46:32,854 [INFO] voice_flow.main: Saved dictation record #109 into SQLite history database
+2026-07-26 22:46:33,180 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (253 chars).
+2026-07-26 22:48:47,950 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
+2026-07-26 22:48:48,324 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
+2026-07-26 22:50:02,452 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
+2026-07-26 22:50:02,676 [INFO] voice_flow.audio: [AUDIO] Resampled 3268608 samples from 44100 Hz -> 16000 Hz (1185890 samples)
+2026-07-26 22:50:02,713 [INFO] voice_flow.main: [AUDIO] Got 1185890 samples (74.12s), peak=0.1388
+2026-07-26 22:50:02,716 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Initiating A New Conversa...' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
+2026-07-26 22:50:02,716 [INFO] voice_flow.main: Detected active app: 'Initiating A New Conversa...' (autocleanup style)
+2026-07-26 22:50:02,721 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
+2026-07-26 22:50:02,721 [INFO] voice_flow.transcriber: Transcribing 74.1s audio on 4 CPU threads with dictionary biasing...
+2026-07-26 22:50:02,721 [INFO] faster_whisper: Processing audio with duration 01:14.118
+2026-07-26 22:50:02,847 [INFO] faster_whisper: VAD filter removed 00:08.086 of audio
+2026-07-26 22:50:06,917 [INFO] voice_flow.main: STT completed in 4.201s: 'Now, I want to properly make the providers feature, the API key providers thing. On the API key providers, about that you have to add like a voice flow, a voice flow, a message policy agent type thing. You have to name like that. You have to name the exec voice flow policy. And on that, I have to select the exec model from all those connected model. Let's say I have connected Google and the group group, whatever model or there on the group and Google, I have to see that on the voice flow policy thing. So you have to properly design that. So that whatever model I have selected on the that model is going to do a polishing work for the messaging thing. So can you properly set up that logic?'
+2026-07-26 22:50:07,562 [WARNING] voice_flow.polisher: [GEMINI gemini-2.5-flash FAILED] HTTP 429: Too Many Requests
+2026-07-26 22:50:07,562 [WARNING] voice_flow.polisher: [AI POLISH - Gemini] Connection 'Google Gemini Key' (#1) failed or rate-limited. Failing over to next key...
+2026-07-26 22:50:08,110 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
+2026-07-26 22:50:08,146 [INFO] voice_flow.main: Saved dictation record #110 into SQLite history database
+2026-07-26 22:50:08,477 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (640 chars).

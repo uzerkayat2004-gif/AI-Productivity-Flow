@@ -95,8 +95,20 @@ class TextPolisher:
             f"Spoken text: {raw_text}"
         )
 
+        # Check Exec Voice Flow Policy active model preference
+        exec_policy_model = storage.get_setting("exec_policy_model", "gemini/gemini-2.5-flash")
+        preferred_provider = None
+        preferred_model = None
+        if "/" in exec_policy_model:
+            preferred_provider, preferred_model = exec_policy_model.split("/", 1)
+
         all_conns = storage.get_all_provider_connections()
         providers = ["gemini", "groq", "openai", "together", "deepseek", "cloudflare", "huggingface", "replicate"]
+
+        if preferred_provider and preferred_provider in providers:
+            providers.remove(preferred_provider)
+            providers.insert(0, preferred_provider)
+            log.info("[EXEC VOICE FLOW POLICY] Primary polishing routed via: %s / %s", preferred_provider.upper(), preferred_model)
 
         now = time.time()
         for provider in providers:

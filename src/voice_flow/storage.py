@@ -198,7 +198,44 @@ class StorageEngine:
                 "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('seed_version', ?, datetime('now'))",
                 (self._SEED_VERSION,)
             )
-            conn.commit()
+    def get_exec_policy_options(self) -> dict[str, Any]:
+        """Return active connected provider models for the Exec Voice Flow Policy."""
+        all_conns = self.get_all_provider_connections()
+        api_keys = self.get_all_api_keys()
+
+        connected_providers = set()
+        for p, keys_list in all_conns.items():
+            if any(k.get("is_active", 1) for k in keys_list):
+                connected_providers.add(p)
+        for p, k in api_keys.items():
+            if k and k.strip():
+                connected_providers.add(p)
+
+        if not connected_providers:
+            connected_providers = {"gemini", "groq"}
+
+        models = []
+        with self._get_conn() as conn:
+            for p in connected_providers:
+                cursor = conn.execute(
+                    "SELECT provider, model_id, display_name FROM provider_models WHERE provider = ? AND is_active = 1", (p,)
+                )
+                rows = cursor.fetchall()
+                for row in rows:
+                    models.append({
+                        "provider": row["provider"],
+                        "model_id": row["model_id"],
+                        "display_name": row["display_name"],
+                        "full_id": f"{row['provider']}/{row['model_id']}",
+                        "label": f"[{row['provider'].capitalize()}] {row['display_name']}"
+                    })
+
+        active_model = self.get_setting("exec_policy_model", "gemini/gemini-2.5-flash")
+        return {
+            "active_model": active_model,
+            "connected_providers": list(connected_providers),
+            "models": models
+        }
 
     # --- History API ---
 

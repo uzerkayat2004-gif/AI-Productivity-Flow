@@ -43,4 +43,11 @@ print(f"   Active Style Presets from DB: {styles}")
 insights = api_get("/api/insights")
 print(f"4. User Insights Statistics: {insights}")
 
+# 5. Fetch & Test Exec Voice Flow Policy
+policy_info = api_get("/api/policy/get")
+print(f"5. Exec Voice Flow Policy: {policy_info.get('policy')}")
+
+policy_update = api_post("/api/policy/update", {"model_id": "gemini/gemini-2.5-flash"})
+print(f"   Updated Exec Policy Model -> Success: {policy_update.get('success')}")
+
 print("=== UI INTERACTION COMPLETED SUCCESSFULLY ===")

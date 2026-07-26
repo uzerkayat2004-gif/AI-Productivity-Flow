@@ -85,6 +85,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "autocleanup": storage.get_setting("style_autocleanup", "cleanup_light"),
             }
             self.send_json_response(styles)
+        elif self.path == "/api/policy/get":
+            policy = storage.get_exec_policy_options()
+            self.send_json_response({"success": True, "policy": policy})
         else:
             super().do_GET()
 
@@ -158,6 +161,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 storage.save_setting(f"style_{category}", style_id)
                 print(f"[STYLE PRESET SAVED] Category: {category} -> Style: {style_id}")
             self.send_json_response({"success": True, "category": category, "style_id": style_id})
+
+        elif self.path == "/api/policy/update":
+            data = json.loads(body)
+            model_id = data.get("model_id", "").strip()
+            if model_id:
+                storage.save_setting("exec_policy_model", model_id)
+                print(f"[EXEC VOICE FLOW POLICY] Updated executive polishing model to: {model_id}")
+            self.send_json_response({"success": True, "active_model": model_id})
 
         elif self.path == "/api/settings/update":
             data = json.loads(body)

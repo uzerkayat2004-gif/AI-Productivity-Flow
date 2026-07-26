@@ -1030,8 +1030,61 @@ async function loadProvidersOverview() {
         </div>
       `;
     }).join("");
+
+    loadExecVoiceFlowPolicy();
+
   } catch (err) {
     console.error("Error loading providers overview:", err);
+  }
+}
+
+async function loadExecVoiceFlowPolicy() {
+  const selectEl = document.getElementById("exec-policy-model-select");
+  if (!selectEl) return;
+
+  try {
+    const res = await fetch("/api/policy/get");
+    const data = await res.json();
+    if (!data.success || !data.policy) return;
+
+    const policy = data.policy;
+    const activeModel = policy.active_model || "gemini/gemini-2.5-flash";
+    const models = policy.models || [];
+
+    if (models.length === 0) {
+      selectEl.innerHTML = `<option value="gemini/gemini-2.5-flash">[Google] Gemini 2.5 Flash (Default)</option>`;
+    } else {
+      selectEl.innerHTML = models.map(m => `
+        <option value="${m.full_id}" ${m.full_id === activeModel ? 'selected' : ''}>
+          ${escapeHtml(m.label)}
+        </option>
+      `).join("");
+    }
+
+    const engineEl = document.getElementById("exec-policy-active-engine");
+    if (engineEl) {
+      const activeObj = models.find(m => m.full_id === activeModel);
+      engineEl.textContent = activeObj ? activeObj.label : activeModel;
+    }
+  } catch (err) {
+    console.error("Error loading Exec Voice Flow Policy:", err);
+  }
+}
+
+async function updateExecVoiceFlowPolicy(modelVal) {
+  if (!modelVal) return;
+  try {
+    const res = await fetch("/api/policy/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelVal }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadExecVoiceFlowPolicy();
+    }
+  } catch (err) {
+    console.error("Error updating Exec Voice Flow Policy:", err);
   }
 }
 
