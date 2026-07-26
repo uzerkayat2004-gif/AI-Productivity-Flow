@@ -214,6 +214,17 @@ function startFloatingBarStartupSequence() {
       barDot.className = "pill-indicator-dot ready";
     }
   }, 1000);
+
+  // Wispr Flow hover interaction
+  const bar = document.getElementById("floating-flow-bar");
+  if (bar) {
+    bar.addEventListener("mouseenter", () => {
+      if (!isHandsFreeRecording) {
+        barText.textContent = "Ready to do this and all";
+        barDot.className = "pill-indicator-dot ready";
+      }
+    });
+  }
 }
 
 // Click Floating Bar to Toggle Hands-Free Recording Mode Automatically!
