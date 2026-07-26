@@ -145,7 +145,8 @@ class VoiceFlowApp:
                     return
 
                 # Step 3: Polish text with AI engine & custom dictionary fuzzy matching
-                polished_text = polisher.polish(raw_transcript, style_preset["prompt_instruction"])
+                style_instruction = style_preset.get("prompt_instruction", str(style_preset)) if isinstance(style_preset, dict) else str(style_preset)
+                polished_text = polisher.polish(raw_transcript, style_instruction)
 
                 # Step 4: Save record to SQLite database for Home History & Insights
                 record = storage.add_dictation(

@@ -33,16 +33,44 @@ def get_active_window_title() -> str:
 
 
 def focus_target_window(hwnd: int) -> None:
-    """Restore window focus to target_hwnd before pasting."""
+    """Robustly restore window focus to target_hwnd on Windows before pasting."""
     if not hwnd:
         return
     try:
-        if ctypes.windll.user32.IsIconic(hwnd):
-            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        user32 = ctypes.windll.user32
+        current_foreground = user32.GetForegroundWindow()
+        if current_foreground == hwnd:
+            return
+
+        # Restore if minimized
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+
+        # Force foreground focus by attaching thread input
+        fore_thread = user32.GetWindowThreadProcessId(current_foreground, None)
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        curr_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        user32.AttachThreadInput(curr_thread, target_thread, True)
+        if fore_thread != 0:
+            user32.AttachThreadInput(fore_thread, target_thread, True)
+
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        user32.SetFocus(hwnd)
+
+        user32.AttachThreadInput(curr_thread, target_thread, False)
+        if fore_thread != 0:
+            user32.AttachThreadInput(fore_thread, target_thread, False)
+
         time.sleep(0.08)
     except Exception as e:
         log.warning("Failed to restore focus to hwnd %d: %s", hwnd, e)
+        try:
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            time.sleep(0.05)
+        except Exception:
+            pass
 
 
 def inject_text(text: str, target_hwnd: int | None = None) -> bool:
