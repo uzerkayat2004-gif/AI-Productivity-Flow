@@ -76,6 +76,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response(mics)
             except Exception:
                 self.send_json_response([])
+        elif self.path == "/api/styles/get":
+            styles = {
+                "personal": storage.get_setting("style_personal", "personal_very_casual"),
+                "work": storage.get_setting("style_work", "work_casual"),
+                "email": storage.get_setting("style_email", "email_formal"),
+                "other": storage.get_setting("style_other", "other_formal"),
+                "autocleanup": storage.get_setting("style_autocleanup", "cleanup_light"),
+            }
+            self.send_json_response(styles)
         else:
             super().do_GET()
 
@@ -140,6 +149,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 json.dump({"recording": recording}, f)
             print(f"[RECORD] Hands-free recording {'STARTED' if recording else 'STOPPED'} via GUI")
             self.send_json_response({"success": True, "recording": recording})
+
+        elif self.path == "/api/styles/update":
+            data = json.loads(body)
+            category = data.get("category", "")
+            style_id = data.get("style_id", "")
+            if category and style_id:
+                storage.save_setting(f"style_{category}", style_id)
+                print(f"[STYLE PRESET SAVED] Category: {category} -> Style: {style_id}")
+            self.send_json_response({"success": True, "category": category, "style_id": style_id})
 
         elif self.path == "/api/settings/update":
             data = json.loads(body)

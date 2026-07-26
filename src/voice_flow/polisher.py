@@ -64,18 +64,23 @@ class TextPolisher:
         for pattern, repl in SELF_CORRECT_PATTERNS:
             cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
 
-        # Clean spacing & capitalize first letter
+        # Clean spacing & apply style guidance rules
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        if cleaned:
-            cleaned = cleaned[0].upper() + cleaned[1:]
 
-        # Ensure sentence ends with proper punctuation
-        if cleaned and cleaned[-1] not in ".!?":
-            cleaned += "."
+        style_lower = style_instruction.lower()
+        if "lowercase" in style_lower or "very_casual" in style_lower:
+            cleaned = cleaned.lower()
+            if cleaned.endswith("."):
+                cleaned = cleaned[:-1]
+        else:
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:]
+            if cleaned and cleaned[-1] not in ".!?":
+                cleaned += "."
 
         # Apply dictionary post-processing
         final_text = dictionary_engine.apply_dictionary_post_processing(cleaned)
-        log.info("Polished (built-in NLP): '%s' -> '%s'", cleaned, final_text)
+        log.info("Polished (built-in NLP): '%s' -> '%s' (style: '%s')", raw_text, final_text, style_instruction)
         return final_text
 
     def _polish_with_api_pool(

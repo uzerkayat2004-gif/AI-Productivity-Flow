@@ -32,9 +32,12 @@ print(f"2. Initial Dictionary Words ({len(dict_words)}): {dict_words[:5]}")
 add_res = api_post("/api/dictionary/add", {"word": "WhisperFlow"})
 print(f"   Added 'WhisperFlow' to Dictionary -> Success: {add_res.get('success')}")
 
-# 3. Fetch Style Presets
+# 3. Fetch & Update Style Presets
+update_style_res = api_post("/api/styles/update", {"category": "personal", "style_id": "personal_casual"})
+print(f"3. Updated Personal Style -> Success: {update_style_res.get('success')}")
+
 styles = api_get("/api/styles/get")
-print(f"3. Active Style Presets: {styles}")
+print(f"   Active Style Presets from DB: {styles}")
 
 # 4. Fetch Insights
 insights = api_get("/api/insights")
