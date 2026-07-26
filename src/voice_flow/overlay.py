@@ -62,16 +62,19 @@ class FloatingOverlayBar:
         self._anim_phase = 0.0
         self._hover_zone: str | None = None  # "cancel", "finish", or None
 
-        self.idle_width = 130
-        self.expanded_width = 240
-        self.recording_width = 280
+        self.idle_width = 70
+        self.expanded_width = 180
+        self.recording_width = 240
+        self.idle_height = 14
+        self.hover_height = 32
         self.width = self.idle_width
-        self.height = 38
-        self.padding = 12
+        self.height = self.idle_height
+        self.padding = 8
 
-    def _set_bar_width(self, new_width: int) -> None:
-        if self.width != new_width:
+    def _set_bar_size(self, new_width: int, new_height: int) -> None:
+        if self.width != new_width or self.height != new_height:
             self.width = new_width
+            self.height = new_height
             if self.win and self.canvas:
                 self.canvas.config(width=self.width, height=self.height)
                 self._position_window()
@@ -293,20 +296,16 @@ class FloatingOverlayBar:
         cy = h / 2
 
         if getattr(self, "_is_mouse_over", False):
-            self._set_bar_width(self.expanded_width)
-            w = self.width
-            c.create_oval(20, cy - 4, 28, cy + 4, fill=self.DONE_GREEN, outline="")
-            c.create_text(42, cy, text="🎙️", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10), anchor="center")
-            c.create_text(w / 2 + 15, cy, text="Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10, "bold"), anchor="center")
+            self._set_bar_size(self.expanded_width, self.hover_height)
+            w, h = self.width, self.height
+            cy = h / 2
+            c.create_text(w / 2, cy, text="Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10, "bold"), anchor="center")
         else:
-            self._set_bar_width(self.idle_width)
-            w = self.width
-            c.create_oval(32, cy - 4, 40, cy + 4, fill=self.DONE_GREEN, outline="")
-            c.create_text(w / 2 + 10, cy, text="🎙️", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 11), anchor="center")
+            self._set_bar_size(self.idle_width, self.idle_height)
 
     def _draw_recording(self, w: int, h: int) -> None:
-        self._set_bar_width(self.recording_width)
-        w = self.width
+        self._set_bar_size(self.recording_width, self.hover_height)
+        w, h = self.width, self.height
         c = self.canvas
         cy = h / 2
 

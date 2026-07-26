@@ -1429,41 +1429,51 @@ input:checked + .toggle-slider:before {
 }
 
 /* ================================================
-   Wispr Flow Floating Bar Design System
+   Wispr Flow Ultra-Sleek Line Bar Design System
    ================================================ */
 #floating-flow-bar,
 .wispr-flow-bar-marker {
   position: fixed;
-  bottom: 28px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 22px;
-  background: rgba(22, 22, 39, 0.92);
+  justify-content: center;
+  width: 64px;
+  height: 10px;
+  padding: 0;
+  background: rgba(22, 22, 39, 0.94);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
   color: #e8e8f0;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1);
   cursor: pointer;
   user-select: none;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 #floating-flow-bar:hover {
+  width: 180px;
+  height: 28px;
+  padding: 0 16px;
+  border-radius: 16px;
   transform: translateX(-50%) translateY(-2px);
-  border-color: rgba(255, 107, 0, 0.4);
-  box-shadow: 0 14px 40px rgba(255, 107, 0, 0.25), 0 0 0 1px rgba(255, 107, 0, 0.3);
+  border-color: rgba(255, 107, 0, 0.5);
+  box-shadow: 0 10px 30px rgba(255, 107, 0, 0.3), 0 0 0 1px rgba(255, 107, 0, 0.4);
 }
 
 #floating-flow-bar.recording-active {
-  background: rgba(26, 18, 15, 0.95);
+  width: 220px;
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: rgba(26, 18, 15, 0.96);
   border-color: #ff6b00;
-  box-shadow: 0 0 30px rgba(255, 107, 0, 0.45), 0 10px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 30px rgba(255, 107, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.4);
   animation: pulse-recording 2s infinite ease-in-out;
 }
 
@@ -1474,59 +1484,24 @@ input:checked + .toggle-slider:before {
   pointer-events: none;
 }
 
-.mic-symbol-icon {
-  font-size: 16px;
-  line-height: 1;
-  filter: drop-shadow(0 0 6px rgba(255, 107, 0, 0.6));
-}
-
-.wispr-bar-line {
-  width: 1px;
-  height: 16px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
 .flow-pill-content {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.pill-indicator-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #a8a29e;
-  transition: all 0.2s ease;
-}
-
-.pill-indicator-dot.ready {
-  background: #51cf66;
-  box-shadow: 0 0 10px #51cf66;
-}
-
-.pill-indicator-dot.recording {
-  background: #ff6b00;
-  box-shadow: 0 0 12px #ff6b00;
-  animation: dot-pulse 1s infinite alternate;
+  justify-content: center;
+  width: 100%;
 }
 
 .pill-text {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   color: #f3f4f6;
   letter-spacing: 0.2px;
   white-space: nowrap;
 }
 
 @keyframes pulse-recording {
-  0% { box-shadow: 0 0 20px rgba(255, 107, 0, 0.3); }
-  50% { box-shadow: 0 0 35px rgba(255, 107, 0, 0.6); }
-  100% { box-shadow: 0 0 20px rgba(255, 107, 0, 0.3); }
-}
-
-@keyframes dot-pulse {
-  from { opacity: 1; transform: scale(1); }
-  to { opacity: 0.4; transform: scale(0.85); }
+  0% { box-shadow: 0 0 15px rgba(255, 107, 0, 0.3); }
+  50% { box-shadow: 0 0 30px rgba(255, 107, 0, 0.6); }
+  100% { box-shadow: 0 0 15px rgba(255, 107, 0, 0.3); }
 }
 
