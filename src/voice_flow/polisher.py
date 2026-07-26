@@ -132,14 +132,17 @@ class TextPolisher:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
                         payload = json.dumps({
                             "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"temperature": 0.1}
+                            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
                         }).encode("utf-8")
                         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-                        with urllib.request.urlopen(req, timeout=8.0) as resp:
+                        with urllib.request.urlopen(req, timeout=6.0) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
-                            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                            if text:
-                                return text
+                            try:
+                                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                                if text:
+                                    return text
+                            except (KeyError, IndexError):
+                                pass
                     except Exception as e:
                         log.warning("[GEMINI %s FAILED] %s", m, e)
 
@@ -156,7 +159,8 @@ class TextPolisher:
                         payload = json.dumps({
                             "model": m,
                             "messages": [{"role": "user", "content": prompt}],
-                            "temperature": 0.1
+                            "temperature": 0.1,
+                            "max_tokens": 256
                         }).encode("utf-8")
                         req = urllib.request.Request(ep_url, data=payload, headers={
                             "Content-Type": "application/json",
