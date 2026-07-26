@@ -144,39 +144,19 @@
           </div>
         </div>
 
-        <!-- INSIGHTS BOTTOM CARDS GRID -->
-        <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+        <!-- INSIGHTS BOTTOM CARDS GRID: FULL-WIDTH ACCURATE DESKTOP USAGE -->
+        <div class="stats-grid" style="grid-template-columns: 1fr; margin-top: 20px;">
           <!-- Desktop App Usage Card -->
-          <div class="stat-card">
-            <div class="stat-header" style="margin-bottom: 14px;">DESKTOP USAGE</div>
+          <div class="stat-card" style="padding: 24px 28px;">
+            <div class="stat-header-row" style="margin-bottom: 16px;">
+              <div class="stat-header" style="font-size: 13px; letter-spacing: 0.8px;">DESKTOP APPLICATION USAGE</div>
+              <div style="font-size: 11px; font-weight: 700; color: var(--primary-orange); background: var(--primary-orange-light); padding: 4px 10px; border-radius: 12px; border: 1px solid var(--primary-orange-border);">REAL-TIME APPS DETECTED</div>
+            </div>
             <div class="usage-list" id="insights-app-breakdown">
-              <!-- Dynamically populated from live dictation data -->
-            </div>
-          </div>
-
-          <!-- Day Streak & Activity Heatmap Card -->
-          <div class="stat-card">
-            <div class="stat-header-row">
-              <div class="stat-header"><span id="insights-streak-title">0 day streak</span></div>
-              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted);">LONGEST STREAK | <span id="insights-longest-streak">0</span> DAYS</div>
-            </div>
-            <div class="heatmap-grid" id="heatmap-grid">
-              <!-- Dynamically populated activity cells -->
-            </div>
-            <div class="heatmap-legend">
-              <span>Less</span>
-              <div class="legend-cells">
-                <span class="heatmap-cell"></span>
-                <span class="heatmap-cell level-1"></span>
-                <span class="heatmap-cell level-2"></span>
-                <span class="heatmap-cell level-3"></span>
-                <span class="heatmap-cell level-4"></span>
-              </div>
-              <span>More</span>
+              <!-- Dynamically populated from live active window dictation data -->
             </div>
           </div>
         </div>
-
       </section>
 
       <!-- PAGE 3: DICTIONARY PAGE (WISPR FLOW GOLD STANDARD) -->

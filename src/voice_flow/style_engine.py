@@ -49,6 +49,45 @@ CATEGORY_DEFAULTS = {
 }
 
 
+def normalize_app_name(title: str, exe_name: str) -> str:
+    title_lower = title.lower()
+    exe_lower = exe_name.lower()
+
+    if "chrome" in exe_lower or "chrome" in title_lower:
+        return "Google Chrome"
+    if "code" in exe_lower or "visual studio code" in title_lower or "vscode" in title_lower:
+        return "VS Code"
+    if "claude" in title_lower or "claude" in exe_lower:
+        return "Claude Code"
+    if "slack" in exe_lower or "slack" in title_lower:
+        return "Slack"
+    if "teams" in exe_lower or "teams" in title_lower:
+        return "Microsoft Teams"
+    if "whatsapp" in exe_lower or "whatsapp" in title_lower:
+        return "WhatsApp"
+    if "telegram" in exe_lower or "telegram" in title_lower:
+        return "Telegram"
+    if "outlook" in exe_lower or "outlook" in title_lower:
+        return "Outlook"
+    if "word" in exe_lower or "winword" in exe_lower or "word" in title_lower:
+        return "Microsoft Word"
+    if "notion" in exe_lower or "notion" in title_lower:
+        return "Notion"
+    if "explorer" in exe_lower:
+        return "File Explorer"
+    
+    if " - " in title:
+        parts = [p.strip() for p in title.split(" - ")]
+        if len(parts) >= 2:
+            return parts[-1]
+    
+    clean_exe = exe_name.replace(".exe", "").capitalize()
+    if clean_exe and clean_exe != "General":
+        return clean_exe
+        
+    return title[:28] if title else "General App"
+
+
 def get_active_app_info() -> tuple[str, str]:
     """Detect current active foreground window title and process executable name on Windows."""
     if sys.platform != "win32":
@@ -87,7 +126,7 @@ def get_active_app_info() -> tuple[str, str]:
             finally:
                 kernel32.CloseHandle(hProcess)
 
-        app_display = title if title else exe_name
+        app_display = normalize_app_name(title, exe_name)
         return (app_display, exe_name)
 
     except Exception as e:
