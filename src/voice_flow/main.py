@@ -173,14 +173,25 @@ class VoiceFlowApp:
                 pass
 
     def run(self) -> None:
+        log.info("Starting local REST API server & Desktop GUI...")
+        try:
+            from voice_flow.gui.desktop_launcher import launch_desktop_gui
+            threading.Thread(target=launch_desktop_gui, daemon=True).start()
+        except Exception as e:
+            log.warning("Could not launch Desktop GUI: %s", e)
+
         log.info("Starting input trigger hooks...")
         self.hotkeys.start()
 
         # Start GUI recording state watcher
         threading.Thread(target=self._watch_gui_state_file, daemon=True).start()
 
+        # Show System-Wide Floating Overlay Bar on whole screen at launch
+        self.overlay.show_ready()
+
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
+        log.info(" - System-wide floating bar active on your screen")
         log.info(" - Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak")
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")

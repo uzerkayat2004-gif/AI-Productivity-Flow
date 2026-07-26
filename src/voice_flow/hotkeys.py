@@ -97,6 +97,7 @@ class InputTriggerListener:
             with self._lock:
                 if not self._is_recording:
                     self._middle_pressed = True
+                    self._is_recording = True
                     self._on_start()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()
@@ -104,8 +105,9 @@ class InputTriggerListener:
 
         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
             with self._lock:
-                if self._middle_pressed and self._is_recording:
+                if self._middle_pressed or self._is_recording:
                     self._middle_pressed = False
+                    self._is_recording = False
                     self._on_finish()
             if self._mouse_listener:
                 self._mouse_listener.suppress_event()

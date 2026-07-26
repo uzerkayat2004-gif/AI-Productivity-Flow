@@ -92,7 +92,10 @@ class FloatingOverlayBar:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        self.canvas.bind("<Button-1>", self._on_click)
+        self.drag_x = 0
+        self.drag_y = 0
+        self.canvas.bind("<ButtonPress-1>", self._on_press)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<Motion>", self._on_motion)
         self.canvas.bind("<Leave>", self._on_leave)
 
@@ -128,6 +131,16 @@ class FloatingOverlayBar:
 
     # -- Public State API --
 
+    def show_ready(self) -> None:
+        """Display the idle system-wide floating bar (ready state)."""
+        self.state = "READY"
+        self._anim_phase = 0.0
+        self.win.deiconify()
+        self.win.lift()
+        self.win.attributes("-topmost", True)
+        self._apply_win32_styles()
+        self._draw()
+
     def show_recording(self, level_provider: Callable[[], float] | None = None) -> None:
         if level_provider:
             self.get_audio_level = level_provider
@@ -154,7 +167,7 @@ class FloatingOverlayBar:
         self.state = "HIDDEN"
         self.win.withdraw()
 
-    # -- Mouse Events --
+    # -- Mouse Events & Dragging --
 
     def _get_zone(self, x: int) -> str | None:
         if x < 52:
@@ -163,26 +176,39 @@ class FloatingOverlayBar:
             return "finish"
         return None
 
-    def _on_click(self, event: tk.Event) -> None:
-        if self.state != "RECORDING":
-            return
-        zone = self._get_zone(event.x)
-        if zone == "cancel":
-            if self.on_cancel_click:
-                self.on_cancel_click()
-            else:
-                self.on_cancel()
-        elif zone == "finish":
+    def _on_press(self, event: tk.Event) -> None:
+        self.drag_x = event.x
+        self.drag_y = event.y
+        if self.state == "READY":
             if self.on_finish_click:
                 self.on_finish_click()
             else:
                 self.on_finish()
+        elif self.state == "RECORDING":
+            zone = self._get_zone(event.x)
+            if zone == "cancel":
+                if self.on_cancel_click:
+                    self.on_cancel_click()
+                else:
+                    self.on_cancel()
+            elif zone == "finish":
+                if self.on_finish_click:
+                    self.on_finish_click()
+                else:
+                    self.on_finish()
+
+    def _on_drag(self, event: tk.Event) -> None:
+        dx = event.x - self.drag_x
+        dy = event.y - self.drag_y
+        new_x = self.win.winfo_x() + dx
+        new_y = self.win.winfo_y() + dy
+        self.win.geometry(f"+{new_x}+{new_y}")
 
     def _on_motion(self, event: tk.Event) -> None:
         zone = self._get_zone(event.x)
         if zone != self._hover_zone:
             self._hover_zone = zone
-            if zone in ("cancel", "finish"):
+            if zone in ("cancel", "finish") or self.state == "READY":
                 self.canvas.config(cursor="hand2")
             else:
                 self.canvas.config(cursor="arrow")
@@ -210,12 +236,21 @@ class FloatingOverlayBar:
 
         self._draw_pill(2, 2, w - 2, h - 2, h // 2 - 2, self.BG, self.BORDER_COLOR)
 
-        if self.state == "RECORDING":
+        if self.state == "READY":
+            self._draw_ready(w, h)
+        elif self.state == "RECORDING":
             self._draw_recording(w, h)
         elif self.state == "PROCESSING":
             self._draw_processing(w, h)
         elif self.state == "DONE":
             self._draw_done(w, h)
+
+    def _draw_ready(self, w: int, h: int) -> None:
+        c = self.canvas
+        cy = h / 2
+        # Green indicator dot
+        c.create_oval(24, cy - 4, 32, cy + 4, fill=self.DONE_GREEN, outline="")
+        c.create_text(w / 2 + 10, cy, text="Ready to do this and all • Click to speak", fill=self.TEXT_PRIMARY, font=(config.bar_font_family, 10, "bold"), anchor="center")
 
     def _draw_recording(self, w: int, h: int) -> None:
         c = self.canvas
