@@ -126,7 +126,7 @@ class TextPolisher:
         """Execute HTTP request to target AI provider model endpoint with model fallbacks."""
         try:
             if provider == "gemini":
-                models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+                models = ["gemini-2.5-flash", "gemini-2.0-flash"]
                 for m in models:
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
@@ -135,7 +135,7 @@ class TextPolisher:
                             "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
                         }).encode("utf-8")
                         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-                        with urllib.request.urlopen(req, timeout=6.0) as resp:
+                        with urllib.request.urlopen(req, timeout=3.5) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             try:
                                 text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -143,6 +143,11 @@ class TextPolisher:
                                     return text
                             except (KeyError, IndexError):
                                 pass
+                    except urllib.error.HTTPError as e:
+                        log.warning("[GEMINI %s FAILED] HTTP %d: %s", m, e.code, e.reason)
+                        if e.code in (429, 403):
+                            # Rate limited or quota exceeded — stop trying this key and failover immediately
+                            break
                     except Exception as e:
                         log.warning("[GEMINI %s FAILED] %s", m, e)
 

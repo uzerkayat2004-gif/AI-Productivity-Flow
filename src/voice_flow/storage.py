@@ -129,10 +129,10 @@ class StorageEngine:
         """Seed standard models for AI providers if not already present."""
         seeds = {
             "gemini": [
-                ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+                ("gemini-2.5-flash", "Gemini 2.5 Flash (Next-Gen Flagship)"),
+                ("gemini-2.5-pro", "Gemini 2.5 Pro (Deep Reasoning)"),
                 ("gemini-2.0-flash", "Gemini 2.0 Flash"),
-                ("gemini-1.5-pro", "Gemini 1.5 Pro"),
-                ("gemini-1.5-flash", "Gemini 1.5 Flash"),
+                ("gemini-2.0-flash-lite", "Gemini 2.0 Flash-Lite (Sub-50ms)"),
             ],
             "groq": [
                 ("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
