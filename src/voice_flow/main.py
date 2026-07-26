@@ -173,21 +173,18 @@ class VoiceFlowApp:
                 pass
 
     def run(self) -> None:
-        log.info("Starting local REST API server & Desktop GUI...")
-        try:
-            from voice_flow.gui.desktop_launcher import launch_desktop_gui
-            threading.Thread(target=launch_desktop_gui, daemon=True).start()
-        except Exception as e:
-            log.warning("Could not launch Desktop GUI: %s", e)
-
         log.info("Starting input trigger hooks...")
         self.hotkeys.start()
 
         # Start GUI recording state watcher
         threading.Thread(target=self._watch_gui_state_file, daemon=True).start()
 
-        # Show System-Wide Floating Overlay Bar on whole screen at launch
-        self.overlay.show_ready()
+        # Start system-wide overlay bar in dedicated thread
+        def start_overlay():
+            self.overlay.show_ready()
+            self.overlay.run_loop()
+
+        threading.Thread(target=start_overlay, daemon=True).start()
 
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
@@ -196,8 +193,15 @@ class VoiceFlowApp:
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 
-        # Start Tkinter main event loop for floating overlay bar
-        self.overlay.run_loop()
+        # Launch Desktop UI Window on main thread
+        try:
+            from voice_flow.gui.desktop_launcher import launch_desktop_gui
+            launch_desktop_gui()
+        except Exception as e:
+            log.warning("Could not launch Desktop GUI: %s. Falling back to background engine mode.", e)
+            import time
+            while True:
+                time.sleep(1.0)
 
     def stop(self) -> None:
         self.hotkeys.stop()
