@@ -127,7 +127,7 @@ class VoiceFlowApp:
 
                 if not raw_transcript.strip():
                     log.info("No text transcribed.")
-                    self.overlay.hide()
+                    self.overlay.show_ready()
                     return
 
                 # Step 3: Polish text with AI engine & custom dictionary fuzzy matching
@@ -151,7 +151,7 @@ class VoiceFlowApp:
 
             except Exception as e:
                 log.error("Error processing dictation: %s", e, exc_info=True)
-                self.overlay.hide()
+                self.overlay.show_ready()
 
     def _watch_gui_state_file(self) -> None:
         """Monitor ~/.voice_flow/recording_state.json for recording toggle events from GUI."""
