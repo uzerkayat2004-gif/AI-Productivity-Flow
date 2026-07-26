@@ -1,0 +1,3 @@
+stdout=None
+stderr=None
+exe=C:\Python314\pythonw.exe
