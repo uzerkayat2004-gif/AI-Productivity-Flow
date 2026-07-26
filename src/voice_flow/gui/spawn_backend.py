@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # Use python.exe (not pythonw) so C extensions get valid stdout/stderr handles
 python_exe = os.path.join(os.path.dirname(sys.executable), "python.exe")
@@ -24,7 +24,7 @@ devnull = open(os.devnull, "w")
 
 subprocess.Popen(
     [python_exe, "-m", "voice_flow.main"],
-    cwd=root_dir,
+    cwd=src_dir,
     stdout=devnull,
     stderr=devnull,
     stdin=subprocess.DEVNULL,

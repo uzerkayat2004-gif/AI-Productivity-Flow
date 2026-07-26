@@ -59,29 +59,14 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
     # Icon path
     ico_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "icon.ico"))
 
-    import ctypes
-    try:
-        user32 = ctypes.windll.user32
-        screen_width = user32.GetSystemMetrics(0)
-        screen_height = user32.GetSystemMetrics(1)
-    except Exception:
-        screen_width, screen_height = 1920, 1080
-
-    win_width = 480
-    win_height = max(600, screen_height - 60)
-    win_x = max(0, screen_width - win_width - 15)
-    win_y = 25
-
-    # Create native desktop window positioned on right side of screen
+    # Create native desktop window matching desktop application layout
     create_kwargs = {
-        "title": "voiceFlow",
+        "title": "Voice Flow - AI Speech Desktop App",
         "url": url,
-        "width": win_width,
-        "height": win_height,
-        "x": win_x,
-        "y": win_y,
+        "width": 1160,
+        "height": 760,
         "resizable": True,
-        "min_size": (380, 500),
+        "min_size": (900, 600),
         "background_color": "#0b0c16",
     }
 

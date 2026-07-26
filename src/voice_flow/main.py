@@ -240,11 +240,11 @@ class VoiceFlowApp:
                 alt_exe = os.path.join(os.path.dirname(python_exe), "python.exe")
                 if os.path.exists(alt_exe):
                     python_exe = alt_exe
-            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             import subprocess
             subprocess.Popen(
                 [python_exe, "-m", "voice_flow.gui.desktop_launcher"],
-                cwd=root_dir,
+                cwd=src_dir,
             )
         except Exception as e:
             log.warning("Could not launch Desktop GUI process: %s", e)
