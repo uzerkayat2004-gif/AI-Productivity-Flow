@@ -8,6 +8,8 @@ from __future__ import annotations
 import ctypes
 import io
 import logging
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -45,6 +47,12 @@ class VoiceFlowApp:
 
     def __init__(self) -> None:
         log.info("Starting Voice Flow System Engine...")
+        # Load saved microphone preference if available
+        saved_mic = storage.get_setting("selected_mic_device", None)
+        if saved_mic is not None:
+            config.selected_mic_device = saved_mic
+            log.info("Loaded saved microphone preference: %s", saved_mic)
+
         self.transcriber = Transcriber()
         self.audio = AudioRecorder()
         self.overlay = FloatingOverlayBar()
@@ -66,8 +74,6 @@ class VoiceFlowApp:
 
     def _on_dictation_start(self) -> None:
         if self.is_recording:
-            log.info("Dictation toggle triggered while recording, finishing...")
-            self._on_dictation_finish()
             return
 
         hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -91,9 +97,9 @@ class VoiceFlowApp:
             if not self.is_recording:
                 return
 
-            log.info("[PROCESSING] Dictation finished, stopping recording stream...")
             self.is_recording = False
             self.hotkeys.set_recording_state(False)
+            log.info("[PROCESSING] Dictation finished, stopping recording stream...")
 
             # Stop audio recording stream & fetch float32 numpy audio buffer
             audio_buffer = self.audio.stop()
@@ -178,7 +184,17 @@ class VoiceFlowApp:
         import json
         import os
         state_file = os.path.join(os.path.expanduser("~"), ".voice_flow", "recording_state.json")
-        last_mtime = 0
+
+        # Ensure state file exists and is reset to false on startup
+        try:
+            os.makedirs(os.path.dirname(state_file), exist_ok=True)
+            with open(state_file, "w") as f:
+                json.dump({"recording": False}, f)
+        except Exception:
+            pass
+
+        last_mtime = os.path.getmtime(state_file) if os.path.exists(state_file) else 0
+
         while True:
             time.sleep(0.2)
             try:
@@ -193,8 +209,8 @@ class VoiceFlowApp:
                             self._on_dictation_start()
                         elif not gui_recording and self.is_recording:
                             self._on_dictation_finish()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("GUI state file watcher error: %s", e)
 
     def run(self) -> None:
         log.info("Starting input trigger hooks...")
@@ -203,12 +219,12 @@ class VoiceFlowApp:
         # Start GUI recording state watcher
         threading.Thread(target=self._watch_gui_state_file, daemon=True).start()
 
-        # Start system-wide overlay bar in dedicated thread
-        def start_overlay():
-            self.overlay.show_ready()
-            self.overlay.run_loop()
-
-        threading.Thread(target=start_overlay, daemon=True).start()
+        # Start local REST API server
+        try:
+            from voice_flow.gui.api_server import start_api_server
+            threading.Thread(target=start_api_server, daemon=True).start()
+        except Exception as e:
+            log.warning("Could not start API server: %s", e)
 
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
@@ -217,12 +233,28 @@ class VoiceFlowApp:
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 
-        # Launch Desktop UI Window on main thread
+        # Launch Desktop UI Window in a dedicated process to prevent COM thread deadlocks with Tkinter
         try:
-            from voice_flow.gui.desktop_launcher import launch_desktop_gui
-            launch_desktop_gui()
+            python_exe = sys.executable
+            if "pythonw.exe" in python_exe.lower():
+                alt_exe = os.path.join(os.path.dirname(python_exe), "python.exe")
+                if os.path.exists(alt_exe):
+                    python_exe = alt_exe
+            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            import subprocess
+            subprocess.Popen(
+                [python_exe, "-m", "voice_flow.gui.desktop_launcher"],
+                cwd=root_dir,
+            )
         except Exception as e:
-            log.warning("Could not launch Desktop GUI: %s. Falling back to background engine mode.", e)
+            log.warning("Could not launch Desktop GUI process: %s", e)
+
+        # Run Tkinter Floating Overlay Bar on the MAIN THREAD
+        try:
+            self.overlay.show_ready()
+            self.overlay.run_loop()
+        except Exception as e:
+            log.error("Overlay main loop error: %s", e)
             import time
             while True:
                 time.sleep(1.0)

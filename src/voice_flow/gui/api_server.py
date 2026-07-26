@@ -75,7 +75,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             mics.append({"index": idx, "name": name})
                 self.send_json_response(mics)
             except Exception:
-                self.send_json_response([{"index": 0, "name": "Headset (Max Pro)"}])
+                self.send_json_response([])
         else:
             super().do_GET()
 
@@ -88,6 +88,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             mic_name = data.get("name")
             mic_index = data.get("index")
             config.selected_mic_device = mic_index if mic_index is not None else mic_name
+            storage.save_setting("selected_mic_device", config.selected_mic_device)
             print(f"[AUDIO] Active recording input device switched to: {config.selected_mic_device}")
             self.send_json_response({"success": True, "selected_device": str(config.selected_mic_device)})
 
@@ -105,14 +106,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             data = json.loads(body)
             word = data.get("word", "").strip()
             success = storage.add_dictionary_word(word)
-            dictionary_engine.refresh_words()
+            dictionary_engine.mark_dirty()
             self.send_json_response({"success": success, "words": storage.get_dictionary_words()})
 
         elif self.path == "/api/dictionary/remove":
             data = json.loads(body)
             word = data.get("word", "").strip()
             success = storage.remove_dictionary_word(word)
-            dictionary_engine.refresh_words()
+            dictionary_engine.mark_dirty()
             self.send_json_response({"success": success, "words": storage.get_dictionary_words()})
 
         elif self.path == "/api/apikeys/add":
@@ -315,14 +316,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 return {"success": False, "error": f"Invalid {provider.capitalize()} API key. Please get a valid key from the provider's dashboard."}
             if e.code == 401:
                 return {"success": False, "error": f"Invalid {provider.capitalize()} API key (HTTP 401 Unauthorized). Please check your key."}
-            if e.code in (403, 429) and len(key) >= 20:
-                # Cloudflare/VPN challenge or quota hit — allow key save as format is valid
-                return {"success": True, "message": f"{provider.capitalize()} Key Saved! (Verified via key format, HTTP {e.code} VPN/Rate Limit noted)"}
+            if e.code in (403, 429):
+                return {"success": False, "error": f"{provider.capitalize()} API returned HTTP {e.code} (rate-limited or forbidden). Check key permissions or try again later."}
             return {"success": False, "error": f"HTTP {e.code}: {e.reason}"}
         except Exception as e:
-            if len(key) >= 20:
-                return {"success": True, "message": f"{provider.capitalize()} Key Saved! (Verified via key format)"}
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Connection failed: {e}. Check your internet and try again."}
 
         return {"success": False, "error": "Verification failed."}
 
@@ -358,9 +356,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
 
 def start_api_server() -> None:
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), VoiceFlowApiHandler)
-    print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://127.0.0.1:{PORT}")
-    httpd.serve_forever()
+    try:
+        ThreadingHTTPServer.allow_reuse_address = True
+        httpd = ThreadingHTTPServer(("127.0.0.1", PORT), VoiceFlowApiHandler)
+        print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://127.0.0.1:{PORT}")
+        httpd.serve_forever()
+    except OSError as e:
+        print(f"[API SERVER WARNING] Port {PORT} already bound or in use ({e}). Continuing with existing API backend.")
+    except Exception as e:
+        print(f"[API SERVER ERROR] Failed to start HTTP server: {e}")
 
 
 if __name__ == "__main__":

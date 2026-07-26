@@ -65,11 +65,9 @@ class Config:
         if not os.path.exists(DB_PATH):
             return []
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.execute("SELECT api_key FROM api_keys ORDER BY id ASC")
-            keys = [row[0] for row in cursor.fetchall()]
-            conn.close()
-            return keys
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.execute("SELECT api_key FROM api_keys ORDER BY id ASC")
+                return [row[0] for row in cursor.fetchall()]
         except Exception:
             return []
 
@@ -78,14 +76,13 @@ class Config:
         if not api_key or not api_key.strip():
             return False
         try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute(
-                "INSERT OR IGNORE INTO api_keys (api_key, created_at) VALUES (?, datetime('now'))",
-                (api_key.strip(),),
-            )
-            conn.commit()
-            conn.close()
-            return True
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO api_keys (api_key, created_at) VALUES (?, datetime('now'))",
+                    (api_key.strip(),),
+                )
+                conn.commit()
+                return True
         except Exception:
             return False
 

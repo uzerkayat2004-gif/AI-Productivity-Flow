@@ -645,8 +645,23 @@ async function loadInsights() {
     const insightsTotalWords = document.getElementById("insights-total-words");
     if (insightsTotalWords) insightsTotalWords.textContent = totalWords.toLocaleString();
 
-    const insightsDesktopWords = document.getElementById("insights-desktop-words");
-    if (insightsDesktopWords) insightsDesktopWords.textContent = totalWords.toLocaleString() + " words";
+    // Time Saved Calculation (Manual typing = 40 WPM vs Speaking = 130 WPM)
+    // Time saved in minutes = (totalWords / 40) - (totalWords / Math.max(avgWpm, 120))
+    const manualMinutes = totalWords / 40.0;
+    const voiceMinutes = totalWords / Math.max(avgWpm || 130, 80);
+    const savedMinutes = Math.max(0, manualMinutes - voiceMinutes);
+
+    const timeSavedEl = document.getElementById("insights-time-saved");
+    const timeSavedUnit = document.getElementById("insights-time-saved-unit");
+    if (timeSavedEl && timeSavedUnit) {
+      if (savedMinutes >= 60) {
+        timeSavedEl.textContent = (savedMinutes / 60.0).toFixed(1);
+        timeSavedUnit.textContent = "hrs";
+      } else {
+        timeSavedEl.textContent = Math.round(savedMinutes);
+        timeSavedUnit.textContent = "mins";
+      }
+    }
 
     const insightsStreakTitle = document.getElementById("insights-streak-title");
     if (insightsStreakTitle) insightsStreakTitle.textContent = `${streak} day streak`;
@@ -670,6 +685,9 @@ async function loadInsights() {
       else badge.textContent = "Ready to record";
     }
 
+    // Gauge Update
+    updateSpeedGauge(avgWpm);
+
     // App Usage Breakdown List
     const usageContainer = document.getElementById("insights-app-breakdown");
     if (usageContainer) {
@@ -684,7 +702,10 @@ async function loadInsights() {
           const icon = getAppIcon(app.app_name);
           return `
             <div class="usage-item">
-              <div class="usage-label"><span>${icon} ${escapeHtml(app.app_name)}</span><span>${pct}% (${app.total_words} words)</span></div>
+              <div class="usage-label">
+                <span style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 16px;">${icon}</span> ${escapeHtml(app.app_name)}</span>
+                <span>${pct}% (${app.total_words} words)</span>
+              </div>
               <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${pct}%;"></div></div>
             </div>
           `;
@@ -701,27 +722,46 @@ async function loadInsights() {
 
 function getAppIcon(appName) {
   const name = appName.toLowerCase();
-  if (name.includes("chrome") || name.includes("edge") || name.includes("brave")) return "🤖 AI Prompts";
-  if (name.includes("whatsapp") || name.includes("telegram")) return "💬 Personal Messages";
-  if (name.includes("outlook") || name.includes("gmail")) return "✉️ Emails";
-  if (name.includes("slack") || name.includes("teams")) return "💼 Work Messages";
-  if (name.includes("notion") || name.includes("word") || name.includes("docs")) return "📄 Documents";
-  return "♾️ Other Tasks";
+  if (name.includes("chrome") || name.includes("edge") || name.includes("brave")) return "🤖";
+  if (name.includes("whatsapp") || name.includes("telegram")) return "💬";
+  if (name.includes("outlook") || name.includes("gmail") || name.includes("mail")) return "✉️";
+  if (name.includes("slack") || name.includes("teams")) return "💼";
+  if (name.includes("notion") || name.includes("word") || name.includes("docs")) return "📄";
+  return "♾️";
+}
+
+function updateSpeedGauge(wpm) {
+  const gaugeFill = document.getElementById("gauge-fill");
+  if (!gaugeFill) return;
+
+  // Max WPM for the gauge is 160
+  const maxWpm = 160;
+  const clampedWpm = Math.min(Math.max(wpm, 0), maxWpm);
+
+  // Dash array length for the SVG circle (approx 283 for r=45)
+  const dashArray = 283;
+  // Calculate percentage (0 to 0.75 for a 3/4 circle arc)
+  const percentage = (clampedWpm / maxWpm) * 0.75;
+  const dashOffset = dashArray - (dashArray * percentage);
+
+  gaugeFill.style.strokeDashoffset = dashOffset;
 }
 
 function renderHeatmap(totalWords) {
   const grid = document.getElementById("heatmap-grid");
   if (!grid) return;
   grid.innerHTML = "";
+  // 64 activity matrix cells
   for (let i = 0; i < 64; i++) {
     const cell = document.createElement("div");
     cell.className = "heatmap-cell";
     if (totalWords > 0) {
-      const rand = Math.random();
-      if (rand > 0.85) cell.classList.add("level-4");
-      else if (rand > 0.7) cell.classList.add("level-3");
-      else if (rand > 0.5) cell.classList.add("level-2");
-      else if (rand > 0.35) cell.classList.add("level-1");
+      // Deterministic activity simulation based on index and word count
+      const activityScore = (i * 17 + totalWords) % 10;
+      if (activityScore > 8) cell.classList.add("level-4");
+      else if (activityScore > 6) cell.classList.add("level-3");
+      else if (activityScore > 4) cell.classList.add("level-2");
+      else if (activityScore > 2) cell.classList.add("level-1");
     }
     grid.appendChild(cell);
   }

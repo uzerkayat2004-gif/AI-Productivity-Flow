@@ -39,9 +39,6 @@ class TextPolisher:
 
     def polish(self, raw_text: str, style_instruction: str = "") -> str:
         """Clean and polish raw speech text."""
-        if not hasattr(self, "_rate_limited_keys"):
-            self._rate_limited_keys = {}
-
         if not raw_text or not raw_text.strip():
             return ""
 
@@ -85,9 +82,6 @@ class TextPolisher:
         self, raw_text: str, api_keys: dict[str, str], style_instruction: str
     ) -> str | None:
         """Rotate through pool of user API keys and multi-connections for AI polishing with priority failover."""
-        if not hasattr(self, "_rate_limited_keys"):
-            self._rate_limited_keys = {}
-
         prompt = (
             f"You are an ultra-fast text polishing assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
             f"fixing punctuation/grammar, and capitalizing properly.\n"

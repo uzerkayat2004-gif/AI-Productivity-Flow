@@ -25,8 +25,28 @@ WM_NCMBUTTONDOWN = 0x00A7
 WM_NCMBUTTONUP = 0x00A8
 WM_NCMBUTTONDBLCLK = 0x00A9
 
+# Win32 Virtual Key Codes for Ctrl and Win keys
+VK_CONTROL = 0x11
+VK_LWIN = 0x5B
+VK_RWIN = 0x5C
+
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
+
+def _is_ctrl_down() -> bool:
+    """Check physical hardware state of Control key on Windows."""
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+    except Exception:
+        return False
+
+def _is_win_down() -> bool:
+    """Check physical hardware state of Windows Key (Left or Right) on Windows."""
+    try:
+        user32 = ctypes.windll.user32
+        return bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
+    except Exception:
+        return False
 
 
 def _suppress_win_start_menu() -> None:
@@ -129,60 +149,48 @@ class InputTriggerListener:
     # -- Internal Keyboard Callbacks --
 
     def _on_key_press(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        if key is None:
-            return
-        self._pressed_keys.add(key)
-
-        # Check for Win + Ctrl / Ctrl + Win combo
-        win_pressed = any(
-            k in self._pressed_keys
-            for k in (
-                keyboard.Key.cmd,
-                keyboard.Key.cmd_l,
-                keyboard.Key.cmd_r,
-            )
-        )
-        ctrl_pressed = any(
-            k in self._pressed_keys
-            for k in (
-                keyboard.Key.ctrl,
-                keyboard.Key.ctrl_l,
-                keyboard.Key.ctrl_r,
-            )
-        )
-
-        if win_pressed and ctrl_pressed:
-            _suppress_win_start_menu()
+        try:
+            if key is None:
+                return
 
             with self._lock:
-                if not self._hotkey_triggered:
-                    self._hotkey_triggered = True
-                    if not self._is_recording:
+                # Check physical hardware state of BOTH keys using Win32 API
+                ctrl_down = _is_ctrl_down()
+                win_down = _is_win_down()
+
+                # BOTH Ctrl and Win must be held simultaneously to trigger dictation
+                if ctrl_down and win_down:
+                    _suppress_win_start_menu()
+                    if not self._hotkey_triggered and not self._is_recording:
+                        self._hotkey_triggered = True
                         self._is_recording = True
                         threading.Thread(target=self._on_start, daemon=True).start()
 
-        # Escape key cancels recording
-        if key == keyboard.Key.esc:
-            with self._lock:
-                if self._is_recording:
-                    self._is_recording = False
-                    threading.Thread(target=self._on_cancel, daemon=True).start()
-
-    def _on_key_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        if key is None:
-            return
-        self._pressed_keys.discard(key)
-
-        # Release hotkey triggers finish when Win or Ctrl is released during recording
-        if key in (
-            keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r,
-            keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
-        ):
-            _suppress_win_start_menu()
-
-            with self._lock:
-                if self._hotkey_triggered:
-                    self._hotkey_triggered = False
+                # Escape key cancels recording
+                if key == keyboard.Key.esc:
                     if self._is_recording:
                         self._is_recording = False
+                        self._hotkey_triggered = False
+                        threading.Thread(target=self._on_cancel, daemon=True).start()
+        except Exception as e:
+            log.exception("Key press handler error: %s", e)
+
+    def _on_key_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
+        try:
+            if key is None:
+                return
+
+            with self._lock:
+                # Releasing Ctrl or Win key when Push-to-Talk shortcut was active
+                if key in (
+                    keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r,
+                    keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
+                ):
+                    if self._hotkey_triggered:
+                        _suppress_win_start_menu()
+                        self._hotkey_triggered = False
+                        self._is_recording = False
+                        # Finish recording, transcribe, and paste text into target app ONCE
                         threading.Thread(target=self._on_finish, daemon=True).start()
+        except Exception as e:
+            log.exception("Key release handler error: %s", e)

@@ -125,8 +125,15 @@ class StorageEngine:
 
         self._seed_default_models()
 
+    _SEED_VERSION = "1"  # Bump to re-seed after adding new default models
+
     def _seed_default_models(self) -> None:
         """Seed standard models for AI providers if not already present."""
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT value FROM settings WHERE key = 'seed_version'")
+            row = cursor.fetchone()
+            if row and row["value"] == self._SEED_VERSION:
+                return  # Already seeded this version
         seeds = {
             "gemini": [
                 ("gemini-2.5-flash", "Gemini 2.5 Flash (Next-Gen Flagship)"),
@@ -187,6 +194,10 @@ class StorageEngine:
                         "INSERT OR IGNORE INTO provider_models (provider, model_id, display_name, is_active) VALUES (?, ?, ?, 1)",
                         (provider, mid, mname)
                     )
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('seed_version', ?, datetime('now'))",
+                (self._SEED_VERSION,)
+            )
             conn.commit()
 
     # --- History API ---

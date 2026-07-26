@@ -112,6 +112,12 @@
             <div class="stat-value"><span id="insights-wpm">0</span> <span class="stat-unit">wpm</span></div>
             <div class="insights-gauge-container">
               <div class="arc-gauge">
+                <svg viewBox="0 0 100 100">
+                  <!-- Background Track -->
+                  <path d="M 20 80 A 45 45 0 1 1 80 80" fill="none" stroke="var(--primary-orange-light)" stroke-width="8" stroke-linecap="round" />
+                  <!-- Progress Fill -->
+                  <path id="gauge-fill" d="M 20 80 A 45 45 0 1 1 80 80" fill="none" stroke="var(--primary-orange)" stroke-width="8" stroke-linecap="round" style="stroke-dasharray: 283; stroke-dashoffset: 283; transition: stroke-dashoffset 1s ease-out;" />
+                </svg>
                 <span class="gauge-badge" id="insights-speed-badge">Speed Tracker</span>
               </div>
             </div>
@@ -127,12 +133,13 @@
             </div>
           </div>
 
-          <!-- Total Words Dictated Card -->
+          <!-- Time Saved Card (Wispr Flow Exact Metric) -->
           <div class="stat-card">
-            <div class="stat-header">TOTAL WORDS DICTATED</div>
-            <div class="stat-value"><span id="insights-total-words">0</span> <span class="stat-unit">words</span></div>
-            <div style="margin-top: 14px; font-size: 13px; color: var(--text-muted);">
-              🖥️ Desktop: <strong id="insights-desktop-words" style="color: var(--text-main);">0 words</strong>
+            <div class="stat-header">TIME SAVED</div>
+            <div class="stat-value"><span id="insights-time-saved">0</span> <span class="stat-unit" id="insights-time-saved-unit">mins</span></div>
+            <div class="fixes-breakdown-list">
+              <div class="fix-sub-row"><span>Total Words Dictated:</span> <strong id="insights-total-words" style="color: var(--text-main);">0</strong></div>
+              <div class="fix-sub-row"><span>Avg Typing vs Speech:</span> <strong style="color: var(--primary-orange);">3x Faster</strong></div>
             </div>
           </div>
         </div>

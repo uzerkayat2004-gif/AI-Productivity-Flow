@@ -574,17 +574,7 @@ body {
 }
 
 .style-card.selected::after {
-  content: "✓ Active";
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  background-color: var(--primary-orange);
-  color: white;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 12px;
-  text-transform: uppercase;
+  display: none;
 }
 
 .style-card-name {
@@ -955,6 +945,10 @@ body {
 }
 
 .gauge-badge {
+  position: absolute;
+  bottom: 15%;
+  left: 50%;
+  transform: translateX(-50%);
   background-color: var(--primary-orange-light);
   color: var(--primary-orange);
   font-weight: 700;
@@ -962,6 +956,7 @@ body {
   padding: 4px 10px;
   border-radius: 12px;
   border: 1px solid var(--primary-orange-border);
+  white-space: nowrap;
 }
 
 /* Usage Progress Bars */
@@ -1406,7 +1401,7 @@ input:checked + .toggle-slider:before {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
-  background: var(--bg-main);
+  background: var(--bg-sidebar);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1425,7 +1420,7 @@ input:checked + .toggle-slider:before {
   background-color: var(--primary-orange-light);
   color: var(--primary-orange);
   border-color: var(--primary-orange-border);
-  box-shadow: 0 0 0 2px rgba(255, 107, 0, 0.15);
+  box-shadow: 0 0 0 2px rgba(124, 108, 246, 0.15);
 }
 
 /* ================================================
@@ -1791,9 +1786,9 @@ input:checked + .toggle-slider:before {
 
 /* Dictionary & Style Extensions */
 .dict-counter-badge {
-  background: rgba(124, 58, 237, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(167, 139, 250, 0.3);
+  background: var(--primary-orange-light);
+  color: var(--primary-orange);
+  border: 1px solid var(--primary-orange-border);
   padding: 4px 12px;
   border-radius: 20px;
   font-size: 12px;
@@ -1801,7 +1796,7 @@ input:checked + .toggle-slider:before {
 }
 
 .dict-tag-btn {
-  background: rgba(255, 255, 255, 0.04);
+  background: white;
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   padding: 6px 14px;
@@ -1813,19 +1808,19 @@ input:checked + .toggle-slider:before {
 }
 
 .dict-tag-btn.active, .dict-tag-btn:hover {
-  background: rgba(124, 58, 237, 0.2);
-  border-color: #7c3aed;
-  color: #fff;
+  background: var(--primary-orange-light);
+  border-color: var(--primary-orange-border);
+  color: var(--primary-orange);
 }
 
 .chip-item {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #fff;
-  padding: 6px 12px;
+  background: var(--primary-orange-light);
+  border: 1px solid var(--primary-orange-border);
+  color: var(--text-main);
+  padding: 6px 14px;
   border-radius: 18px;
   font-size: 13px;
   font-weight: 600;
@@ -1833,8 +1828,8 @@ input:checked + .toggle-slider:before {
 }
 
 .chip-item:hover {
-  border-color: #a78bfa;
-  background: rgba(124, 58, 237, 0.15);
+  border-color: var(--primary-orange);
+  background: #ffe9d9;
 }
 
 .chip-delete-btn {

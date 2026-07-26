@@ -18,16 +18,29 @@ class DictionaryEngine:
     """Manages custom vocabulary biasing and phonetic fuzzy replacement."""
 
     def __init__(self) -> None:
-        self.refresh_words()
+        self.words: list[str] = []
+        self._dirty = True  # Force first load
+        self._ensure_loaded()
+
+    def mark_dirty(self) -> None:
+        """Signal that the DB has changed and words need reloading."""
+        self._dirty = True
+
+    def _ensure_loaded(self) -> None:
+        """Load words from DB only if marked dirty."""
+        if self._dirty:
+            self.words = storage.get_dictionary_words()
+            self._dirty = False
 
     def refresh_words(self) -> list[str]:
-        """Fetch custom terms from database."""
-        self.words = storage.get_dictionary_words()
+        """Force-reload custom terms from database."""
+        self._dirty = True
+        self._ensure_loaded()
         return self.words
 
     def get_initial_prompt(self) -> str:
         """Construct Whisper initial_prompt string to bias Transformer decoding."""
-        self.refresh_words()
+        self._ensure_loaded()
         # Filter terms to include genuine custom jargon / proper nouns
         valid_words = [w for w in self.words if len(w) >= 3 and w.lower() not in {"the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and", "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i", "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who", "why"}]
         if not valid_words:
@@ -42,7 +55,7 @@ class DictionaryEngine:
         if not text:
             return text
 
-        self.refresh_words()
+        self._ensure_loaded()
         if not self.words:
             return text
 
