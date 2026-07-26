@@ -63,6 +63,7 @@ class FloatingOverlayBar:
         self.state = "HIDDEN"  # HIDDEN, READY, RECORDING, PROCESSING, DONE
         self._anim_phase = 0.0
         self._hover_zone: str | None = None  # "cancel", "finish", or None
+        self._is_mouse_over = False
 
         self.idle_width = 70
         self.expanded_width = 180
