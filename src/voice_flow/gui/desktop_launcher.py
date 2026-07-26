@@ -11,6 +11,13 @@ import time
 import winreg
 import webview
 
+if sys.stdout is None:
+    class DummyWriter:
+        def write(self, x): pass
+        def flush(self): pass
+    sys.stdout = DummyWriter()
+    sys.stderr = DummyWriter()
+
 from voice_flow.gui.api_server import start_api_server, PORT
 
 
