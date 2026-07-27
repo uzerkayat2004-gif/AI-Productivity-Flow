@@ -21,12 +21,12 @@ class Config:
     cpu_threads: int = field(default_factory=lambda: max(2, min(4, (os.cpu_count() or 8) // 2)))
 
     # --- Speed & Accuracy Settings ---
-    beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
+    beam_size: int = 5  # 5 = beam search for accurate multi-sentence dictation
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
-    vad_threshold: float = 0.30
-    min_speech_duration_ms: int = 100
+    vad_threshold: float = 0.20  # Lower = catches softer speech and natural pauses
+    min_speech_duration_ms: int = 80
     noise_gate_rms: float = 0.001
 
     # --- Audio Hardware Input Selection ---

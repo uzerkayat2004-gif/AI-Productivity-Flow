@@ -67,7 +67,7 @@ class AudioRecorder:
             "samplerate": self._native_sr,
             "channels": self._native_ch,
             "dtype": "float32",
-            "blocksize": 2048,
+            "blocksize": 1024,
             "callback": self._audio_callback,
         }
         if target_device is not None:
@@ -111,8 +111,8 @@ class AudioRecorder:
 
         # Environmental Noise Gate: Ignore distant room chatter / ambient background noise
         max_amp = float(np.max(np.abs(mono)))
-        if max_amp < 0.012:
-            log.info("[AUDIO] Peak amplitude (%.4f) below environmental noise gate threshold (0.012). Ignoring ambient noise.", max_amp)
+        if max_amp < 0.006:
+            log.info("[AUDIO] Peak amplitude (%.4f) below environmental noise gate threshold (0.006). Ignoring ambient noise.", max_amp)
             return np.array([], dtype=np.float32)
 
         # Resample from native sample rate to 16000 Hz for Whisper
