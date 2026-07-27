@@ -1,51 +1,15 @@
-2026-07-26 22:59:33,068 [INFO] voice_flow.main: Starting Voice Flow System Engine...
-2026-07-26 22:59:33,069 [INFO] voice_flow.transcriber: [MODEL] Loading speech model ('base.en') with 4 CPU threads in background...
-2026-07-26 22:59:33,069 [INFO] voice_flow.main: Starting input trigger hooks...
-2026-07-26 22:59:33,070 [INFO] voice_flow.hotkeys: [INPUT] Initializing global mouse filter & keyboard shortcuts...
-2026-07-26 22:59:33,127 [INFO] voice_flow.hotkeys: [INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).
-2026-07-26 22:59:33,160 [INFO] voice_flow.main: ==========================================================
-2026-07-26 22:59:33,160 [INFO] voice_flow.main:  VOICE FLOW READY! 
-2026-07-26 22:59:33,160 [INFO] voice_flow.main:  - System-wide floating bar active on your screen
-2026-07-26 22:59:33,160 [INFO] voice_flow.main:  - Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak
-2026-07-26 22:59:33,160 [INFO] voice_flow.main:  - Release to transcribe, clean up, and auto-paste!
-2026-07-26 22:59:33,160 [INFO] voice_flow.main: ==========================================================
+2026-07-27 15:53:37,810 [INFO] voice_flow.main: Starting Voice Flow System Engine...
+2026-07-27 15:53:37,811 [INFO] voice_flow.transcriber: [MODEL] Loading speech model ('base.en') with 4 CPU threads in background...
+2026-07-27 15:53:37,811 [INFO] voice_flow.main: Starting input trigger hooks...
+2026-07-27 15:53:37,812 [INFO] voice_flow.hotkeys: [INPUT] Initializing global mouse filter & keyboard shortcuts...
+2026-07-27 15:53:37,827 [INFO] voice_flow.hotkeys: [INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).
+2026-07-27 15:53:37,898 [INFO] voice_flow.main: ==========================================================
+2026-07-27 15:53:37,898 [INFO] voice_flow.main:  VOICE FLOW READY! 
+2026-07-27 15:53:37,898 [INFO] voice_flow.main:  - System-wide floating bar active on your screen
+2026-07-27 15:53:37,898 [INFO] voice_flow.main:  - Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak
+2026-07-27 15:53:37,898 [INFO] voice_flow.main:  - Release to transcribe, clean up, and auto-paste!
+2026-07-27 15:53:37,898 [INFO] voice_flow.main: ==========================================================
 [API SERVER] Voice Flow Multithreaded Backend API listening on http://127.0.0.1:8991
-2026-07-26 22:59:34,031 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/Systran/faster-whisper-base.en/revision/main "HTTP/1.1 200 OK"
-2026-07-26 22:59:34,524 [INFO] voice_flow.transcriber: [MODEL] Ultra-fast speech engine ready!
-[0726/230025.382:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1411
-2026-07-26 23:01:23,186 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
-2026-07-26 23:01:23,612 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
-2026-07-26 23:01:28,045 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
-2026-07-26 23:01:28,198 [INFO] voice_flow.audio: [AUDIO] Resampled 194560 samples from 44100 Hz -> 16000 Hz (70589 samples)
-2026-07-26 23:01:28,200 [INFO] voice_flow.main: [AUDIO] Got 70589 samples (4.41s), peak=0.1829
-2026-07-26 23:01:28,203 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Antigravity' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
-2026-07-26 23:01:28,203 [INFO] voice_flow.main: Detected active app: 'Antigravity' (autocleanup style)
-2026-07-26 23:01:28,203 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
-2026-07-26 23:01:28,203 [INFO] voice_flow.transcriber: Transcribing 4.4s audio on 4 CPU threads with dictionary biasing...
-2026-07-26 23:01:28,204 [INFO] faster_whisper: Processing audio with duration 00:04.412
-2026-07-26 23:01:28,273 [INFO] faster_whisper: VAD filter removed 00:00.440 of audio
-2026-07-26 23:01:29,400 [INFO] voice_flow.main: STT completed in 1.197s: 'Hey, right now I'm getting data again, the app is not opening. Are you hacking? Kidding me!'
-2026-07-26 23:01:29,403 [INFO] voice_flow.polisher: [EXEC VOICE FLOW POLICY] Primary polishing routed via: GEMINI / gemini-2.5-flash
-2026-07-26 23:01:30,088 [WARNING] voice_flow.polisher: [GEMINI gemini-2.5-flash FAILED] HTTP 429: Too Many Requests
-2026-07-26 23:01:30,089 [WARNING] voice_flow.polisher: [AI POLISH - Gemini] Connection 'Google Gemini Key' (#1) failed or rate-limited. Failing over to next key...
-2026-07-26 23:01:30,403 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
-2026-07-26 23:01:30,421 [INFO] voice_flow.main: Saved dictation record #112 into SQLite history database
-2026-07-26 23:01:30,756 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (95 chars).
-2026-07-26 23:03:17,062 [INFO] voice_flow.main: [RECORDING] Dictation triggered for target hwnd 132716!
-2026-07-26 23:03:17,438 [INFO] voice_flow.audio: [AUDIO] Started hardware input stream (44100 Hz, 2 ch)
-2026-07-26 23:03:28,317 [INFO] voice_flow.main: [PROCESSING] Dictation finished, stopping recording stream...
-2026-07-26 23:03:28,486 [INFO] voice_flow.audio: [AUDIO] Resampled 479232 samples from 44100 Hz -> 16000 Hz (173872 samples)
-2026-07-26 23:03:28,494 [INFO] voice_flow.main: [AUDIO] Got 173872 samples (10.87s), peak=0.1047
-2026-07-26 23:03:28,498 [INFO] voice_flow.style_engine: [STYLE ENGINE] App: 'Antigravity' | Category: 'autocleanup' | Selected Style ID: 'cleanup_light'
-2026-07-26 23:03:28,498 [INFO] voice_flow.main: Detected active app: 'Antigravity' (autocleanup style)
-2026-07-26 23:03:28,499 [INFO] voice_flow.dictionary: Whisper initial_prompt biased with dictionary terms: ['API', 'GitHub', 'HTTP', 'Kubernetes', 'Pro-Con', 'SQL', 'UIs', 'VPN', 'VSPL', 'Voice Flow', 'Whisper', 'WhisperFlow']
-2026-07-26 23:03:28,499 [INFO] voice_flow.transcriber: Transcribing 10.9s audio on 4 CPU threads with dictionary biasing...
-2026-07-26 23:03:28,499 [INFO] faster_whisper: Processing audio with duration 00:10.867
-2026-07-26 23:03:28,517 [INFO] faster_whisper: VAD filter removed 00:01.075 of audio
-2026-07-26 23:03:29,669 [INFO] voice_flow.main: STT completed in 1.170s: 'Hey, what the heck are you doing? You have totally broken the app. Now it's not opening again. I'm double-cleaning the next app, but it is not opening.'
-2026-07-26 23:03:29,671 [INFO] voice_flow.polisher: [EXEC VOICE FLOW POLICY] Primary polishing routed via: GEMINI / gemini-2.5-flash
-2026-07-26 23:03:30,277 [WARNING] voice_flow.polisher: [GEMINI gemini-2.5-flash FAILED] HTTP 429: Too Many Requests
-2026-07-26 23:03:30,277 [WARNING] voice_flow.polisher: [AI POLISH - Gemini] Connection 'Google Gemini Key' (#1) failed or rate-limited. Failing over to next key...
-2026-07-26 23:03:30,638 [INFO] voice_flow.polisher: [AI POLISH - Groq] Polished successfully using Connection 'Groq Audio Key' (#2)!
-2026-07-26 23:03:30,655 [INFO] voice_flow.main: Saved dictation record #113 into SQLite history database
-2026-07-26 23:03:30,982 [INFO] voice_flow.injector: Text injected successfully into 'Initiating A New Conversa...' (151 chars).
+2026-07-27 15:53:40,266 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/Systran/faster-whisper-base.en/revision/main "HTTP/1.1 200 OK"
+2026-07-27 15:53:41,129 [INFO] voice_flow.transcriber: [MODEL] Ultra-fast speech engine ready!
+[0727/155349.941:ERROR:ui\gfx\win\window_impl.cc:172] Failed to unregister class Chrome_WidgetWin_0. Error = 1411

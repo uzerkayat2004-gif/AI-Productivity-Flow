@@ -21,7 +21,7 @@ class Config:
     cpu_threads: int = field(default_factory=lambda: max(2, min(4, (os.cpu_count() or 8) // 2)))
 
     # --- Speed & Accuracy Settings ---
-    beam_size: int = 5  # 5 = beam search for accurate multi-sentence dictation
+    beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
     # --- Noise & Background Voice Filtering ---
