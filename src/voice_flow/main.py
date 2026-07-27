@@ -146,7 +146,8 @@ class VoiceFlowApp:
                 t0 = time.time()
                 raw_transcript = self.transcriber.transcribe(audio_buffer)
                 t_stt = time.time() - t0
-                log.info("STT completed in %.3fs: '%s'", t_stt, raw_transcript)
+                raw_words = len(raw_transcript.split()) if raw_transcript else 0
+                log.info("STT completed in %.3fs (%d words): '%s'", t_stt, raw_words, raw_transcript)
 
                 if not raw_transcript.strip():
                     log.info("No text transcribed.")
@@ -157,6 +158,8 @@ class VoiceFlowApp:
                 style_instruction = style_preset.get("prompt_instruction", str(style_preset)) if isinstance(style_preset, dict) else str(style_preset)
                 polished_text = polisher.polish(raw_transcript, style_instruction)
                 polished_text = dictionary_engine.apply_dictionary_post_processing(polished_text)
+                polished_words = len(polished_text.split()) if polished_text else 0
+                log.info("Polish complete (%d words -> %d words): '%s'", raw_words, polished_words, polished_text)
 
                 # Step 4: Save record to SQLite database for Home History & Insights
                 record = storage.add_dictation(

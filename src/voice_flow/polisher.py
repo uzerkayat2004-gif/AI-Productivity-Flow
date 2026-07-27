@@ -42,6 +42,8 @@ class TextPolisher:
         if not raw_text or not raw_text.strip():
             return ""
 
+        raw_word_count = len(raw_text.split())
+
         # Step 1: Fetch saved API keys from SQLite storage
         try:
             saved_keys = storage.get_all_api_keys()
@@ -51,6 +53,13 @@ class TextPolisher:
         if saved_keys:
             polished_api = self._polish_with_api_pool(raw_text, saved_keys, style_instruction)
             if polished_api:
+                polished_word_count = len(polished_api.split())
+                # Safety check: if polished text lost >50% of words, the AI truncated it — use raw STT instead
+                if polished_word_count < raw_word_count * 0.5 and raw_word_count > 5:
+                    log.warning("[POLISH SAFETY] AI polisher lost too many words (%d -> %d). Using raw STT text instead.",
+                                raw_word_count, polished_word_count)
+                    return dictionary_engine.apply_dictionary_post_processing(raw_text)
+                log.info("[POLISH] API polished: %d words -> %d words", raw_word_count, polished_word_count)
                 return dictionary_engine.apply_dictionary_post_processing(polished_api)
 
         # Step 2: Built-in instant zero-latency NLP polisher fallback
@@ -91,6 +100,7 @@ class TextPolisher:
             f"You are an ultra-fast text polishing assistant. Clean up this spoken text by removing filler words ('um', 'uh', 'like', 'you know'), "
             f"fixing punctuation/grammar, and capitalizing properly.\n"
             f"CRITICAL INSTRUCTION: Output ONLY the final cleaned text. Do NOT add options, bullet points, intro text, quote marks, or explanation.\n"
+            f"CRITICAL: You MUST preserve ALL spoken content completely. Do NOT shorten, summarize, or remove any sentences. Every sentence from the input must appear in your output.\n"
             f"Style guidance: {style_instruction}\n\n"
             f"Spoken text: {raw_text}"
         )
@@ -157,13 +167,13 @@ class TextPolisher:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
                         payload = json.dumps({
                             "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256}
+                            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
                         }).encode("utf-8")
                         req = urllib.request.Request(url, data=payload, headers={
                             "Content-Type": "application/json",
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         })
-                        with urllib.request.urlopen(req, timeout=3.5) as resp:
+                        with urllib.request.urlopen(req, timeout=12.0) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             try:
                                 text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -193,14 +203,14 @@ class TextPolisher:
                             "model": m,
                             "messages": [{"role": "user", "content": prompt}],
                             "temperature": 0.1,
-                            "max_tokens": 256
+                            "max_tokens": 2048
                         }).encode("utf-8")
                         req = urllib.request.Request(ep_url, data=payload, headers={
                             "Content-Type": "application/json",
                             "Authorization": f"Bearer {key}",
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         })
-                        with urllib.request.urlopen(req, timeout=8.0) as resp:
+                        with urllib.request.urlopen(req, timeout=12.0) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             text = data["choices"][0]["message"]["content"].strip()
                             if text:
