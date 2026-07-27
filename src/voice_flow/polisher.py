@@ -158,22 +158,22 @@ class TextPolisher:
         return None
 
     def _try_provider_call(self, provider: str, key: str, prompt: str) -> str | None:
-        """Execute HTTP request to target AI provider model endpoint with model fallbacks."""
+        """Execute HTTP request to target AI provider model endpoint with ultra-fast models and strict 1.8s timeout."""
         try:
             if provider == "gemini":
-                models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+                models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
                 for m in models:
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
                         payload = json.dumps({
                             "contents": [{"parts": [{"text": prompt}]}],
-                            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048}
+                            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1024}
                         }).encode("utf-8")
                         req = urllib.request.Request(url, data=payload, headers={
                             "Content-Type": "application/json",
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         })
-                        with urllib.request.urlopen(req, timeout=12.0) as resp:
+                        with urllib.request.urlopen(req, timeout=1.8) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             try:
                                 text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -187,11 +187,11 @@ class TextPolisher:
                             # Rate limited or quota exceeded — stop trying this key and failover immediately
                             break
                     except Exception as e:
-                        log.warning("[GEMINI %s FAILED] %s", m, e)
+                        log.warning("[GEMINI %s FAILED/TIMEOUT] %s", m, e)
 
             elif provider in ("groq", "openai", "deepseek", "together"):
                 endpoints = {
-                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]),
                     "openai": ("https://api.openai.com/v1/chat/completions", ["gpt-4o-mini", "gpt-4o"]),
                     "together": ("https://api.together.xyz/v1/chat/completions", ["meta-llama/Llama-3.3-70B-Instruct-Turbo"]),
                     "deepseek": ("https://api.deepseek.com/v1/chat/completions", ["deepseek-chat"]),
@@ -202,21 +202,21 @@ class TextPolisher:
                         payload = json.dumps({
                             "model": m,
                             "messages": [{"role": "user", "content": prompt}],
-                            "temperature": 0.1,
-                            "max_tokens": 2048
+                            "temperature": 0.0,
+                            "max_tokens": 1024
                         }).encode("utf-8")
                         req = urllib.request.Request(ep_url, data=payload, headers={
                             "Content-Type": "application/json",
                             "Authorization": f"Bearer {key}",
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                         })
-                        with urllib.request.urlopen(req, timeout=12.0) as resp:
+                        with urllib.request.urlopen(req, timeout=1.8) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             text = data["choices"][0]["message"]["content"].strip()
                             if text:
                                 return text
                     except Exception as e:
-                        log.warning("[%s %s FAILED] %s", provider.upper(), m, e)
+                        log.warning("[%s %s FAILED/TIMEOUT] %s", provider.upper(), m, e)
 
         except Exception as e:
             log.warning("[%s API CALL FAILED] %s", provider.upper(), e)
