@@ -14,3 +14,7 @@ env/
 *.dll
 .uv/
 uv.lock
+
+# Video Flow renderer build artifacts
+video_flow_renderer/node_modules/
+video_flow_renderer/out/
