@@ -1,9 +1,9 @@
 # Video Flow Architecture and Implementation Plan
 
-**Status:** Planning baseline; no Video Flow product implementation has started.  
-**Repository:** C:\Users\Asus\.gemini\antigravity\scratch\voice-flow  
-**Primary application:** Voice Flow, with Audio Flow as an existing feature  
-**Primary renderer:** Remotion  
+**Status:** V1 implementation completed and verified on the feature/video-flow branch.
+**Repository:** C:\Users\Asus\.gemini\antigravity\scratch\voice-flow
+**Primary application:** Voice Flow, with Audio Flow as an existing feature
+**Primary renderer:** Remotion
 **Planned output:** One-narrator, source-grounded, animated 16:9 educational MP4
 
 This document is the decision-complete architecture baseline for the permanent Video Flow Brain. It reconciles both Video Flow handoffs with the live Voice Flow codebase and the existing remotion_creator_os prototype. Later prompts may refine product requirements, but implementation should not need to rediscover the architecture described here.

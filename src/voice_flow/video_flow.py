@@ -619,4 +619,3 @@ class VideoFlowService:
 
 
 video_flow_service = VideoFlowService()
-
