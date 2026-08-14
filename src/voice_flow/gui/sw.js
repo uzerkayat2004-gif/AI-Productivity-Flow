@@ -1,40 +1,43 @@
 // Voice Flow PWA Service Worker
-const CACHE_NAME = "voice-flow-cache-v1";
+const CACHE_NAME = "voice-flow-cache-v5-theme";
+const APP_SHELL = "/index.html";
 const ASSETS_TO_CACHE = [
-  "/index.html",
-  "/styles.css",
-  "/app.js",
+  APP_SHELL,
+  "/styles.css?v=20260814",
+  "/video-flow.css?v=20260811",
+  "/design-system.css?v=20260814",
+  "/app.js?v=20260814",
+  "/video-flow.js?v=20260811",
   "/manifest.json",
   "/assets/logo.png"
 ];
 
 self.addEventListener("install", (evt) => {
-  evt.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
+  evt.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE)));
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (evt) => {
-  evt.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) return caches.delete(key);
-        })
-      );
-    })
-  );
+  evt.waitUntil(caches.keys().then((keys) => Promise.all(
+    keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+  )));
   self.clients.claim();
 });
 
 self.addEventListener("fetch", (evt) => {
-  if (evt.request.url.includes("/api/")) return; // Bypass API calls
-  evt.respondWith(
-    caches.match(evt.request).then((res) => {
-      return res || fetch(evt.request);
-    })
-  );
+  if (evt.request.url.includes("/api/")) return;
+
+  if (evt.request.mode === "navigate") {
+    evt.respondWith(
+      fetch(evt.request).then((response) => {
+        if (response.ok) {
+          caches.open(CACHE_NAME).then((cache) => cache.put(APP_SHELL, response.clone()));
+        }
+        return response;
+      }).catch(() => caches.match(APP_SHELL))
+    );
+    return;
+  }
+
+  evt.respondWith(caches.match(evt.request).then((cached) => cached || fetch(evt.request)));
 });

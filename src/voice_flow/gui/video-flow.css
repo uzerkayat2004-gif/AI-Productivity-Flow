@@ -888,3 +888,12 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+#page-videoflow.vf-provider-open > :not(#vf-provider-detail-panel) {
+  display: none;
+}
+
+#page-videoflow.vf-provider-open #vf-provider-detail-panel {
+  display: block;
+}

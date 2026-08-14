@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Flow Player</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #050a11; color: #f7fbff; }
+    body { display: grid; grid-template-rows: auto 1fr auto; }
+    header, footer { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0d1826; }
+    header { border-bottom: 1px solid #203246; }
+    footer { border-top: 1px solid #203246; }
+    .brand { color: #06cfe5; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; }
+    #title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    button, a { border: 1px solid #2b4056; border-radius: 9px; padding: 7px 10px; color: #f7fbff; background: #142131; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+    button:hover, a:hover { border-color: #06cfe5; }
+    main { position: relative; min-height: 0; display: grid; place-items: center; background: #02050a; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #status { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #17283d, #050a11 70%); }
+    #status.hidden { display: none; }
+    .status-card { width: min(360px, 80%); text-align: center; }
+    .spinner { width: 46px; height: 46px; margin: 0 auto 16px; border: 4px solid #23374b; border-top-color: #06cfe5; border-radius: 50%; animation: spin .9s linear infinite; }
+    .progress { height: 6px; margin-top: 16px; overflow: hidden; border-radius: 99px; background: #203246; }
+    .progress span { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#ff6b19,#06cfe5); transition: width .35s ease; }
+    #stage { color: #9bb0c6; font-size: 12px; }
+    #percent { margin-left: auto; color: #9bb0c6; font-size: 11px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header><span class="brand">VIDEO FLOW</span><strong id="title">Preparing video…</strong><button onclick="toggleFullscreen()">⛶ Full screen</button></header>
+  <main><video id="player" controls preload="metadata"></video><div id="status"><div class="status-card"><div class="spinner"></div><strong id="status-title">Creating your video</strong><p id="stage">Checking progress…</p><div class="progress"><span id="progress-bar"></span></div></div></div></main>
+  <footer><span id="footer-stage">Video Flow</span><span id="percent">0%</span><a id="download" href="#" download>↓ Download</a></footer>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const videoId = params.get("id") || "";
+    const player = document.getElementById("player");
+    let timer = null;
+    async function refresh() {
+      try {
+        const response = await fetch("/api/video-flow/jobs/status?id=" + encodeURIComponent(videoId));
+        const data = await response.json();
+        if (!response.ok || !data.video) throw new Error("Video not found.");
+        const video = data.video;
+        document.getElementById("title").textContent = video.title || "Video Flow";
+        document.getElementById("stage").textContent = video.stage || video.status;
+        document.getElementById("footer-stage").textContent = video.stage || video.status;
+        document.getElementById("percent").textContent = (video.progress || 0) + "%";
+        document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
+        if (video.status === "completed") {
+          clearInterval(timer);
+          document.getElementById("status").classList.add("hidden");
+          player.src = video.view_url;
+          document.getElementById("download").href = video.download_url;
+          player.play().catch(() => {});
+        } else if (video.status === "failed") {
+          clearInterval(timer);
+          document.querySelector(".spinner").style.display = "none";
+          document.getElementById("status-title").textContent = "Generation failed";
+          document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
+        }
+      } catch (error) {
+        document.getElementById("stage").textContent = error.message || "Waiting for Voice Flow…";
+      }
+    }
+    function toggleFullscreen() {
+      if (window.pywebview?.api?.toggle_fullscreen) window.pywebview.api.toggle_fullscreen();
+      else if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    }
+    refresh();
+    timer = setInterval(refresh, 1200);
+  </script>
+</body>
+</html>

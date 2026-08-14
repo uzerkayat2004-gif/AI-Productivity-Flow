@@ -3,20 +3,20 @@ let vfVideos = [];
 let vfPollTimer = null;
 let vfDeleteTarget = null;
 let vfPreviewVideo = null;
+let vfCurrentProvider = null;
+let vfCurrentProviderDetails = null;
+let vfConnectionMode = "single";
+let vfComboDraftModels = [];
+let vfProviderOpenRequest = 0;
 
 const VF_PERMANENT_CONFIRMATION = "DELETE_VIDEO_FROM_THIS_PC";
 const vfProviderIcons = {
-  gemini: "✦",
-  groq: "⚡",
-  openai: "◎",
-  huggingface: "HF",
-  cloudflare: "☁",
-  together: "↔",
-  replicate: "R",
-  elevenlabs: "11",
-  deepgram: "D",
-  assemblyai: "A",
-};
+  claude_code: "✺", antigravity: "A", openai_codex: "◎",
+  vertex_ai: "V", gemini: "✦", openrouter: "↔", nvidia_nim: "N",
+  opencode_zen: "Z", anthropic: "A", openai: "◎", groq: "G",
+  together: "T", cloudflare: "☁", ollama: "◉", lm_studio: "LM",
+  llama_cpp: "L",
+}
 
 function vfEscape(value) {
   return String(value ?? "")
@@ -55,8 +55,21 @@ async function loadVideoFlow() {
     scheduleVideoFlowPolling();
   } catch (error) {
     vfToast(error.message || "Could not load Video Flow.", true);
+    renderVideoBackendFailure(error);
     const status = document.getElementById("vf-engine-status");
-    if (status) status.textContent = "○ Renderer unavailable";
+    if (status) status.textContent = "○ Backend unavailable";
+  }
+}
+
+function renderVideoBackendFailure(error) {
+  const detail = vfEscape(error?.message || "Video Flow backend is unavailable.");
+  const message = '<div class="vf-empty-state vf-backend-failure">' +
+    '<strong>Providers could not load</strong>' +
+    '<span>' + detail + ' Restart Voice Flow to attach this page to the current backend.</span>' +
+    '</div>';
+  for (const id of ["vf-oauth-provider-grid", "vf-api-provider-grid", "vf-local-provider-grid"]) {
+    const grid = document.getElementById(id);
+    if (grid) grid.innerHTML = message;
   }
 }
 
@@ -73,6 +86,7 @@ function renderVideoHistory() {
     const complete = video.status === "completed";
     const failed = video.status === "failed";
     const mode = video.mode === "full" ? "Full explanation" : "Summary";
+    const engineVersion = video.engine_version || "legacy";
     const error = failed && video.error ? ` title="${vfEscape(video.error)}"` : "";
     return `
       <article class="vf-video-card" data-video-id="${vfEscape(video.id)}">
@@ -86,7 +100,7 @@ function renderVideoHistory() {
         </div>
         <div class="vf-video-body">
           <h3 title="${vfEscape(video.title)}">${vfEscape(video.title)}</h3>
-          <div class="vf-video-meta"><span>${vfFormatDate(video.created_at)}</span><span>${vfFormatDuration(video.duration_sec)}</span></div>
+          <div class="vf-video-meta"><span>${vfFormatDate(video.created_at)}</span><span>${vfFormatDuration(video.duration_sec)}</span><span>${vfEscape(engineVersion)}</span></div>
           ${!complete ? `<div class="vf-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(video.progress || 0)))}%"></span></div>` : ""}
           <div class="vf-video-actions">
             ${complete ? `
@@ -102,49 +116,128 @@ function renderVideoHistory() {
   }).join("");
 }
 
+function vfCapabilityBadges(model) {
+  const labels = {vision: "👁 Vision", reasoning: "🧠 Reasoning", code: "</> Code", audio: "♪ Audio", private: "⌂ Private", offline: "⊘ Offline"};
+  return (model.capabilities || []).map(item => '<span class="vf-capability">' + vfEscape(labels[item] || item) + '</span>').join("");
+}
+
+function renderVideoProviderGrid(elementId, providers) {
+  const grid = document.getElementById(elementId);
+  if (!grid) return;
+  grid.innerHTML = (providers || []).map(provider => {
+    const connected = provider.status === "connected";
+    const status = provider.category === "oauth"
+      ? (provider.oauth_status?.label || (connected ? "Account connected" : "No account"))
+      : connected
+        ? provider.active_count + " active"
+        : provider.category === "local" ? "Not configured" : "No connections";
+    return '<button class="vf-provider-card ' + (connected ? "connected" : "") + '" onclick="openVideoProvider(\'' + vfEscape(provider.id) + '\')">' +
+      '<span class="vf-provider-logo">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "AI") + '</span>' +
+      '<span class="vf-provider-copy"><strong>' + vfEscape(provider.name) + '</strong><span><i></i>' + vfEscape(status) + '</span><small>' + vfEscape(provider.description || "") + '</small></span>' +
+      '<span class="vf-provider-arrow">›</span></button>';
+  }).join("");
+}
+
+function vfSelectableVideoModels() {
+  return (vfCatalog.models || []).filter(model => model.full_id !== "local/deterministic" && model.available && model.is_active !== false);
+}
+
+function vfIsSelectableVideoModelRef(modelRef) {
+  return modelRef === "local/deterministic" || vfSelectableVideoModels().some(model => model.full_id === modelRef);
+}
+
+function vfSelectableVideoCombos() {
+  const availableRefs = new Set(["local/deterministic", ...vfSelectableVideoModels().map(model => model.full_id)]);
+  return (vfCatalog.combos || []).filter(combo => (combo.models || []).length && (combo.models || []).every(ref => availableRefs.has(ref)));
+}
+
 function renderVideoCatalog() {
+  const models = vfSelectableVideoModels();
+  const combos = vfSelectableVideoCombos();
+  const groups = new Map();
+  for (const model of models) {
+    const name = model.provider_name || model.provider;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(model);
+  }
+
   const select = document.getElementById("vf-model-select");
   if (select) {
-    const groups = new Map();
-    for (const model of vfCatalog.models || []) {
-      const name = model.provider_name || model.provider;
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(model);
-    }
-    select.innerHTML = [...groups.entries()].map(([name, models]) =>
-      `<optgroup label="${vfEscape(name)}">${models.map(model =>
-        `<option value="${vfEscape(model.full_id)}">${vfEscape(model.display_name)}</option>`
-      ).join("")}</optgroup>`
-    ).join("") + ((vfCatalog.combos || []).length
-      ? `<optgroup label="Model Combos">${vfCatalog.combos.map(combo =>
-          `<option value="${vfEscape(combo.ref)}">◈ ${vfEscape(combo.name)} · ${vfEscape(combo.strategy.replace("_", " "))}</option>`
-        ).join("")}</optgroup>`
-      : "");
-    select.value = vfCatalog.active_model || "local/deterministic";
-    if (!select.value) select.value = "local/deterministic";
-    updateActiveVideoModel(select.value);
+    select.innerHTML = (combos.length ? '<optgroup label="Model Combos">' + combos.map(combo =>
+      '<option value="' + vfEscape(combo.ref) + '">◈ ' + vfEscape(combo.name) + '</option>'
+    ).join("") + '</optgroup>' : "") +
+      [...groups.entries()].map(([name, items]) => '<optgroup label="' + vfEscape(name) + '">' + items.map(model =>
+        '<option value="' + vfEscape(model.full_id) + '">' + vfEscape(model.display_name) + '</option>'
+      ).join("") + '</optgroup>').join("");
+    const activeModelRef = vfCatalog.active_model || "local/deterministic";
+    select.value = activeModelRef;
+    updateActiveVideoModel(activeModelRef);
   }
 
   const strip = document.getElementById("vf-combo-strip");
+  const empty = document.getElementById("vf-combo-empty");
   if (strip) {
     strip.innerHTML = (vfCatalog.combos || []).map(combo =>
-      `<span class="vf-combo-pill">◈ ${vfEscape(combo.name)} · ${combo.models.length} models · ${vfEscape(combo.strategy.replace("_", " "))}
-        <button title="Delete combo" onclick="deleteVideoCombo(${Number(combo.id)})">×</button>
-      </span>`
+      '<span class="vf-combo-pill">◈ ' + vfEscape(combo.name) + ' · ' + combo.models.length + ' models · ' + vfEscape(combo.strategy.replace("_", " ")) +
+        '<button title="Delete combo" onclick="deleteVideoCombo(' + Number(combo.id) + ')">×</button></span>'
     ).join("");
   }
+  if (empty) empty.style.display = (vfCatalog.combos || []).length ? "none" : "flex";
 
-  const grid = document.getElementById("vf-provider-grid");
-  if (grid) {
-    grid.innerHTML = (vfCatalog.providers || []).map(provider => `
-      <button class="vf-provider-card ${provider.status === "connected" ? "connected" : ""}" onclick="openVideoProvider('${vfEscape(provider.id)}')">
-        <span class="vf-provider-logo">${vfEscape(vfProviderIcons[provider.id] || "AI")}</span>
-        <span><strong>${vfEscape(provider.name)}</strong><span>● ${provider.connection_count} connection${provider.connection_count === 1 ? "" : "s"}</span></span>
-      </button>
-    `).join("");
-  }
+  const providerGroups = vfCatalog.provider_groups || {};
+  renderVideoProviderGrid("vf-oauth-provider-grid", providerGroups.oauth || []);
+  renderVideoProviderGrid("vf-api-provider-grid", providerGroups.api_key || []);
+  renderVideoProviderGrid("vf-local-provider-grid", providerGroups.local || []);
+  renderVideoModelPicker();
 }
 
+function renderVideoModelPicker() {
+  const root = document.getElementById("vf-model-picker-list");
+  if (!root) return;
+  const query = (document.getElementById("vf-model-picker-search")?.value || "").trim().toLowerCase();
+  const models = vfSelectableVideoModels().filter(model =>
+    !query || [model.provider_name, model.display_name, model.full_id, ...(model.capabilities || [])].join(" ").toLowerCase().includes(query)
+  );
+  const combos = vfSelectableVideoCombos().filter(combo =>
+    !query || [combo.name, combo.strategy, ...(combo.models || [])].join(" ").toLowerCase().includes(query)
+  );
+  const groups = new Map();
+  for (const model of models) {
+    const name = model.provider_name || model.provider;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(model);
+  }
+  const sections = [];
+  if (combos.length) {
+    sections.push('<section class="vf-picker-group"><h4>◈ Model Combos <span>' + combos.length + '</span></h4>' + combos.map(combo =>
+      '<button class="vf-picker-model ' + (combo.ref === vfCatalog.active_model ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(combo.ref) + '\')"><span><strong>' + vfEscape(combo.name) + '</strong><small>' + combo.models.length + ' models · ' + vfEscape(combo.strategy.replace("_", " ")) + '</small></span><b>✓</b></button>'
+    ).join("") + '</section>');
+  }
+  if (!query || "on this pc built-in deterministic private offline".includes(query)) {
+    sections.push('<section class="vf-picker-group"><h4>⌂ On this PC <span>1</span></h4><button class="vf-picker-model ' + (vfCatalog.active_model === "local/deterministic" ? "selected" : "") + '" onclick="chooseVideoModel(\'local/deterministic\')"><span><strong>Built-in deterministic planner</strong><small>Private · offline · no account required</small></span><b>✓</b></button></section>');
+  }
+  for (const [providerName, items] of groups.entries()) {
+    sections.push('<section class="vf-picker-group"><h4>' + vfEscape(providerName) + ' <span>' + items.length + '</span></h4>' + items.map(model =>
+      '<button class="vf-picker-model ' + (model.full_id === vfCatalog.active_model ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(model.full_id) + '\')"><span><strong>' + vfEscape(model.display_name) + '</strong><small>' + vfEscape(model.full_id) + '</small></span><span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span><b>✓</b></button>'
+    ).join("") + '</section>');
+  }
+  root.innerHTML = sections.join("") || '<div class="vf-empty-state vf-compact-empty"><strong>No connected models match</strong><span>Connect a provider, enable one of its models, or try another search.</span></div>';
+}
+
+function openVideoModelPicker() {
+  const search = document.getElementById("vf-model-picker-search");
+  if (search) search.value = "";
+  renderVideoModelPicker();
+  document.getElementById("vf-model-picker-modal")?.classList.remove("hidden");
+  requestAnimationFrame(() => search?.focus());
+}
+
+function chooseVideoModel(modelRef) {
+  const select = document.getElementById("vf-model-select");
+  if (select) select.value = modelRef;
+  closeVideoModal("vf-model-picker-modal");
+  saveVideoModel(modelRef);
+}
 function toggleVideoHistory() {
   const body = document.getElementById("vf-history-body");
   const button = document.getElementById("vf-history-toggle");
@@ -221,11 +314,25 @@ function selectVideoMode(mode) {
   }
 }
 
+function isVideoModelExternal(modelRef) {
+  let refs = [modelRef];
+  if (modelRef.startsWith("combo:")) {
+    refs = (vfCatalog.combos || []).find(item => item.ref === modelRef)?.models || [];
+  }
+  const localProviders = new Set((vfCatalog.provider_groups?.local || []).map(item => item.id));
+  return refs.some(ref => {
+    if (ref === "local/deterministic") return false;
+    const model = (vfCatalog.models || []).find(item => item.full_id === ref);
+    return !model || !localProviders.has(model.provider);
+  });
+}
+
 async function generateVideoFlow() {
   const sourceInput = document.getElementById("vf-source-input");
   const titleInput = document.getElementById("vf-title-input");
   const modelSelect = document.getElementById("vf-model-select");
   const themeSelect = document.getElementById("vf-theme-select");
+  const visualDirection = document.getElementById("vf-visual-direction");
   const selectedMode = document.querySelector('input[name="vf-mode"]:checked');
   const button = document.getElementById("vf-generate-button");
   const message = document.getElementById("vf-generate-message");
@@ -237,7 +344,7 @@ async function generateVideoFlow() {
   }
   const modelRef = modelSelect?.value || "local/deterministic";
   const consent = Boolean(document.getElementById("vf-external-consent")?.checked);
-  if (!modelRef.startsWith("local/") && !consent) {
+  if (isVideoModelExternal(modelRef) && !consent) {
     vfToast("Confirm external AI planning before sending this source to the selected provider.", true);
     document.getElementById("vf-external-consent")?.focus();
     return;
@@ -254,7 +361,8 @@ async function generateVideoFlow() {
         mode: selectedMode?.value || "summary",
         model_ref: modelRef,
         allow_external_ai: consent,
-        theme: themeSelect?.value || "voice-flow",
+        theme: themeSelect?.value || "auto",
+        visual_direction: visualDirection?.value || "",
       }),
     });
     const data = await response.json();
@@ -264,7 +372,7 @@ async function generateVideoFlow() {
     scheduleVideoFlowPolling(true);
     vfToast("Video queued. You can follow its progress in history.");
     if (message) message.textContent = "Generation is running in the background.";
-    document.getElementById("vf-history-panel")?.scrollIntoView({behavior: "smooth"});
+    document.getElementById("vf-generate-button")?.scrollIntoView({behavior: "smooth", block: "nearest"});
   } catch (error) {
     if (message) message.textContent = error.message || "Generation failed.";
     vfToast(error.message || "Generation failed.", true);
@@ -306,6 +414,8 @@ async function saveVideoModel(modelRef) {
     if (!response.ok) throw new Error("Could not save the Video Flow model.");
     vfCatalog.active_model = modelRef;
     updateActiveVideoModel(modelRef);
+    renderVideoModelPicker();
+    vfToast("Video Flow model selected.");
   } catch (error) {
     vfToast(error.message, true);
   }
@@ -331,7 +441,7 @@ function updateVideoExternalConsent(modelRef) {
   const checkbox = document.getElementById("vf-external-consent");
   const copy = document.getElementById("vf-external-consent-copy");
   if (!row || !checkbox || !copy) return;
-  if (modelRef.startsWith("local/")) {
+  if (!isVideoModelExternal(modelRef)) {
     row.style.display = "none";
     checkbox.checked = false;
     return;
@@ -348,40 +458,472 @@ function updateVideoExternalConsent(modelRef) {
   checkbox.checked = false;
   copy.textContent = "The source text will be sent to " + (names.join(", ") || "the selected providers") + " for scene planning. Voice narration and rendering remain on this PC.";
 }
-function openVideoProvider(providerId) {
-  switchPage("providers");
-  window.setTimeout(() => {
-    if (typeof openProviderDetail === "function") openProviderDetail(providerId);
-  }, 40);
+async function vfPost(path, body = {}) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok || data.success === false) throw new Error(data.error || "Video Flow request failed.");
+  return data;
 }
 
-function openVideoComboModal() {
-  const modal = document.getElementById("vf-combo-modal");
-  const list = document.getElementById("vf-combo-model-list");
-  const search = document.getElementById("vf-combo-search");
-  if (search) search.value = "";
-  if (list) {
-    list.innerHTML = (vfCatalog.models || []).filter(model => !model.full_id.startsWith("local/")).map(model => `
-      <label class="vf-model-option" data-search="${vfEscape(`${model.provider_name} ${model.display_name} ${model.full_id}`.toLowerCase())}">
-        <input type="checkbox" value="${vfEscape(model.full_id)}">
-        <span><strong>${vfEscape(model.display_name)}</strong><small>${vfEscape(model.provider_name)} · ${vfEscape(model.model_id)}</small></span>
-      </label>
-    `).join("") || '<div class="vf-empty-state"><strong>No connected provider models</strong><span>Add a provider API key first.</span></div>';
+async function openVideoProvider(providerId) {
+  const page = document.getElementById("page-videoflow");
+  const panel = document.getElementById("vf-provider-detail-panel");
+  const root = document.getElementById("vf-provider-detail-content");
+  if (!page || !panel || !root) return;
+
+  const requestId = ++vfProviderOpenRequest;
+  if (!page.classList.contains("vf-provider-open")) {
+    page.dataset.providerReturnScroll = String(window.scrollY || 0);
   }
+  page.classList.add("vf-provider-open");
+  panel.classList.remove("hidden");
+  panel.setAttribute("aria-hidden", "false");
+  root.innerHTML = '<div class="vf-empty-state vf-compact-empty"><strong>Opening provider…</strong><span>Loading its connections and enabled models.</span></div>';
+  window.scrollTo({top: 0, behavior: "smooth"});
+
+  try {
+    const response = await fetch("/api/video-flow/providers/details?provider=" + encodeURIComponent(providerId));
+    const data = await response.json();
+    if (!response.ok || data.success === false) throw new Error(data.error || "Could not open provider.");
+    if (requestId !== vfProviderOpenRequest) return;
+    vfCurrentProvider = providerId;
+    vfCurrentProviderDetails = data;
+    renderVideoProviderDetails();
+  } catch (error) {
+    if (requestId !== vfProviderOpenRequest) return;
+    root.innerHTML = '<div class="vf-empty-state vf-compact-empty"><strong>Provider could not open</strong><span>' + vfEscape(error.message || "Try again from the provider list.") + '</span></div>';
+    vfToast(error.message || "Could not open provider.", true);
+  }
+}
+
+function closeVideoProvider() {
+  vfProviderOpenRequest += 1;
+  const page = document.getElementById("page-videoflow");
+  const returnScroll = Number(page?.dataset.providerReturnScroll || 0);
+  const panel = document.getElementById("vf-provider-detail-panel");
+  panel?.classList.add("hidden");
+  panel?.setAttribute("aria-hidden", "true");
+  page?.classList.remove("vf-provider-open");
+  vfCurrentProvider = null;
+  vfCurrentProviderDetails = null;
+  requestAnimationFrame(() => window.scrollTo({top: returnScroll, behavior: "smooth"}));
+}
+
+function renderVideoProviderDetails() {
+
+  const data = vfCurrentProviderDetails;
+
+  const root = document.getElementById("vf-provider-detail-content");
+
+  if (!data || !root) return;
+
+  const provider = data.provider;
+
+  const getKey = document.getElementById("vf-provider-get-key");
+
+  if (getKey) {
+
+    getKey.href = provider.get_key_url || "#";
+
+    getKey.style.display = provider.get_key_url ? "inline-flex" : "none";
+
+  }
+
+  const isOAuth = provider.category === "oauth";
+
+  const isLocal = provider.category === "local";
+
+  const connectionRows = (data.connections || []).map(connection =>
+
+    '<div class="vf-connection-row"><label><input type="checkbox" ' + (connection.is_active ? "checked" : "") + ' onchange="toggleVideoConnection(' + connection.id + ', this.checked)"><span></span></label>' +
+
+    '<span class="vf-connection-key">🔑</span><span class="vf-connection-copy"><strong>' + vfEscape(connection.name) + '</strong><small><b class="' + vfEscape(connection.status) + '">● ' + vfEscape(connection.status) + '</b> · priority ' + connection.priority + (connection.secret_hint ? ' · ' + vfEscape(connection.secret_hint) : '') + '</small></span>' +
+
+    '<button class="vf-text-button" onclick="testVideoConnection(' + connection.id + ')">⚗ Test</button>' +
+
+    '<button class="vf-text-button" onclick="editVideoConnection(' + connection.id + ')">✎ Edit</button>' +
+
+    '<button class="vf-text-button danger" onclick="deleteVideoConnection(' + connection.id + ')">⌫ Delete</button></div>'
+
+  ).join("");
+
+  const modelRows = (data.models || []).map(model =>
+
+    '<div class="vf-provider-model-row"><span class="vf-provider-model-icon">🤖</span><span><strong>' + vfEscape(model.full_id) + '</strong><small>' + vfEscape(model.display_name) + '</small></span>' +
+
+    '<span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span>' +
+
+    '<button class="vf-text-button" onclick="copyVideoModelId(\'' + vfEscape(model.full_id) + '\')">▣ Copy</button>' +
+
+    '<label class="vf-mini-switch"><input type="checkbox" ' + (model.is_active ? "checked" : "") + ' onchange="toggleVideoModel(' + model.id + ', this.checked)"><span></span></label>' +
+
+    (model.custom ? '<button class="vf-text-button danger" onclick="deleteVideoCustomModel(' + model.id + ')">×</button>' : '') + '</div>'
+
+  ).join("");
+
+  const oauthStatus = provider.oauth_status || {};
+
+  root.innerHTML =
+
+    '<div class="vf-provider-detail-heading"><span class="vf-provider-logo large">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "AI") + '</span><span><strong>' + vfEscape(provider.name) + '</strong><small>' + vfEscape(provider.description || "") + '</small></span>' +
+
+    (isOAuth ? '<button class="btn-primary" onclick="startVideoOAuth(\'' + vfEscape(provider.id) + '\')">' + (oauthStatus.connected ? "Reconnect account" : "Add account") + '</button>' : '') + '</div>' +
+
+    (isOAuth ? '<div class="vf-oauth-banner ' + (oauthStatus.connected ? "connected" : "") + '"><span>' + (oauthStatus.connected ? "✓" : "i") + '</span><strong>' + vfEscape(oauthStatus.label || "Not connected") + '</strong><button class="vf-text-button" onclick="refreshVideoOAuth(\'' + vfEscape(provider.id) + '\')">Refresh</button></div>' : '') +
+
+    (!isOAuth ? '<div class="vf-detail-section"><div class="vf-detail-section-head"><span><strong>Connections</strong><small>Keys and endpoints are used only by Video Flow.</small></span><span><label class="vf-round-robin"><select onchange="setVideoProviderMode(this.value)"><option value="priority" ' + (data.load_balance_mode === "priority" ? "selected" : "") + '>Priority / fallback</option><option value="round_robin" ' + (data.load_balance_mode === "round_robin" ? "selected" : "") + '>Round robin</option></select></label><button class="btn-primary" onclick="openVideoConnectionModal()">＋ Add</button></span></div>' +
+
+      (connectionRows || '<div class="vf-empty-state vf-compact-empty"><strong>No connections</strong><span>' + (isLocal ? "Add the local server URL." : "Add an API key to activate these models.") + '</span></div>') + '</div>' : '') +
+
+    '<div class="vf-detail-section"><div class="vf-detail-section-head"><span><strong>Available models</strong><small>The provider prefix is attached automatically to custom model IDs.</small></span><button class="btn-secondary" onclick="openVideoCustomModelModal()">＋ Add model</button></div>' +
+
+      (modelRows || '<div class="vf-empty-state vf-compact-empty"><strong>No models</strong><span>Add a model ID for this provider.</span></div>') + '</div>';
+
+}
+
+function openVideoConnectionModal(connectionId = null) {
+  if (!vfCurrentProviderDetails) return;
+  const provider = vfCurrentProviderDetails.provider;
+  const modal = document.getElementById("vf-connection-modal");
+  modal.dataset.provider = provider.id;
+  modal.dataset.connectionId = connectionId || "";
+  document.getElementById("vf-connection-modal-title").textContent = (connectionId ? "Edit " : "Add ") + provider.name + (provider.category === "local" ? " endpoint" : " API key");
+  document.getElementById("vf-connection-secret-label").textContent = provider.id === "vertex_ai" ? "Service account JSON / API key" : "API key";
+  document.querySelectorAll(".vf-local-only").forEach(item => item.style.display = provider.category === "local" ? "flex" : "none");
+  document.querySelectorAll(".vf-cloudflare-only").forEach(item => item.style.display = provider.id === "cloudflare" ? "flex" : "none");
+  const connection = (vfCurrentProviderDetails.connections || []).find(item => item.id === Number(connectionId));
+  document.getElementById("vf-connection-name").value = connection?.name || "";
+  document.getElementById("vf-connection-secret").value = "";
+  document.getElementById("vf-connection-secret").placeholder = connection?.has_secret ? "Leave blank to keep saved credential" : "Paste credential";
+  document.getElementById("vf-connection-priority").value = connection?.priority || 1;
+  document.getElementById("vf-connection-base-url").value = connection?.metadata?.base_url || provider.default_base_url || "";
+  document.getElementById("vf-connection-account-id").value = connection?.metadata?.account_id || "";
+  document.getElementById("vf-connection-bulk").value = "";
+  document.getElementById("vf-connection-bulk-tab").style.display = connectionId || provider.category === "local" ? "none" : "inline-flex";
+  setVideoConnectionMode("single");
   modal?.classList.remove("hidden");
 }
 
+function setVideoConnectionMode(mode) {
+  vfConnectionMode = mode;
+  document.getElementById("vf-connection-single-fields")?.classList.toggle("hidden", mode !== "single");
+  document.getElementById("vf-connection-bulk-fields")?.classList.toggle("hidden", mode !== "bulk");
+  document.getElementById("vf-connection-single-tab")?.classList.toggle("active", mode === "single");
+  document.getElementById("vf-connection-bulk-tab")?.classList.toggle("active", mode === "bulk");
+}
+
+async function saveVideoConnection() {
+  const modal = document.getElementById("vf-connection-modal");
+  const provider = modal?.dataset.provider;
+  const connectionId = Number(modal?.dataset.connectionId || 0);
+  if (!provider) return;
+  try {
+    if (vfConnectionMode === "bulk") {
+      const keys = (document.getElementById("vf-connection-bulk")?.value || "").split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+      if (!keys.length) throw new Error("Paste at least one API key.");
+      await vfPost("/api/video-flow/providers/connections/add", {
+        provider,
+        keys: keys.map((secret, index) => ({name: "Key " + (index + 1), secret, priority: index + 1})),
+      });
+    } else {
+      const secret = document.getElementById("vf-connection-secret")?.value || "";
+      const metadata = {
+        base_url: document.getElementById("vf-connection-base-url")?.value || "",
+        account_id: document.getElementById("vf-connection-account-id")?.value || "",
+      };
+      const payload = {
+        provider,
+        name: document.getElementById("vf-connection-name")?.value || "Connection",
+        priority: Number(document.getElementById("vf-connection-priority")?.value || 1),
+        metadata,
+      };
+      if (secret) payload.secret = secret;
+      if (connectionId) {
+        payload.id = connectionId;
+        await vfPost("/api/video-flow/providers/connections/update", payload);
+      } else {
+        if (vfCurrentProviderDetails.provider.category === "api_key" && !secret) throw new Error("Paste an API key or credential.");
+        await vfPost("/api/video-flow/providers/connections/add", payload);
+      }
+    }
+    closeVideoModal("vf-connection-modal");
+    await openVideoProvider(provider);
+    await loadVideoFlow();
+    vfToast("Video Flow connection saved.");
+  } catch (error) {
+    vfToast(error.message, true);
+  }
+}
+
+function editVideoConnection(connectionId) {
+  openVideoConnectionModal(connectionId);
+}
+
+async function checkUnsavedVideoConnection() {
+  const id = Number(document.getElementById("vf-connection-modal")?.dataset.connectionId || 0);
+  if (!id) {
+    vfToast("Save the connection first, then Video Flow can run a live test.");
+    return;
+  }
+  await testVideoConnection(id);
+}
+
+async function testVideoConnection(connectionId) {
+  try {
+    await vfPost("/api/video-flow/providers/connections/test", {id: connectionId});
+    vfToast("Connection test passed.");
+  } catch (error) {
+    vfToast(error.message, true);
+  }
+  if (vfCurrentProvider) await openVideoProvider(vfCurrentProvider);
+}
+
+async function testAllVideoConnections() {
+  const groups = vfCatalog.provider_groups || {};
+  const providers = [...(groups.api_key || []), ...(groups.local || [])];
+  let tested = 0;
+  let failed = 0;
+  for (const provider of providers) {
+    const response = await fetch("/api/video-flow/providers/details?provider=" + encodeURIComponent(provider.id));
+    const details = await response.json();
+    for (const connection of details.connections || []) {
+      if (!connection.is_active) continue;
+      try { await vfPost("/api/video-flow/providers/connections/test", {id: connection.id}); tested += 1; }
+      catch (_) { failed += 1; }
+    }
+  }
+  await loadVideoFlow();
+  vfToast(tested + " connection" + (tested === 1 ? "" : "s") + " ready" + (failed ? " · " + failed + " failed" : ""), Boolean(failed));
+}
+
+async function deleteVideoConnection(connectionId) {
+  try {
+    await vfPost("/api/video-flow/providers/connections/delete", {id: connectionId});
+    await openVideoProvider(vfCurrentProvider);
+    await loadVideoFlow();
+    vfToast("Connection deleted from Video Flow.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function toggleVideoConnection(connectionId, isActive) {
+  try {
+    await vfPost("/api/video-flow/providers/connections/toggle", {id: connectionId, is_active: isActive});
+    await openVideoProvider(vfCurrentProvider);
+    await loadVideoFlow();
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function setVideoProviderMode(mode) {
+  try {
+    await vfPost("/api/video-flow/providers/settings", {provider: vfCurrentProvider, load_balance_mode: mode});
+    vfCurrentProviderDetails.load_balance_mode = mode;
+    vfToast(mode === "round_robin" ? "Round robin enabled for Video Flow." : "Priority fallback enabled for Video Flow.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function startVideoOAuth(providerId) {
+  try {
+    await vfPost("/api/video-flow/providers/oauth/start", {provider: providerId});
+    vfToast("Sign-in opened. Return here and press Refresh when it completes.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function refreshVideoOAuth(providerId) {
+  try {
+    await vfPost("/api/video-flow/providers/oauth/status", {provider: providerId});
+    await loadVideoFlow();
+    await refreshCurrentVideoProviderDetail(providerId);
+    vfToast("Account status refreshed.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function refreshVideoOAuthProviders() {
+  const providers = vfCatalog.provider_groups?.oauth || [];
+  for (const provider of providers) {
+    try { await vfPost("/api/video-flow/providers/oauth/status", {provider: provider.id}); }
+    catch (_) {}
+  }
+  await loadVideoFlow();
+  vfToast("OAuth provider status refreshed.");
+}
+
+function openVideoCustomModelModal() {
+  if (!vfCurrentProviderDetails) return;
+  const modal = document.getElementById("vf-custom-model-modal");
+  modal.dataset.provider = vfCurrentProvider;
+  document.getElementById("vf-custom-model-prefix").textContent = vfCurrentProviderDetails.provider.prefix + "/";
+  document.getElementById("vf-custom-model-id").value = "";
+  document.getElementById("vf-custom-model-name").value = "";
+  modal.querySelectorAll('.vf-capability-picker input').forEach(input => input.checked = false);
+  modal?.classList.remove("hidden");
+}
+
+async function saveVideoCustomModel() {
+  const modal = document.getElementById("vf-custom-model-modal");
+  const provider = modal?.dataset.provider;
+  const capabilities = [...modal.querySelectorAll('.vf-capability-picker input:checked')].map(input => input.value);
+  try {
+    await vfPost("/api/video-flow/providers/models/add", {
+      provider,
+      model_id: document.getElementById("vf-custom-model-id")?.value || "",
+      display_name: document.getElementById("vf-custom-model-name")?.value || "",
+      capabilities,
+    });
+    closeVideoModal("vf-custom-model-modal");
+    await loadVideoFlow();
+    await refreshCurrentVideoProviderDetail(provider);
+    vfToast("Custom model added with its provider prefix.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function toggleVideoModel(modelId, isActive) {
+  const provider = vfCurrentProvider;
+  if (!provider) return;
+  try {
+    await vfPost("/api/video-flow/providers/models/toggle", {id: modelId, is_active: isActive});
+    await loadVideoFlow();
+    await refreshCurrentVideoProviderDetail(provider);
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function deleteVideoCustomModel(modelId) {
+  const provider = vfCurrentProvider;
+  if (!provider) return;
+  try {
+    await vfPost("/api/video-flow/providers/models/delete", {id: modelId});
+    await loadVideoFlow();
+    await refreshCurrentVideoProviderDetail(provider);
+    vfToast("Custom model removed.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function copyVideoModelId(modelId) {
+  try {
+    await navigator.clipboard.writeText(modelId);
+    vfToast("Model ID copied.");
+  } catch (_) { vfToast(modelId); }
+}
+function openVideoComboModal() {
+  const modal = document.getElementById("vf-combo-modal");
+  vfComboDraftModels = [];
+  const name = document.getElementById("vf-combo-name");
+  const strategy = document.getElementById("vf-combo-strategy");
+  if (name) name.value = "";
+  if (strategy) strategy.value = "fallback";
+  renderVideoComboDraft();
+  modal?.classList.remove("hidden");
+}
+
+function vfVideoModelByRef(ref) {
+  if (ref === "local/deterministic") {
+    return {full_id: ref, display_name: "Built-in deterministic planner", provider_name: "On this PC", capabilities: ["private", "offline"]};
+  }
+  return (vfCatalog.models || []).find(model => model.full_id === ref);
+}
+
+function renderVideoComboDraft() {
+  const root = document.getElementById("vf-combo-draft-list");
+  if (!root) return;
+  root.innerHTML = vfComboDraftModels.map((ref, index) => {
+    const model = vfVideoModelByRef(ref) || {display_name: ref, provider_name: "Model", full_id: ref, capabilities: []};
+    return '<div class="vf-combo-draft-row"><span class="vf-combo-grip">⠿</span><span class="vf-combo-position">' + (index + 1) + '</span><span class="vf-combo-draft-copy"><strong>' + vfEscape(model.display_name) + '</strong><small>' + vfEscape(model.provider_name) + ' · ' + vfEscape(model.full_id) + '</small></span><span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span><button type="button" title="Move up" onclick="moveVideoComboModel(' + index + ', -1)" ' + (index === 0 ? "disabled" : "") + '>↑</button><button type="button" title="Move down" onclick="moveVideoComboModel(' + index + ', 1)" ' + (index === vfComboDraftModels.length - 1 ? "disabled" : "") + '>↓</button><button type="button" class="danger" title="Remove" onclick="removeVideoComboModel(' + index + ')">×</button></div>';
+  }).join("") || '<div class="vf-empty-state vf-combo-draft-empty"><strong>No models added yet</strong><span>Add enabled models from your connected providers.</span></div>';
+}
+
+function moveVideoComboModel(index, direction) {
+  const next = index + direction;
+  if (next < 0 || next >= vfComboDraftModels.length) return;
+  [vfComboDraftModels[index], vfComboDraftModels[next]] = [vfComboDraftModels[next], vfComboDraftModels[index]];
+  renderVideoComboDraft();
+}
+
+function removeVideoComboModel(index) {
+  vfComboDraftModels.splice(index, 1);
+  renderVideoComboDraft();
+  renderVideoComboModelPicker();
+}
+
+function openVideoComboModelPicker() {
+  const search = document.getElementById("vf-combo-search");
+  if (search) search.value = "";
+  renderVideoComboModelPicker();
+  document.getElementById("vf-combo-model-picker-modal")?.classList.remove("hidden");
+  requestAnimationFrame(() => search?.focus());
+}
+
+function renderVideoComboModelPicker() {
+  const root = document.getElementById("vf-combo-model-list");
+  if (!root) return;
+  const query = (document.getElementById("vf-combo-search")?.value || "").trim().toLowerCase();
+  const models = vfSelectableVideoModels()
+    .filter(model => model.full_id !== "local/deterministic")
+    .filter(model =>
+      !query || [model.provider_name, model.display_name, model.full_id, ...(model.capabilities || [])].join(" ").toLowerCase().includes(query)
+    );
+  const groups = new Map();
+  for (const model of models) {
+    const name = model.provider_name || model.provider;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(model);
+  }
+  const sections = [];
+  if (!query || "on this pc built-in deterministic private offline".includes(query)) {
+    const selected = vfComboDraftModels.includes("local/deterministic");
+    sections.push('<section class="vf-picker-group"><h4>⌂ On this PC <span>1</span></h4><label class="vf-picker-model ' + (selected ? "selected" : "") + '"><input type="checkbox" ' + (selected ? "checked" : "") + ' onchange="toggleVideoComboDraftModel(\'local/deterministic\', this.checked)"><span><strong>Built-in deterministic planner</strong><small>Private · offline</small></span><b>✓</b></label></section>');
+  }
+  for (const [providerName, items] of groups.entries()) {
+    sections.push('<section class="vf-picker-group"><h4>' + vfEscape(providerName) + ' <span>' + items.length + '</span></h4>' + items.map(model => {
+      const selected = vfComboDraftModels.includes(model.full_id);
+      return '<label class="vf-picker-model ' + (selected ? "selected" : "") + '"><input type="checkbox" ' + (selected ? "checked" : "") + ' onchange="toggleVideoComboDraftModel(\'' + vfEscape(model.full_id) + '\', this.checked)"><span><strong>' + vfEscape(model.display_name) + '</strong><small>' + vfEscape(model.full_id) + '</small></span><span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span><b>✓</b></label>';
+    }).join("") + '</section>');
+  }
+  root.innerHTML = sections.join("") || '<div class="vf-empty-state vf-compact-empty"><strong>No connected models match</strong><span>Connect a provider and enable models before building a combo.</span></div>';
+}
+
+function toggleVideoComboDraftModel(modelRef, checked) {
+  const index = vfComboDraftModels.indexOf(modelRef);
+  if (checked && index === -1) {
+    if (!vfIsSelectableVideoModelRef(modelRef)) {
+      vfToast("Only connected, enabled models can be added to a combo.", true);
+      renderVideoComboModelPicker();
+      return;
+    }
+    vfComboDraftModels.push(modelRef);
+  }
+  if (!checked && index !== -1) vfComboDraftModels.splice(index, 1);
+  renderVideoComboDraft();
+  renderVideoComboModelPicker();
+}
+
 function filterVideoComboModels() {
-  const query = (document.getElementById("vf-combo-search")?.value || "").toLowerCase();
-  document.querySelectorAll("#vf-combo-model-list .vf-model-option").forEach(item => {
-    item.style.display = (item.dataset.search || "").includes(query) ? "flex" : "none";
-  });
+  renderVideoComboModelPicker();
 }
 
 async function createVideoCombo() {
-  const name = document.getElementById("vf-combo-name")?.value || "";
+  const name = (document.getElementById("vf-combo-name")?.value || "").trim();
   const strategy = document.getElementById("vf-combo-strategy")?.value || "fallback";
-  const models = [...document.querySelectorAll("#vf-combo-model-list input:checked")].map(input => input.value);
+  const models = [...vfComboDraftModels];
+  const unavailableModels = models.filter(modelRef => !vfIsSelectableVideoModelRef(modelRef));
+  if (!name) {
+    vfToast("Give the combo a name.", true);
+    document.getElementById("vf-combo-name")?.focus();
+    return;
+  }
+  if (!models.length) {
+    vfToast("Add at least one connected, enabled model.", true);
+    return;
+  }
+  if (unavailableModels.length) {
+    vfComboDraftModels = models.filter(modelRef => !unavailableModels.includes(modelRef));
+    renderVideoComboDraft();
+    renderVideoComboModelPicker();
+    vfToast("Unavailable models were removed. Add only connected, enabled models.", true);
+    return;
+  }
   try {
     const response = await fetch("/api/video-flow/combos/create", {
       method: "POST",
@@ -391,7 +933,7 @@ async function createVideoCombo() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Could not create combo.");
     closeVideoModal("vf-combo-modal");
-    document.getElementById("vf-combo-name").value = "";
+    vfComboDraftModels = [];
     await loadVideoFlow();
     vfToast("Model combo created.");
   } catch (error) {
@@ -425,6 +967,16 @@ function previewVideoFlow(videoId) {
   if (title) title.textContent = video.title;
   if (download) download.href = video.download_url;
   document.getElementById("vf-preview-modal")?.classList.remove("hidden");
+}
+
+function toggleVideoPreviewFullscreen() {
+  const player = document.getElementById("vf-preview-player");
+  if (!player) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else {
+    player.requestFullscreen?.();
+  }
 }
 
 async function sharePreviewVideo() {
@@ -518,6 +1070,9 @@ async function permanentlyDeleteVideo() {
 function closeVideoModal(modalId) {
   const modal = document.getElementById(modalId);
   modal?.classList.add("hidden");
+  if (modalId === "vf-combo-modal") {
+    document.getElementById("vf-combo-model-picker-modal")?.classList.add("hidden");
+  }
   if (modalId === "vf-preview-modal") {
     const player = document.getElementById("vf-preview-player");
     player?.pause();

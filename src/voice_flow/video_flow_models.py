@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import tempfile
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from voice_flow.storage import storage
@@ -43,6 +47,14 @@ class VideoModelGateway:
         if not refs or refs == ["local/deterministic"]:
             deterministic["planning_model"] = "local/deterministic"
             return deterministic
+
+        # Local providers like ollama or local execution do not require external consent
+        is_local = all(ref.startswith("local/") or ref.startswith("ollama/") for ref in refs)
+        if is_local:
+            deterministic["planning_model"] = "local/deterministic"
+            deterministic["requested_model"] = model_ref
+            return deterministic
+
         if not allow_external_ai:
             raise PermissionError(
                 "External model planning needs per-video consent because the source text is sent to the selected provider."
@@ -59,8 +71,6 @@ class VideoModelGateway:
             except Exception as exc:
                 failures.append(f"{ref}: {exc}")
 
-        # A combo is a best-effort route. If every external member fails, the
-        # deterministic planner still delivers a video and records the reason.
         deterministic["planning_model"] = "local/deterministic"
         deterministic["requested_model"] = model_ref
         deterministic["model_fallback_reason"] = " | ".join(failures)[:1000]
@@ -102,6 +112,11 @@ class VideoModelGateway:
         if "/" not in model_ref:
             raise ValueError("Invalid model reference.")
         provider, model_id = model_ref.split("/", 1)
+        if provider == "claude":
+            return self._call_claude_code(model_id, self._prompt(source, mode, title))
+        if provider == "codex":
+            return self._call_codex(model_id, self._prompt(source, mode, title))
+
         connections = [
             item for item in storage.get_provider_connections(provider)
             if item.get("is_active") and item.get("api_key")
@@ -128,22 +143,52 @@ class VideoModelGateway:
         raise RuntimeError("; ".join(failures)[:700] or "Provider request failed.")
 
     @staticmethod
-    def _prompt(source: str, mode: str, title: str) -> str:
+    def _prompt(source: str, mode: str, title: str, visual_language: Any = None) -> str:
         limited = source[:80_000]
-        requirement = (
-            "Summarize the source into 4-8 scenes. Narration must be accurate and substantially shorter."
-            if mode == "summary"
-            else "Return visual metadata only. Narration is merged from exact source chunks and must not be rewritten."
-        )
-        return f"""You are the scene planner for a polished 16:9 explainer video.
-{requirement}
-Return JSON only:
+        if mode == "full":
+            return f"""You are the scene planner for a complete polished explanation video in Notebook Editorial medium.
+Requirement: complete polished explanation.
+Do not summarize or omit any paragraph.
+Remove Markdown symbols from spoken text.
+Use metric/chart and diverse scene structures; do not repeat one layout for consecutive scenes.
+Never design dashboards.
+Supply 3-5 concrete entities for visual doodles; each entity label must be at most three words.
+Return JSON only (do not output JSX):
+{{"scenes":[{{"type":"hook|statement|quote|metric|comparison|process|timeline|grid|chart|code|list|image|diagram|chapter|closing","title":"short title","body":"visual copy","narration":"complete spoken explanation"}}]}}
+Title: {title}
+Source:
+{limited}"""
+
+        return f"""You are the scene planner for a Notebook Editorial explanation video.
+Summarize the source into 4-8 scenes. Narration must be accurate and substantially shorter.
+Never design dashboards.
+Supply 3-5 concrete entities for domain doodles; each entity label must be at most three words.
+Return JSON only (do not output JSX):
 {{"scenes":[{{"type":"hook|statement|quote|metric|comparison|process|timeline|grid|chart|code|list|image|diagram|chapter|closing","title":"short title","body":"visual copy","narration":"summary narration"}}]}}
-Use specific visual structures, not generic decoration.
 Title: {title}
 Mode: {mode}
 Source:
 {limited}"""
+
+    def _call_claude_code(self, model_name: str, prompt: str) -> dict[str, Any]:
+        cmd = ["claude", "-p", "--output-format", "json"]
+        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=True)
+        return self._parse_json(proc.stdout)
+
+    def _call_codex(self, model_name: str, prompt: str) -> dict[str, Any]:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            out_path = tmp.name
+        try:
+            cmd = ["codex", "exec", "--model", model_name, "--output-last-message", out_path, "-"]
+            proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=True)
+            content = Path(out_path).read_text(encoding="utf-8")
+            return self._parse_json(content)
+        finally:
+            try:
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+            except Exception:
+                pass
 
     def _call_gemini(self, model_id: str, key: str, prompt: str) -> dict[str, Any]:
         safe_model = urllib.parse.quote(model_id, safe="-_.")

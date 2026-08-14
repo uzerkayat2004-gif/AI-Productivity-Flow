@@ -13,34 +13,49 @@ import webview
 import pystray
 from PIL import Image
 
+# Hide console window on Windows immediately so the GUI runs silently
+if sys.platform == "win32":
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            if "--show-console" not in sys.argv:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 = SW_HIDE
+    except Exception:
+        pass
+
 if sys.stdout is None:
     class DummyWriter:
+        encoding = "utf-8"
+        errors = "replace"
         def write(self, x): pass
         def flush(self): pass
+        def isatty(self): return False
     sys.stdout = DummyWriter()
     sys.stderr = DummyWriter()
 
 from voice_flow.gui.api_server import start_api_server, PORT
+from voice_flow.runtime_guard import runtime_is_compatible
 
 
 def set_windows_auto_startup(enable: bool = True) -> None:
-    """Configure Windows Registry auto-launch at login via silent VBS launcher."""
+    """Configure Windows Registry and Startup folder auto-launch at login via silent VBS launcher."""
     try:
-        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        vbs_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "VoiceFlowLauncher.vbs"))
-        cmd = f'wscript.exe "{vbs_path}"' if os.path.exists(vbs_path) else f'"{sys.executable}" -m voice_flow.main'
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
-            if enable:
-                winreg.SetValueEx(key, "VoiceFlow", 0, winreg.REG_SZ, cmd)
-                print("[SYSTEM] Enabled Windows silent auto-startup at login.")
-            else:
-                try:
-                    winreg.DeleteValue(key, "VoiceFlow")
-                    print("[SYSTEM] Disabled Windows auto-startup at login.")
-                except FileNotFoundError:
-                    pass
+        from voice_flow.installer import register_registry_autorun, register_startup_folder, unregister_registry_autorun, unregister_startup_folder
+        if enable:
+            register_registry_autorun()
+            register_startup_folder()
+            print("[SYSTEM] Enabled Windows dual silent auto-startup at login.")
+        else:
+            unregister_registry_autorun()
+            unregister_startup_folder()
+            print("[SYSTEM] Disabled Windows auto-startup at login.")
     except Exception as e:
-        print(f"[SYSTEM WARNING] Could not modify Windows startup registry: {e}")
+        print(f"[SYSTEM WARNING] Could not configure Windows startup: {e}")
+
+
+def is_api_server_ready(timeout: float = 0.2) -> bool:
+    return runtime_is_compatible(port=PORT, timeout=timeout)
 
 
 def launch_desktop_gui(on_quit_callback=None) -> None:
@@ -48,10 +63,21 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
     # Ensure Windows startup registry entry exists
     set_windows_auto_startup(True)
 
-    # Start local REST API server
-    server_thread = threading.Thread(target=start_api_server, daemon=True)
-    server_thread.start()
-    time.sleep(0.4)
+    # Start local REST API server if not already active
+    if not is_api_server_ready():
+        server_thread = threading.Thread(target=start_api_server, daemon=True)
+        server_thread.start()
+
+    # Poll up to 3 seconds until API server responds cleanly
+    for _ in range(30):
+        if is_api_server_ready():
+            break
+        time.sleep(0.1)
+
+    if not is_api_server_ready(timeout=0.5):
+        raise RuntimeError(
+            "Voice Flow could not start its current backend. Port 8991 is still owned by an incompatible process."
+        )
 
     url = f"http://127.0.0.1:{PORT}/index.html"
     print(f"[GUI] Opening Voice Flow Desktop App window at {url}...")

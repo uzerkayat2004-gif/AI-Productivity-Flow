@@ -23,11 +23,11 @@ def _apply_noise_gate_and_normalize(audio: NDArray[np.float32]) -> NDArray[np.fl
     if audio.size == 0:
         return audio
 
-    clean = audio.flatten()
+    clean = np.nan_to_num(audio.flatten(), nan=0.0, posinf=0.0, neginf=0.0)
     max_amp = float(np.max(np.abs(clean)))
 
-    if max_amp > 0.005:
-        scale = min(4.0, 0.85 / max_amp)
+    if max_amp > 0.001:
+        scale = min(6.0, 0.85 / max_amp)
         return (clean * scale).astype(np.float32)
 
     return clean
@@ -41,7 +41,8 @@ class Transcriber:
         self.model: WhisperModel | None = None
         self._loading = False
         self._lock = threading.Lock()
-        # Start loading speech model asynchronously in background thread so GUI pops up instantly (<0.2s)
+        self._transcribe_lock = threading.Lock()
+        # Start loading speech model asynchronously in background thread
         threading.Thread(target=self._load_model_bg, daemon=True).start()
 
     def _load_model_bg(self) -> None:
@@ -77,8 +78,14 @@ class Transcriber:
         if self.model is None:
             log.info("Speech model still warming up, waiting for initialization...")
             start_wait = time.time()
-            while self.model is None and (time.time() - start_wait) < 10.0:
+            while self.model is None and (time.time() - start_wait) < 15.0:
                 time.sleep(0.1)
+
+            if self.model is None:
+                # Trigger a reload attempt if failed previously
+                self._load_model_bg()
+                while self.model is None and (time.time() - start_wait) < 20.0:
+                    time.sleep(0.1)
 
             if self.model is None:
                 log.error("Speech model failed to initialize in time.")
@@ -96,38 +103,44 @@ class Transcriber:
 
         log.info("Transcribing %.1fs audio on %d CPU threads (beam=%d)...", duration, config.cpu_threads, config.beam_size)
 
-        # High-precision single-pass VAD transcription (sub-second performance)
-        segments, _ = self.model.transcribe(
-            clean_audio,
-            beam_size=config.beam_size,
-            temperature=config.temperature,
-            language=config.language,
-            initial_prompt=initial_prompt,
-            vad_filter=True,
-            vad_parameters=dict(
-                threshold=0.20,             # Low threshold catches soft speech & natural pauses
-                min_speech_duration_ms=80,   # Catch even brief words
-                min_silence_duration_ms=500, # 500ms silence tolerance allows natural pauses
-                speech_pad_ms=300,           # 300ms pad on ends
-            ),
-        )
+        result = ""
+        with self._transcribe_lock:
+            try:
+                segments, _ = self.model.transcribe(
+                    clean_audio,
+                    beam_size=config.beam_size,
+                    temperature=config.temperature,
+                    language=config.language,
+                    initial_prompt=initial_prompt,
+                    vad_filter=True,
+                    vad_parameters=dict(
+                        threshold=0.20,             # Low threshold catches soft speech & natural pauses
+                        min_speech_duration_ms=80,   # Catch even brief words
+                        min_silence_duration_ms=500, # 500ms silence tolerance allows natural pauses
+                        speech_pad_ms=300,           # 300ms pad on ends
+                    ),
+                )
+                parts = [s.text.strip() for s in segments if s.text.strip()]
+                result = " ".join(parts).strip()
+            except Exception as e:
+                log.warning("[VAD] VAD pass encountered error (%s), attempting direct fallback...", e)
+                result = ""
 
-        parts = [s.text.strip() for s in segments if s.text.strip()]
-        result = " ".join(parts).strip()
-
-        # Instant conditional fallback only if VAD returned empty text on audible audio
-        if not result and float(np.max(np.abs(clean_audio))) > 0.02:
-            log.info("[FALLBACK] VAD filter returned empty on speech, running direct audio pass...")
-            fallback_segments, _ = self.model.transcribe(
-                clean_audio,
-                beam_size=config.beam_size,
-                temperature=config.temperature,
-                language=config.language,
-                initial_prompt=initial_prompt,
-                vad_filter=False,
-            )
-            parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
-            result = " ".join(parts).strip()
+            # Dual-pass fallback if VAD returned empty text or failed on audible audio (peak > 0.002)
+            if not result and float(np.max(np.abs(clean_audio))) > 0.002:
+                log.info("[FALLBACK] Running direct audio pass without VAD filter...")
+                try:
+                    fallback_segments, _ = self.model.transcribe(
+                        clean_audio,
+                        beam_size=config.beam_size,
+                        temperature=config.temperature,
+                        language=config.language,
+                        initial_prompt=initial_prompt,
+                        vad_filter=False,
+                    )
+                    parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
+                    result = " ".join(parts).strip()
+                except Exception as e:
+                    log.error("[FALLBACK] Direct transcription pass failed: %s", e)
 
         return result
-

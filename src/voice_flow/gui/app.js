@@ -374,6 +374,7 @@ function switchPage(pageId) {
     if (pageId === "dictionary") loadDictionary();
     if (pageId === "style") renderStyleCategory(currentStyleCategory);
     if (pageId === "providers") loadProvidersOverview();
+    if (pageId === "audioflow") loadAudioFlowPage();
   }
 }
 
@@ -623,32 +624,48 @@ function formatGroupDate(dateStr) {
   return dateStr.toUpperCase();
 }
 
+// Time Range Filter State
+let currentInsightsRange = "all";
+
+function switchInsightsRange(rangeKey, el) {
+  currentInsightsRange = rangeKey;
+  document.querySelectorAll(".insights-range-switcher .range-btn").forEach(btn => btn.classList.remove("active"));
+  if (el) el.classList.add("active");
+  loadInsights();
+}
+
 // Fetch and render Insights & Metrics from SQLite Database
 async function loadInsights() {
   try {
-    const res = await fetch("/api/insights");
+    const res = await fetch(`/api/insights?range=${currentInsightsRange}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
     const totalWords = data.total_words || 0;
     const avgWpm = data.avg_wpm || 0;
     const streak = data.streak || 0;
+    const dictationCount = data.dictation_count || 0;
 
     // Home Banner Metrics
-    document.getElementById("stat-total-words").textContent = totalWords > 1000 ? (totalWords / 1000).toFixed(1) + "K" : totalWords;
-    document.getElementById("stat-wpm").textContent = avgWpm;
-    document.getElementById("stat-streak").textContent = streak;
+    const totalWordsFormatted = totalWords >= 1000 ? (totalWords / 1000).toFixed(1) + "K" : totalWords;
+    if (document.getElementById("stat-total-words")) document.getElementById("stat-total-words").textContent = totalWordsFormatted;
+    if (document.getElementById("stat-wpm")) document.getElementById("stat-wpm").textContent = avgWpm;
+    if (document.getElementById("stat-streak")) document.getElementById("stat-streak").textContent = streak;
 
-    // Insights Page Cards
+    // Insights Page Top Metrics
     const insightsWpm = document.getElementById("insights-wpm");
     if (insightsWpm) insightsWpm.textContent = avgWpm;
 
     const insightsTotalWords = document.getElementById("insights-total-words");
     if (insightsTotalWords) insightsTotalWords.textContent = totalWords.toLocaleString();
 
-    // Time Saved & Speed Multiplier (Wispr Flow Exact Formula)
-    const savedHours = data.time_saved_hours || (data.time_saved_minutes ? (data.time_saved_minutes / 60).toFixed(1) : 0);
-    const speedMult = data.speed_multiplier || 3.4;
-    const aiFixesTotal = data.ai_refinements || Math.round(totalWords * 0.18);
+    // Time Saved & Multiplier
+    const savedHours = data.time_saved_hours !== undefined ? data.time_saved_hours : 0;
+    const savedMinutes = data.time_saved_minutes !== undefined ? data.time_saved_minutes : 0;
+    const speedMult = data.speed_multiplier !== undefined ? data.speed_multiplier : (avgWpm > 0 ? Number((avgWpm / 40.0).toFixed(1)) : 1.0);
+    const aiFixesTotal = data.ai_refinements !== undefined ? data.ai_refinements : (data.words_corrected || 0);
+    const wordFixes = data.words_corrected !== undefined ? data.words_corrected : 0;
+    const dictFixes = data.dictionary_fixes !== undefined ? data.dictionary_fixes : 0;
 
     const timeSavedEl = document.getElementById("insights-time-saved");
     const timeSavedUnit = document.getElementById("insights-time-saved-unit");
@@ -657,135 +674,160 @@ async function loadInsights() {
         timeSavedEl.textContent = savedHours;
         timeSavedUnit.textContent = "hrs";
       } else {
-        timeSavedEl.textContent = Math.round((data.time_saved_minutes || 0));
+        timeSavedEl.textContent = Math.round(savedMinutes);
         timeSavedUnit.textContent = "mins";
       }
     }
 
-    const insightsStreakTitle = document.getElementById("insights-streak-title");
-    if (insightsStreakTitle) insightsStreakTitle.textContent = `${streak} day streak`;
-
-    const insightsLongestStreak = document.getElementById("insights-longest-streak");
-    if (insightsLongestStreak) insightsLongestStreak.textContent = Math.max(streak, 1);
+    const multiplierEl = document.getElementById("insights-multiplier");
+    if (multiplierEl) multiplierEl.textContent = `${speedMult}x Faster`;
 
     // Fixes calculation
-    const wordFixes = Math.round(aiFixesTotal * 0.7);
-    const dictFixes = Math.round(aiFixesTotal * 0.3);
     if (document.getElementById("insights-fixes-total")) document.getElementById("insights-fixes-total").textContent = aiFixesTotal;
     if (document.getElementById("insights-words-corrected")) document.getElementById("insights-words-corrected").textContent = wordFixes;
     if (document.getElementById("insights-dict-fixes")) document.getElementById("insights-dict-fixes").textContent = dictFixes;
 
-    // Speed Badge
-    const badge = document.getElementById("insights-speed-badge");
-    if (badge) {
-      if (avgWpm > 120) badge.textContent = "Top 0.5% Speed";
-      else if (avgWpm > 80) badge.textContent = "Top 5% Speed";
-      else if (avgWpm > 0) badge.textContent = "Active Speed";
-      else badge.textContent = "Ready to record";
-    }
-
-    // Wispr Flow "Your Voice" Communication Profile Rendering
-    const vp = data.voice_profile || {};
-    if (document.getElementById("insights-archetype-badge")) {
-      document.getElementById("insights-archetype-badge").textContent = vp.archetype || "The Tech Strategist";
-    }
-    if (document.getElementById("insights-peak-hours")) {
-      document.getElementById("insights-peak-hours").textContent = vp.peak_hours || "2:00 PM – 5:00 PM";
-    }
-    if (document.getElementById("insights-multiplier")) {
-      document.getElementById("insights-multiplier").textContent = `${speedMult}x Faster than Typing`;
-    }
-    if (document.getElementById("insights-vocab-status")) {
-      document.getElementById("insights-vocab-status").textContent = vp.vocabulary_unlocked ? "Unlocked (Custom Terms Active)" : "Active (Unlocks at 500 words)";
-    }
-
-    // Share Card Values
-    const wordsFormatted = totalWords > 1000 ? (totalWords / 1000).toFixed(1) + "K" : totalWords;
-    if (document.getElementById("share-words-val")) document.getElementById("share-words-val").textContent = `${wordsFormatted} words`;
-    if (document.getElementById("share-time-val")) document.getElementById("share-time-val").textContent = `${savedHours || 1.4} hours`;
+    // Streak & Total Dictations
+    if (document.getElementById("insights-longest-streak")) document.getElementById("insights-longest-streak").textContent = streak;
+    if (document.getElementById("insights-streak-title")) document.getElementById("insights-streak-title").textContent = `${streak} day streak`;
+    if (document.getElementById("insights-dictation-count")) document.getElementById("insights-dictation-count").textContent = dictationCount;
 
     // Gauge Update
     updateSpeedGauge(avgWpm);
 
-    // App Usage Breakdown List
+    // Desktop Application Breakdown
     const usageContainer = document.getElementById("insights-app-breakdown");
     if (usageContainer) {
       if (!data.app_breakdown || data.app_breakdown.length === 0) {
         usageContainer.innerHTML = `
-          <div style="font-size: 13px; color: var(--text-muted); padding: 12px 0;">No desktop app dictation data yet. Start dictating to see usage breakdowns automatically!</div>
+          <div style="font-size: 13px; color: var(--text-muted); padding: 24px 0; text-align: center;">
+            <div style="font-size: 24px; margin-bottom: 6px;">⚡</div>
+            <strong>No application dictations recorded yet</strong>
+            <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">Hold Middle Mouse button or Ctrl+Win to dictate in VS Code, Chrome, Slack, or Notion!</div>
+          </div>
         `;
       } else {
         const totalDictations = data.app_breakdown.reduce((acc, a) => acc + a.count, 0) || 1;
         usageContainer.innerHTML = data.app_breakdown.map(app => {
           const pct = app.percentage !== undefined ? app.percentage : Math.round((app.count / totalDictations) * 100);
           const icon = getAppIcon(app.app_name);
+          const catClass = (app.category || "other").toLowerCase().replace(/[^a-z]/g, "");
           return `
-            <div class="usage-item">
-              <div class="usage-label">
-                <span style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 16px;">${icon}</span> ${escapeHtml(app.app_name)}</span>
-                <span>${pct}% (${app.total_words} words)</span>
+            <div class="usage-item" style="margin-bottom: 14px;">
+              <div class="usage-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 13px;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 16px;">${icon}</span>
+                  <strong style="color: var(--text-main);">${escapeHtml(app.app_name)}</strong>
+                  <span class="app-cat-pill ${catClass}">${escapeHtml(app.category || 'General')}</span>
+                </span>
+                <span style="font-weight: 600; color: var(--text-muted);">${pct}% <span style="font-size: 11px; opacity: 0.7;">(${app.total_words || 0} words)</span></span>
               </div>
-              <div class="progress-bar-bg"><div class="progress-bar-fill" style="width: ${pct}%;"></div></div>
+              <div class="progress-bar-bg" style="height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden;">
+                <div class="progress-bar-fill" style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, var(--primary-orange), #ff8833); border-radius: 3px; transition: width 0.8s ease;"></div>
+              </div>
             </div>
           `;
         }).join("");
       }
     }
 
+    // Render 28-Day Heatmap
     renderHeatmap(data.daily_activity || []);
+
+    // Render Time-of-Day Distribution
+    renderTimeOfDayBars(data.time_of_day || []);
+
+    // Voice Profile Archetype
+    const vp = data.voice_profile || {};
+    if (document.getElementById("insights-archetype-badge")) {
+      document.getElementById("insights-archetype-badge").textContent = vp.archetype || (totalWords > 0 ? "The Rapid Thinker" : "Getting Started");
+    }
+    if (document.getElementById("insights-archetype-desc")) {
+      document.getElementById("insights-archetype-desc").textContent = vp.archetype_desc || "Captures raw thoughts, code syntax, and communications at peak throughput.";
+    }
+    if (document.getElementById("insights-archetype-tag")) {
+      document.getElementById("insights-archetype-tag").textContent = vp.archetype_tag || "General Flow";
+    }
+    if (document.getElementById("insights-archetype-icon")) {
+      document.getElementById("insights-archetype-icon").textContent = vp.archetype_icon || "⚡";
+    }
+    if (document.getElementById("insights-vocab-status")) {
+      document.getElementById("insights-vocab-status").textContent = vp.vocabulary_unlocked ? "Unlocked (Active)" : "Active (Learning)";
+    }
+    if (document.getElementById("insights-peak-hours")) {
+      document.getElementById("insights-peak-hours").textContent = vp.peak_hours || "Morning";
+    }
+    if (document.getElementById("insights-peak-hours-tag")) {
+      document.getElementById("insights-peak-hours-tag").textContent = `⚡ Peak: ${vp.peak_hours || 'Active throughout day'}`;
+    }
+
+    // Share Card Snippet Preview
+    const previewEl = document.getElementById("share-snippet-preview");
+    if (previewEl) {
+      const timeStr = savedHours >= 1 ? `${savedHours} hrs` : `${Math.round(savedMinutes)} mins`;
+      previewEl.textContent = `🚀 I dictated ${totalWords.toLocaleString()} words at ${avgWpm} WPM and saved ${timeStr} with Voice Flow (${speedMult}x faster than typing)! #VoiceFlow`;
+    }
 
   } catch (err) {
     console.error("Error loading insights:", err);
   }
 }
 
-// Wispr Flow Share Productivity Badge Handler
-function copyProductivityShareCard() {
-  const wordsVal = document.getElementById("stat-total-words") ? document.getElementById("stat-total-words").textContent : "3.3K";
-  const timeVal = document.getElementById("insights-time-saved") ? document.getElementById("insights-time-saved").textContent : "1.4";
-  const unitVal = document.getElementById("insights-time-saved-unit") ? document.getElementById("insights-time-saved-unit").textContent : "hrs";
-  const wpmVal = document.getElementById("insights-wpm") ? document.getElementById("insights-wpm").textContent : "135";
-
-  const shareText = `🚀 I dictated ${wordsVal} words & saved ${timeVal} ${unitVal} with Voice Flow at ${wpmVal} WPM! (3.4x faster than typing) #VoiceFlow #SpeechToText`;
-  navigator.clipboard.writeText(shareText).then(() => {
-    alert("Copied Productivity Share Card to clipboard!\n\n" + shareText);
-  }).catch(err => {
-    console.error("Failed to copy share card:", err);
-    alert(shareText);
-  });
-}
-
-function getAppIcon(appName) {
-  const name = appName.toLowerCase();
-  if (name.includes("chrome") || name.includes("edge") || name.includes("brave")) return "🤖";
-  if (name.includes("whatsapp") || name.includes("telegram")) return "💬";
-  if (name.includes("outlook") || name.includes("gmail") || name.includes("mail")) return "✉️";
-  if (name.includes("slack") || name.includes("teams")) return "💼";
-  if (name.includes("notion") || name.includes("word") || name.includes("docs")) return "📄";
-  return "♾️";
-}
-
 function updateSpeedGauge(wpm) {
   const gaugeFill = document.getElementById("gauge-fill");
+  const gaugeNeedle = document.getElementById("gauge-needle");
+  const badge = document.getElementById("insights-speed-badge");
   if (!gaugeFill) return;
 
-  const maxWpm = 160;
+  const maxWpm = 180;
   const clampedWpm = Math.min(Math.max(wpm, 0), maxWpm);
-  // Total arc length for 180-degree semi-circle (r=45) is pi * 45 = 141.37
   const totalArcLength = 141.37;
   const pct = clampedWpm / maxWpm;
   const dashOffset = totalArcLength - (totalArcLength * pct);
 
   gaugeFill.style.strokeDashoffset = dashOffset;
+  gaugeFill.style.filter = `drop-shadow(0 0 ${4 + pct * 10}px var(--accent-glow))`;
+
+  if (gaugeNeedle) {
+    const rotation = -90 + (180 * pct);
+    gaugeNeedle.style.transform = `rotate(${rotation}deg)`;
+  }
+
+  if (badge) {
+    if (clampedWpm >= 140) {
+      badge.textContent = "Top 0.5% Ultra Speed 🏆";
+      badge.style.color = "#ff6b00";
+    } else if (clampedWpm >= 100) {
+      badge.textContent = "Top 5% Rapid 🚀";
+      badge.style.color = "#ff8833";
+    } else if (clampedWpm >= 60) {
+      badge.textContent = "Fast Conversational ⚡";
+      badge.style.color = "#10B981";
+    } else if (clampedWpm > 0) {
+      badge.textContent = "Active Speed";
+      badge.style.color = "var(--text-main)";
+    } else {
+      badge.textContent = "Ready to record";
+      badge.style.color = "var(--text-muted)";
+    }
+  }
 }
 
 function renderHeatmap(dailyActivityData) {
   const grid = document.getElementById("heatmap-grid");
   if (!grid) return;
-  grid.innerHTML = "";
 
-  // Render a clean 28-cell activity matrix (4 weeks of activity)
   const activityList = Array.isArray(dailyActivityData) ? dailyActivityData : [];
+
+  let html = `
+    <div class="heatmap-wrapper">
+      <div class="day-labels">
+        <span>Mon</span>
+        <span>Wed</span>
+        <span>Fri</span>
+      </div>
+      <div class="heatmap-grid">
+  `;
 
   for (let i = 27; i >= 0; i--) {
     const d = new Date();
@@ -795,18 +837,88 @@ function renderHeatmap(dailyActivityData) {
 
     const match = activityList.find(a => a.date === dateStr);
     const wordCount = match ? match.words : 0;
+    const level = match ? (match.level !== undefined ? match.level : 0) : (wordCount > 500 ? 4 : (wordCount > 250 ? 3 : (wordCount > 100 ? 2 : (wordCount > 0 ? 1 : 0))));
 
-    const cell = document.createElement("div");
-    cell.className = "heatmap-cell";
-    cell.title = `${dayName}, ${dateStr}: ${wordCount} words spoken`;
-
-    if (wordCount > 500) cell.classList.add("level-4");
-    else if (wordCount > 250) cell.classList.add("level-3");
-    else if (wordCount > 100) cell.classList.add("level-2");
-    else if (wordCount > 0) cell.classList.add("level-1");
-
-    grid.appendChild(cell);
+    html += `
+      <div class="heatmap-cell level-${level}" 
+           style="animation-delay: ${i * 10}ms;"
+           title="${dayName}, ${dateStr}: ${wordCount} words dictated"
+           aria-label="${dayName}, ${dateStr}: ${wordCount} words">
+      </div>
+    `;
   }
+
+  html += `
+      </div>
+    </div>
+  `;
+
+  grid.innerHTML = html;
+}
+
+function renderTimeOfDayBars(timeOfDayList) {
+  const container = document.getElementById("time-of-day-bars");
+  if (!container) return;
+
+  const periods = Array.isArray(timeOfDayList) && timeOfDayList.length > 0 ? timeOfDayList : [
+    { period: "morning", label: "Morning", time_range: "6 AM - 12 PM", icon: "🌅", words: 0, pct: 25 },
+    { period: "afternoon", label: "Afternoon", time_range: "12 PM - 5 PM", icon: "☀️", words: 0, pct: 25 },
+    { period: "evening", label: "Evening", time_range: "5 PM - 10 PM", icon: "🌆", words: 0, pct: 25 },
+    { period: "night", label: "Night", time_range: "10 PM - 6 AM", icon: "🌙", words: 0, pct: 25 },
+  ];
+
+  container.innerHTML = periods.map(p => `
+    <div class="tod-bar-item">
+      <div class="tod-bar-header">
+        <span>${p.icon} <strong>${escapeHtml(p.label)}</strong></span>
+        <span>${p.words || 0} w</span>
+      </div>
+      <div class="tod-bar-bg">
+        <div class="tod-bar-fill" style="width: ${Math.max(p.pct || 0, 3)}%;"></div>
+      </div>
+      <div style="font-size: 10px; color: var(--text-muted); opacity: 0.7;">${escapeHtml(p.time_range)}</div>
+    </div>
+  `).join("");
+}
+
+// Share Productivity Card Handler with inline feedback
+function copyProductivityShareCard(btnElement = null) {
+  const wordsVal = document.getElementById("insights-total-words") ? document.getElementById("insights-total-words").textContent : "0";
+  const timeVal = document.getElementById("insights-time-saved") ? document.getElementById("insights-time-saved").textContent : "0";
+  const unitVal = document.getElementById("insights-time-saved-unit") ? document.getElementById("insights-time-saved-unit").textContent : "mins";
+  const wpmVal = document.getElementById("insights-wpm") ? document.getElementById("insights-wpm").textContent : "0";
+  const multVal = document.getElementById("insights-multiplier") ? document.getElementById("insights-multiplier").textContent : "3x Faster";
+  const archVal = document.getElementById("insights-archetype-badge") ? document.getElementById("insights-archetype-badge").textContent : "The Rapid Thinker";
+
+  const shareText = `🚀 Voice Flow Telemetry (${archVal}): I dictated ${wordsVal} words at ${wpmVal} WPM and saved ${timeVal} ${unitVal} with Voice Flow (${multVal} than typing)! #VoiceFlow #AI`;
+  
+  navigator.clipboard.writeText(shareText).then(() => {
+    if (btnElement) {
+      const originalHtml = btnElement.innerHTML;
+      btnElement.innerHTML = "<span>✅ Copied to Clipboard!</span>";
+      btnElement.style.background = "#10B981";
+      setTimeout(() => {
+        btnElement.innerHTML = originalHtml;
+        btnElement.style.background = "";
+      }, 2000);
+    }
+    showToast("Copied Productivity Card to clipboard!", "🚀");
+  }).catch(err => {
+    console.error("Failed to copy share card:", err);
+  });
+}
+
+function getAppIcon(appName) {
+  const name = (appName || "").toLowerCase();
+  if (name.includes("chatgpt") || name.includes("gpt")) return "🧠";
+  if (name.includes("claude")) return "🤖";
+  if (name.includes("chrome") || name.includes("edge") || name.includes("brave") || name.includes("firefox")) return "🌐";
+  if (name.includes("whatsapp") || name.includes("telegram")) return "💬";
+  if (name.includes("outlook") || name.includes("gmail") || name.includes("mail")) return "✉️";
+  if (name.includes("slack") || name.includes("teams") || name.includes("discord")) return "💼";
+  if (name.includes("notion") || name.includes("word") || name.includes("docs") || name.includes("obsidian")) return "📄";
+  if (name.includes("terminal") || name.includes("code") || name.includes("powershell") || name.includes("cursor")) return "💻";
+  return "⚡";
 }
 
 // Dictionary Management (Wispr Flow Gold Standard)
@@ -933,6 +1045,24 @@ async function removeDictionaryWord(word) {
     console.error("Error removing dictionary word:", err);
   }
 }
+
+// Theme switching (Light cream / Dark matte black)
+function applyTheme(theme) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("vf-theme", next); } catch (e) {}
+  const icon = document.getElementById("theme-toggle-icon");
+  const label = document.getElementById("theme-toggle-label");
+  if (icon) icon.textContent = next === "dark" ? "🌙" : "☀️";
+  if (label) label.textContent = next === "dark" ? "Dark Mode" : "Light Mode";
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
+applyTheme(document.documentElement.getAttribute("data-theme") || "light");
 
 // Settings Modal Controls
 function openSettings(tab = "general") {
@@ -1363,5 +1493,479 @@ async function testAllProviders() {
     }
   }
   loadProvidersOverview();
+}
+
+// =========================================================
+// AUDIO FLOW (TTS) — PROVIDER & POLICY CONTROLLER
+// =========================================================
+
+const AUDIO_PROVIDERS_CONFIG = {
+  edge: { name: "Microsoft Edge Neural (Free)", logo: "✨", keyLink: null, free: true },
+  offline: { name: "Windows Offline SAPI5", logo: "💻", keyLink: null, free: true },
+  google: { name: "Google Cloud TTS", logo: "☁️", keyLink: "https://console.cloud.google.com/apis/credentials" },
+  gemini: { name: "Gemini AI TTS", logo: "💎", keyLink: "https://aistudio.google.com/apikey" },
+  azure: { name: "Microsoft Azure Speech", logo: "🔷", keyLink: "https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices" },
+  fish: { name: "Fish Audio", logo: "🐟", keyLink: "https://fish.audio/api" },
+  nvidia: { name: "NVIDIA Riva", logo: "🟢", keyLink: "https://build.nvidia.com" },
+  elevenlabs: { name: "ElevenLabs", logo: "🎙️", keyLink: "https://elevenlabs.io/api" },
+  deepgram: { name: "Deepgram Aura", logo: "🎧", keyLink: "https://console.deepgram.com" },
+  openai: { name: "OpenAI TTS", logo: "🤖", keyLink: "https://platform.openai.com/api-keys" }
+};
+
+let currentAudioProvider = null;
+
+function loadAudioFlowPage() {
+  loadAudioProvidersOverview();
+  loadExecAudioFlowPolicy();
+}
+
+async function loadExecAudioFlowPolicy() {
+  const selectEl = document.getElementById("exec-audio-policy-model-select");
+  if (!selectEl) return;
+
+  try {
+    const res = await fetch("/api/audio-policy/get");
+    const data = await res.json();
+    if (!data.success || !data.policy) return;
+
+    const policy = data.policy;
+    const activeModel = policy.active_model || "edge/en-US-AvaNeural";
+    const models = policy.models || [];
+    const grouped = policy.grouped_models || [];
+
+    if (models.length === 0) {
+      selectEl.innerHTML = `<option value="edge/en-US-AvaNeural">✨ Microsoft Edge Neural (Free) — Ava</option>`;
+    } else if (grouped.length > 0) {
+      selectEl.innerHTML = grouped.map(g => `
+        <optgroup label="${escapeHtml(`${g.provider_logo} ${g.provider_name}`)}">
+          ${g.models.map(m => `
+            <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
+              ${escapeHtml(m.label)}
+            </option>
+          `).join("")}
+        </optgroup>
+      `).join("");
+    } else {
+      selectEl.innerHTML = models.map(m => `
+        <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
+          ${escapeHtml(m.label)}
+        </option>
+      `).join("");
+    }
+
+    const engineEl = document.getElementById("exec-audio-active-engine");
+    if (engineEl) {
+      const activeObj = models.find(m => m.full_id === activeModel);
+      engineEl.textContent = activeObj ? activeObj.display_name : activeModel.split("/").pop();
+    }
+
+    const failEl = document.getElementById("exec-audio-failover-count");
+    if (failEl) {
+      const count = policy.failover_count || 0;
+      failEl.textContent = count > 0
+        ? `${count} connected provider${count === 1 ? "" : "s"} + Edge fallback`
+        : "Edge Free Engine";
+    }
+
+    const toggle = document.getElementById("toggle-audio-flow");
+    if (toggle) toggle.checked = policy.audio_flow_enabled !== false;
+    updateAudioFlowStatusBadge(policy.audio_flow_enabled !== false);
+
+    const speed = parseFloat(policy.audio_flow_speed);
+    if (!isNaN(speed)) {
+      document.querySelectorAll(".speed-pill-btn").forEach(btn => {
+        btn.classList.toggle("active", parseFloat(btn.dataset.speed) === speed);
+      });
+    }
+  } catch (err) {
+    console.error("Error loading Audio Flow policy:", err);
+  }
+}
+
+function updateAudioFlowStatusBadge(enabled) {
+  const badge = document.getElementById("exec-audio-status-badge");
+  if (!badge) return;
+  badge.textContent = enabled ? "● Audio Flow Active" : "○ Audio Flow Off";
+  badge.classList.toggle("off", !enabled);
+  badge.removeAttribute("style");
+}
+
+async function updateExecAudioFlowPolicy(modelVal) {
+  if (!modelVal) return;
+  try {
+    await fetch("/api/audio-policy/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelVal }),
+    });
+    loadExecAudioFlowPolicy();
+  } catch (err) {
+    console.error("Error updating Audio Flow policy:", err);
+  }
+}
+
+async function toggleAudioFlowSetting(checked) {
+  try {
+    await fetch("/api/audio-policy/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !!checked }),
+    });
+    updateAudioFlowStatusBadge(!!checked);
+  } catch (err) {
+    console.error("Error toggling Audio Flow:", err);
+  }
+}
+
+async function setAudioFlowSpeed(x) {
+  const speed = parseFloat(x);
+  if (isNaN(speed)) return;
+  try {
+    await fetch("/api/audio-policy/speed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ speed }),
+    });
+    document.querySelectorAll(".speed-pill-btn").forEach(btn => {
+      btn.classList.toggle("active", parseFloat(btn.dataset.speed) === speed);
+    });
+  } catch (err) {
+    console.error("Error setting Audio Flow speed:", err);
+  }
+}
+
+async function loadAudioProvidersOverview() {
+  const container = document.getElementById("audio-providers-grid-container");
+  const overview = document.getElementById("audio-providers-view-overview");
+  const detail = document.getElementById("audio-providers-view-detail");
+  if (!container) return;
+  if (overview) overview.style.display = "block";
+  if (detail) detail.style.display = "none";
+
+  try {
+    const res = await fetch("/api/audio-providers/overview");
+    const data = await res.json();
+    if (!Array.isArray(data)) {
+      container.innerHTML = `<div class="audio-empty-state">${escapeHtml(data.error || "Failed to load providers")}</div>`;
+      return;
+    }
+
+    const freeProviders = [
+      { id: "edge", name: "Microsoft Edge Neural (Free)", logo: "✨", key_link: null },
+      { id: "offline", name: "Windows Offline SAPI5", logo: "💻", key_link: null },
+    ].map(p => ({ ...p, connection_count: 1, is_connected: true }));
+
+    const allProviders = [...freeProviders, ...data];
+
+    container.innerHTML = allProviders.map(p => {
+      const cfg = AUDIO_PROVIDERS_CONFIG[p.id] || {};
+      const isFree = !!cfg.free;
+      const connText = p.is_connected
+        ? `${p.connection_count || 1} Connected`
+        : "Not connected";
+      return `
+        <div class="provider-card-item audio-provider-card" onclick="openAudioProviderDetail('${p.id}')">
+          <div class="provider-card-left">
+            <div class="provider-card-logo audio-card-logo">${p.logo}</div>
+            <div class="provider-card-info">
+              <span class="provider-card-name">${escapeHtml(p.name)}</span>
+              <span class="provider-card-status">
+                <span class="status-dot-indicator ${p.is_connected ? "connected" : ""}"></span>
+                ${isFree ? "Free Engine — Always available" : connText}
+              </span>
+            </div>
+          </div>
+          <label class="toggle-switch" onclick="event.stopPropagation()">
+            <input type="checkbox" ${p.is_connected ? "checked" : ""} onchange="toggleAudioProviderMaster('${p.id}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("Error loading audio providers overview:", err);
+    container.innerHTML = `<div class="audio-empty-state">Failed to load providers — is the Voice Flow backend running?</div>`;
+  }
+}
+
+async function openAudioProviderDetail(providerId) {
+  currentAudioProvider = providerId;
+  const cfg = AUDIO_PROVIDERS_CONFIG[providerId] || { name: providerId, logo: "🔊", keyLink: null };
+
+  document.getElementById("audio-providers-view-overview").style.display = "none";
+  document.getElementById("audio-providers-view-detail").style.display = "block";
+
+  document.getElementById("audio-detail-provider-name").textContent = cfg.name;
+  document.getElementById("audio-detail-provider-logo").textContent = cfg.logo;
+  const keyLink = document.getElementById("audio-detail-get-key-link");
+  if (keyLink) {
+    keyLink.style.display = cfg.keyLink ? "inline-flex" : "none";
+    if (cfg.keyLink) keyLink.href = cfg.keyLink;
+  }
+  loadAudioProviderDetails(providerId);
+}
+
+function closeAudioProviderDetail() {
+  currentAudioProvider = null;
+  loadAudioProvidersOverview();
+}
+
+async function loadAudioProviderDetails(providerId) {
+  try {
+    const res = await fetch(`/api/audio-providers/details?provider=${providerId}`);
+    const data = await res.json();
+    if (!data || data.error) return;
+
+    const conns = data.connections || [];
+    const connCountEl = document.getElementById("audio-detail-conn-count");
+    if (connCountEl) {
+      connCountEl.textContent = `${conns.length} connection${conns.length === 1 ? "" : "s"}`;
+    }
+
+    const connListEl = document.getElementById("audio-detail-connections-list");
+    if (connListEl) {
+      if (conns.length === 0) {
+        connListEl.innerHTML = `
+          <div class="audio-empty-state">
+            <div class="audio-empty-icon">🎙️</div>
+            <p><strong>No API keys configured yet.</strong></p>
+            <p class="audio-empty-sub">Add your first key to unlock ${escapeHtml((AUDIO_PROVIDERS_CONFIG[providerId] || {}).name || providerId)} voices.</p>
+            <button class="btn-primary" style="margin-top: 12px; padding: 8px 18px; font-size: 12px;" onclick="openAddAudioConnectionModal()">+ Add API Key</button>
+          </div>`;
+      } else {
+        connListEl.innerHTML = conns.map(c => {
+          const keyRaw = c.api_key || "";
+          const keyPreview = keyRaw.length > 10 ? `${keyRaw.substring(0, 6)}...${keyRaw.substring(keyRaw.length - 4)}` : "Key saved";
+          const statusOk = String(c.last_tested_status || "").includes("Connected");
+          const validClass = c.is_valid === 0 || c.is_valid === false ? "err" : (statusOk ? "ok" : "neutral");
+          return `
+          <div class="connection-item-card audio-conn-item ${c.is_active ? "" : "audio-conn-inactive"}">
+            <div class="conn-left-info">
+              <input type="checkbox" ${c.is_active ? "checked" : ""} onchange="toggleAudioProviderConn(${c.id}, this.checked)">
+              <div>
+                <div class="conn-name-group">
+                  <span class="conn-name">${escapeHtml(c.name)}</span>
+                  ${c.is_active ? '<span class="active-pill-badge audio-active-badge">+ active</span>' : '<span class="active-pill-badge audio-muted-badge">off</span>'}
+                  <span class="priority-pill-badge audio-priority-badge">Priority #${c.priority}</span>
+                </div>
+                <div class="conn-key-preview">Key: ${escapeHtml(keyPreview)}</div>
+                <div class="conn-status-msg ${validClass}">${escapeHtml(c.last_tested_status || "Not Tested")}</div>
+              </div>
+            </div>
+            <div class="conn-actions-right">
+              <button class="btn-secondary audio-action-btn" onclick="testSingleAudioConn(${c.id}, '${escapeJs(keyRaw)}')">⚡ Test</button>
+              <button class="btn-secondary audio-action-btn audio-delete-btn" onclick="deleteAudioConn(${c.id})">Delete</button>
+            </div>
+          </div>`;
+        }).join("");
+      }
+    }
+
+    const models = data.models || [];
+    const modelsGridEl = document.getElementById("audio-detail-models-grid");
+    if (modelsGridEl) {
+      modelsGridEl.innerHTML = models.length > 0
+        ? models.map(m => `
+          <div class="model-card-item audio-model-card">
+            <div>
+              <div class="model-id-text">${escapeHtml(m.model_id)}</div>
+              <div class="model-display-name">${escapeHtml(m.display_name)}</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" ${m.is_active ? "checked" : ""} onchange="toggleAudioTtsModel(${m.id}, this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>`).join("")
+        : `<div class="audio-empty-state">No voices available for this provider yet.</div>`;
+    }
+  } catch (err) {
+    console.error("Error loading audio provider details:", err);
+  }
+}
+
+async function toggleAudioProviderConn(cid, isActive) {
+  try {
+    await fetch("/api/audio-providers/connections/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid, is_active: isActive }),
+    });
+    if (currentAudioProvider) loadAudioProviderDetails(currentAudioProvider);
+  } catch (err) {
+    console.error("Error toggling audio connection:", err);
+  }
+}
+
+async function deleteAudioConn(cid) {
+  if (!confirm("Delete this API key connection?")) return;
+  try {
+    await fetch("/api/audio-providers/connections/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid }),
+    });
+    if (currentAudioProvider) loadAudioProviderDetails(currentAudioProvider);
+    loadExecAudioFlowPolicy();
+  } catch (err) {
+    console.error("Error deleting audio connection:", err);
+  }
+}
+
+async function toggleAudioProviderMaster(providerId, isActive) {
+  try {
+    await fetch("/api/audio-providers/master/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider_id: providerId, is_active: isActive }),
+    });
+    loadExecAudioFlowPolicy();
+  } catch (err) {
+    console.error("Error toggling audio provider master:", err);
+  }
+}
+
+async function toggleAudioTtsModel(mid, isActive) {
+  try {
+    await fetch("/api/audio-providers/models/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: mid, is_active: isActive }),
+    });
+  } catch (err) {
+    console.error("Error toggling TTS model:", err);
+  }
+}
+
+async function testAllAudioProviders() {
+  try {
+    const res = await fetch("/api/audio-providers/overview");
+    const data = await res.json();
+    if (!Array.isArray(data)) return;
+    const providers = data.filter(p => p.is_connected);
+    for (const p of providers) {
+      const detRes = await fetch(`/api/audio-providers/details?provider=${p.id}`);
+      const det = await detRes.json();
+      for (const c of det.connections || []) {
+        await testSingleAudioConn(c.id, c.api_key, p.id);
+      }
+    }
+    if (currentAudioProvider) loadAudioProviderDetails(currentAudioProvider);
+  } catch (err) {
+    console.error("Error testing all audio providers:", err);
+  }
+}
+
+async function testAudioProviderConnections() {
+  if (!currentAudioProvider) return;
+  const res = await fetch(`/api/audio-providers/details?provider=${currentAudioProvider}`);
+  const det = await res.json();
+  for (const c of det.connections || []) {
+    await testSingleAudioConn(c.id, c.api_key, currentAudioProvider);
+  }
+}
+
+async function testSingleAudioConn(cid, key, provider) {
+  const prov = provider || currentAudioProvider || "";
+  try {
+    const res = await fetch("/api/audio-providers/connections/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cid, provider: prov, key: key || "" }),
+    });
+    const data = await res.json();
+    if (prov === currentAudioProvider) loadAudioProviderDetails(prov);
+    return data;
+  } catch (err) {
+    console.error("Error testing audio connection:", err);
+    return { valid: false, status: err.message };
+  }
+}
+
+function openAddAudioConnectionModal() {
+  const modal = document.getElementById("modal-add-audio-connection");
+  if (!modal) return;
+
+  const nameInput = document.getElementById("audio-conn-input-name");
+  const keyInput = document.getElementById("audio-conn-input-key");
+  const priorityInput = document.getElementById("audio-conn-input-priority");
+  const badge = document.getElementById("audio-conn-check-badge");
+  if (nameInput) nameInput.value = "";
+  if (keyInput) keyInput.value = "";
+  if (priorityInput) priorityInput.value = "1";
+  if (badge) badge.innerHTML = "";
+
+  const cfg = AUDIO_PROVIDERS_CONFIG[currentAudioProvider] || {};
+  const title = document.getElementById("modal-audio-conn-title");
+  if (title) title.textContent = `Add ${cfg.name || "TTS"} API Key`;
+
+  const hint = document.getElementById("audio-conn-provider-hint");
+  if (hint) {
+    if (cfg.keyLink) {
+      hint.innerHTML = `Get your key from <a href="${cfg.keyLink}" target="_blank" class="get-key-pill-link">${escapeHtml(cfg.name || "provider")} →</a>`;
+      hint.style.display = "block";
+    } else {
+      hint.style.display = "none";
+    }
+  }
+
+  modal.classList.remove("hidden");
+}
+
+async function testNewAudioConnectionKey() {
+  const key = document.getElementById("audio-conn-input-key").value.trim();
+  const badge = document.getElementById("audio-conn-check-badge");
+  if (!badge) return;
+  if (!key) {
+    badge.innerHTML = `<span class="status-badge status-error">✕ Key is empty</span>`;
+    return;
+  }
+  badge.innerHTML = `<span class="status-badge" style="background:#f3f4f6; color:#4b5563;">Testing...</span>`;
+  try {
+    const res = await fetch("/api/audio-providers/connections/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentAudioProvider || "", key }),
+    });
+    const data = await res.json();
+    if (data.valid) {
+      badge.innerHTML = `<span class="status-badge status-connected">✓ Connected</span>`;
+    } else {
+      badge.innerHTML = `<span class="status-badge status-error" title="${escapeHtml(data.status || "")}">✕ ${escapeHtml(data.status || "Invalid key")}</span>`;
+    }
+  } catch (err) {
+    badge.innerHTML = `<span class="status-badge status-error">✕ ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+async function saveAudioConnectionModal() {
+  const name = document.getElementById("audio-conn-input-name").value.trim();
+  const key = document.getElementById("audio-conn-input-key").value.trim();
+  const priority = parseInt(document.getElementById("audio-conn-input-priority").value, 10) || 1;
+  if (!key) {
+    alert("Please paste an API key first.");
+    return;
+  }
+  try {
+    const res = await fetch("/api/audio-providers/connections/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: currentAudioProvider || "",
+        name: name || "Key #1",
+        key,
+        priority,
+      }),
+    });
+    const data = await res.json();
+    closeSubModal("modal-add-audio-connection");
+    if (currentAudioProvider) loadAudioProviderDetails(currentAudioProvider);
+    loadExecAudioFlowPolicy();
+    loadAudioProvidersOverview();
+    if (data.verification && data.verification.valid === false) {
+      alert("Key saved, but validation failed: " + (data.verification.status || "Unknown error"));
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
 }
 

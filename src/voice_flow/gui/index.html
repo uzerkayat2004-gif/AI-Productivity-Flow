@@ -1,594 +1,1469 @@
 <!DOCTYPE html>
+
 <html lang="en">
+
 <head>
+
   <meta charset="UTF-8">
+
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>Voice Flow - AI Speech Desktop App</title>
+
   <link rel="manifest" href="manifest.json">
+
   <link rel="icon" type="image/png" href="assets/logo.png">
+
   <meta name="theme-color" content="#0b0c16">
+
   <link rel="stylesheet" href="styles.css">
+
+  <link rel="stylesheet" href="video-flow.css?v=20260811">
+
+  <link rel="stylesheet" href="design-system.css?v=20260814">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
+
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script>try{document.documentElement.setAttribute("data-theme", localStorage.getItem("vf-theme") || "light");}catch(e){}</script>
+
 </head>
+
 <body>
+
   <div id="app">
+
     <!-- LEFT NAVIGATION SIDEBAR -->
+
     <aside class="sidebar" id="main-sidebar">
+
       <div>
+
         <!-- BRAND HEADER WITH SIDEBAR TOGGLE BUTTON AT PRO LABEL POSITION -->
+
         <div class="brand">
+
           <div class="brand-left">
+
             <img src="assets/logo.png" alt="Voice Flow" class="brand-icon" style="width: 28px; height: 28px; border-radius: 8px; object-fit: cover;">
+
             <span class="brand-title">Voice Flow</span>
+
           </div>
+
           <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle Sidebar (Expand/Collapse)">
+
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+
               <line x1="9" y1="3" x2="9" y2="21"></line>
+
             </svg>
+
           </button>
+
         </div>
 
+
+
         <nav class="nav-group">
+
           <div class="nav-item active" data-page="home">
+
             <span class="nav-icon">⊞</span> <span class="nav-label">Home</span>
+
           </div>
+
           <div class="nav-item" data-page="insights">
+
             <span class="nav-icon">📊</span> <span class="nav-label">Insights</span>
+
           </div>
+
           <div class="nav-item" data-page="dictionary">
+
             <span class="nav-icon">📖</span> <span class="nav-label">Dictionary</span>
+
           </div>
+
           <div class="nav-item" data-page="style">
+
             <span class="nav-icon">Tτ</span> <span class="nav-label">Style</span>
+
           </div>
-          <div class="nav-item" data-page="providers">
+
+          <div class="nav-item" data-page="audioflow">
+
+            <span class="nav-icon">🔊</span> <span class="nav-label">Audio Flow</span>
+
+          </div>
+
+          <div class="nav-item" data-page="videoflow">
+
+            <span class="nav-icon">🎬</span> <span class="nav-label">Video Flow</span>
+
+          </div>          <div class="nav-item" data-page="providers">
+
             <span class="nav-icon">🔌</span> <span class="nav-label">Providers</span>
+
           </div>
+
         </nav>
+
       </div>
 
+
+
       <div>
+
         <nav class="nav-group">
+
           <div class="nav-item" onclick="openSettings('general')">
+
             <span class="nav-icon">⚙️</span> <span class="nav-label">Settings</span>
+
           </div>
+
+          <div class="nav-item" id="theme-toggle-nav" onclick="toggleTheme()" title="Switch between Light and Dark mode">
+
+            <span class="nav-icon" id="theme-toggle-icon">☀️</span> <span class="nav-label" id="theme-toggle-label">Light Mode</span>
+
+          </div>
+
         </nav>
+
       </div>
+
     </aside>
 
+
+
     <!-- MAIN CONTENT VIEW -->
+
     <main class="main-content">
 
+
+
       <!-- PAGE 1: HOME PAGE -->
+
       <section id="page-home" class="page-view">
 
+
+
         <!-- STRETCHED METRICS PANEL -->
+
         <div class="stretched-metrics-banner">
+
           <div class="metric-block">
+
             <div class="metric-val" id="stat-total-words">0</div>
+
             <div class="metric-lbl">Total Words</div>
+
           </div>
+
           <div class="metric-divider"></div>
+
           <div class="metric-block">
+
             <div class="metric-val" id="stat-wpm">0</div>
+
             <div class="metric-lbl">WPM Speed</div>
+
           </div>
+
           <div class="metric-divider"></div>
+
           <div class="metric-block">
+
             <div class="metric-val" id="stat-streak">0</div>
+
             <div class="metric-lbl">Day Streak</div>
+
           </div>
+
         </div>
+
+
 
         <!-- SEARCH BAR & FEED HEADER -->
+
         <div class="history-controls">
+
           <div class="history-title">RECENT DICTATIONS</div>
+
           <div class="search-box">
+
             <span style="opacity: 0.5;">🔍</span>
+
             <input type="text" id="history-search" placeholder="Search transcripts..." oninput="filterHistory()">
+
           </div>
+
         </div>
+
+
 
         <!-- LIVE DICTATION FEED (Grouped by Date) -->
+
         <div id="dictations-list">
+
           <!-- Dynamically populated from SQLite DB -->
+
         </div>
+
       </section>
 
-      <!-- PAGE 2: INSIGHTS PAGE -->
+
+
+      <!-- PAGE 2: INSIGHTS PAGE (WORLD-CLASS TELEMETRY & PRODUCTIVITY) -->
       <section id="page-insights" class="page-view" style="display: none;">
-        <div class="page-header">
-          <h1 class="page-title">Insights</h1>
+        
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+              <h1 class="page-title" style="margin: 0;">Insights</h1>
+              <span class="telemetry-live-pill"><span class="pulse-dot"></span> Live Telemetry</span>
+            </div>
+            <p style="color: var(--text-muted); font-size: 13px; margin: 0;">Real-time speaking velocity, active desktop application intelligence, and AI productivity analytics.</p>
+          </div>
+
+          <!-- Time Range Switcher -->
+          <div class="insights-range-switcher" style="display: flex; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 10px; padding: 3px; gap: 4px;">
+            <button type="button" class="range-btn" id="range-btn-7d" onclick="switchInsightsRange('7d', this)">7 Days</button>
+            <button type="button" class="range-btn" id="range-btn-30d" onclick="switchInsightsRange('30d', this)">30 Days</button>
+            <button type="button" class="range-btn active" id="range-btn-all" onclick="switchInsightsRange('all', this)">All Time</button>
+          </div>
         </div>
 
-        <!-- INSIGHTS TOP STATS CARDS GRID -->
-        <div class="stats-grid">
-          <!-- WPM Card -->
-          <div class="stat-card">
-            <div class="stat-header">WORDS PER MINUTE</div>
-            <div class="stat-value"><span id="insights-wpm">0</span> <span class="stat-unit">wpm</span></div>
+        <!-- TOP 4 TELEMETRY CARDS -->
+        <div class="insights-top-grid">
+          
+          <!-- Card 1: Velocity / Speedometer -->
+          <div class="insight-card glow-accent">
+            <div class="card-header-row">
+              <span class="card-kicker">SPEAKING VELOCITY</span>
+              <span class="card-icon-pill">⚡</span>
+            </div>
+            <div class="metric-hero-value">
+              <span id="insights-wpm">0</span> <span class="metric-unit">wpm</span>
+            </div>
             <div class="insights-gauge-container">
-              <div class="arc-gauge" style="position: relative; width: 140px; height: 75px; display: flex; justify-content: center; align-items: flex-end;">
-                <svg viewBox="0 0 120 70" style="width: 140px; height: 75px;">
-                  <!-- Background Track (180deg arc) -->
+              <div class="arc-gauge" style="position: relative; width: 150px; height: 80px; display: flex; justify-content: center; align-items: flex-end;">
+                <svg viewBox="0 0 120 70" style="width: 150px; height: 80px;">
+                  <defs>
+                    <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stop-color="#FF6B00" />
+                      <stop offset="100%" stop-color="#FF9E00" />
+                    </linearGradient>
+                  </defs>
                   <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="rgba(255, 107, 0, 0.15)" stroke-width="9" stroke-linecap="round" />
-                  <!-- Progress Fill (180deg arc) -->
-                  <path id="gauge-fill" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="var(--primary-orange)" stroke-width="9" stroke-linecap="round" style="stroke-dasharray: 141.37; stroke-dashoffset: 141.37; transition: stroke-dashoffset 1s ease-out;" />
+                  <path id="gauge-fill" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="url(#gauge-grad)" stroke-width="9" stroke-linecap="round" style="stroke-dasharray: 141.37; stroke-dashoffset: 141.37; transition: stroke-dashoffset 1s ease-out;" />
+                  <polygon id="gauge-needle" points="58,60 62,60 60,25" fill="#ffffff" style="transform-origin: 60px 60px; transition: transform 1s ease-out; transform: rotate(-90deg);" />
+                  <circle cx="60" cy="60" r="4" fill="#ffffff" />
                 </svg>
-                <span class="gauge-badge" id="insights-speed-badge" style="position: absolute; bottom: 0; transform: translateY(50%);">Top 0.5% Speed</span>
+                <span class="gauge-badge" id="insights-speed-badge">Active Speed</span>
               </div>
             </div>
           </div>
 
-          <!-- Fixes Made By Flow Card -->
-          <div class="stat-card">
-            <div class="stat-header">FIXES MADE BY FLOW</div>
-            <div class="stat-value"><span id="insights-fixes-total">0</span> <span class="stat-unit">fixes</span></div>
-            <div class="fixes-breakdown-list">
-              <div class="fix-sub-row"><span>Words corrected:</span> <strong id="insights-words-corrected">0</strong></div>
-              <div class="fix-sub-row"><span>Dictionary fixes:</span> <strong id="insights-dict-fixes">0</strong></div>
+          <!-- Card 2: Time Saved vs Typing -->
+          <div class="insight-card">
+            <div class="card-header-row">
+              <span class="card-kicker">TIME SAVED</span>
+              <span class="card-icon-pill">⏱️</span>
+            </div>
+            <div class="metric-hero-value">
+              <span id="insights-time-saved">0</span> <span class="metric-unit" id="insights-time-saved-unit">mins</span>
+            </div>
+            <div class="card-sub-stats">
+              <div class="stat-sub-row">
+                <span>Total Words Dictated:</span>
+                <strong id="insights-total-words" style="color: var(--text-main);">0</strong>
+              </div>
+              <div class="stat-sub-row">
+                <span>Avg vs 40 WPM Typing:</span>
+                <strong id="insights-multiplier" style="color: var(--primary-orange); font-weight: 700;">3x Faster</strong>
+              </div>
             </div>
           </div>
 
-          <!-- Time Saved Card (Wispr Flow Exact Metric) -->
-          <div class="stat-card">
-            <div class="stat-header">TIME SAVED</div>
-            <div class="stat-value"><span id="insights-time-saved">0</span> <span class="stat-unit" id="insights-time-saved-unit">mins</span></div>
-            <div class="fixes-breakdown-list">
-              <div class="fix-sub-row"><span>Total Words Dictated:</span> <strong id="insights-total-words" style="color: var(--text-main);">0</strong></div>
-              <div class="fix-sub-row"><span>Avg Typing vs Speech:</span> <strong style="color: var(--primary-orange);">3x Faster</strong></div>
+          <!-- Card 3: AI Refinements & Fixes -->
+          <div class="insight-card">
+            <div class="card-header-row">
+              <span class="card-kicker">AI AUTO-REFINEMENTS</span>
+              <span class="card-icon-pill">✨</span>
+            </div>
+            <div class="metric-hero-value">
+              <span id="insights-fixes-total">0</span> <span class="metric-unit">fixes</span>
+            </div>
+            <div class="card-sub-stats">
+              <div class="stat-sub-row">
+                <span>Grammar & filler diffs:</span>
+                <strong id="insights-words-corrected">0</strong>
+              </div>
+              <div class="stat-sub-row">
+                <span>Custom dictionary fixes:</span>
+                <strong id="insights-dict-fixes">0</strong>
+              </div>
             </div>
           </div>
+
+          <!-- Card 4: Daily Streak & Consistency -->
+          <div class="insight-card">
+            <div class="card-header-row">
+              <span class="card-kicker">SPEAKING STREAK</span>
+              <span class="card-icon-pill">🔥</span>
+            </div>
+            <div class="metric-hero-value">
+              <span id="insights-longest-streak">0</span> <span class="metric-unit">days</span>
+            </div>
+            <div class="card-sub-stats">
+              <div class="stat-sub-row">
+                <span>Current Daily Streak:</span>
+                <strong id="insights-streak-title" style="color: var(--primary-orange);">0 day streak</strong>
+              </div>
+              <div class="stat-sub-row">
+                <span>Total Dictations:</span>
+                <strong id="insights-dictation-count">0</strong>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        <!-- INSIGHTS BOTTOM CARDS GRID: FULL-WIDTH ACCURATE DESKTOP USAGE -->
-        <div class="stats-grid" style="grid-template-columns: 1fr; margin-top: 20px;">
-          <!-- Desktop App Usage Card -->
-          <div class="stat-card" style="padding: 24px 28px;">
-            <div class="stat-header-row" style="margin-bottom: 16px;">
-              <div class="stat-header" style="font-size: 13px; letter-spacing: 0.8px;">DESKTOP APPLICATION USAGE</div>
-              <div style="font-size: 11px; font-weight: 700; color: var(--primary-orange); background: var(--primary-orange-light); padding: 4px 10px; border-radius: 12px; border: 1px solid var(--primary-orange-border);">REAL-TIME APPS DETECTED</div>
+        <!-- MIDDLE SECTION: 2 COLUMNS (App Usage & Activity Matrix + Velocity) -->
+        <div class="insights-mid-grid">
+          
+          <!-- Column 1: Desktop Application Breakdown -->
+          <div class="insight-card" style="padding: 24px;">
+            <div class="card-header-row" style="margin-bottom: 16px;">
+              <div>
+                <span class="card-kicker">DESKTOP APPLICATION INTELLIGENCE</span>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Real-time apps detected from active window context</div>
+              </div>
+              <span class="app-telemetry-badge">⚡ Live App Detection</span>
             </div>
             <div class="usage-list" id="insights-app-breakdown">
-              <!-- Dynamically populated from live active window dictation data -->
+              <!-- Dynamically populated -->
             </div>
           </div>
+
+          <!-- Column 2: 28-Day Consistency Matrix & Hourly Velocity -->
+          <div class="insight-card" style="padding: 24px;">
+            <div class="card-header-row" style="margin-bottom: 14px;">
+              <div>
+                <span class="card-kicker">28-DAY SPEAKING CONSISTENCY</span>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Daily dictation throughput & frequency matrix</div>
+              </div>
+              <div class="heatmap-legend-row">
+                <span style="font-size: 10px; color: var(--text-muted);">Less</span>
+                <div class="legend-squares">
+                  <span class="heatmap-cell level-0"></span>
+                  <span class="heatmap-cell level-1"></span>
+                  <span class="heatmap-cell level-2"></span>
+                  <span class="heatmap-cell level-3"></span>
+                  <span class="heatmap-cell level-4"></span>
+                </div>
+                <span style="font-size: 10px; color: var(--text-muted);">More</span>
+              </div>
+            </div>
+
+            <!-- Heatmap Container -->
+            <div id="heatmap-grid" class="heatmap-container-box">
+              <!-- Dynamically populated 28 cells with day labels -->
+            </div>
+
+            <!-- Hourly Time-of-Day Velocity Distribution -->
+            <div style="margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+              <div class="card-header-row" style="margin-bottom: 10px;">
+                <span class="card-kicker" style="font-size: 11px;">VELOCITY BY TIME OF DAY</span>
+                <span id="insights-peak-hours-tag" style="font-size: 11px; font-weight: 600; color: var(--primary-orange);">🌅 Morning Peak</span>
+              </div>
+              <div id="time-of-day-bars" class="tod-distribution-grid">
+                <!-- Dynamically populated Morning / Afternoon / Evening / Night -->
+              </div>
+            </div>
+          </div>
+
         </div>
+
+        <!-- BOTTOM SECTION: YOUR VOICE ARCHETYPE & ONE-CLICK SHARE CARD -->
+        <div class="insights-bottom-grid">
+          
+          <!-- Your Voice Archetype Card -->
+          <div class="insight-card archetype-profile-card">
+            <div class="card-header-row" style="margin-bottom: 16px;">
+              <span class="card-kicker">YOUR VOICE PROFILE</span>
+              <span class="archetype-tag-badge" id="insights-archetype-tag">General Flow</span>
+            </div>
+            
+            <div class="archetype-hero-layout">
+              <div class="archetype-avatar-aura">
+                <span class="archetype-avatar-emoji" id="insights-archetype-icon">⚡</span>
+              </div>
+              <div>
+                <h3 class="archetype-title-text" id="insights-archetype-badge">The Rapid Thinker</h3>
+                <p class="archetype-desc-text" id="insights-archetype-desc">Captures raw thoughts, stream-of-consciousness ideas, and daily tasks with natural flow.</p>
+              </div>
+            </div>
+
+            <div class="archetype-footer-pills">
+              <div class="arch-pill">
+                <span style="color: var(--text-muted);">Vocabulary:</span>
+                <strong id="insights-vocab-status" style="color: #10B981;">Active</strong>
+              </div>
+              <div class="arch-pill">
+                <span style="color: var(--text-muted);">Peak Window:</span>
+                <strong id="insights-peak-hours" style="color: var(--text-main);">Morning</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Share Productivity Card -->
+          <div class="insight-card share-productivity-card">
+            <div class="card-header-row" style="margin-bottom: 12px;">
+              <span class="card-kicker">SHARE PRODUCTIVITY CARD</span>
+              <span style="font-size: 18px;">🚀</span>
+            </div>
+            <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 16px 0; line-height: 1.4;">
+              Share your verified Voice Flow speed benchmarks and time saved with your engineering or product team.
+            </p>
+            <div class="share-preview-box">
+              <div style="font-size: 12px; color: var(--text-muted); font-family: monospace;" id="share-snippet-preview">
+                🚀 Dictated with Voice Flow at 3.8x speed!
+              </div>
+            </div>
+            <button type="button" class="btn-primary share-action-btn" id="share-card-btn" onclick="copyProductivityShareCard(this)">
+              <span>📋 Copy Share Card</span>
+            </button>
+          </div>
+
+        </div>
+
       </section>
+
+
 
       <!-- PAGE 3: DICTIONARY PAGE (WISPR FLOW GOLD STANDARD) -->
+
       <section id="page-dictionary" class="page-view" style="display: none;">
+
         <div class="page-header" style="margin-bottom: 16px;">
+
           <div>
+
             <h1 class="page-title">Personal Dictionary</h1>
+
             <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">Ensure custom jargon, technical terms, names, and acronyms are transcribed with 100% exact spelling and casing.</p>
+
           </div>
+
           <span class="dict-counter-badge" id="dict-counter-badge">0 Terms</span>
+
         </div>
+
+
 
         <!-- SEARCH BAR & QUICK ADD TOOLBAR -->
+
         <div class="dictionary-toolbar" style="display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;">
+
           <div class="search-box" style="flex: 1; min-width: 240px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: 10px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
+
             <span style="opacity: 0.5;">🔍</span>
+
             <input type="text" id="dictionary-search-input" placeholder="Search terms or snippets..." oninput="filterDictionaryChips()" style="background: none; border: none; color: #fff; width: 100%; font-size: 13px; outline: none;">
+
           </div>
+
           <div style="display: flex; gap: 8px; align-items: center;">
+
             <input type="text" id="dictionary-add-input" placeholder="e.g. VoiceFlow, or shortcut -> text..." style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 14px; color: #fff; font-size: 13px; outline: none; width: 280px;" onkeydown="if(event.key==='Enter') addDictionaryWordFromInput()">
+
             <button class="btn-primary" style="padding: 8px 16px; font-size: 13px;" onclick="addDictionaryWordFromInput()">+ Add Word</button>
+
           </div>
+
         </div>
+
+
 
         <!-- CATEGORY TAG FILTERS -->
+
         <div class="dict-tags-nav" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+
           <button class="dict-tag-btn active" onclick="filterDictionaryCategory('all', this)">All Terms</button>
+
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('snippets', this)">🚀 Snippets & Text Expansions</button>
+
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('technical', this)">💻 Technical Jargon</button>
+
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('names', this)">👤 Proper Names</button>
+
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('brands', this)">🏢 Brands & Products</button>
+
           <button class="dict-tag-btn" onclick="filterDictionaryCategory('acronyms', this)">⚡ Acronyms</button>
+
         </div>
+
+
 
         <!-- DICTIONARY CHIPS GRID -->
+
         <div class="chip-container" id="dictionary-chips">
+
           <!-- Populated from SQLite DB -->
+
         </div>
+
       </section>
+
+
 
       <!-- PAGE 4: STYLE PAGE -->
+
       <section id="page-style" class="page-view" style="display: none;">
+
         <div class="page-header">
+
           <h1 class="page-title">Style</h1>
+
         </div>
+
+
 
         <!-- STYLE CATEGORY TABS HEADER -->
+
         <div class="tabs-header" id="style-tabs-nav">
+
           <button class="tab-btn active" onclick="switchStyleTab('personal', this)">Personal messages</button>
+
           <button class="tab-btn" onclick="switchStyleTab('work', this)">Work messages</button>
+
           <button class="tab-btn" onclick="switchStyleTab('email', this)">Email</button>
+
           <button class="tab-btn" onclick="switchStyleTab('other', this)">Other</button>
+
           <button class="tab-btn" onclick="switchStyleTab('autocleanup', this)">Auto cleanup</button>
+
         </div>
+
+
 
         <!-- HERO BANNER CARD -->
+
         <div class="style-hero-banner" id="style-hero-banner">
+
           <div class="style-hero-text">
+
             <h3 class="style-hero-title" id="style-hero-title">This style applies in personal messengers</h3>
+
             <p class="style-hero-desc" id="style-hero-desc">Style formatting applies instantly across personal desktop messaging apps.</p>
+
           </div>
+
           <div class="style-hero-app-icons" id="style-hero-icons">
+
             <span class="app-icon-pill">💬 WhatsApp</span>
+
             <span class="app-icon-pill">✈️ Telegram</span>
+
             <span class="app-icon-pill">👾 Discord</span>
+
             <span class="app-icon-pill">📸 Instagram</span>
+
           </div>
+
         </div>
 
+
+
         <!-- STYLE CARDS GRID (3 CARDS PER CATEGORY) -->
+
         <div class="style-cards-grid" id="style-cards-grid">
+
           <!-- Dynamically populated per tab -->
+
         </div>
+
+
 
       </section>
 
+
+
       <!-- PAGE 5: PROVIDERS & AI MODELS MANAGER PAGE (MATCHING VIDEO EXACTLY) -->
+
       <section id="page-providers" class="page-view" style="display: none;">
 
+
+
         <!-- SUB-VIEW 1: PROVIDERS GRID OVERVIEW -->
+
         <div id="providers-view-overview">
+
           <div class="page-header" style="margin-bottom: 20px;">
+
             <div>
+
               <h1 class="page-title">Providers</h1>
+
               <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">Manage your AI provider connections</p>
+
             </div>
+
             <div style="display: flex; gap: 12px; align-items: center;">
+
               <div class="search-box" style="width: 240px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 8px;">
+
                 <span style="opacity: 0.5;">🔍</span>
+
                 <input type="text" id="provider-search" placeholder="Search providers..." oninput="filterProvidersList()">
+
               </div>
-              <button class="btn-secondary" style="padding: 8px 14px; font-size: 13px;" onclick="testAllProviders()"><span style="color: #a78bfa;">⚡</span> Test All</button>
+
+              <button class="btn-secondary" style="padding: 8px 14px; font-size: 13px;" onclick="testAllProviders()"><span class="btn-emoji">⚡</span> Test All</button>
+
             </div>
+
           </div>
 
-          <!-- EXEC VOICE FLOW POLICY SECTION -->
-          <div class="exec-policy-card" style="background: linear-gradient(135deg, rgba(255, 107, 0, 0.08) 0%, rgba(18, 20, 32, 0.7) 100%); border: 1px solid rgba(255, 107, 0, 0.25); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px;">
+
+
+          <!-- VOICE FLOW MODEL SELECTOR SECTION -->
+
+          <div class="exec-policy-card" style="background: linear-gradient(135deg, rgba(255, 107, 0, 0.1) 0%, rgba(18, 20, 32, 0.85) 100%); border: 1px solid rgba(255, 107, 0, 0.3); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;">
+
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
+
               <div>
+
                 <div style="display: flex; align-items: center; gap: 10px;">
-                  <span style="font-size: 20px;">🛡️</span>
-                  <h2 style="font-size: 16px; font-weight: 800; color: var(--primary-orange); letter-spacing: 0.5px; margin: 0;">EXEC VOICE FLOW POLICY</h2>
+
+                  <span style="font-size: 20px;">🎙️</span>
+
+                  <h2 style="font-size: 16px; font-weight: 800; color: var(--primary-orange); letter-spacing: 0.5px; margin: 0;">VOICE FLOW MODEL SELECTOR</h2>
+
                 </div>
-                <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Select the primary executive AI model across all connected providers to execute message polishing.</p>
+
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">Select the primary Voice Flow AI model across all connected providers to execute message polishing.</p>
+
               </div>
-              <div style="display: flex; gap: 10px; align-items: center;">
-                <span style="font-size: 11px; font-weight: 700; color: #4cd964; background: rgba(76, 217, 100, 0.12); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(76, 217, 100, 0.3);" id="exec-policy-status-badge">● Policy Active</span>
+
+              <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+
+                <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.35); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip">
+
+                  <span style="font-size: 12px; font-weight: 700; color: #fff;">AI Polishing</span>
+
+                  <label class="toggle-switch">
+
+                    <input type="checkbox" id="toggle-polishing" checked onchange="togglePolishingSetting(this.checked)">
+
+                    <span class="toggle-slider"></span>
+
+                  </label>
+
+                </div>
+
+                <span style="font-size: 11px; font-weight: 700; color: #4cd964; background: rgba(76, 217, 100, 0.12); padding: 4px 10px; border-radius: 12px; border: 1px solid rgba(76, 217, 100, 0.3);" id="exec-policy-status-badge">● Voice Flow Active</span>
+
               </div>
+
             </div>
 
-            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.25); padding: 14px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06);">
+
+
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.35); padding: 16px 20px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08);" class="pf-inner-box">
+
               <div style="flex: 1; min-width: 280px;">
-                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">Executive Model Selector</label>
-                <select id="exec-policy-model-select" class="mode-select-dropdown" style="width: 100%; padding: 10px 14px; font-size: 13px; background: rgba(255,255,255,0.08); border: 1px solid var(--border-color); color: #fff; border-radius: 8px; outline: none; cursor: pointer;" onchange="updateExecVoiceFlowPolicy(this.value)">
+
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.5px;">Voice Flow Model Selector</label>
+
+                <select id="exec-policy-model-select" class="mode-select-dropdown" onchange="updateExecVoiceFlowPolicy(this.value)">
+
                   <!-- Dynamically populated from active provider connections -->
+
                 </select>
+
               </div>
+
               <div style="font-size: 12px; color: var(--text-muted); min-width: 220px; border-left: 1px dashed var(--border-color); padding-left: 16px;">
+
                 <div>Active Engine: <strong style="color: #fff;" id="exec-policy-active-engine">Google Gemini</strong></div>
-                <div style="margin-top: 3px;">Failover Pool: <span style="color: var(--primary-orange);" id="exec-policy-failover-count">Auto-Failover Ready</span></div>
+
+                <div style="margin-top: 4px;">Failover Pool: <span style="color: var(--primary-orange);" id="exec-policy-failover-count">Auto-Failover Ready</span></div>
+
               </div>
+
             </div>
+
           </div>
+
+
 
           <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">API KEY PROVIDERS</div>
 
+
+
           <div class="providers-cards-grid" id="providers-grid-container">
+
             <!-- Dynamically populated provider cards -->
+
           </div>
+
         </div>
 
+
+
         <!-- SUB-VIEW 2: PROVIDER DETAIL PAGE (OPENED WHEN CLICKING A PROVIDER CARD) -->
+
         <div id="providers-view-detail" style="display: none;">
+
           <!-- Header & Back Button -->
+
           <div class="detail-header-bar">
+
             <button class="btn-back" onclick="closeProviderDetail()">
+
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+
               <span>Back to Providers</span>
+
             </button>
 
             <div class="provider-detail-title-row">
-              <div class="provider-large-badge" id="detail-provider-logo">✨</div>
+
+              <div class="provider-large-badge" id="detail-provider-logo">☁️</div>
+
               <div>
+
                 <div style="display: flex; align-items: center; gap: 10px;">
-                  <h1 class="provider-detail-title" id="detail-provider-name">Google Gemini</h1>
+
+                  <h1 class="provider-detail-title" id="detail-provider-name">Provider</h1>
+
                   <a href="#" target="_blank" id="detail-get-key-link" class="get-key-pill-link">🔑 Get API Key ↗</a>
+
                 </div>
+
                 <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="detail-conn-count">0 connections</div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <!-- CONNECTIONS CARD -->
+          <div class="provider-section-box">
+
+            <div class="section-box-header">
+
+              <div class="section-title-group">
+
+                <span class="section-box-title">Connections</span>
+
+              </div>
+
+              <div class="section-controls-group">
+
+                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="testCurrentProviderConnections()">⚡ Test Connections</button>
+
+                <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openAddConnectionModal()">+ Add Connection</button>
+
+              </div>
+
+            </div>
+
+            <div class="connections-list" id="detail-connections-list">
+
+              <!-- Dynamically populated -->
+            </div>
+
+            <!-- LOAD BALANCE MODE -->
+            <div class="load-balance-row" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--border-color);">
+
+              <div>
+
+                <div style="font-size: 12px; font-weight: 700; color: var(--text-main);">Load Balancing Mode</div>
+
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">priority = use key #1 first, fallback if it fails</div>
+
+              </div>
+
+              <select id="load-balance-mode-select" class="mode-select-dropdown" style="width: 200px; padding: 8px 12px; font-size: 13px;" onchange="changeLoadBalanceMode(this.value)">
+
+                <option value="priority">Priority (sequential)</option>
+
+                <option value="round-robin">Round Robin (balanced)</option>
+
+              </select>
+
+            </div>
+
+          </div>
+
+          <!-- AVAILABLE MODELS -->
+          <div class="provider-section-box" style="margin-top: 24px;">
+
+            <div class="section-box-header">
+
+              <div class="section-title-group">
+
+                <span class="section-box-title">Available Models</span>
+
+              </div>
+
+              <div class="section-controls-group">
+
+                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="toggleAllModels(true)">✓ Enable All</button>
+
+                <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openAddModelModal()">+ Add Model</button>
+
+              </div>
+
+            </div>
+
+            <div class="models-cards-grid" id="detail-models-grid">
+
+              <!-- Dynamically populated -->
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- PAGE: AUDIO FLOW DEDICATED FEATURE SCREEN -->
+      <section id="page-audioflow" class="page-view" style="display: none; padding-bottom: 60px;">
+
+        <!-- SUB-VIEW 1: AUDIO PROVIDERS OVERVIEW -->
+        <div id="audio-providers-view-overview" style="margin-bottom: 24px;">
+          <div class="page-header" style="margin-bottom: 24px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <h1 class="page-title" style="margin: 0; font-size: 24px; font-weight: 800;">Audio Flow</h1>
+                <span class="af-engine-badge" style="font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 20px;">🔊 Text-to-Speech Engine</span>
+              </div>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">Read any selected text across your applications using neural AI voices or connected provider TTS models.</p>
+            </div>
+          </div>
+
+          <!-- AUDIO FLOW MODEL SELECTOR & MASTER CONTROL CARD -->
+          <div class="exec-policy-card" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.95) 50%, rgba(10, 14, 26, 0.98) 100%); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 16px; padding: 24px 28px; margin-bottom: 28px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); backdrop-filter: blur(20px);">
+            <!-- Header Row -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
+              <div style="flex: 1; min-width: 280px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 24px;">🔊</span>
+                  <h2 style="font-size: 18px; font-weight: 800; color: #00f2fe; letter-spacing: 0.5px; margin: 0;">AUDIO FLOW MODEL SELECTOR</h2>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">
+                  Select text anywhere on screen &amp; press <kbd style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); padding: 2px 7px; border-radius: 6px; color: #00f2fe; font-family: var(--font-sans), monospace; font-size: 11px; font-weight: 700;">Alt + S</kbd> or click the floating audio button to listen instantly.
+                </p>
+              </div>
+              <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.45); padding: 8px 18px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);" class="pill-chip">
+                  <span style="font-size: 13px; font-weight: 700; color: #fff;">Enable Audio Flow</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-audio-flow" checked onchange="toggleAudioFlowSetting(this.checked)">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <span id="exec-audio-status-badge" class="audio-status-badge">● Audio Flow Active</span>
+              </div>
+            </div>
+
+            <!-- Active Voice Dropdown + Stats Box Grid -->
+            <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 20px; background: rgba(0, 0, 0, 0.4); padding: 20px 24px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 20px;" class="af-inner-box">
+              <div>
+                <label for="exec-audio-policy-model-select" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Voice / Engine Selector</label>
+                <select id="exec-audio-policy-model-select" class="mode-select-dropdown" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid rgba(0, 242, 254, 0.4); border-radius: 10px; color: #f8fafc;" onchange="updateExecAudioFlowPolicy(this.value)">
+                  <!-- Dynamically populated from active provider connections & Edge-TTS -->
+                </select>
+              </div>
+              <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Active Voice:</span>
+                  <strong style="color: var(--accent-text); font-weight: 700; word-break: break-word;" id="exec-audio-active-engine">Microsoft Edge Ava</strong>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Provider Pool:</span>
+                  <span style="color: var(--accent-text); font-weight: 700; background: var(--accent-soft); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--accent-glow);" id="exec-audio-failover-count">Edge Free Engine</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- AUDIO PLAYBACK SPEED CONTROL -->
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: rgba(0,0,0,0.25); padding: 14px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);" class="af-inner-box">
+              <div>
+                <label style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; letter-spacing: 0.6px;">Audio Playback Speed</label>
+                <span style="font-size: 12px; color: var(--text-muted); margin-top: 2px; display: block;">Adjust reading speed rate across all voices</span>
+              </div>
+              <div class="speed-pill-group" style="display: flex; gap: 6px; flex-wrap: wrap; background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1);">
+                <button type="button" class="speed-pill-btn" data-speed="0.75" onclick="setAudioFlowSpeed(0.75)">0.75x</button>
+                <button type="button" class="speed-pill-btn active" data-speed="1.0" onclick="setAudioFlowSpeed(1.0)">1.0x</button>
+                <button type="button" class="speed-pill-btn" data-speed="1.2" onclick="setAudioFlowSpeed(1.2)">1.2x</button>
+                <button type="button" class="speed-pill-btn" data-speed="1.25" onclick="setAudioFlowSpeed(1.25)">1.25x</button>
+                <button type="button" class="speed-pill-btn" data-speed="1.5" onclick="setAudioFlowSpeed(1.5)">1.5x</button>
+                <button type="button" class="speed-pill-btn" data-speed="1.75" onclick="setAudioFlowSpeed(1.75)">1.75x</button>
+                <button type="button" class="speed-pill-btn" data-speed="2.0" onclick="setAudioFlowSpeed(2.0)">2.0x</button>
               </div>
             </div>
           </div>
 
-          <!-- CONNECTIONS CARD SECTION -->
+          <!-- AUDIO FLOW TTS API KEY PROVIDERS SECTION -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <div>
+              <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">TTS API KEY PROVIDERS</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Connect API keys to unlock premium AI voices from top providers</div>
+            </div>
+            <button class="btn-secondary" style="padding: 8px 14px; font-size: 13px;" onclick="testAllAudioProviders()"><span class="btn-emoji">⚡</span> Test All</button>
+          </div>
+
+          <!-- DYNAMICALLY POPULATED TTS PROVIDER CARDS GRID -->
+          <div class="providers-cards-grid" id="audio-providers-grid-container">
+            <!-- Dynamically populated from loadAudioProvidersOverview() in app.js -->
+          </div>
+        </div>
+
+        <!-- AUDIO FLOW PROVIDER DETAIL VIEW -->
+        <div id="audio-providers-view-detail" style="display: none; margin-bottom: 24px;">
+          <div class="detail-header-bar">
+            <button class="btn-back" onclick="closeAudioProviderDetail()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              <span>Back to Audio Flow</span>
+            </button>
+            <div class="provider-detail-title-row">
+              <div class="provider-large-badge" id="audio-detail-provider-logo">☁️</div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <h1 class="provider-detail-title" id="audio-detail-provider-name">Provider</h1>
+                  <a href="#" target="_blank" id="audio-detail-get-key-link" class="get-key-pill-link">🔑 Get API Key ↗</a>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="audio-detail-conn-count">0 connections</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONNECTIONS CARD -->
           <div class="provider-section-box">
             <div class="section-box-header">
               <div class="section-title-group">
                 <span class="section-box-title">Connections</span>
               </div>
               <div class="section-controls-group">
-                <select id="load-balance-mode-select" class="mode-select-dropdown" onchange="changeLoadBalanceMode(this.value)">
-                  <option value="priority">Priority Failover (Key #1 ➔ Key #2 ➔ Key #3)</option>
-                  <option value="round_robin">Round Robin (Load Balance Evenly)</option>
-                </select>
-                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="testCurrentProviderConnections()">⚡ Test Connections One-by-One</button>
-                <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openAddConnectionModal()">+ Add Connection</button>
+                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="testAudioProviderConnections()">⚡ Test Connections</button>
+                <button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openAddAudioConnectionModal()">+ Add Connection</button>
               </div>
             </div>
-
-            <!-- Connections List -->
-            <div class="connections-list" id="detail-connections-list">
-              <!-- Dynamically populated connection items -->
+            <div class="connections-list" id="audio-detail-connections-list">
+              <!-- Dynamically populated -->
             </div>
           </div>
 
-          <!-- AVAILABLE MODELS CARD SECTION -->
+          <!-- AVAILABLE TTS VOICES -->
           <div class="provider-section-box" style="margin-top: 24px;">
             <div class="section-box-header">
               <div class="section-title-group">
-                <span class="section-box-title">Available Models</span>
-                <select class="mode-select-dropdown" style="margin-left: 12px; font-size: 11px;">
-                  <option>Thinking: Auto</option>
-                  <option>Thinking: Enabled</option>
-                  <option>Thinking: Disabled</option>
-                </select>
-              </div>
-              <div class="section-controls-group">
-                <button class="btn-secondary" style="padding: 5px 10px; font-size: 11px;" onclick="toggleAllModels(true)">Active All</button>
-                <button class="btn-secondary" style="padding: 5px 10px; font-size: 11px;" onclick="toggleAllModels(false)">Disable All</button>
-                <button class="btn-secondary" style="padding: 5px 12px; font-size: 11px;" onclick="openAddModelModal()">+ Add Model</button>
+                <span class="section-box-title">Available Voices</span>
               </div>
             </div>
-
-            <!-- Models Grid -->
-            <div class="models-cards-grid" id="detail-models-grid">
-              <!-- Dynamically populated model items -->
+            <div class="models-cards-grid" id="audio-detail-models-grid">
+              <!-- Dynamically populated -->
             </div>
           </div>
         </div>
+      </section>
 
+      <!-- PAGE: VIDEO FLOW -->
+      <section id="page-videoflow" class="page-view video-flow-page" style="display: none; padding-bottom: 70px;">
+        <div class="vf-page-heading">
+          <div>
+            <div class="vf-title-line">
+              <h1 class="page-title">Video Flow</h1>
+              <span class="vf-badge">🎬 Text & Documents → Video</span>
+            </div>
+            <p>The in-app studio is a secondary way to create videos. Your screen-wide Voice Flow bar remains the primary experience.</p>
+          </div>
+          <span class="vf-live-pill" id="vf-engine-status">● Renderer ready</span>
+        </div>
+
+        <section class="vf-panel vf-history-panel" id="vf-history-panel">
+          <button class="vf-panel-toggle" type="button" onclick="toggleVideoHistory()" aria-expanded="false" id="vf-history-toggle">
+            <span><strong>VIDEO HISTORY</strong><small id="vf-history-count">Your generated videos appear here</small></span>
+            <span class="vf-chevron">⌄</span>
+          </button>
+          <div id="vf-history-body" style="display: none;">
+            <div id="vf-history-grid" class="vf-history-grid"></div>
+            <div id="vf-history-empty" class="vf-empty-state">
+              <div class="vf-empty-icon">▶</div>
+              <strong>No videos yet</strong>
+              <span>Videos created from the system bar and from this studio share this history.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="vf-create-panel">
+          <div class="vf-section-heading">
+            <div><span class="vf-kicker">CREATE A VIDEO</span><h2>What should Video Flow explain?</h2><p>Paste text or choose a document. This studio feeds the same generator and history as the screen-wide bar.</p></div>
+            <span id="vf-source-counter">0 characters</span>
+          </div>
+          <div class="vf-create-grid">
+            <div class="vf-source-column">
+              <label class="vf-field"><span>Video title <em>optional</em></span><input id="vf-title-input" type="text" maxlength="100" placeholder="e.g. Research findings explained"></label>
+              <label class="vf-file-drop" for="vf-file-input" id="vf-file-drop">
+                <input id="vf-file-input" type="file" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.rtf,.docx,.pdf" onchange="loadVideoSourceFile(this.files[0])">
+                <span class="vf-file-icon">⇧</span><strong>Choose a text document</strong><small>TXT, Markdown, CSV, JSON, HTML, XML, RTF, DOCX, or PDF · up to 8 MB</small><span id="vf-file-name"></span>
+              </label>
+              <label class="vf-field vf-source-field"><span>Source text</span><textarea id="vf-source-input" maxlength="500000" placeholder="Paste the selected paragraph, article, notes, or full research document here…" oninput="updateVideoSourceCount()"></textarea></label>
+            </div>
+            <div class="vf-options-column">
+              <span class="vf-field-title">Explanation type</span>
+              <label class="vf-mode-card active" data-mode="summary">
+                <input type="radio" name="vf-mode" value="summary" checked onchange="selectVideoMode('summary')"><span class="vf-mode-icon">✦</span>
+                <span><strong>Summary Video</strong><small>Distills the research into the clearest key points and visual story.</small></span><span class="vf-check">✓</span>
+              </label>
+              <label class="vf-mode-card" data-mode="full">
+                <input type="radio" name="vf-mode" value="full" onchange="selectVideoMode('full')"><span class="vf-mode-icon">≡</span>
+                <span><strong>Full Explanation</strong><small>Covers the complete source in order without dropping any characters.</small></span><span class="vf-check">✓</span>
+              </label>
+              <label class="vf-field"><span>Visual theme</span><select id="vf-theme-select"><option value="auto">Auto — choose from the permanent visual policy</option><option value="voice-flow">Voice Flow</option><option value="midnight">Midnight</option><option value="paper">Paper</option><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="mono">Monochrome</option></select></label>
+              <label class="vf-field"><span>Your visual direction <em>optional — always wins</em></span><textarea id="vf-visual-direction" rows="3" maxlength="1000" placeholder="e.g. A quiet midnight kitchen with deep blue light and warm copper details"></textarea><small>If you leave this blank, Video Flow chooses a consistent theme from the subject.</small></label>
+              <div class="vf-coverage-note" id="vf-coverage-note"><strong>Summary mode</strong><span>Video Flow samples the opening, middle, and conclusion to create a shorter explanation.</span></div>
+              <button class="vf-generate-button" id="vf-generate-button" onclick="generateVideoFlow()"><span>▶</span><span><strong>Generate Summary Video</strong><small>Plan → narrate → render MP4</small></span></button>
+              <div id="vf-generate-message" class="vf-inline-message"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="vf-model-hero">
+          <div class="vf-hero-top">
+            <div><span class="vf-kicker">VIDEO FLOW MODEL SELECTOR</span><h2>Choose the planning model</h2><p>Models are grouped by provider. Eye means vision-aware; brain means reasoning-capable. This selection belongs only to Video Flow.</p></div>
+          </div>
+          <button id="vf-model-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker()" aria-haspopup="dialog">
+            <span class="vf-model-picker-copy"><span>Active planning model</span><strong id="vf-active-model-label">Voice Flow Local — Deterministic Storyboard</strong><small id="vf-active-model-detail">Works without an API key</small></span>
+            <span class="vf-model-picker-action">Change model <b>⌄</b></span>
+          </button>
+          <select id="vf-model-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
+          <label id="vf-external-consent-row" class="vf-external-consent" style="display: none;">
+            <input id="vf-external-consent" type="checkbox">
+            <span><strong>Allow external AI planning for this video</strong><small id="vf-external-consent-copy">The source text will be sent to the selected provider only for scene planning.</small></span>
+          </label>
+        </section>
+
+        <section class="vf-panel vf-provider-panel">
+          <div class="vf-section-heading"><div><span class="vf-kicker">ACCOUNT AUTHENTICATION</span><h2>OAuth Providers</h2><p>Connect a subscription account. Credentials stay in the provider's own CLI or app.</p></div><button class="btn-secondary" onclick="refreshVideoOAuthProviders()">↻ Refresh status</button></div>
+          <div id="vf-oauth-provider-grid" class="vf-provider-grid"></div>
+        </section>
+
+        <section class="vf-panel vf-provider-panel">
+          <div class="vf-section-heading"><div><span class="vf-kicker">FREE TIER & API KEYS</span><h2>Video Flow API Providers</h2><p>Keys, priority, tests, round-robin, and custom model IDs are isolated to Video Flow.</p></div><button class="btn-secondary" onclick="testAllVideoConnections()">▷ Test active</button></div>
+          <div id="vf-api-provider-grid" class="vf-provider-grid"></div>
+        </section>
+
+        <section class="vf-panel vf-provider-panel">
+          <div class="vf-section-heading"><div><span class="vf-kicker">ON THIS PC</span><h2>Local Providers</h2><p>Use Ollama, LM Studio, or llama.cpp without sending source text to a hosted API.</p></div></div>
+          <div id="vf-local-provider-grid" class="vf-provider-grid"></div>
+        </section>
+
+        <section class="vf-panel vf-combo-section" id="vf-combo-section">
+          <div class="vf-section-heading"><div><span class="vf-kicker">MODEL COMBOS</span><h2>Build a reliable model route</h2><p>Name a combo, add models from any Video Flow provider, then choose fallback or round-robin.</p></div><button class="btn-primary vf-combo-button" onclick="openVideoComboModal()">＋ Create Combo</button></div>
+          <div id="vf-combo-strip" class="vf-combo-strip"></div>
+          <div id="vf-combo-empty" class="vf-empty-state vf-compact-empty"><strong>No combos yet</strong><span>Create one to group models under a reusable Video Flow route.</span></div>
+        </section>
+
+        <section id="vf-provider-detail-panel" class="vf-provider-detail-panel hidden" aria-live="polite">
+          <div class="vf-provider-detail-toolbar"><button class="vf-provider-back" onclick="closeVideoProvider()">← Video Flow providers</button><a id="vf-provider-get-key" class="btn-secondary vf-anchor-button" href="#" target="_blank" rel="noreferrer">Get API key ↗</a></div>
+          <div id="vf-provider-detail-content"></div>
+        </section>
       </section>
 
     </main>
-  </div>
-
-  <!-- FLOATING WISPR FLOW BAR PILL MARKER -->
-  <div id="floating-flow-bar" class="wispr-flow-bar-marker" title="Click bar to start Hands-Free dictation" onclick="toggleHandsFreeRecording()">
-    <div class="flow-pill-content">
-      <span class="pill-text" id="flow-bar-text"></span>
-    </div>
-  </div>
 
   <!-- ENLARGED SETTINGS MODAL -->
-  <div id="settings-modal" class="modal-overlay hidden">
-    <div class="modal-card modal-card-large">
-      <div class="modal-sidebar">
-        <div style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 16px;">SETTINGS</div>
-        <div class="nav-item active" onclick="switchSettingsTab('general', this)">⚙️ General</div>
-        <div class="nav-item" onclick="switchSettingsTab('system', this)">💻 System</div>
-      </div>
-
-      <div class="modal-body">
-
-        <!-- GENERAL SETTINGS TAB (STRICTLY SHORTCUTS & MICROPHONE ONLY) -->
-        <div id="set-tab-general">
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 24px;">General</h2>
-
-          <div class="settings-group-card">
-            <!-- 1. Shortcuts Row -->
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-title">Shortcuts</span>
-                <span class="setting-desc" id="current-shortcut-text">Hands-Free: <kbd class="kbd-pill">Middle Click</kbd> + <kbd class="kbd-pill">Ctrl</kbd> + <kbd class="kbd-pill">Win</kbd> | Push to Talk: <kbd class="kbd-pill" id="ptt-display-kbd">Ctrl+Win</kbd></span>
-              </div>
-              <button class="btn-secondary" onclick="openShortcutDialog()">Change</button>
-            </div>
-
-            <!-- 2. Microphone Row -->
-            <div class="setting-row" style="border-bottom: none;">
-              <div class="setting-info">
-                <span class="setting-title">Microphone</span>
-                <span class="setting-desc" id="current-mic-desc">Detecting...</span>
-              </div>
-              <button class="btn-secondary" onclick="openMicrophoneDialog()">Change</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- SYSTEM TAB (MATCHING USER SCREENSHOT EXACTLY) -->
-        <div id="set-tab-system" style="display: none;">
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 6px;">System</h2>
-          <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 20px;">App settings</div>
-
-          <div class="settings-group-card">
-            <!-- Toggle 1: Launch app at login -->
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-title">Launch app at login</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="toggle-login" checked onchange="toggleSystemSetting('login', this.checked)">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <!-- Toggle 2: Show Flow Bar at all times -->
-            <div class="setting-row">
-              <div class="setting-info">
-                <span class="setting-title">Show Flow Bar at all times</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="toggle-flow-bar" checked onchange="toggleFlowBarVisibility(this.checked)">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-
-            <!-- Toggle 3: Show app in dock -->
-            <div class="setting-row" style="border-bottom: none;">
-              <div class="setting-info">
-                <span class="setting-title">Show app in dock</span>
-              </div>
-              <label class="toggle-switch">
-                <input type="checkbox" id="toggle-dock" checked onchange="toggleSystemSetting('dock', this.checked)">
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-top: 32px; display: flex; justify-content: flex-end;">
-          <button class="btn-primary" onclick="closeSettings()">Save & Close</button>
-        </div>
-
-      </div>
-    </div>
-  </div>
-
-  <!-- SUB-DIALOG 1: SHORTCUTS SELECTION MODAL -->
-  <div id="shortcuts-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
-    <div class="perfect-keys-card">
-      <div class="perfect-keys-header">
-        <div>
-          <h3 style="font-size: 18px; font-weight: 800;">Shortcuts</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Configure your dictation activation shortcuts.</p>
-        </div>
-        <button class="close-icon-btn" onclick="closeSubModal('shortcuts-sub-modal')">✕</button>
-      </div>
-
-      <div class="perfect-keys-list">
-        <!-- Option 1: Hands-Free Mode -->
-        <div class="shortcut-option-card active-option" onclick="selectShortcutMode('Hands-Free Mode', this)">
-          <div>
-            <div style="font-size: 14px; font-weight: 700;">Hands-Free Mode</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Click floating bar or press hotkey to start & stop dictating</div>
-          </div>
-          <div style="display: flex; gap: 4px; align-items: center;">
-            <kbd class="kbd-pill">Middle Click</kbd>
-            <kbd class="kbd-pill">Ctrl</kbd>
-            <kbd class="kbd-pill">Win</kbd>
-          </div>
-        </div>
-
-        <!-- Option 2: Push to Talk (With Change Button) -->
-        <div class="shortcut-option-card" onclick="selectShortcutMode('Push to Talk', this)">
-          <div>
-            <div style="font-size: 14px; font-weight: 700;">Push to Talk</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Hold button while speaking, release to transcribe instantly</div>
-          </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <kbd class="kbd-pill" id="ptt-current-kbd">Ctrl+Win</kbd>
-            <button class="btn-secondary" style="padding: 4px 10px; font-size: 11px;" onclick="event.stopPropagation(); changePushToTalkKey()">Change Key</button>
-          </div>
-        </div>
-      </div>
-
-      <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
-        <button class="btn-primary" onclick="closeSubModal('shortcuts-sub-modal')">Save Shortcuts</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- SUB-DIALOG 2: DYNAMIC HARDWARE MICROPHONE SELECTION MODAL -->
-  <div id="mic-sub-modal" class="modal-overlay hidden" style="z-index: 1100;">
-    <div class="perfect-keys-card">
-      <div class="perfect-keys-header">
-        <div>
-          <h3 style="font-size: 18px; font-weight: 800;">Microphone</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Select hardware microphone input device detected on your computer.</p>
-        </div>
-        <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
-      </div>
-
-      <!-- DYNAMIC 4 HARDWARE MICROPHONE OPTIONS -->
-      <div class="perfect-keys-list" id="mic-devices-list">
-        <!-- Dynamically rendered via /api/microphones -->
-      </div>
-    </div>
-  </div>
 
   <!-- MODAL: ADD / EDIT API KEY CONNECTION MODAL -->
+
   <div id="modal-add-connection" class="modal-overlay hidden" style="z-index: 1200;">
+
     <div class="perfect-keys-card" style="width: 480px;">
+
       <div class="perfect-keys-header">
+
         <div>
+
           <h3 style="font-size: 18px; font-weight: 800;" id="modal-conn-title">Add API Key</h3>
+
           <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Add an API connection key with priority failover.</p>
+
         </div>
+
         <button class="close-icon-btn" onclick="closeSubModal('modal-add-connection')">✕</button>
+
       </div>
+
+
 
       <!-- Single vs Bulk Tabs -->
+
       <div class="tabs-header" style="margin: 14px 0;">
+
         <button class="tab-btn active" style="padding: 6px 14px; font-size: 12px;">Single</button>
+
         <button class="tab-btn" style="padding: 6px 14px; font-size: 12px; opacity: 0.5;" title="Bulk import coming soon">Bulk Add</button>
+
       </div>
+
+
 
       <div style="display: flex; flex-direction: column; gap: 14px;">
+
         <div>
+
           <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Connection Name</label>
+
           <input type="text" id="conn-input-name" placeholder="e.g. Primary Key / Key #1" class="key-input-field" style="width: 100%;">
+
         </div>
 
+
+
         <div>
+
           <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">API Key</label>
+
           <div style="display: flex; gap: 8px;">
+
             <input type="password" id="conn-input-key" placeholder="Paste key..." class="key-input-field" style="flex: 1;">
+
             <button class="btn-secondary" style="padding: 8px 14px; font-size: 12px;" onclick="testNewConnectionKey()">Check</button>
+
           </div>
+
           <div id="conn-check-badge" style="margin-top: 6px;"></div>
+
         </div>
 
+
+
         <div>
+
           <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Priority Number (1 = First, 2 = Fallback)</label>
+
           <input type="number" id="conn-input-priority" value="1" min="1" max="100" class="key-input-field" style="width: 100%;">
+
         </div>
+
       </div>
+
+
 
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+
         <button class="btn-secondary" onclick="closeSubModal('modal-add-connection')">Cancel</button>
+
         <button class="btn-primary" onclick="saveConnectionModal()">Save Connection</button>
+
       </div>
+
     </div>
+
   </div>
 
+
+
   <!-- MODAL: ADD CUSTOM MODEL MODAL -->
+
   <div id="modal-add-model" class="modal-overlay hidden" style="z-index: 1200;">
+
     <div class="perfect-keys-card" style="width: 440px;">
+
       <div class="perfect-keys-header">
+
         <div>
+
           <h3 style="font-size: 18px; font-weight: 800;">Add Model</h3>
+
           <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Register a custom model ID for this provider.</p>
+
         </div>
+
         <button class="close-icon-btn" onclick="closeSubModal('modal-add-model')">✕</button>
+
+      </div>
+
+
+
+      <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 14px;">
+
+        <div>
+
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Model ID</label>
+
+          <input type="text" id="model-input-id" placeholder="e.g. gemini-2.5-pro / gpt-4o" class="key-input-field" style="width: 100%;">
+
+        </div>
+
+        <div>
+
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Display Name</label>
+
+          <input type="text" id="model-input-name" placeholder="e.g. Gemini 2.5 Pro" class="key-input-field" style="width: 100%;">
+
+        </div>
+
+      </div>
+
+
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+
+        <button class="btn-secondary" onclick="closeSubModal('modal-add-model')">Cancel</button>
+
+        <button class="btn-primary" onclick="saveCustomModelModal()">Add Model</button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+
+  <!-- MODAL: ADD AUDIO FLOW API KEY CONNECTION -->
+
+  <div id="modal-add-audio-connection" class="modal-overlay hidden" style="z-index: 1200;">
+
+    <div class="perfect-keys-card" style="width: 480px;">
+
+      <div class="perfect-keys-header">
+
+        <div>
+
+          <h3 style="font-size: 18px; font-weight: 800;" id="modal-audio-conn-title">Add TTS API Key</h3>
+
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Add an API key for Text-to-Speech provider.</p>
+          <div id="audio-conn-provider-hint" style="margin-top: 6px; font-size: 11px; display: none;"></div>
+
+        </div>
+
+        <button class="close-icon-btn" onclick="closeSubModal('modal-add-audio-connection')">✕</button>
+
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 14px;">
+
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Model ID</label>
-          <input type="text" id="model-input-id" placeholder="e.g. gemini-2.5-pro / gpt-4o" class="key-input-field" style="width: 100%;">
+
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Connection Name</label>
+
+          <input type="text" id="audio-conn-input-name" placeholder="e.g. Primary Key / Key #1" class="key-input-field" style="width: 100%;">
+
         </div>
+
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Display Name</label>
-          <input type="text" id="model-input-name" placeholder="e.g. Gemini 2.5 Pro" class="key-input-field" style="width: 100%;">
+
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">API Key</label>
+
+          <div style="display: flex; gap: 8px;">
+
+            <input type="password" id="audio-conn-input-key" placeholder="Paste key..." class="key-input-field" style="flex: 1;">
+
+            <button class="btn-secondary" style="padding: 8px 14px; font-size: 12px;" onclick="testNewAudioConnectionKey()">Check</button>
+
+          </div>
+
+          <div id="audio-conn-check-badge" style="margin-top: 6px;"></div>
+
         </div>
+
+        <div>
+
+          <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">Priority Number (1 = First, 2 = Fallback)</label>
+
+          <input type="number" id="audio-conn-input-priority" value="1" min="1" max="100" class="key-input-field" style="width: 100%;">
+
+        </div>
+
       </div>
 
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
-        <button class="btn-secondary" onclick="closeSubModal('modal-add-model')">Cancel</button>
-        <button class="btn-primary" onclick="saveCustomModelModal()">Add Model</button>
+
+        <button class="btn-secondary" onclick="closeSubModal('modal-add-audio-connection')">Cancel</button>
+
+        <button class="btn-primary" onclick="saveAudioConnectionModal()">Save Connection</button>
+
       </div>
+
     </div>
+
   </div>
 
+
+
+  <div id="vf-connection-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-provider-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO FLOW CONNECTION</span><h3 id="vf-connection-modal-title">Add API key</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-connection-modal')">✕</button></div>
+
+      <div class="vf-tabs"><button id="vf-connection-single-tab" class="active" onclick="setVideoConnectionMode('single')">Single</button><button id="vf-connection-bulk-tab" onclick="setVideoConnectionMode('bulk')">Bulk add</button></div>
+
+      <div id="vf-connection-single-fields">
+
+        <label class="vf-field"><span>Name</span><input id="vf-connection-name" type="text" placeholder="Production key"></label>
+
+        <label class="vf-field"><span id="vf-connection-secret-label">API key</span><input id="vf-connection-secret" type="password" autocomplete="off" placeholder="Paste credential"></label>
+
+        <label class="vf-field"><span>Priority</span><input id="vf-connection-priority" type="number" min="1" value="1"></label>
+
+        <label class="vf-field vf-local-only"><span>Local base URL</span><input id="vf-connection-base-url" type="url" placeholder="http://127.0.0.1:11434"></label>
+
+        <label class="vf-field vf-cloudflare-only"><span>Cloudflare account ID</span><input id="vf-connection-account-id" type="text" placeholder="Account ID"></label>
+
+      </div>
+
+      <div id="vf-connection-bulk-fields" class="hidden">
+
+        <label class="vf-field"><span>One key per line</span><textarea id="vf-connection-bulk" rows="8" placeholder="key-one&#10;key-two&#10;key-three"></textarea><small>Names and priorities are assigned in order. Keys are never returned to the interface.</small></label>
+
+      </div>
+
+      <div class="vf-dialog-actions"><button class="btn-secondary" onclick="closeVideoModal('vf-connection-modal')">Cancel</button><button class="btn-secondary" onclick="checkUnsavedVideoConnection()">⚗ Check</button><button class="btn-primary" onclick="saveVideoConnection()">Save connection</button></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-custom-model-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-provider-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO FLOW MODEL</span><h3>Add custom model</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-custom-model-modal')">✕</button></div>
+
+      <div class="vf-prefix-preview"><span>Provider prefix</span><strong id="vf-custom-model-prefix">provider/</strong><small>You only enter the model ID. Video Flow adds this prefix automatically.</small></div>
+
+      <label class="vf-field"><span>Model ID</span><input id="vf-custom-model-id" type="text" autocomplete="off" placeholder="gemini-4.0-pro"></label>
+
+      <label class="vf-field"><span>Display name <em>optional</em></span><input id="vf-custom-model-name" type="text" placeholder="Gemini 4 Pro"></label>
+
+      <fieldset class="vf-capability-picker"><legend>Capabilities</legend><label><input type="checkbox" value="vision"> 👁 Vision</label><label><input type="checkbox" value="reasoning"> 🧠 Reasoning</label><label><input type="checkbox" value="code"> &lt;/&gt; Code</label><label><input type="checkbox" value="audio"> ♪ Audio</label></fieldset>
+
+      <div class="vf-dialog-actions"><button class="btn-secondary" onclick="closeVideoModal('vf-custom-model-modal')">Cancel</button><button class="btn-primary" onclick="saveVideoCustomModel()">Add model</button></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-preview-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-preview-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO PREVIEW</span><h3 id="vf-preview-title">Generated video</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-preview-modal')">✕</button></div>
+
+      <video id="vf-preview-player" controls preload="metadata"></video>
+
+      <div class="vf-dialog-actions"><button class="btn-secondary" onclick="toggleVideoPreviewFullscreen()">⛶ Full screen</button><button class="btn-secondary" onclick="sharePreviewVideo()">↗ Share</button><a class="btn-primary vf-anchor-button" id="vf-preview-download" href="#" download>↓ Download MP4</a></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-model-picker-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-model-picker-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO FLOW MODEL</span><h3>Select the planning model</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-model-picker-modal')">✕</button></div>
+
+      <div class="vf-picker-note">Only enabled models from connected Video Flow providers appear here. Combos are listed first.</div>
+
+      <input id="vf-model-picker-search" class="vf-picker-search" type="search" placeholder="Search models, providers, or capabilities…" oninput="renderVideoModelPicker()">
+
+      <div id="vf-model-picker-list" class="vf-grouped-model-picker"></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-combo-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-combo-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">MODEL ROUTING</span><h3>Create Combo</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-combo-modal')">✕</button></div>
+
+      <label class="vf-field"><span>Combo name</span><input id="vf-combo-name" type="text" placeholder="my-reliable-combo"><small>Letters, numbers, hyphens, and underscores.</small></label>
+
+      <label class="vf-field"><span>Strategy</span><select id="vf-combo-strategy"><option value="fallback">Fallback — try in order</option><option value="round_robin">Round robin — rotate models</option></select></label>
+
+      <div class="vf-combo-model-heading"><span>Models</span></div>
+
+      <div id="vf-combo-draft-list" class="vf-combo-draft-list"></div>
+
+      <button class="vf-add-combo-model" type="button" onclick="openVideoComboModelPicker()">＋ Add model</button>
+
+      <div class="vf-dialog-actions"><button class="btn-secondary" onclick="closeVideoModal('vf-combo-modal')">Cancel</button><button class="btn-primary" onclick="createVideoCombo()">Create Combo</button></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-combo-model-picker-modal" class="modal-overlay hidden vf-modal-layer vf-submodal-layer">
+
+    <div class="vf-dialog vf-model-picker-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">MODEL COMBO</span><h3>Add models to combo</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-combo-model-picker-modal')">✕</button></div>
+
+      <div class="vf-picker-note">Click a model to add it; click again to remove it. Only connected and enabled models are available.</div>
+
+      <input id="vf-combo-search" class="vf-picker-search" type="search" placeholder="Search connected models…" oninput="renderVideoComboModelPicker()">
+
+      <div id="vf-combo-model-list" class="vf-grouped-model-picker"></div>
+
+      <div class="vf-dialog-actions"><button class="btn-primary" onclick="closeVideoModal('vf-combo-model-picker-modal')">Done</button></div>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="vf-delete-first-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-danger-dialog"><div class="vf-danger-icon">!</div><h3>Delete this video?</h3><p>This starts permanent deletion. The MP4, narration, manifest, and project folder will be removed from this PC.</p><div class="vf-dialog-actions"><button class="btn-secondary" onclick="cancelVideoDelete()">Keep video</button><button class="vf-danger-button" onclick="continueVideoDelete()">Continue</button></div></div>
+
+  </div>
+
+  <div id="vf-delete-final-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-danger-dialog"><div class="vf-danger-icon">×</div><h3>This cannot be undone</h3><p>Deleting here removes the video from Video Flow and from the whole PC. Type <strong>DELETE</strong> to confirm.</p><input id="vf-delete-confirm-input" type="text" autocomplete="off" placeholder="Type DELETE" oninput="updateFinalDeleteButton()"><div class="vf-dialog-actions"><button class="btn-secondary" onclick="cancelVideoDelete()">Cancel</button><button id="vf-delete-final-button" class="vf-danger-button" disabled onclick="permanentlyDeleteVideo()">Delete from this PC</button></div></div>
+
+  </div>
+
+  <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
+
+  <script src="video-flow.js?v=20260811"></script>
+
   <script src="app.js"></script>
+
 </body>
+
 </html>

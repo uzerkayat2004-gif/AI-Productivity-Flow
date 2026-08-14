@@ -32,24 +32,45 @@
 5. **Persistent SQLite Storage**:
    - Dictation history, custom dictionary terms, and verified API keys are stored in `~/.voice_flow/voice_flow.db` and preserved across sessions.
 
-6. **Windows Startup Auto-Launch**:
-   - Registers in Windows Registry `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` so the floating bar appears automatically when you start your laptop.
+6. **Windows Startup & Watchdog Auto-Recovery**:
+   - **Dual Auto-Start**: Registers in both Windows Registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VoiceFlow`) and Windows Startup Folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Voice Flow.lnk`).
+   - **Silent Background Execution**: Runs via `VoiceFlowLauncher.vbs` with `pythonw.exe` and `WScript.Shell.Run(..., 0, False)` for zero console/terminal popups on boot.
+   - **Watchdog Supervisor**: Background health monitor that auto-recovers and restarts Voice Flow if unexpectedly terminated or crashed, with exponential backoff protection.
 
 ---
 
-## 🚀 How to Run
+## 🚀 How to Run & Configure Auto-Startup
 
-### Method 1: Double-Click Batch File
-Double click `run_voice_flow.bat` in the project root.
-
-### Method 2: Command Line
-```bash
-python -m voice_flow.gui.desktop_launcher
+### 1. Configure Auto-Startup & Desktop Shortcuts
+Run the standalone desktop installer:
+```bat
+setup_desktop_app.bat
 ```
+Or via Python:
+```bash
+python -m voice_flow.installer --install
+```
+
+### 2. Verify Startup & Watchdog Diagnostics
+Run the verification script in PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File scratch/verify_startup.ps1
+```
+Or check status via CLI:
+```bash
+python -m voice_flow.watchdog --status
+```
+
+### 3. Manual Launch Modes
+- **Silent Background (Default)**: Double-click `VoiceFlowLauncher.vbs` or `run_voice_flow.bat`
+- **Interactive Console Mode**: `run_voice_flow.bat --console`
+- **Watchdog Console Mode**: `run_voice_flow.bat --watchdog-console`
+- **Stop Background Service**: `run_voice_flow.bat --stop`
 
 ---
 
 ## 🛠️ Requirements
 - Windows 10 / 11
 - Python 3.10+
-- Dependencies: `sounddevice`, `pyautogui`, `pyperclip`, `pywebview`, `pynput`
+- Dependencies: `faster-whisper`, `sounddevice`, `pyautogui`, `pyperclip`, `pywebview`, `pynput`, `scipy`
+

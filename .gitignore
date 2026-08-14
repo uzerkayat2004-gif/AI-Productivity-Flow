@@ -15,6 +15,24 @@ env/
 .uv/
 uv.lock
 
+# Logs and runtime artifacts
+*.log
+*.bak*
+*.lock
+*.flag
+crash_log.txt
+voice_flow_debug.log
+test_audio.mp3
+test_gemini_output.wav
+
 # Video Flow renderer build artifacts
 video_flow_renderer/node_modules/
 video_flow_renderer/out/
+video_flow_renderer/dist/
+video_flow_renderer/.cache/
+
+# Test output directories
+scratch/motion-*
+scratch/video-flow-*
+scratch/renderer-*
+scratch/production-*
