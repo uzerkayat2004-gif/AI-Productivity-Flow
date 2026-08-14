@@ -1131,7 +1131,7 @@ class StorageEngine:
             provider_names = {
                 "gemini": "Google Gemini",
                 "groq": "Groq Audio",
-                "elevenlabs": "ElevenLabs Voice",
+                "elevenlabs": "ElevenLabs",
                 "deepgram": "Deepgram Speech",
                 "openai": "OpenAI Voice",
                 "assemblyai": "AssemblyAI",
@@ -1166,6 +1166,9 @@ class StorageEngine:
                 p_logo = provider_logos.get(p, "🔌")
                 full_id = f"{p}/{r['model_id']}"
                 label = f"{p_name} — {r['display_name']}"
+                m_text = f"{r['model_id']} {r['display_name']} {p}".lower()
+                has_vis = any(k in m_text for k in ["vision", "multimodal", "flash", "aria", "jenny", "pro", "gemini", "gpt", "chatterbox", "narrator"])
+                has_br = True  # All neural AI models have brain/reasoning capability
                 item = {
                     "full_id": full_id,
                     "label": label,
@@ -1173,7 +1176,9 @@ class StorageEngine:
                     "provider_name": p_name,
                     "provider_logo": p_logo,
                     "model_id": r["model_id"],
-                    "display_name": r["display_name"]
+                    "display_name": r["display_name"],
+                    "has_vision": has_vis,
+                    "has_brain": has_br
                 }
                 models.append(item)
 
@@ -1214,9 +1219,9 @@ class StorageEngine:
             connected_providers.add("offline")
 
             provider_names = {
-                "edge": "Microsoft Edge Neural (Free)",
-                "elevenlabs": "ElevenLabs Voice",
-                "deepgram": "Deepgram Aura Speech",
+                "edge": "Microsoft Edge Neural",
+                "elevenlabs": "ElevenLabs",
+                "deepgram": "Deepgram Aura",
                 "openai": "OpenAI TTS",
                 "offline": "Windows Offline SAPI5",
                 "google": "Google Cloud TTS",
@@ -1254,6 +1259,9 @@ class StorageEngine:
                 p_logo = provider_logos.get(p, "🔊")
                 full_id = f"{p}/{r['model_id']}"
                 label = f"{p_name} — {r['display_name']}"
+                m_text = f"{r['model_id']} {r['display_name']} {p}".lower()
+                has_vis = any(k in m_text for k in ["vision", "multimodal", "flash", "aria", "jenny", "pro", "gemini", "gpt", "chatterbox", "narrator"])
+                has_br = True  # All neural AI models have brain/reasoning capability
                 item = {
                     "full_id": full_id,
                     "label": label,
@@ -1261,7 +1269,9 @@ class StorageEngine:
                     "provider_name": p_name,
                     "provider_logo": p_logo,
                     "model_id": r["model_id"],
-                    "display_name": r["display_name"]
+                    "display_name": r["display_name"],
+                    "has_vision": has_vis,
+                    "has_brain": has_br
                 }
                 models.append(item)
 

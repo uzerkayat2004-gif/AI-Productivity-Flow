@@ -523,6 +523,31 @@ html[data-theme="light"] #page-providers .exec-policy-card .pill-chip {
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* Providers grid cards — prevent text/toggle overlap at narrow window widths */
+#page-providers .provider-card-item {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+#page-providers .provider-card-left {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+#page-providers .provider-card-info {
+  min-width: 0;
+}
+
+#page-providers .provider-card-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#page-providers .provider-card-item .toggle-switch {
+  flex-shrink: 0;
+}
+
 .provider-card-item:hover {
   transform: translateY(-3px);
   border-color: var(--accent-glow) !important;
@@ -748,10 +773,26 @@ html[data-theme="dark"] .brand-icon {
   box-shadow: 0 2px 10px rgba(255, 255, 255, 0.25);
 }
 
+/* Audio provider logo card badge — RNG warm orange theme identity */
+.audio-card-logo {
+  background: linear-gradient(135deg, rgba(255, 96, 32, 0.14), rgba(255, 140, 0, 0.08)) !important;
+  border: 1px solid rgba(255, 96, 32, 0.32) !important;
+  box-shadow: 0 0 12px rgba(255, 96, 32, 0.15) !important;
+  color: var(--accent-text) !important;
+}
+
+html[data-theme="light"] .audio-card-logo {
+  background: linear-gradient(135deg, rgba(255, 96, 32, 0.14), rgba(255, 140, 0, 0.08)) !important;
+  border: 1px solid rgba(255, 96, 32, 0.35) !important;
+  box-shadow: 0 2px 10px rgba(255, 96, 32, 0.14) !important;
+  color: #e0520f !important;
+}
+
 html[data-theme="dark"] .audio-card-logo {
-  background: rgba(255, 255, 255, 0.14) !important;
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(255, 120, 40, 0.22), rgba(255, 160, 60, 0.1)) !important;
+  border: 1px solid rgba(255, 120, 40, 0.4) !important;
+  box-shadow: 0 0 14px rgba(255, 120, 40, 0.25) !important;
+  color: #ff9d66 !important;
 }
 
 html[data-theme="dark"] #insights-speed-badge {
@@ -966,3 +1007,99 @@ html[data-theme="dark"] .provider-card-logo {
 }
 
 html[data-theme="dark"] #insights-vocab-status { color: #e5e5e5 !important; }
+
+/* ---------- Audio Flow Grid & Card Layout Overlap Fix ---------- */
+#page-audioflow .providers-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
+  gap: 14px !important;
+}
+
+#page-audioflow .provider-card-item {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 14px 16px !important;
+}
+
+#page-audioflow .provider-card-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+#page-audioflow .provider-card-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+  flex: 1 !important;
+}
+
+#page-audioflow .provider-card-name {
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  color: var(--text-main) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 180px !important;
+  display: block !important;
+}
+
+#page-audioflow .provider-card-status {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--text-muted) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+#page-audioflow .provider-card-item .toggle-switch {
+  flex-shrink: 0 !important;
+  margin-left: auto !important;
+}
+
+
+/* ---------- Audio Flow Model Selector Styling Fixes ---------- */
+#page-audioflow .mode-select-dropdown {
+  width: 100% !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  padding: 11px 16px !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+html[data-theme="light"] #page-audioflow .mode-select-dropdown {
+  background: #ffffff !important;
+  border: 1px solid rgba(255, 96, 32, 0.35) !important;
+  color: #1e293b !important;
+  box-shadow: 0 2px 10px rgba(255, 96, 32, 0.08) !important;
+}
+
+html[data-theme="light"] #page-audioflow .mode-select-dropdown:focus {
+  border-color: #ff6020 !important;
+  box-shadow: 0 0 0 3px rgba(255, 96, 32, 0.18), 0 4px 14px rgba(255, 96, 32, 0.15) !important;
+  outline: none !important;
+}
+
+html[data-theme="dark"] #page-audioflow .mode-select-dropdown {
+  background: #0f172a !important;
+  border: 1px solid rgba(255, 120, 40, 0.4) !important;
+  color: #f8fafc !important;
+}
+
+html[data-theme="light"] #page-audioflow .af-inner-box {
+  background: linear-gradient(135deg, #fffcf8 0%, #fff8f2 100%) !important;
+  border: 1px solid rgba(255, 96, 32, 0.2) !important;
+  box-shadow: inset 0 1px 3px rgba(255, 96, 32, 0.04) !important;
+}

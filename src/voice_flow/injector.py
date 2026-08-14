@@ -304,12 +304,30 @@ class ClipboardInjector:
         return inject_text(text, target_hwnd, press_enter=press_enter)
 
     def get_selected_text_strict(self, target_hwnd: int | None = None) -> str:
-        """Capture currently highlighted/selected text in the target window without corrupting clipboard."""
+        """Capture currently highlighted/selected text in the target window without corrupting clipboard.
+
+        SAFEGUARD: Skips sending synthetic Ctrl+C to console and terminal windows (Terminal, PowerShell, CMD,
+        mintty, etc.) to prevent sending SIGINT break signals that terminate running CLI agents (Codex, Claude, etc.).
+        """
         with _paste_lock:
             try:
                 _wait_for_modifiers_released(timeout_ms=100)
                 if target_hwnd:
                     focus_target_window(target_hwnd)
+
+                active_hwnd = target_hwnd or ctypes.windll.user32.GetForegroundWindow()
+                active_title = get_active_window_title()
+                active_class = get_window_class_name(active_hwnd) if active_hwnd else ""
+
+                # Console / terminal windows MUST NOT receive synthetic Ctrl+C as it sends SIGINT and kills CLI processes
+                is_console = (
+                    active_class in ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "mintty", "PuTTY", "VirtualConsoleClass")
+                    or any(kw in (active_title or "").lower() for kw in ["cmd", "powershell", "terminal", "bash", "ubuntu", "command prompt", "putty", "mintty", "pwsh", "codex", "claude"])
+                )
+
+                if is_console:
+                    log.info("[INJECTOR] Skipping synthetic Ctrl+C text capture in console window to preserve running CLI processes.")
+                    return ""
 
                 original_clipboard = _safe_paste_from_clipboard()
 

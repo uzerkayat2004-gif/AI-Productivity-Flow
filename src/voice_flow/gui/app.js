@@ -1020,11 +1020,17 @@ async function addDictionaryWordFromInput() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word }),
     });
-    await res.json();
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      showToast(data.error || "Failed to add dictionary term.", "⚠️");
+      return;
+    }
     inputEl.value = "";
+    showToast("Dictionary term added.", "✅");
     loadDictionary();
   } catch (err) {
     console.error("Error adding dictionary word:", err);
+    showToast("Network error adding term.", "⚠️");
   }
 }
 
@@ -1039,10 +1045,16 @@ async function removeDictionaryWord(word) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word }),
     });
-    await res.json();
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      showToast(data.error || "Failed to remove dictionary term.", "⚠️");
+      return;
+    }
+    showToast("Dictionary term removed.", "✅");
     loadDictionary();
   } catch (err) {
     console.error("Error removing dictionary word:", err);
+    showToast("Network error removing term.", "⚠️");
   }
 }
 
@@ -1100,7 +1112,31 @@ function escapeHtml(str) {
 }
 
 function escapeJs(str) {
-  return str.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+  return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
+let _vfToastTimer = null;
+function showToast(message, icon) {
+  let el = document.getElementById("vf-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "vf-toast";
+    el.className = "vf-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = (icon ? icon + " " : "") + message;
+  if (icon === "⚠️") {
+    el.classList.add("error");
+    el.style.backgroundColor = "#a92323";
+  } else {
+    el.classList.remove("error");
+    el.style.backgroundColor = "";
+  }
+  el.classList.add("show");
+  clearTimeout(_vfToastTimer);
+  _vfToastTimer = setTimeout(() => {
+    el.classList.remove("show");
+  }, 2400);
 }
 
 // =========================================================
@@ -1500,7 +1536,7 @@ async function testAllProviders() {
 // =========================================================
 
 const AUDIO_PROVIDERS_CONFIG = {
-  edge: { name: "Microsoft Edge Neural (Free)", logo: "✨", keyLink: null, free: true },
+  edge: { name: "Microsoft Edge Neural", logo: "✨", keyLink: null, free: true },
   offline: { name: "Windows Offline SAPI5", logo: "💻", keyLink: null, free: true },
   google: { name: "Google Cloud TTS", logo: "☁️", keyLink: "https://console.cloud.google.com/apis/credentials" },
   gemini: { name: "Gemini AI TTS", logo: "💎", keyLink: "https://aistudio.google.com/apikey" },
@@ -1534,15 +1570,18 @@ async function loadExecAudioFlowPolicy() {
     const grouped = policy.grouped_models || [];
 
     if (models.length === 0) {
-      selectEl.innerHTML = `<option value="edge/en-US-AvaNeural">✨ Microsoft Edge Neural (Free) — Ava</option>`;
+      selectEl.innerHTML = `<option value="edge/en-US-AvaNeural">✨ Microsoft Edge Neural — Ava (Calm Female)</option>`;
     } else if (grouped.length > 0) {
       selectEl.innerHTML = grouped.map(g => `
         <optgroup label="${escapeHtml(`${g.provider_logo} ${g.provider_name}`)}">
-          ${g.models.map(m => `
-            <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
-              ${escapeHtml(m.label)}
-            </option>
-          `).join("")}
+          ${g.models.map(m => {
+            const specIcons = (m.has_vision ? "👁️ " : "") + (m.has_brain ? "🧠" : "");
+            return `
+              <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
+                ${escapeHtml(m.display_name || m.label)} ${specIcons}
+              </option>
+            `;
+          }).join("")}
         </optgroup>
       `).join("");
     } else {
@@ -1554,9 +1593,16 @@ async function loadExecAudioFlowPolicy() {
     }
 
     const engineEl = document.getElementById("exec-audio-active-engine");
+    const specialtyEl = document.getElementById("exec-audio-model-specialty");
     if (engineEl) {
       const activeObj = models.find(m => m.full_id === activeModel);
       engineEl.textContent = activeObj ? activeObj.display_name : activeModel.split("/").pop();
+      if (specialtyEl && activeObj) {
+        let tags = [];
+        if (activeObj.has_vision) tags.push("👁️ Vision");
+        if (activeObj.has_brain) tags.push("🧠 Brain");
+        specialtyEl.innerHTML = tags.map(t => `<span style="display:inline-flex;align-items:center;gap:4px;">${t}</span>`).join(" ");
+      }
     }
 
     const failEl = document.getElementById("exec-audio-failover-count");
@@ -1651,7 +1697,7 @@ async function loadAudioProvidersOverview() {
     }
 
     const freeProviders = [
-      { id: "edge", name: "Microsoft Edge Neural (Free)", logo: "✨", key_link: null },
+      { id: "edge", name: "Microsoft Edge Neural", logo: "✨", key_link: null },
       { id: "offline", name: "Windows Offline SAPI5", logo: "💻", key_link: null },
     ].map(p => ({ ...p, connection_count: 1, is_connected: true }));
 
@@ -1668,7 +1714,7 @@ async function loadAudioProvidersOverview() {
           <div class="provider-card-left">
             <div class="provider-card-logo audio-card-logo">${p.logo}</div>
             <div class="provider-card-info">
-              <span class="provider-card-name">${escapeHtml(p.name)}</span>
+              <span class="provider-card-name" title="${escapeHtml(cfg.name || p.name)}">${escapeHtml(cfg.name || p.name)}</span>
               <span class="provider-card-status">
                 <span class="status-dot-indicator ${p.is_connected ? "connected" : ""}"></span>
                 ${isFree ? "Free Engine — Always available" : connText}

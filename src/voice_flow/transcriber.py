@@ -104,6 +104,10 @@ class Transcriber:
         log.info("Transcribing %.1fs audio on %d CPU threads (beam=%d)...", duration, config.cpu_threads, config.beam_size)
 
         result = ""
+        # Guard: constructors that bypass __init__ (e.g. tests) may lack the lock;
+        # create it lazily so transcription is always thread-safe.
+        if not hasattr(self, "_transcribe_lock"):
+            self._transcribe_lock = threading.Lock()
         with self._transcribe_lock:
             try:
                 segments, _ = self.model.transcribe(
