@@ -124,18 +124,55 @@ function vfCapabilityBadges(model) {
 function renderVideoProviderGrid(elementId, providers) {
   const grid = document.getElementById(elementId);
   if (!grid) return;
+  grid.className = "providers-cards-grid";
   grid.innerHTML = (providers || []).map(provider => {
     const connected = provider.status === "connected";
-    const status = provider.category === "oauth"
-      ? (provider.oauth_status?.label || (connected ? "Account connected" : "No account"))
+    const statusText = provider.category === "oauth"
+      ? (provider.oauth_status?.label || (connected ? "Connected" : "Not connected"))
       : connected
-        ? provider.active_count + " active"
-        : provider.category === "local" ? "Not configured" : "No connections";
-    return '<button class="vf-provider-card ' + (connected ? "connected" : "") + '" onclick="openVideoProvider(\'' + vfEscape(provider.id) + '\')">' +
-      '<span class="vf-provider-logo">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "AI") + '</span>' +
-      '<span class="vf-provider-copy"><strong>' + vfEscape(provider.name) + '</strong><span><i></i>' + vfEscape(status) + '</span><small>' + vfEscape(provider.description || "") + '</small></span>' +
-      '<span class="vf-provider-arrow">›</span></button>';
+        ? `${provider.active_count} Active`
+        : provider.category === "local" ? "Native / Local" : "Not connected";
+    const logo = vfProviderIcons[provider.id] || provider.icon || "🎬";
+    return `
+      <div class="provider-card-item" onclick="openVideoProvider('${vfEscape(provider.id)}')">
+        <div class="provider-card-left">
+          <div class="provider-card-logo">${vfEscape(logo)}</div>
+          <div class="provider-card-info">
+            <span class="provider-card-name">${vfEscape(provider.name)}</span>
+            <span class="provider-card-status">
+              <span class="status-dot-indicator ${connected ? 'connected' : ''}"></span>
+              ${vfEscape(statusText)}
+            </span>
+          </div>
+        </div>
+        <label class="toggle-switch" onclick="event.stopPropagation()">
+          <input type="checkbox" ${connected ? 'checked' : ''} onchange="toggleVideoProviderMaster('${vfEscape(provider.id)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    `;
   }).join("");
+}
+
+async function toggleVideoProviderMaster(providerId, isChecked) {
+  try {
+    const res = await fetch("/api/video-flow/providers/details?provider=" + encodeURIComponent(providerId));
+    const data = await res.json();
+    if (data && data.connections && data.connections.length > 0) {
+      for (const conn of data.connections) {
+        await vfPost("/api/video-flow/providers/connections/update", {
+          connection_id: conn.id,
+          is_active: isChecked,
+        });
+      }
+      vfToast(`${providerId} provider connections ${isChecked ? 'enabled' : 'disabled'}.`);
+      loadVideoFlow();
+    } else {
+      openVideoProvider(providerId);
+    }
+  } catch (err) {
+    vfToast(err.message || "Error toggling provider", true);
+  }
 }
 
 function vfSelectableVideoModels() {
@@ -421,17 +458,41 @@ async function saveVideoModel(modelRef) {
   }
 }
 
+function isVideoModelExternal(modelRef) {
+  if (!modelRef || modelRef === "local/deterministic") return false;
+  if (modelRef.startsWith("local/") || modelRef.startsWith("ollama/") || modelRef.startsWith("lmstudio/") || modelRef.startsWith("llamacpp/")) {
+    return false;
+  }
+  let refs = [modelRef];
+  if (modelRef.startsWith("combo:")) {
+    refs = (vfCatalog.combos || []).find(item => item.ref === modelRef)?.models || [];
+  }
+  const localProviders = new Set((vfCatalog.provider_groups?.local || []).map(item => item.id));
+  return refs.some(ref => {
+    if (ref === "local/deterministic") return false;
+    const providerId = ref.split("/", 1)[0];
+    return !localProviders.has(providerId);
+  });
+}
+
 function updateActiveVideoModel(modelRef) {
   const label = document.getElementById("vf-active-model-label");
   const detail = document.getElementById("vf-active-model-detail");
+  const engineLabel = document.getElementById("vf-active-engine-label");
   if (modelRef.startsWith("combo:")) {
     const combo = (vfCatalog.combos || []).find(item => item.ref === modelRef);
     if (label) label.textContent = combo ? "◈ " + combo.name : modelRef;
     if (detail) detail.textContent = combo ? combo.models.length + " models · " + combo.strategy.replace("_", " ") : "Model combo";
+    if (engineLabel) engineLabel.textContent = combo ? "Combo: " + combo.name : "Model Combo";
+  } else if (modelRef === "local/deterministic") {
+    if (label) label.textContent = "Voice Flow Local — Deterministic Storyboard";
+    if (detail) detail.textContent = "Works without an API key";
+    if (engineLabel) engineLabel.textContent = "Local Deterministic";
   } else {
     const model = (vfCatalog.models || []).find(item => item.full_id === modelRef);
     if (label) label.textContent = model ? model.provider_name + " — " + model.display_name : modelRef;
     if (detail) detail.textContent = modelRef.startsWith("local/") ? "Works without an API key" : "Uses active provider connections and failover settings";
+    if (engineLabel) engineLabel.textContent = model ? model.provider_name : modelRef.split("/", 1)[0];
   }
   updateVideoExternalConsent(modelRef);
 }
@@ -568,20 +629,17 @@ function renderVideoProviderDetails() {
   const oauthStatus = provider.oauth_status || {};
 
   root.innerHTML =
-
-    '<div class="vf-provider-detail-heading"><span class="vf-provider-logo large">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "AI") + '</span><span><strong>' + vfEscape(provider.name) + '</strong><small>' + vfEscape(provider.description || "") + '</small></span>' +
-
-    (isOAuth ? '<button class="btn-primary" onclick="startVideoOAuth(\'' + vfEscape(provider.id) + '\')">' + (oauthStatus.connected ? "Reconnect account" : "Add account") + '</button>' : '') + '</div>' +
-
+    '<div class="detail-header-bar" style="margin-bottom: 20px;"><button class="btn-back" onclick="closeVideoProvider()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Back to Video Flow</span></button>' +
+    '<div class="provider-detail-title-row"><div class="provider-large-badge">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "🎬") + '</div>' +
+    '<div><div style="display: flex; align-items: center; gap: 10px;"><h1 class="provider-detail-title">' + vfEscape(provider.name) + '</h1>' +
+    (provider.get_key_url ? '<a href="' + vfEscape(provider.get_key_url) + '" target="_blank" class="get-key-pill-link">🔑 Get API Key ↗</a>' : '') + '</div>' +
+    '<div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">' + vfEscape(provider.description || "") + '</div></div></div></div>' +
+    (isOAuth ? '<div class="vf-provider-detail-heading" style="margin-bottom: 16px;">' + (oauthStatus.connected ? '<span class="status-badge status-connected">✓ Account connected</span>' : '<span class="status-badge status-error">No account</span>') + '<button class="btn-primary" onclick="startVideoOAuth(\'' + vfEscape(provider.id) + '\')">' + (oauthStatus.connected ? "Reconnect account" : "Add account") + '</button></div>' : '') +
     (isOAuth ? '<div class="vf-oauth-banner ' + (oauthStatus.connected ? "connected" : "") + '"><span>' + (oauthStatus.connected ? "✓" : "i") + '</span><strong>' + vfEscape(oauthStatus.label || "Not connected") + '</strong><button class="vf-text-button" onclick="refreshVideoOAuth(\'' + vfEscape(provider.id) + '\')">Refresh</button></div>' : '') +
-
-    (!isOAuth ? '<div class="vf-detail-section"><div class="vf-detail-section-head"><span><strong>Connections</strong><small>Keys and endpoints are used only by Video Flow.</small></span><span><label class="vf-round-robin"><select onchange="setVideoProviderMode(this.value)"><option value="priority" ' + (data.load_balance_mode === "priority" ? "selected" : "") + '>Priority / fallback</option><option value="round_robin" ' + (data.load_balance_mode === "round_robin" ? "selected" : "") + '>Round robin</option></select></label><button class="btn-primary" onclick="openVideoConnectionModal()">＋ Add</button></span></div>' +
-
-      (connectionRows || '<div class="vf-empty-state vf-compact-empty"><strong>No connections</strong><span>' + (isLocal ? "Add the local server URL." : "Add an API key to activate these models.") + '</span></div>') + '</div>' : '') +
-
-    '<div class="vf-detail-section"><div class="vf-detail-section-head"><span><strong>Available models</strong><small>The provider prefix is attached automatically to custom model IDs.</small></span><button class="btn-secondary" onclick="openVideoCustomModelModal()">＋ Add model</button></div>' +
-
-      (modelRows || '<div class="vf-empty-state vf-compact-empty"><strong>No models</strong><span>Add a model ID for this provider.</span></div>') + '</div>';
+    (!isOAuth ? '<div class="provider-section-box"><div class="section-box-header"><div class="section-title-group"><span class="section-box-title">Connections</span></div><div class="section-controls-group"><label class="vf-round-robin"><select onchange="setVideoProviderMode(this.value)" class="mode-select-dropdown" style="padding: 4px 8px; font-size: 11px;"><option value="priority" ' + (data.load_balance_mode === "priority" ? "selected" : "") + '>Priority / fallback</option><option value="round_robin" ' + (data.load_balance_mode === "round_robin" ? "selected" : "") + '>Round robin</option></select></label><button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openVideoConnectionModal()">+ Add Connection</button></div></div>' +
+      '<div class="connections-list" style="margin-top: 12px;">' + (connectionRows || '<div class="vf-empty-state vf-compact-empty"><strong>No connections</strong><span>' + (isLocal ? "Add the local server URL." : "Add an API key to activate these models.") + '</span></div>') + '</div></div>' : '') +
+    '<div class="provider-section-box" style="margin-top: 24px;"><div class="section-box-header"><div class="section-title-group"><span class="section-box-title">Available Models</span></div><div class="section-controls-group"><button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="openVideoCustomModelModal()">+ Add Model</button></div></div>' +
+      '<div class="models-cards-grid" style="margin-top: 12px;">' + (modelRows || '<div class="vf-empty-state vf-compact-empty"><strong>No models</strong><span>Add a model ID for this provider.</span></div>') + '</div></div>';
 
 }
 

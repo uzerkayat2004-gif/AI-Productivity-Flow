@@ -39,19 +39,17 @@ from voice_flow.runtime_guard import runtime_is_compatible
 
 
 def set_windows_auto_startup(enable: bool = True) -> None:
-    """Configure Windows Registry and Startup folder auto-launch at login via silent VBS launcher."""
+    """Configure single-point Windows Registry auto-launch at login via silent VBS launcher."""
     try:
-        from voice_flow.installer import register_registry_autorun, register_startup_folder, unregister_registry_autorun, unregister_startup_folder
+        from voice_flow.installer import register_registry_autorun, unregister_registry_autorun, unregister_startup_folder
         if enable:
             register_registry_autorun()
-            register_startup_folder()
-            print("[SYSTEM] Enabled Windows dual silent auto-startup at login.")
+            unregister_startup_folder()  # Clean any legacy startup folder shortcut to prevent double-launching
         else:
             unregister_registry_autorun()
             unregister_startup_folder()
-            print("[SYSTEM] Disabled Windows auto-startup at login.")
     except Exception as e:
-        print(f"[SYSTEM WARNING] Could not configure Windows startup: {e}")
+        pass
 
 
 def is_api_server_ready(timeout: float = 0.2) -> bool:
@@ -109,7 +107,6 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
     def on_closed():
         if on_quit_callback:
             on_quit_callback()
-        os._exit(0)
 
     window.events.closed += on_closed
 

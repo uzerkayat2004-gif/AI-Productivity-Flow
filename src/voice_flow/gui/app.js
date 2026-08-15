@@ -375,6 +375,10 @@ function switchPage(pageId) {
     if (pageId === "style") renderStyleCategory(currentStyleCategory);
     if (pageId === "providers") loadProvidersOverview();
     if (pageId === "audioflow") loadAudioFlowPage();
+    if (pageId === "videoflow") {
+      if (typeof loadVideoFlow === "function") loadVideoFlow();
+      else if (typeof loadVideoCatalog === "function") loadVideoCatalog();
+    }
   }
 }
 

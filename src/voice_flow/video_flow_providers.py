@@ -175,17 +175,21 @@ def antigravity_bridge_status() -> dict[str, Any]:
     }
 
 DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("claude_code", "sonnet", "Claude Sonnet 5 (Latest)", ("vision", "reasoning", "code")),
-    ("claude_code", "opus", "Claude Opus 5 (Latest)", ("vision", "reasoning", "code")),
-    ("claude_code", "fable", "Claude Fable 5 (Latest)", ("vision", "reasoning", "code")),
+    ("claude_code", "opus-4-7", "Claude Opus 4.7", ("vision", "reasoning", "code")),
+    ("claude_code", "opus-4-6", "Claude Opus 4.6", ("vision", "reasoning", "code")),
+    ("claude_code", "sonnet-4-6", "Claude Sonnet 4.6", ("vision", "reasoning", "code")),
+    ("claude_code", "sonnet-5", "Claude Sonnet 5 (Latest)", ("vision", "reasoning", "code")),
+    ("claude_code", "opus-5", "Claude Opus 5 (Latest)", ("vision", "reasoning", "code")),
+    ("claude_code", "fable-5", "Claude Fable 5 (Latest)", ("vision", "reasoning", "code")),
+    ("antigravity", "gpt-oss-120b", "GPT-OSS 120B (Medium)", ("reasoning", "code")),
     ("antigravity", "gemini-3.5-flash", "Gemini 3.5 Flash", ("vision", "reasoning")),
     ("antigravity", "gemini-3.1-pro", "Gemini 3.1 Pro", ("vision", "reasoning")),
-    ("antigravity", "gemini-3-flash", "Gemini 3 Flash", ("vision", "reasoning")),
+    ("antigravity", "gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", ("vision", "reasoning")),
     ("antigravity", "claude-sonnet-4-6", "Claude Sonnet 4.6", ("vision", "reasoning")),
     ("antigravity", "claude-opus-4-6", "Claude Opus 4.6", ("vision", "reasoning")),
-    ("antigravity", "gpt-oss-120b", "GPT-OSS 120B", ("reasoning", "code")),
     ("openai_codex", "gpt-5.6-sol", "GPT-5.6 Sol", ("vision", "reasoning", "code")),
     ("openai_codex", "gpt-5.6-terra", "GPT-5.6 Terra", ("vision", "reasoning", "code")),
+    ("openai_codex", "gpt-5.4", "GPT-5.4", ("vision", "reasoning", "code")),
     ("openai_codex", "gpt-5.3-codex", "GPT-5.3 Codex", ("reasoning", "code")),
     ("vertex_ai", "gemini-3.5-flash", "Gemini 3.5 Flash", ("vision", "reasoning")),
     ("vertex_ai", "gemini-3.1-pro", "Gemini 3.1 Pro", ("vision", "reasoning")),
@@ -628,18 +632,28 @@ class VideoFlowProviderService:
             return False
         try:
             with self._connection() as conn:
-                combo = conn.execute(
-                    "SELECT id FROM video_flow_combos WHERE name = ?", (name,)
-                ).fetchone()
-                if not combo:
-                    return False
-                members = conn.execute(
-                    "SELECT model_ref FROM video_flow_combo_models WHERE combo_id = ? ORDER BY position",
-                    (int(combo["id"]),),
-                ).fetchall()
-        except sqlite3.OperationalError:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(video_flow_combos)").fetchall()]
+                if "models_json" in cols:
+                    combo = conn.execute(
+                        "SELECT models_json FROM video_flow_combos WHERE name = ?", (name,)
+                    ).fetchone()
+                    if not combo:
+                        return False
+                    members = json.loads(combo["models_json"] or "[]")
+                else:
+                    combo_id_row = conn.execute(
+                        "SELECT id FROM video_flow_combos WHERE name = ?", (name,)
+                    ).fetchone()
+                    if not combo_id_row:
+                        return False
+                    member_rows = conn.execute(
+                        "SELECT model_ref FROM video_flow_combo_models WHERE combo_id = ? ORDER BY position",
+                        (int(combo_id_row["id"]),),
+                    ).fetchall()
+                    members = [row["model_ref"] for row in member_rows]
+        except (sqlite3.OperationalError, json.JSONDecodeError):
             return False
-        return bool(members) and all(member["model_ref"] in selectable for member in members)
+        return bool(members) and all(member in selectable for member in members)
 
     def oauth_status(self, provider_id: str, *, refresh: bool = True) -> dict[str, Any]:
         provider = self.provider(provider_id)

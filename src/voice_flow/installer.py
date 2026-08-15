@@ -89,19 +89,26 @@ def create_windows_shortcut(
     description: str = "Voice Flow",
 ) -> bool:
     """Create a Windows .lnk shortcut file via WScript.Shell COM object."""
+    import tempfile, time
     shortcut_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_target = str(target_path).replace('"', '""')
+    safe_args = str(arguments).replace('"', '""')
+    safe_workdir = str(working_dir).replace('"', '""')
+    safe_icon = str(icon_path).replace('"', '""')
+    safe_desc = str(description).replace('"', '""')
+
     vbs_helper = f"""
 Set WshShell = CreateObject("WScript.Shell")
 Set Shortcut = WshShell.CreateShortcut("{shortcut_path}")
-Shortcut.TargetPath = "{target_path}"
-Shortcut.Arguments = "{arguments}"
-Shortcut.WorkingDirectory = "{working_dir}"
-Shortcut.IconLocation = "{icon_path}"
-Shortcut.Description = "{description}"
+Shortcut.TargetPath = "{safe_target}"
+Shortcut.Arguments = "{safe_args}"
+Shortcut.WorkingDirectory = "{safe_workdir}"
+Shortcut.IconLocation = "{safe_icon}"
+Shortcut.Description = "{safe_desc}"
 Shortcut.Save
 """
     try:
-        temp_vbs = shortcut_path.parent / f"_temp_shortcut_{os.getpid()}.vbs"
+        temp_vbs = Path(tempfile.gettempdir()) / f"_temp_shortcut_{os.getpid()}_{time.time_ns()}.vbs"
         temp_vbs.write_text(vbs_helper, encoding="utf-8")
         result = subprocess.run(["cscript.exe", "//Nologo", str(temp_vbs)], capture_output=True, text=True)
         try:

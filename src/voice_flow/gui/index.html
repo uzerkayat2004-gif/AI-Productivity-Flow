@@ -20,7 +20,7 @@
 
   <link rel="stylesheet" href="video-flow.css?v=20260811">
 
-  <link rel="stylesheet" href="design-system.css?v=20260814">
+  <link rel="stylesheet" href="design-system.css">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
 
@@ -1039,16 +1039,48 @@
           </div>
         </section>
 
-        <section class="vf-model-hero">
-          <div class="vf-hero-top">
-            <div><span class="vf-kicker">VIDEO FLOW MODEL SELECTOR</span><h2>Choose the planning model</h2><p>Models are grouped by provider. Eye means vision-aware; brain means reasoning-capable. This selection belongs only to Video Flow.</p></div>
+        <!-- VIDEO FLOW MODEL SELECTOR & MASTER CONTROL CARD -->
+        <section class="exec-policy-card vf-model-hero" style="border-radius: 16px; padding: 20px 24px; margin-bottom: 20px; backdrop-filter: blur(20px);" id="vf-model-hero">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 16px;">
+            <div style="flex: 1; min-width: 280px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 24px;">🎬</span>
+                <h2 style="font-size: 18px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.5px; margin: 0;">VIDEO FLOW MODEL SELECTOR</h2>
+              </div>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">
+                Select the planning model for video generation. Eye (👁) means vision-aware; brain (🧠) means reasoning-capable.
+              </p>
+            </div>
+            <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.45); padding: 8px 18px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);" class="pill-chip">
+                <span style="font-size: 13px; font-weight: 700; color: #fff;">Enable Video Flow</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="toggle-video-flow" checked onchange="toggleSystemSetting('video_flow_enabled', this.checked)">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <span class="audio-status-badge">● Video Flow Active</span>
+            </div>
           </div>
-          <button id="vf-model-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker()" aria-haspopup="dialog">
-            <span class="vf-model-picker-copy"><span>Active planning model</span><strong id="vf-active-model-label">Voice Flow Local — Deterministic Storyboard</strong><small id="vf-active-model-detail">Works without an API key</small></span>
-            <span class="vf-model-picker-action">Change model <b>⌄</b></span>
-          </button>
-          <select id="vf-model-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
-          <label id="vf-external-consent-row" class="vf-external-consent" style="display: none;">
+
+          <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 16px;" class="af-inner-box">
+            <div>
+              <label for="vf-model-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Planning Model</label>
+              <button id="vf-model-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker()" aria-haspopup="dialog" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                <span class="vf-model-picker-copy"><strong id="vf-active-model-label">Voice Flow Local — Deterministic Storyboard</strong> <small id="vf-active-model-detail" style="color: var(--text-muted); margin-left: 6px;">(Works without an API key)</small></span>
+                <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>⌄</b></span>
+              </button>
+              <select id="vf-model-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Planner Engine:</span>
+                <strong style="color: var(--accent-text); font-weight: 700;" id="vf-active-engine-label">Local Deterministic</strong>
+              </div>
+            </div>
+          </div>
+
+          <label id="vf-external-consent-row" class="vf-external-consent" style="display: none; margin-top: 12px;">
             <input id="vf-external-consent" type="checkbox">
             <span><strong>Allow external AI planning for this video</strong><small id="vf-external-consent-copy">The source text will be sent to the selected provider only for scene planning.</small></span>
           </label>
@@ -1076,7 +1108,7 @@
         </section>
 
         <section id="vf-provider-detail-panel" class="vf-provider-detail-panel hidden" aria-live="polite">
-          <div class="vf-provider-detail-toolbar"><button class="vf-provider-back" onclick="closeVideoProvider()">← Video Flow providers</button><a id="vf-provider-get-key" class="btn-secondary vf-anchor-button" href="#" target="_blank" rel="noreferrer">Get API key ↗</a></div>
+          <div class="vf-provider-detail-toolbar" style="display: none;"><button class="vf-provider-back" onclick="closeVideoProvider()">← Video Flow providers</button></div>
           <div id="vf-provider-detail-content"></div>
         </section>
       </section>

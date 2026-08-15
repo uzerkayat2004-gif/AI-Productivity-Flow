@@ -1,13 +1,13 @@
 // Voice Flow PWA Service Worker
-const CACHE_NAME = "voice-flow-cache-v5-theme";
+const CACHE_NAME = "voice-flow-cache-v6";
 const APP_SHELL = "/index.html";
 const ASSETS_TO_CACHE = [
   APP_SHELL,
-  "/styles.css?v=20260814",
-  "/video-flow.css?v=20260811",
-  "/design-system.css?v=20260814",
-  "/app.js?v=20260814",
-  "/video-flow.js?v=20260811",
+  "/styles.css",
+  "/video-flow.css",
+  "/design-system.css",
+  "/app.js",
+  "/video-flow.js",
   "/manifest.json",
   "/assets/logo.png"
 ];
@@ -39,5 +39,13 @@ self.addEventListener("fetch", (evt) => {
     return;
   }
 
-  evt.respondWith(caches.match(evt.request).then((cached) => cached || fetch(evt.request)));
+  evt.respondWith(
+    fetch(evt.request).then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(evt.request, clone));
+      }
+      return response;
+    }).catch(() => caches.match(evt.request))
+  );
 });

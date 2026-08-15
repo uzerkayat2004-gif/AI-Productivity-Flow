@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from voice_flow.storage import storage
+from voice_flow.video_flow_providers import video_flow_provider_service
 
 
 class VideoModelGateway:
@@ -117,26 +118,27 @@ class VideoModelGateway:
         if provider == "codex":
             return self._call_codex(model_id, self._prompt(source, mode, title))
 
-        connections = [
-            item for item in storage.get_provider_connections(provider)
-            if item.get("is_active") and item.get("api_key")
-        ]
+        connections = video_flow_provider_service.active_connections(provider)
         if not connections:
             raise RuntimeError(f"No active {provider} connection.")
-        if storage.get_provider_load_balance_mode(provider) == "round_robin" and len(connections) > 1:
+        load_balance_mode = video_flow_provider_service.get_setting(f"load_balance:{provider}", "priority")
+        if load_balance_mode == "round_robin" and len(connections) > 1:
             cursor_key = f"video_flow_provider_cursor_{provider}"
-            cursor = int(storage.get_setting(cursor_key, 0) or 0) % len(connections)
-            storage.save_setting(cursor_key, cursor + 1)
+            cursor = int(video_flow_provider_service.get_setting(cursor_key, 0) or 0) % len(connections)
+            video_flow_provider_service.set_setting(cursor_key, cursor + 1)
             connections = connections[cursor:] + connections[:cursor]
 
         prompt = self._prompt(source, mode, title)
         failures: list[str] = []
         for connection in connections:
             try:
+                secret = str(connection.get("secret", ""))
+                if not secret and provider not in ("local", "ollama", "lm_studio", "llama_cpp"):
+                    continue
                 if provider == "gemini":
-                    return self._call_gemini(model_id, connection["api_key"], prompt)
+                    return self._call_gemini(model_id, secret, prompt)
                 if provider in self._openai_endpoints:
-                    return self._call_openai_compatible(provider, model_id, connection["api_key"], prompt)
+                    return self._call_openai_compatible(provider, model_id, secret, prompt)
                 raise RuntimeError(f"{provider} does not expose a compatible planning endpoint yet.")
             except Exception as exc:
                 failures.append(str(exc))

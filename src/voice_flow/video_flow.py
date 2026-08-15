@@ -26,6 +26,7 @@ from typing import Any, Iterator
 
 from voice_flow.storage import DB_PATH, storage
 from voice_flow.video_flow_models import VideoModelGateway
+from voice_flow.video_flow_providers import video_flow_provider_service
 
 log = logging.getLogger(__name__)
 
@@ -327,6 +328,12 @@ class VideoFlowStore:
             conn.execute("DELETE FROM video_flow_videos WHERE id = ?", (video_id,))
         return True
 
+    def delete_combo(self, combo_id: int) -> bool:
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM video_flow_combos WHERE id = ?", (int(combo_id),))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def create_combo(self, name: str, models: list[str], strategy: str = "fallback") -> dict[str, Any]:
         now = _now()
         with self._connection() as conn:
@@ -336,7 +343,7 @@ class VideoFlowStore:
             )
             row = conn.execute("SELECT * FROM video_flow_combos WHERE name = ?", (name,)).fetchone()
         d = dict(row)
-        d["models"] = json.loads(d["models_json"])
+        d["models"] = json.loads(d.get("models_json") or "[]")
         return d
 
     def list_combos(self) -> list[dict[str, Any]]:
@@ -345,7 +352,7 @@ class VideoFlowStore:
         results = []
         for r in rows:
             d = dict(r)
-            d["models"] = json.loads(d["models_json"])
+            d["models"] = json.loads(d.get("models_json") or "[]")
             results.append(d)
         return results
 
@@ -501,44 +508,17 @@ class VideoFlowService:
             )
 
     def catalog(self) -> dict[str, Any]:
-        overview = storage.get_all_provider_connections()
-        providers = []
-        models: list[dict[str, str]] = []
-        provider_names = {
-            "gemini": "Google Gemini",
-            "groq": "Groq",
-            "openai": "OpenAI",
-            "huggingface": "Hugging Face",
-            "cloudflare": "Cloudflare AI",
-            "together": "Together AI",
-            "replicate": "Replicate",
-            "elevenlabs": "ElevenLabs",
-            "deepgram": "Deepgram",
-            "assemblyai": "AssemblyAI",
-        }
-        for provider_id, name in provider_names.items():
-            connections = overview.get(provider_id, [])
-            provider_models = storage.get_provider_models(provider_id)
-            providers.append({
-                "id": provider_id,
-                "name": name,
-                "connection_count": len(connections),
-                "active_count": sum(1 for item in connections if item.get("is_active")),
-                "status": "connected" if any(item.get("is_active") for item in connections) else "disconnected",
-            })
-            for model in provider_models:
-                models.append({
-                    "provider": provider_id,
-                    "provider_name": name,
-                    "model_id": model["model_id"],
-                    "display_name": model["display_name"],
-                    "full_id": f"{provider_id}/{model['model_id']}",
-                })
+        provider_catalog = video_flow_provider_service.catalog()
         return {
-            "providers": providers,
-            "models": models,
+            "providers": provider_catalog.get("oauth", []) + provider_catalog.get("api_key", []) + provider_catalog.get("local", []),
+            "provider_groups": {
+                "oauth": provider_catalog.get("oauth", []),
+                "api_key": provider_catalog.get("api_key", []),
+                "local": provider_catalog.get("local", []),
+            },
+            "models": provider_catalog.get("models", []),
             "combos": self.store.list_combos(),
-            "active_model": storage.get_setting("video_flow_model", ""),
+            "active_model": video_flow_provider_service.get_active_model(),
             "themes": ["voice-flow", "midnight", "paper", "neon", "ocean", "forest", "sunset", "mono"],
         }
 
