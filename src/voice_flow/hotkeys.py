@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 VK_CONTROL = 0x11
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
+VK_SHIFT = 0x10
 
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
@@ -42,6 +43,14 @@ def _is_win_down() -> bool:
     try:
         user32 = ctypes.windll.user32
         return bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
+    except Exception:
+        return False
+
+
+def _is_shift_down() -> bool:
+    """Check physical hardware state of Shift key on Windows."""
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
     except Exception:
         return False
 
@@ -188,6 +197,34 @@ class InputTriggerListener:
                         self._is_recording = True
                         self._mouse_hook.set_recording_state(True)
                         threading.Thread(target=self._safe_on_start, daemon=True).start()
+
+                # Alt+C or Ctrl+C / Ctrl+Shift+C — copy-last ONLY when Voice Flow's own window is focused
+                vk_menu = (key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r)
+                vk_c = key == keyboard.KeyCode.from_char("c")
+                shift_down = _is_shift_down()
+                if (vk_menu and vk_c) or (ctrl_down and not shift_down and vk_c) or (ctrl_down and shift_down and vk_c):
+                    if self._on_copy_last and not self._is_recording:
+                        # Only fire copy-last when the foreground window belongs to Voice Flow
+                        # (prevents clipboard corruption when user presses Ctrl+C in Chrome, etc.)
+                        try:
+                            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+                            fg_len = ctypes.windll.user32.GetWindowTextLengthW(fg_hwnd)
+                            fg_buf = ctypes.create_unicode_buffer(fg_len + 1)
+                            ctypes.windll.user32.GetWindowTextW(fg_hwnd, fg_buf, fg_len + 1)
+                            fg_title = fg_buf.value.lower()
+                            fg_class_buf = ctypes.create_unicode_buffer(256)
+                            ctypes.windll.user32.GetClassNameW(fg_hwnd, fg_class_buf, 256)
+                            fg_class = fg_class_buf.value.lower()
+                            is_voice_flow = (
+                                "voice flow" in fg_title
+                                or "voiceflow" in fg_title
+                                or fg_class.startswith("tk")
+                            )
+                            if is_voice_flow:
+                                threading.Thread(target=self._on_copy_last, daemon=True).start()
+                        except Exception:
+                            pass
+                    # Do NOT return — let Ctrl+C pass through to the active app normally
 
                 # Escape key cancels recording
                 if key == keyboard.Key.esc:

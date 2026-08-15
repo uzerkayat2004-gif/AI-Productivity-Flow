@@ -336,115 +336,105 @@
 
         </div>
 
-        <!-- MIDDLE SECTION: 2 COLUMNS (App Usage & Activity Matrix + Velocity) -->
-        <div class="insights-mid-grid">
+        <!-- MAIN INSIGHTS LAYOUT: 2 COLUMNS -->
+        <div class="insights-mid-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
           
-          <!-- Column 1: Desktop Application Breakdown -->
-          <div class="insight-card" style="padding: 24px;">
-            <div class="card-header-row" style="margin-bottom: 16px;">
-              <div>
-                <span class="card-kicker">DESKTOP APPLICATION INTELLIGENCE</span>
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Real-time apps detected from active window context</div>
+          <!-- LEFT COLUMN: Desktop Application Intelligence -->
+          <div style="display: flex; flex-direction: column; gap: 24px;">
+            <div class="insight-card" style="padding: 24px;">
+              <div class="card-header-row" style="margin-bottom: 16px;">
+                <div>
+                  <span class="card-kicker">DESKTOP APPLICATION INTELLIGENCE</span>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Real-time apps detected from active window context</div>
+                </div>
+                <span class="app-telemetry-badge">⚡ Live App Detection</span>
               </div>
-              <span class="app-telemetry-badge">⚡ Live App Detection</span>
-            </div>
-            <div class="usage-list" id="insights-app-breakdown">
-              <!-- Dynamically populated -->
+              <div class="usage-list" id="insights-app-breakdown">
+                <!-- Dynamically populated -->
+              </div>
             </div>
           </div>
 
-          <!-- Column 2: 28-Day Consistency Matrix & Hourly Velocity -->
-          <div class="insight-card" style="padding: 24px;">
-            <div class="card-header-row" style="margin-bottom: 14px;">
-              <div>
-                <span class="card-kicker">28-DAY SPEAKING CONSISTENCY</span>
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Daily dictation throughput & frequency matrix</div>
-              </div>
-              <div class="heatmap-legend-row">
-                <span style="font-size: 10px; color: var(--text-muted);">Less</span>
-                <div class="legend-squares">
-                  <span class="heatmap-cell level-0"></span>
-                  <span class="heatmap-cell level-1"></span>
-                  <span class="heatmap-cell level-2"></span>
-                  <span class="heatmap-cell level-3"></span>
-                  <span class="heatmap-cell level-4"></span>
+          <!-- RIGHT COLUMN: GitHub-style Speaking Consistency Heatmap -> Velocity by Time of Day -> Voice Profile -->
+          <div style="display: flex; flex-direction: column; gap: 24px;">
+            
+            <!-- 1. GitHub-style Lifetime 52-Week Speaking Consistency Contribution Graph -->
+            <div class="insight-card github-heatmap-card" style="padding: 24px; position: relative; background: #0d1117; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;">
+              <div class="card-header-row" style="margin-bottom: 16px;">
+                <div>
+                  <span class="card-kicker" style="font-size: 12px; color: var(--text-main);">LIFETIME SPEAKING CONSISTENCY & MONTHS OF PROGRESS</span>
+                  <div style="font-size: 11px; color: #8b949e; margin-top: 2px;">52-week activity contribution matrix across months</div>
                 </div>
-                <span style="font-size: 10px; color: var(--text-muted);">More</span>
+              </div>
+
+              <!-- Heatmap Container (Dynamically rendered 52-week GitHub grid) -->
+              <div id="heatmap-grid" class="github-heatmap-container" style="position: relative;">
+                <!-- Dynamically populated month labels, Mon/Wed/Fri day labels, 52-week green squares & tooltips -->
+              </div>
+
+              <!-- Bottom Footer Row matching Image #1 -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; pt: 12px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; color: #8b949e;">
+                <span style="cursor: pointer; opacity: 0.85;" onclick="showToast('Dictation contributions are calculated from daily word count and active speaking duration.', '📊')">Learn how we count contributions</span>
+                <div class="heatmap-legend-row" style="display: flex; align-items: center; gap: 5px;">
+                  <span>Less</span>
+                  <div class="legend-squares" style="display: flex; gap: 3px;">
+                    <span class="heatmap-cell level-0" style="width:10px;height:10px;border-radius:2px;display:inline-block;background:#161b22;border:1px solid rgba(255,255,255,0.05);"></span>
+                    <span class="heatmap-cell level-1" style="width:10px;height:10px;border-radius:2px;display:inline-block;background:#0e4429;border:1px solid #006d32;"></span>
+                    <span class="heatmap-cell level-2" style="width:10px;height:10px;border-radius:2px;display:inline-block;background:#006d32;border:1px solid #26a641;"></span>
+                    <span class="heatmap-cell level-3" style="width:10px;height:10px;border-radius:2px;display:inline-block;background:#26a641;border:1px solid #39d353;"></span>
+                    <span class="heatmap-cell level-4" style="width:10px;height:10px;border-radius:2px;display:inline-block;background:#39d353;border:1px solid #56f072;"></span>
+                  </div>
+                  <span>More</span>
+                </div>
               </div>
             </div>
 
-            <!-- Heatmap Container -->
-            <div id="heatmap-grid" class="heatmap-container-box">
-              <!-- Dynamically populated 28 cells with day labels -->
-            </div>
-
-            <!-- Hourly Time-of-Day Velocity Distribution -->
-            <div style="margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border-color);">
-              <div class="card-header-row" style="margin-bottom: 10px;">
-                <span class="card-kicker" style="font-size: 11px;">VELOCITY BY TIME OF DAY</span>
+            <!-- 2. Hourly Time-of-Day Velocity Distribution -->
+            <div class="insight-card" style="padding: 24px;">
+              <div class="card-header-row" style="margin-bottom: 14px;">
+                <div>
+                  <span class="card-kicker">VELOCITY BY TIME OF DAY</span>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Speech throughput & activity hours</div>
+                </div>
                 <span id="insights-peak-hours-tag" style="font-size: 11px; font-weight: 600; color: var(--primary-orange);">🌅 Morning Peak</span>
               </div>
               <div id="time-of-day-bars" class="tod-distribution-grid">
                 <!-- Dynamically populated Morning / Afternoon / Evening / Night -->
               </div>
             </div>
+
+            <!-- 3. Your Voice Archetype Card -->
+            <div class="insight-card archetype-profile-card">
+              <div class="card-header-row" style="margin-bottom: 16px;">
+                <span class="card-kicker">YOUR VOICE PROFILE</span>
+                <span class="archetype-tag-badge" id="insights-archetype-tag">Productivity Elite</span>
+              </div>
+              
+              <div class="archetype-hero-layout">
+                <div class="archetype-avatar-aura">
+                  <span class="archetype-avatar-emoji" id="insights-archetype-icon">🚀</span>
+                </div>
+                <div>
+                  <h3 class="archetype-title-text" id="insights-archetype-badge">The High-Velocity Orator</h3>
+                  <p class="archetype-desc-text" id="insights-archetype-desc">Speaks at peak velocity, outpacing traditional keyboard input by multiple orders of magnitude.</p>
+                </div>
+              </div>
+
+              <div class="archetype-footer-pills">
+                <div class="arch-pill">
+                  <span style="color: var(--text-muted);">Vocabulary:</span>
+                  <strong id="insights-vocab-status" style="color: #10B981;">Unlocked (Active)</strong>
+                </div>
+                <div class="arch-pill">
+                  <span style="color: var(--text-muted);">Peak Window:</span>
+                  <strong id="insights-peak-hours" style="color: var(--text-main);">4:00 PM – 5:00 PM</strong>
+                </div>
+              </div>
+            </div>
+
           </div>
 
         </div>
-
-        <!-- BOTTOM SECTION: YOUR VOICE ARCHETYPE & ONE-CLICK SHARE CARD -->
-        <div class="insights-bottom-grid">
-          
-          <!-- Your Voice Archetype Card -->
-          <div class="insight-card archetype-profile-card">
-            <div class="card-header-row" style="margin-bottom: 16px;">
-              <span class="card-kicker">YOUR VOICE PROFILE</span>
-              <span class="archetype-tag-badge" id="insights-archetype-tag">General Flow</span>
-            </div>
-            
-            <div class="archetype-hero-layout">
-              <div class="archetype-avatar-aura">
-                <span class="archetype-avatar-emoji" id="insights-archetype-icon">⚡</span>
-              </div>
-              <div>
-                <h3 class="archetype-title-text" id="insights-archetype-badge">The Rapid Thinker</h3>
-                <p class="archetype-desc-text" id="insights-archetype-desc">Captures raw thoughts, stream-of-consciousness ideas, and daily tasks with natural flow.</p>
-              </div>
-            </div>
-
-            <div class="archetype-footer-pills">
-              <div class="arch-pill">
-                <span style="color: var(--text-muted);">Vocabulary:</span>
-                <strong id="insights-vocab-status" style="color: #10B981;">Active</strong>
-              </div>
-              <div class="arch-pill">
-                <span style="color: var(--text-muted);">Peak Window:</span>
-                <strong id="insights-peak-hours" style="color: var(--text-main);">Morning</strong>
-              </div>
-            </div>
-          </div>
-
-          <!-- Share Productivity Card -->
-          <div class="insight-card share-productivity-card">
-            <div class="card-header-row" style="margin-bottom: 12px;">
-              <span class="card-kicker">SHARE PRODUCTIVITY CARD</span>
-              <span style="font-size: 18px;">🚀</span>
-            </div>
-            <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 16px 0; line-height: 1.4;">
-              Share your verified Voice Flow speed benchmarks and time saved with your engineering or product team.
-            </p>
-            <div class="share-preview-box">
-              <div style="font-size: 12px; color: var(--text-muted); font-family: monospace;" id="share-snippet-preview">
-                🚀 Dictated with Voice Flow at 3.8x speed!
-              </div>
-            </div>
-            <button type="button" class="btn-primary share-action-btn" id="share-card-btn" onclick="copyProductivityShareCard(this)">
-              <span>📋 Copy Share Card</span>
-            </button>
-          </div>
-
-        </div>
-
       </section>
 
 
@@ -846,21 +836,21 @@
       <section id="page-audioflow" class="page-view" style="display: none; padding-bottom: 60px;">
 
         <!-- SUB-VIEW 1: AUDIO PROVIDERS OVERVIEW -->
-        <div id="audio-providers-view-overview" style="margin-bottom: 24px;">
-          <div class="page-header" style="margin-bottom: 24px;">
+        <div id="audio-providers-view-overview" style="margin-bottom: 16px;">
+          <div class="page-header" style="margin-bottom: 16px;">
             <div>
               <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                 <h1 class="page-title" style="margin: 0; font-size: 24px; font-weight: 800;">Audio Flow</h1>
                 <span class="af-engine-badge" style="font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 20px;">🔊 Text-to-Speech Engine</span>
               </div>
-              <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">Read any selected text across your applications using neural AI voices or connected provider TTS models.</p>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0; line-height: 1.5;">Read any selected text across your applications using neural AI voices or connected provider TTS models.</p>
             </div>
           </div>
 
           <!-- AUDIO FLOW MODEL SELECTOR & MASTER CONTROL CARD -->
-          <div class="exec-policy-card" style="border-radius: 16px; padding: 24px 28px; margin-bottom: 28px; backdrop-filter: blur(20px);">
+          <div class="exec-policy-card" style="border-radius: 16px; padding: 20px 24px; margin-bottom: 20px; backdrop-filter: blur(20px);">
             <!-- Header Row -->
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 16px;">
               <div style="flex: 1; min-width: 280px;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                   <span style="font-size: 24px;">🔊</span>
@@ -883,7 +873,7 @@
             </div>
 
             <!-- Active Voice Dropdown + Stats Box Grid -->
-            <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 20px; background: rgba(0, 0, 0, 0.4); padding: 20px 24px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 20px;" class="af-inner-box">
+            <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 16px;" class="af-inner-box">
               <div>
                 <label for="exec-audio-policy-model-select" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Voice / Engine Selector</label>
                 <select id="exec-audio-policy-model-select" class="mode-select-dropdown" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc;" onchange="updateExecAudioFlowPolicy(this.value)">
@@ -907,7 +897,7 @@
             </div>
 
             <!-- AUDIO PLAYBACK SPEED CONTROL -->
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: rgba(0,0,0,0.25); padding: 14px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);" class="af-inner-box">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; background: rgba(0,0,0,0.25); padding: 12px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);" class="af-inner-box">
               <div>
                 <label style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; letter-spacing: 0.6px;">Audio Playback Speed</label>
                 <span style="font-size: 12px; color: var(--text-muted); margin-top: 2px; display: block;">Adjust reading speed rate across all voices</span>

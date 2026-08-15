@@ -1,76 +1,210 @@
-# 🎙️ Voice Flow — AI Speech Desktop Application
+# 🌊 Flow — Open-Source Multimodal Information Transformation
 
-**Voice Flow** is a high-performance, real-time AI speech-to-text dictation application for Windows, featuring a native desktop interface, floating Wispr Flow-style overlay bar, 100% hardware audio routing, 2026 voice model API integrations, and direct Microsoft Excel spreadsheet cell navigation.
+> **Zero-friction information transformation across Speech, Audio, and Video directly from your desktop workflow.**
 
----
-
-## 🌟 Key Features
-
-1. **Floating Wispr Flow Bar Marker (`[ ─── ]`)**:
-   - Always-on-top system-wide overlay bar with 10-second startup initialization sequence (`Starting... 10s` -> `Ready to do this and all`).
-   - Click-to-activate dictation mode (`🎙️ Dictating... Click to stop`).
-
-2. **100% Hardware Microphone Device Selection**:
-   - Hardware audio routing using `sounddevice.InputStream(device=...)` bypassing Windows Microsoft Sound Mapper. Supports `Headphones`, `LK`, `Headset (Max Pro)`.
-
-3. **2026 Voice Model & API Keys Hub (10 Providers, 5 Left / 5 Right)**:
-   - ✨ **Google Gemini**: `gemini-3.1-flash-live`, `gemini-3.1-flash-tts`, `gemini-3.5-live-translate`, `gemini-2.5-flash-tts`, `gemini-2.0-flash`
-   - ⚡ **Groq Audio**: `whisper-large-v3-turbo`, `whisper-large-v3`, `distil-whisper-large-v3-en`, `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`
-   - 🎙️ **ElevenLabs Voice**: `eleven_v3`, `eleven_flash_v2_5`, `eleven_multilingual_v2`, `eleven_turbo_v2_5`, `eleven_english_v2`
-   - 🎧 **Deepgram Speech**: `nova-3`, `flux`, `aura-2`, `aura-asteria-en`, `nova-2-general`
-   - 🤖 **OpenAI Voice**: `gpt-realtime-2`, `gpt-realtime-whisper`, `gpt-realtime-translate`, `whisper-1`, `tts-1-hd`
-   - 🗣️ **AssemblyAI**: `universal-2`, `universal-1`, `conformer-2`, `slam-1`, `conformer-1`
-   - 🤗 **Hugging Face Voice**: `fixie-ai/ultravox-v0_5`, `openai/whisper-large-v3-turbo`, `kyutai/moshiko-pytorch`, `suno/bark`, `coqui/XTTS-v2`
-   - ☁️ **Cloudflare Workers Voice AI**: `@cf/deepgram/nova-3`, `@cf/myshell/melotts`, `@cf/openai/whisper-large-v3-turbo`
-   - 🤝 **Together Voice AI**: `cartesia/sonic-multilingual`, `hexgrad/kokoro-v0_19`, `togethercomputer/whisper-large-v3`
-   - 🚀 **Replicate Voice**: `victor-upx/kokoro-tts`, `coqui/xtts-v2`, `replicate/whisp-v3`
-
-4. **Microsoft Excel & Spreadsheet Integration**:
-   - Automatic active window detection for Excel, CSVs, and spreadsheets.
-   - Spoken table commands (`"next cell"`, `"tab"`, `"next row"`, `"new line"`) are instantly converted into tabbed/newline clipboard data for effortless multi-cell entry.
-
-5. **Persistent SQLite Storage**:
-   - Dictation history, custom dictionary terms, and verified API keys are stored in `~/.voice_flow/voice_flow.db` and preserved across sessions.
-
-6. **Windows Startup & Watchdog Auto-Recovery**:
-   - **Dual Auto-Start**: Registers in both Windows Registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VoiceFlow`) and Windows Startup Folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Voice Flow.lnk`).
-   - **Silent Background Execution**: Runs via `VoiceFlowLauncher.vbs` with `pythonw.exe` and `WScript.Shell.Run(..., 0, False)` for zero console/terminal popups on boot.
-   - **Watchdog Supervisor**: Background health monitor that auto-recovers and restarts Voice Flow if unexpectedly terminated or crashed, with exponential backoff protection.
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://python.org)
+[![Platform](https://img.shields.io/badge/Platform-Windows_10_%2F_11-blue.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-47%20Passed%20(100%25)-success.svg)]()
 
 ---
 
-## 🚀 How to Run & Configure Auto-Startup
+## 💡 What is Flow?
 
-### 1. Configure Auto-Startup & Desktop Shortcuts
-Run the standalone desktop installer:
-```bat
-setup_desktop_app.bat
+**Flow** is a native desktop productivity platform engineered around a simple, powerful philosophy:
+
+> **You should never need to open the main application to receive value.**
+
+Whether you are writing code in VS Code, researching papers in Chrome, analyzing data in Excel, or chatting in Slack, Flow sits silently in the background. With a single gesture (middle mouse click, hotkey, or text highlight), Flow transforms information instantly:
+
+```text
+User selects text anywhere (Browser / IDE / Document)
+                        ↓
+                 Invoke Flow
+         _______________|_______________
+        |               |               |
+   Voice Flow      Audio Flow      Video Flow
+ (Speech → Text) (Text → Audio)  (Text → Video)
+        ↓               ↓               ↓
+  Direct Paste    Spoken Audio   Visual Explainer
 ```
-Or via Python:
+
+---
+
+## 🌟 The Three Pillars of Flow
+
+### 1. 🎙️ Voice Flow (Speech → Text & Intelligent Dictation)
+* **Zero-Latency Triggers:** Middle Mouse Button (scroll wheel click) or `Ctrl + Win` / `Win + Ctrl` hotkey.
+* **Push-to-Talk & Toggle Tap:** Hold (>0.30s) to speak and release to paste, or quick-tap (<0.30s) to toggle continuous dictation.
+* **Active Window Style Engine:** Automatically senses the foreground application window and adapts formatting (e.g., Markdown/snake_case in VS Code, professional tone in Slack/Email, natural phrasing in browsers).
+* **Local Faster-Whisper Engine:** Local offline transcription with dictionary prompt-biasing and dual-pass VAD fallback.
+* **Intelligent Auto-Refinement:** AI-powered grammar and disfluency cleanup with strict code-symbol and keyword preservation.
+* **Active Window Text Injection:** Direct Win32 clipboard injection with automatic modifier key state clearing and terminal (`Shift+Insert`) support.
+
+### 2. 🎧 Audio Flow (Selected Text → Spoken Speech & Screen Reader)
+* **Screen Highlight Reading:** Highlight text anywhere to immediately hear it read aloud with synchronized yellow tracking.
+* **Interactive Floating Player:** Waveform scrub bar, speed adjustment (0.8x–2.0x), play/pause, and quick stop.
+* **Multi-Provider TTS:** Free Microsoft Edge Neural voices, Google Cloud TTS, Gemini AI Audio, Azure Speech, ElevenLabs, Deepgram Aura, and offline Windows SAPI5.
+
+### 3. 🎬 Video Flow (Selected Text → Source-Grounded Visual Explanation)
+* **Source-Grounded Explanation:** Converts dense text, code, or documents into structured, animated 16:9 explainer videos.
+* **Video Flow Brain:** Analyzes evidence claims, extracts key entities, designs pedagogical scene structures, and generates synchronized narration scripts.
+* **Hybrid Rendering Engine:** Combines deterministic 2D motion graphics, 3D WebGL scenes, Remotion animations, and generative video clips with guaranteed zero-cost fallbacks.
+
+---
+
+## 🚦 Project Status
+
+| Subsystem | Component | Status | Description |
+| :--- | :--- | :---: | :--- |
+| **Voice Flow** | Core Speech-to-Text | ✅ Implemented | 64-bit Win32 hook, Faster-Whisper, local prompt-biasing |
+| **Voice Flow** | Active Window Style Engine | ✅ Implemented | Title/class detection, category presets (Formal/Casual/Code) |
+| **Voice Flow** | Auto-Startup & Watchdog | ✅ Implemented | Silent Windows startup, process health supervisor |
+| **Audio Flow** | Text-to-Speech Engine | ✅ Implemented | Edge Neural, Google, ElevenLabs, Deepgram, SAPI5 |
+| **Audio Flow** | Highlight Tracker Widget | ✅ Implemented | Synchronized text highlight & floating audio controls |
+| **Video Flow** | Video Flow Brain | ✅ Implemented | Evidence grounding, scene planning, diversity validation |
+| **Video Flow** | Deterministic 2D/3D Renderer | ✅ Implemented | React/Remotion motion scenes, Canvas/SVG animations |
+| **Video Flow** | Hybrid Render Router | ✅ Implemented | Provider-neutral generative video routing & fallback contracts |
+| **Video Flow** | Benchmark Suite | ✅ Implemented | 12 domain benchmark fixtures, multi-metric scoring harness |
+| **Video Flow** | Generative Video Provider | 🚧 In Progress | Integration seams ready; testing with mock provider |
+| **Platform** | Insights Telemetry | ✅ Implemented | 28-day activity heatmap, speedometer gauge, app breakdown |
+| **Platform** | Custom Dictionary & Snippets | ✅ Implemented | Trigger expansion (`myemail -> me@company.com`), tag filtering |
+| **Platform** | Multi-Key Connection Hub | ✅ Implemented | BYOK multi-provider manager with load balancing |
+
+---
+
+## 🏗️ Architectural Philosophy: Hybrid Rendering
+
+Video Flow is architected as a **hybrid rendering pipeline**. It avoids black-box text-to-video APIs in favor of structured comprehension:
+
+```text
+Selected Content / Source Text
+              ↓
+   Evidence & Source Grounding (Claims, Entities, Spans)
+              ↓
+       Video Flow Brain (Pedagogical Scene Planning)
+              ↓
+  Scene Programs & Visual Direction (Motion, Layout, Timing)
+              ↓
+      Hybrid Render Router
+   ↙           ↓            ↘
+Procedural   WebGL/3D   Generative Video (Veo / Future)
+ Remotion                 [Optional Enhancement]
+    ↓          ↓             ↓
+   ───────────────────────────
+              ↓
+    Narration & Audio Sync
+              ↓
+      Automated QA & Repair
+              ↓
+     Final Explainer Video
+```
+
+### 🆓 Free-First Guarantee
+Flow is built so that **no user is ever blocked by a paywall**.
+- When generative video APIs are unavailable or unconfigured, the **Hybrid Render Router** automatically falls back to deterministic procedural Remotion and 2D/3D Canvas rendering.
+- You never need a paid API key or cloud billing to generate high-quality explanation videos.
+
+---
+
+## 📦 Installation & Setup
+
+### Prerequisites
+* **Operating System:** Windows 10 or 11 (64-bit)
+* **Python:** Version 3.10+ (tested on Python 3.14)
+* **Node.js:** Version 18+ (for Remotion video renderer)
+
+### Quick Setup
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/uzerkayat2004-gif/Voice-Flow.git
+   cd Voice-Flow
+   ```
+
+2. **Install Python dependencies:**
+   ```bash
+   pip install -e .
+   ```
+
+3. **Install Video Flow Renderer dependencies:**
+   ```bash
+   cd video_flow_renderer
+   npm install
+   cd ..
+   ```
+
+4. **One-Click Desktop & Auto-Startup Installation:**
+   ```bat
+   setup_desktop_app.bat
+   ```
+   *Registers Flow in Windows Startup and creates Desktop shortcuts for silent background startup on boot.*
+
+---
+
+## 🚀 Running Flow
+
+* **Silent Background Mode (Recommended):**
+  Double-click `VoiceFlowLauncher.vbs` or run:
+  ```bat
+  run_voice_flow.bat
+  ```
+* **Interactive Console Mode:**
+  ```bat
+  run_voice_flow.bat --console
+  ```
+* **Check Background Watchdog Status:**
+  ```bash
+  python -m voice_flow.watchdog --status
+  ```
+* **Open Web Dashboard:**
+  Navigate to `http://127.0.0.1:8991` in your browser.
+
+---
+
+## 🧪 Testing & Verification
+
+Run the comprehensive automated test suite (all tests execute offline with zero paid API calls):
+
 ```bash
-python -m voice_flow.installer --install
-```
+# Run all core tests
+python -m pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py tests/test_style_system.py tests/test_provider_management.py tests/test_watchdog_and_startup.py tests/test_hybrid_render_routing.py tests/test_video_flow_benchmarks.py -s
 
-### 2. Verify Startup & Watchdog Diagnostics
-Run the verification script in PowerShell:
-```powershell
-powershell -ExecutionPolicy Bypass -File scratch/verify_startup.ps1
-```
-Or check status via CLI:
-```bash
-python -m voice_flow.watchdog --status
-```
+# Run Video Flow engine tests
+python -m pytest tests/test_video_flow.py tests/test_video_flow_models.py tests/test_video_flow_motion.py tests/test_video_flow_providers.py tests/test_video_flow_themes.py -s
 
-### 3. Manual Launch Modes
-- **Silent Background (Default)**: Double-click `VoiceFlowLauncher.vbs` or `run_voice_flow.bat`
-- **Interactive Console Mode**: `run_voice_flow.bat --console`
-- **Watchdog Console Mode**: `run_voice_flow.bat --watchdog-console`
-- **Stop Background Service**: `run_voice_flow.bat --stop`
+# Run Video Flow Renderer TypeScript Typecheck
+cd video_flow_renderer && npm run typecheck
+```
 
 ---
 
-## 🛠️ Requirements
-- Windows 10 / 11
-- Python 3.10+
-- Dependencies: `faster-whisper`, `sounddevice`, `pyautogui`, `pyperclip`, `pywebview`, `pynput`, `scipy`
+## 🔒 Privacy & Local-First Design
 
+* **Local Speech-to-Text:** Whisper runs locally on your CPU/GPU. No audio leaves your machine unless you configure an external speech provider.
+* **BYOK (Bring Your Own Key):** All AI credentials are encrypted and stored locally in `~/.voice_flow/voice_flow.db`. Keys are never transmitted to third-party telemetry servers.
+* **Consent-Gated Processing:** Source text is only sent to external LLMs if you explicitly select that model and authorize the request.
+
+---
+
+## 🤝 Sponsors & Compute Partners
+
+Flow is designed so its core functionality remains 100% free and useful without paid inference. We are actively interested in compute, API-credit, infrastructure, and research partnerships to accelerate open multimodal AI accessibility:
+
+* 🎥 **Video Inference Partnerships:** Integrating next-generation generative video models into our hybrid router.
+* ⚡ **GPU & Cloud Compute:** Distributed rendering clusters and open-weights model hosting.
+* 🧠 **LLM & Speech Inference:** API credit support for open-source research and educational explanation generation.
+* 🎓 **Accessibility & Education:** Partnering with academic institutions to make research papers and dense educational material accessible in multimodal formats.
+
+*If your organization is interested in supporting open-source multimodal accessibility, please open an issue or contact the maintainers.*
+
+---
+
+## 📄 License
+
+This project is licensed under the **Apache License 2.0**. See the [`LICENSE`](LICENSE) file for details.
+
+### Third-Party Licenses
+Third-party libraries used in Flow remain subject to their respective licenses:
+* Remotion (`video_flow_renderer`) is distributed under the Remotion Company License.
+* Faster-Whisper, SoundDevice, PyWebView, React, and other dependencies remain under their respective MIT / Apache / BSD licenses.

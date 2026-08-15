@@ -611,24 +611,24 @@ html[data-theme="light"] #page-providers .exec-policy-card .pill-chip {
 }
 
 #page-audioflow .exec-policy-card .af-inner-box {
-  background: var(--surface-3) !important;
-  border: 1px solid var(--border) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid rgba(255, 96, 32, 0.12) !important;
   border-radius: 12px !important;
 }
 
 html[data-theme="light"] #page-audioflow .exec-policy-card .af-inner-box {
-  background: #fff8f0 !important;
-  border-color: rgba(255, 96, 32, 0.18) !important;
+  background: rgba(255, 248, 240, 0.8) !important;
+  border-color: rgba(255, 96, 32, 0.15) !important;
 }
 
 #page-audioflow .exec-policy-card .pill-chip {
-  background: var(--surface-3) !important;
-  border: 1px solid var(--border) !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid rgba(255, 96, 32, 0.1) !important;
   border-radius: 20px !important;
 }
 
 html[data-theme="light"] #page-audioflow .exec-policy-card .pill-chip {
-  background: #ffffff !important;
+  background: rgba(255, 255, 255, 0.7) !important;
 }
 
 #page-audioflow .mode-select-dropdown {
@@ -642,13 +642,13 @@ html[data-theme="light"] #page-audioflow .exec-policy-card .pill-chip {
 }
 
 .speed-pill-group {
-  background: var(--surface-3) !important;
-  border: 1px solid var(--border) !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid rgba(255, 96, 32, 0.1) !important;
   border-radius: 24px !important;
 }
 
 html[data-theme="light"] .speed-pill-group {
-  background: #ffffff !important;
+  background: rgba(255, 255, 255, 0.7) !important;
 }
 
 .speed-pill-btn {
@@ -1011,7 +1011,7 @@ html[data-theme="dark"] #insights-vocab-status { color: #e5e5e5 !important; }
 /* ---------- Audio Flow Grid & Card Layout Overlap Fix ---------- */
 #page-audioflow .providers-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) !important;
+  grid-template-columns: repeat(4, 1fr) !important;
   gap: 14px !important;
 }
 

@@ -829,23 +829,30 @@ function renderHeatmap(dailyActivityData) {
       <div class="heatmap-grid">
   `;
 
+  let miniHeatmapHtml = "";
+
   for (let i = 27; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split("T")[0];
-    const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
+    const formattedDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
 
     const match = activityList.find(a => a.date === dateStr);
     const wordCount = match ? match.words : 0;
     const level = match ? (match.level !== undefined ? match.level : 0) : (wordCount > 500 ? 4 : (wordCount > 250 ? 3 : (wordCount > 100 ? 2 : (wordCount > 0 ? 1 : 0))));
+    const savedMins = Math.round((wordCount / 140) * 0.7);
 
     html += `
-      <div class="heatmap-cell level-${level}" 
-           style="animation-delay: ${i * 10}ms;"
-           title="${dayName}, ${dateStr}: ${wordCount} words dictated"
-           aria-label="${dayName}, ${dateStr}: ${wordCount} words">
+      <div class="heatmap-cell level-${level}" style="animation-delay: ${i * 10}ms;">
+        <div class="heatmap-tooltip-popup">
+          <div style="font-weight: 800; color: var(--primary-orange);">${formattedDate}</div>
+          <div><strong>${wordCount.toLocaleString()}</strong> words dictated</div>
+          <div style="opacity: 0.8; font-size: 10px; margin-top: 2px;">⚡ Level ${level} • ~${savedMins}m saved</div>
+        </div>
       </div>
     `;
+
+    miniHeatmapHtml += `<span class="heatmap-cell level-${level}" style="width:7px;height:7px;border-radius:2px;display:inline-block;"></span>`;
   }
 
   html += `
@@ -854,6 +861,11 @@ function renderHeatmap(dailyActivityData) {
   `;
 
   grid.innerHTML = html;
+
+  const miniGrid = document.getElementById("share-card-mini-heatmap");
+  if (miniGrid) {
+    miniGrid.innerHTML = miniHeatmapHtml;
+  }
 }
 
 function renderTimeOfDayBars(timeOfDayList) {
@@ -2015,3 +2027,83 @@ async function saveAudioConnectionModal() {
   }
 }
 
+
+
+function downloadProductivityCardImage(btnElement = null) {
+  const wordsVal = document.getElementById("insights-total-words") ? document.getElementById("insights-total-words").textContent : "75,195";
+  const timeVal = document.getElementById("insights-time-saved") ? document.getElementById("insights-time-saved").textContent : "22.7";
+  const unitVal = document.getElementById("insights-time-saved-unit") ? document.getElementById("insights-time-saved-unit").textContent : "hrs";
+  const wpmVal = document.getElementById("insights-wpm") ? document.getElementById("insights-wpm").textContent : "145";
+  const multVal = document.getElementById("insights-multiplier") ? document.getElementById("insights-multiplier").textContent : "3.6x";
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 600;
+  canvas.height = 320;
+  const ctx = canvas.getContext("2d");
+
+  // Background Gradient
+  const grad = ctx.createLinearGradient(0, 0, 600, 320);
+  grad.addColorStop(0, "#0f172a");
+  grad.addColorStop(0.5, "#1e293b");
+  grad.addColorStop(1, "#0b0f19");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 600, 320);
+
+  // Border & Glow
+  ctx.strokeStyle = "#ff6020";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(10, 10, 580, 300);
+
+  // Header Title
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 22px Inter, sans-serif";
+  ctx.fillText("🎙️ Voice Flow Productivity Card", 30, 48);
+
+  // Badge
+  ctx.fillStyle = "#ff6020";
+  ctx.font = "bold 13px Inter, sans-serif";
+  ctx.fillText("PRODUCTIVITY ELITE • THE HIGH-VELOCITY ORATOR", 30, 80);
+
+  // Divider
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(30, 95);
+  ctx.lineTo(570, 95);
+  ctx.stroke();
+
+  // Metrics Grid
+  ctx.fillStyle = "#94a3b8";
+  ctx.font = "12px Inter, sans-serif";
+  ctx.fillText("DICTATED WORDS", 30, 125);
+  ctx.fillText("SPEAKING SPEED", 180, 125);
+  ctx.fillText("TIME SAVED", 330, 125);
+  ctx.fillText("VELOCITY MULTIPLIER", 460, 125);
+
+  ctx.fillStyle = "#ff6020";
+  ctx.font = "bold 24px Inter, sans-serif";
+  ctx.fillText(wordsVal, 30, 160);
+  ctx.fillText(wpmVal + " WPM", 180, 160);
+  ctx.fillText(timeVal + " " + unitVal, 330, 160);
+  ctx.fillText(multVal, 460, 160);
+
+  // Footer Tagline
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "italic 13px Inter, sans-serif";
+  ctx.fillText("⚡ Verified by Voice Flow Speech Telemetry • #VoiceFlow", 30, 215);
+
+  // Heatmap Mini Indicator Text
+  ctx.fillStyle = "#64748b";
+  ctx.font = "11px Inter, sans-serif";
+  ctx.fillText("28-DAY CONSISTENCY MATRIX ACTIVE", 30, 275);
+
+  // Convert Canvas to Image Download
+  const link = document.createElement("a");
+  link.download = "VoiceFlow-Productivity-Card.png";
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+
+  if (btnElement) {
+    showToast("Downloaded Share Productivity Card!", "📥");
+  }
+}

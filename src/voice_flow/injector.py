@@ -312,10 +312,10 @@ class ClipboardInjector:
         with _paste_lock:
             try:
                 _wait_for_modifiers_released(timeout_ms=100)
-                if target_hwnd:
-                    focus_target_window(target_hwnd)
-
-                active_hwnd = target_hwnd or ctypes.windll.user32.GetForegroundWindow()
+                # NEVER call focus_target_window() here — it steals focus and drags
+                # the terminal to the foreground, interrupting running CLI agents.
+                # Always read selected text from whatever window is currently focused.
+                active_hwnd = ctypes.windll.user32.GetForegroundWindow()
                 active_title = get_active_window_title()
                 active_class = get_window_class_name(active_hwnd) if active_hwnd else ""
 

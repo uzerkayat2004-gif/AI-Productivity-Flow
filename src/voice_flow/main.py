@@ -371,9 +371,36 @@ class VoiceFlowApp:
 
         def _check():
             try:
-                target_hwnd = getattr(self, "target_hwnd", None)
-                if not target_hwnd or not ctypes.windll.user32.IsWindow(target_hwnd):
-                    target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+                # Always use the CURRENT foreground window — never a stale target_hwnd
+                # from a previous dictation session (which may point to the terminal).
+                target_hwnd = ctypes.windll.user32.GetForegroundWindow()
+                if not target_hwnd:
+                    return
+
+                # Skip system/utility windows that produce mouse drags but are NOT
+                # real text selection sources (Snipping Tool, screenshot tools, etc.)
+                try:
+                    title_len = ctypes.windll.user32.GetWindowTextLengthW(target_hwnd)
+                    title_buf = ctypes.create_unicode_buffer(title_len + 1)
+                    ctypes.windll.user32.GetWindowTextW(target_hwnd, title_buf, title_len + 1)
+                    fg_title = title_buf.value.lower()
+                    class_buf = ctypes.create_unicode_buffer(256)
+                    ctypes.windll.user32.GetClassNameW(target_hwnd, class_buf, 256)
+                    fg_class = class_buf.value.lower()
+
+                    skip_titles = [
+                        "snipping", "screen snip", "screen sketch",
+                        "screenshot", "screen clip", "capture",
+                        "magnifier", "recorder", "xbox game bar",
+                    ]
+                    skip_classes = ["xellashwin", "applicationsnaphost"]
+                    if any(kw in fg_title for kw in skip_titles):
+                        return
+                    if any(kw in fg_class for kw in skip_classes):
+                        return
+                except Exception:
+                    pass
+
                 selected = self.injector.get_selected_text_strict(target_hwnd=target_hwnd)
                 if selection_generation != self._selection_generation:
                     return

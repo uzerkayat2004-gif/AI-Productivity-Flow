@@ -179,14 +179,8 @@ class AudioRecorder:
                 log.info("[AUDIO] Resampled %d samples from %d Hz -> 16000 Hz (%d samples)", len(mono), self._native_sr, len(resampled))
                 return resampled
             except Exception as e:
-                log.warning("[AUDIO] Polyphase resample failed (%s), falling back to standard resample", e)
-                try:
-                    num_samples = int(len(mono) * target_sr / self._native_sr)
-                    resampled = sig.resample(mono, num_samples).astype(np.float32)
-                    return resampled
-                except Exception as e2:
-                    log.error("[AUDIO] Resample fallback failed: %s", e2)
-                    return np.array([], dtype=np.float32)
+                log.warning("[AUDIO] Polyphase resample failed (%s), discarding unusable audio buffer", e)
+                return np.array([], dtype=np.float32)
         return mono
 
     def cancel(self) -> None:
