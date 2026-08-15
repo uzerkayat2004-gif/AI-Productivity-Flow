@@ -129,9 +129,9 @@ def test_active_model_requires_a_connected_enabled_model_or_existing_combo(tmp_p
     service.update_connection(connection["id"], status="connected")
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute("CREATE TABLE video_flow_combos (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL)")
-        conn.execute("CREATE TABLE video_flow_combo_models (combo_id INTEGER NOT NULL, model_ref TEXT NOT NULL, position INTEGER NOT NULL)")
-        conn.execute("INSERT INTO video_flow_combos (id, name) VALUES (1, 'remote')")
+        conn.execute("CREATE TABLE IF NOT EXISTS video_flow_combos (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL)")
+        conn.execute("CREATE TABLE IF NOT EXISTS video_flow_combo_models (combo_id INTEGER NOT NULL, model_ref TEXT NOT NULL, position INTEGER NOT NULL)")
+        conn.execute("INSERT OR REPLACE INTO video_flow_combos (id, name) VALUES (1, 'remote')")
         conn.execute("INSERT INTO video_flow_combo_models (combo_id, model_ref, position) VALUES (1, 'gemini/gemini-3.5-flash', 0)")
         conn.commit()
 
