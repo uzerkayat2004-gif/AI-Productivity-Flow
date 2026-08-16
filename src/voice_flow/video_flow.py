@@ -287,15 +287,28 @@ class VideoFlowStore:
             )
         return self.get_video(video_id)  # type: ignore
 
+    @staticmethod
+    def _public_video(row: dict[str, Any]) -> dict[str, Any]:
+        if not row:
+            return row  # type: ignore[return-value]
+        row.pop("source_text", None)
+        if row.get("output_path"):
+            row["download_url"] = f"/api/video-flow/videos/file?id={row['id']}&download=1"
+            row["view_url"] = f"/api/video-flow/videos/file?id={row['id']}"
+        else:
+            row.setdefault("download_url", "")
+            row.setdefault("view_url", "")
+        return row
+
     def get_video(self, video_id: str) -> dict[str, Any] | None:
         with self._connection() as conn:
             row = conn.execute("SELECT * FROM video_flow_videos WHERE id = ?", (video_id,)).fetchone()
-        return dict(row) if row else None
+        return self._public_video(dict(row)) if row else None
 
     def list_videos(self) -> list[dict[str, Any]]:
         with self._connection() as conn:
             rows = conn.execute("SELECT * FROM video_flow_videos ORDER BY created_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        return [self._public_video(dict(r)) for r in rows]
 
     def update_video(self, video_id: str, **kwargs: Any) -> dict[str, Any] | None:
         allowed = {

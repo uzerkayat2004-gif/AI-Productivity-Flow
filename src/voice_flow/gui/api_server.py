@@ -4,6 +4,7 @@ to the Voice Flow Desktop GUI.
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import mimetypes
@@ -42,6 +43,7 @@ from voice_flow.style_engine import (
 from voice_flow.video_flow import PERMANENT_DELETE_CONFIRMATION, video_flow_service
 from voice_flow.video_flow_documents import extract_document_text
 from voice_flow.video_flow_providers import video_flow_provider_service
+from voice_flow.video_flow_oauth import OAuthError, start_refresh_scheduler
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION, RUNTIME_FEATURES
 from voice_flow.runtime_guard import runtime_is_compatible
 
@@ -49,6 +51,60 @@ GUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8991
 MAX_JSON_BODY_BYTES = 12 * 1024 * 1024
 ALLOWED_ORIGINS = None  # None = allow all origins (local loopback, LAN IP, desktop webview, custom client origins)
+
+OAUTH_CALLBACK_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Voice Flow — OAuth</title>
+<style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100vh;margin:0}
+div.card{text-align:center;padding:32px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:460px}
+h1{font-size:18px;margin:0 0 8px}p{color:#8b949e;font-size:14px;margin:0 0 16px}
+code{display:block;font-family:ui-monospace,Consolas,monospace;font-size:13px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:14px;word-break:break-all}
+button{background:#238636;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}
+button:hover{background:#2ea043}.hidden{display:none}</style></head>
+<body><div class="card">
+<h1 id="vf-heading">Finishing sign-in…</h1>
+<p id="vf-detail">Your account is being connected to Voice Flow.</p>
+<div id="vf-code-card" class="hidden">
+<p>This window opened outside Voice Flow, so copy the code below, paste it into the sign-in box in the app, and press <b>Complete sign-in</b>.</p>
+<code id="vf-code-value"></code>
+<button id="vf-copy">Copy code</button>
+</div>
+</div>
+<script>
+(function () {
+  var code = __OAUTH_CODE__;
+  var state = __OAUTH_STATE__;
+  var error = __OAUTH_ERROR__;
+  var heading = document.getElementById("vf-heading");
+  var detail = document.getElementById("vf-detail");
+  var card = document.getElementById("vf-code-card");
+  var value = document.getElementById("vf-code-value");
+  if (error) {
+    heading.textContent = "Sign-in was not completed.";
+    detail.textContent = error;
+  } else if (code && window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({type: "OAUTH_CALLBACK_SUCCESS", code: code, state: state}, window.location.origin);
+      window.close();
+    } catch (err) {
+      card.classList.remove("hidden");
+      value.textContent = code;
+    }
+  } else if (code) {
+    card.classList.remove("hidden");
+    value.textContent = code;
+    heading.textContent = "Copy the code, then close this tab";
+  } else {
+    heading.textContent = "No authorization code received.";
+    detail.textContent = "Close this window and press Add account again in Voice Flow.";
+  }
+  var copy = document.getElementById("vf-copy");
+  if (copy) copy.addEventListener("click", function () {
+    navigator.clipboard.writeText(value.textContent).then(function () {
+      copy.textContent = "Copied ✓";
+      window.setTimeout(function () { copy.textContent = "Copy code"; }, 2000);
+    });
+  });
+})();
+</script></body></html>"""
 
 runtime_controller = None
 
@@ -86,6 +142,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if "code" in urllib.parse.parse_qs(parsed.query) or "error" in urllib.parse.parse_qs(parsed.query):
+            # OAuth popup callback landing: Google's loopback redirect arrives
+            # at "/?code=...&state=..." with no API path.
+            self._serve_oauth_callback()
+            return
 
         if path == "/api/reload-tts":
             try:
@@ -138,6 +200,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 })
             else:
                 self.send_json_response({"app_name": None, "category": None, "style_id": None, "style_label": None})
+
+
+        elif path == "/api/video-flow/providers/oauth/callback":
+            self._serve_oauth_callback()
 
 
         elif path == "/api/apikeys/list":
@@ -805,6 +871,39 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
+        elif path == "/api/video-flow/providers/oauth/poll":
+            try:
+                result = video_flow_provider_service.oauth_poll(str(data.get("provider", "")))
+                self.send_json_response({"success": True, **result})
+            except (OAuthError, RuntimeError, ValueError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/providers/oauth/import":
+            try:
+                connection = video_flow_provider_service.oauth_import(str(data.get("provider", "")))
+                self.send_json_response({"success": True, "connection": connection})
+            except (OAuthError, RuntimeError, ValueError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/providers/oauth/refresh":
+            try:
+                connection = video_flow_provider_service.oauth_refresh(int(data.get("id", 0)))
+                self.send_json_response({"success": True, "connection": connection})
+            except (OAuthError, RuntimeError, ValueError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/providers/oauth/exchange":
+            try:
+                connection = video_flow_provider_service.oauth_exchange(
+                    str(data.get("provider", "")),
+                    str(data.get("code", "")),
+                    str(data.get("state", "")),
+                    code_verifier=str(data.get("code_verifier", "")),
+                )
+                self.send_json_response({"success": True, "connection": connection})
+            except (OAuthError, RuntimeError, ValueError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
         elif path == "/api/video-flow/combos/create":
             try:
                 combo = video_flow_service.store.create_combo(
@@ -1219,6 +1318,31 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
+    def _serve_oauth_callback(self) -> None:
+        """Serve the OAuth popup landing page.
+
+        Runs inside the popup: when the provider redirects back with a code, the
+        page relays it to the main app window via postMessage and closes itself.
+        If the popup was closed early (or never opened), it shows a card with
+        the code and a copy button so the user can complete the sign-in in the
+        main app's manual fallback field.
+        """
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        code = params.get("code", [""])[0]
+        state = params.get("state", [""])[0]
+        error = params.get("error", [""])[0]
+        body = (
+            OAUTH_CALLBACK_PAGE
+            .replace("__OAUTH_CODE__", json.dumps(code))
+            .replace("__OAUTH_STATE__", json.dumps(state))
+            .replace("__OAUTH_ERROR__", json.dumps(error))
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_json_response(self, data: any, status: int = 200) -> None:
         content = json.dumps(data).encode("utf-8")
         self.send_response(status)
@@ -1236,6 +1360,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 def start_api_server(host: str = "0.0.0.0") -> None:
     try:
         ThreadingHTTPServer.allow_reuse_address = True
+        start_refresh_scheduler(video_flow_provider_service)
         httpd = ThreadingHTTPServer((host, PORT), VoiceFlowApiHandler)
         print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://{host}:{PORT}")
         httpd.serve_forever()

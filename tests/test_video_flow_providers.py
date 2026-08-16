@@ -38,6 +38,9 @@ def test_video_flow_provider_policy_is_complete_and_isolated(tmp_path):
         "claude_code",
         "antigravity",
         "openai_codex",
+        "cursor",
+        "kiro",
+        "copilot",
     ]
     assert len(catalog["api_key"]) >= 10
     assert {provider["id"] for provider in catalog["local"]} == {

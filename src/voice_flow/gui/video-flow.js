@@ -8,6 +8,7 @@ let vfCurrentProviderDetails = null;
 let vfConnectionMode = "single";
 let vfComboDraftModels = [];
 let vfProviderOpenRequest = 0;
+let vfOAuthProvider = null;
 
 const VF_PERMANENT_CONFIRMATION = "DELETE_VIDEO_FROM_THIS_PC";
 const vfProviderIcons = {
@@ -575,72 +576,107 @@ function closeVideoProvider() {
 }
 
 function renderVideoProviderDetails() {
-
   const data = vfCurrentProviderDetails;
-
   const root = document.getElementById("vf-provider-detail-content");
-
   if (!data || !root) return;
 
   const provider = data.provider;
+  const isOAuth = provider.category === "oauth";
+  const isLocal = provider.category === "local";
+  const oauthStatus = provider.oauth_status || {};
+  const logo = vfEscape(vfProviderIcons[provider.id] || provider.icon || "🎬");
 
-  const getKey = document.getElementById("vf-provider-get-key");
+  // Connection rows
+  const connectionRows = (data.connections || []).map(function(conn) {
+    return '<div class="vf-connection-row">' +
+      '<label><input type="checkbox" ' + (conn.is_active ? "checked" : "") + ' onchange="toggleVideoConnection(' + conn.id + ', this.checked)"></label>' +
+      '<span class="vf-connection-key">🔑</span>' +
+      '<span class="vf-connection-copy">' +
+        '<strong>' + vfEscape(conn.name) + '</strong>' +
+        '<small><b class="' + vfEscape(conn.status) + '">● ' + vfEscape(conn.status) + '</b> · priority ' + conn.priority + (conn.secret_hint ? ' · ' + vfEscape(conn.secret_hint) : '') + '</small>' +
+      '</span>' +
+      '<button class="vf-text-button" onclick="testVideoConnection(' + conn.id + ')">⚗ Test</button>' +
+      '<button class="vf-text-button" onclick="editVideoConnection(' + conn.id + ')">✎ Edit</button>' +
+      '<button class="vf-text-button danger" onclick="deleteVideoConnection(' + conn.id + ')">⌫ Delete</button>' +
+    '</div>';
+  }).join("");
 
-  if (getKey) {
+  // Model rows
+  const modelRows = (data.models || []).map(function(model) {
+    return '<div class="vf-provider-model-row">' +
+      '<span class="vf-provider-model-icon">🤖</span>' +
+      '<span><strong>' + vfEscape(model.full_id) + '</strong><small>' + vfEscape(model.display_name) + '</small></span>' +
+      '<span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span>' +
+      '<button class="vf-text-button" onclick="copyVideoModelId(\'' + vfEscape(model.full_id) + '\')">▣ Copy</button>' +
+      '<label class="vf-mini-switch"><input type="checkbox" ' + (model.is_active ? "checked" : "") + ' onchange="toggleVideoModel(' + model.id + ', this.checked)"></label>' +
+      (model.custom ? '<button class="vf-text-button danger" onclick="deleteVideoCustomModel(' + model.id + ')">× Remove</button>' : '') +
+    '</div>';
+  }).join("");
 
-    getKey.href = provider.get_key_url || "#";
+  // Empty-state fallbacks
+  var connectionsEmpty = '<div class="vf-empty-state vf-compact-empty"><strong>No connections</strong><span>' + (isLocal ? "Add the local server URL." : "Add an API key to activate these models.") + '</span></div>';
+  var modelsEmpty = '<div class="vf-empty-state vf-compact-empty"><strong>No models</strong><span>Add a model ID for this provider.</span></div>';
 
-    getKey.style.display = provider.get_key_url ? "inline-flex" : "none";
+  // Build the full detail HTML
+  var html = '';
 
+  // Provider title row
+  html += '<div class="provider-detail-title-row">';
+  html += '<div class="provider-large-badge">' + logo + '</div>';
+  html += '<div>';
+  html += '<div style="display:flex;align-items:center;gap:10px;">';
+  html += '<h1 class="provider-detail-title">' + vfEscape(provider.name) + '</h1>';
+  if (provider.get_key_url) {
+    html += '<a href="' + vfEscape(provider.get_key_url) + '" target="_blank" class="get-key-pill-link">🔑 Get API Key ↗</a>';
+  }
+  html += '</div>';
+  if (provider.description) {
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + vfEscape(provider.description) + '</div>';
+  }
+  html += '</div></div>';
+
+  // OAuth status section
+  if (isOAuth) {
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">';
+    html += oauthStatus.connected
+      ? '<span class="status-badge status-connected">✓ Account connected</span>'
+      : '<span class="status-badge status-error">No account</span>';
+    html += '<button class="btn-primary" onclick="startVideoOAuth(\'' + vfEscape(provider.id) + '\')">' + (oauthStatus.connected ? "Reconnect account" : "Add account") + '</button>';
+    html += '</div>';
+    html += '<div class="vf-oauth-banner ' + (oauthStatus.connected ? "connected" : "") + '">';
+    html += '<span>' + (oauthStatus.connected ? "✓" : "i") + '</span>';
+    html += '<strong>' + vfEscape(oauthStatus.label || "Not connected") + '</strong>';
+    html += '<button class="vf-text-button" onclick="refreshVideoOAuth(\'' + vfEscape(provider.id) + '\')">Refresh</button>';
+    html += '</div>';
   }
 
-  const isOAuth = provider.category === "oauth";
+  // Connections section (non-OAuth)
+  if (!isOAuth) {
+    html += '<div class="provider-section-box">';
+    html += '<div class="section-box-header">';
+    html += '<div class="section-title-group"><span class="section-box-title">Connections</span></div>';
+    html += '<div class="section-controls-group">';
+    html += '<select onchange="setVideoProviderMode(this.value)" class="mode-select-dropdown">';
+    html += '<option value="priority"' + (data.load_balance_mode === "priority" ? " selected" : "") + '>Priority / fallback</option>';
+    html += '<option value="round_robin"' + (data.load_balance_mode === "round_robin" ? " selected" : "") + '>Round robin</option>';
+    html += '</select>';
+    html += '<button class="btn-primary" style="padding:6px 14px;font-size:12px;" onclick="openVideoConnectionModal()">+ Add Connection</button>';
+    html += '</div></div>';
+    html += '<div class="connections-list">' + (connectionRows || connectionsEmpty) + '</div>';
+    html += '</div>';
+  }
 
-  const isLocal = provider.category === "local";
+  // Models section
+  html += '<div class="provider-section-box" style="margin-top:24px;">';
+  html += '<div class="section-box-header">';
+  html += '<div class="section-title-group"><span class="section-box-title">Available Models</span></div>';
+  html += '<div class="section-controls-group">';
+  html += '<button class="btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="openVideoCustomModelModal()">+ Add Model</button>';
+  html += '</div></div>';
+  html += '<div class="connections-list">' + (modelRows || modelsEmpty) + '</div>';
+  html += '</div>';
 
-  const connectionRows = (data.connections || []).map(connection =>
-
-    '<div class="vf-connection-row"><label><input type="checkbox" ' + (connection.is_active ? "checked" : "") + ' onchange="toggleVideoConnection(' + connection.id + ', this.checked)"><span></span></label>' +
-
-    '<span class="vf-connection-key">🔑</span><span class="vf-connection-copy"><strong>' + vfEscape(connection.name) + '</strong><small><b class="' + vfEscape(connection.status) + '">● ' + vfEscape(connection.status) + '</b> · priority ' + connection.priority + (connection.secret_hint ? ' · ' + vfEscape(connection.secret_hint) : '') + '</small></span>' +
-
-    '<button class="vf-text-button" onclick="testVideoConnection(' + connection.id + ')">⚗ Test</button>' +
-
-    '<button class="vf-text-button" onclick="editVideoConnection(' + connection.id + ')">✎ Edit</button>' +
-
-    '<button class="vf-text-button danger" onclick="deleteVideoConnection(' + connection.id + ')">⌫ Delete</button></div>'
-
-  ).join("");
-
-  const modelRows = (data.models || []).map(model =>
-
-    '<div class="vf-provider-model-row"><span class="vf-provider-model-icon">🤖</span><span><strong>' + vfEscape(model.full_id) + '</strong><small>' + vfEscape(model.display_name) + '</small></span>' +
-
-    '<span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span>' +
-
-    '<button class="vf-text-button" onclick="copyVideoModelId(\'' + vfEscape(model.full_id) + '\')">▣ Copy</button>' +
-
-    '<label class="vf-mini-switch"><input type="checkbox" ' + (model.is_active ? "checked" : "") + ' onchange="toggleVideoModel(' + model.id + ', this.checked)"><span></span></label>' +
-
-    (model.custom ? '<button class="vf-text-button danger" onclick="deleteVideoCustomModel(' + model.id + ')">×</button>' : '') + '</div>'
-
-  ).join("");
-
-  const oauthStatus = provider.oauth_status || {};
-
-  root.innerHTML =
-    '<div class="detail-header-bar" style="margin-bottom: 20px;"><button class="btn-back" onclick="closeVideoProvider()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Back to Video Flow</span></button>' +
-    '<div class="provider-detail-title-row"><div class="provider-large-badge">' + vfEscape(vfProviderIcons[provider.id] || provider.icon || "🎬") + '</div>' +
-    '<div><div style="display: flex; align-items: center; gap: 10px;"><h1 class="provider-detail-title">' + vfEscape(provider.name) + '</h1>' +
-    (provider.get_key_url ? '<a href="' + vfEscape(provider.get_key_url) + '" target="_blank" class="get-key-pill-link">🔑 Get API Key ↗</a>' : '') + '</div>' +
-    '<div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">' + vfEscape(provider.description || "") + '</div></div></div></div>' +
-    (isOAuth ? '<div class="vf-provider-detail-heading" style="margin-bottom: 16px;">' + (oauthStatus.connected ? '<span class="status-badge status-connected">✓ Account connected</span>' : '<span class="status-badge status-error">No account</span>') + '<button class="btn-primary" onclick="startVideoOAuth(\'' + vfEscape(provider.id) + '\')">' + (oauthStatus.connected ? "Reconnect account" : "Add account") + '</button></div>' : '') +
-    (isOAuth ? '<div class="vf-oauth-banner ' + (oauthStatus.connected ? "connected" : "") + '"><span>' + (oauthStatus.connected ? "✓" : "i") + '</span><strong>' + vfEscape(oauthStatus.label || "Not connected") + '</strong><button class="vf-text-button" onclick="refreshVideoOAuth(\'' + vfEscape(provider.id) + '\')">Refresh</button></div>' : '') +
-    (!isOAuth ? '<div class="provider-section-box"><div class="section-box-header"><div class="section-title-group"><span class="section-box-title">Connections</span></div><div class="section-controls-group"><label class="vf-round-robin"><select onchange="setVideoProviderMode(this.value)" class="mode-select-dropdown" style="padding: 4px 8px; font-size: 11px;"><option value="priority" ' + (data.load_balance_mode === "priority" ? "selected" : "") + '>Priority / fallback</option><option value="round_robin" ' + (data.load_balance_mode === "round_robin" ? "selected" : "") + '>Round robin</option></select></label><button class="btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="openVideoConnectionModal()">+ Add Connection</button></div></div>' +
-      '<div class="connections-list" style="margin-top: 12px;">' + (connectionRows || '<div class="vf-empty-state vf-compact-empty"><strong>No connections</strong><span>' + (isLocal ? "Add the local server URL." : "Add an API key to activate these models.") + '</span></div>') + '</div></div>' : '') +
-    '<div class="provider-section-box" style="margin-top: 24px;"><div class="section-box-header"><div class="section-title-group"><span class="section-box-title">Available Models</span></div><div class="section-controls-group"><button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="openVideoCustomModelModal()">+ Add Model</button></div></div>' +
-      '<div class="models-cards-grid" style="margin-top: 12px;">' + (modelRows || '<div class="vf-empty-state vf-compact-empty"><strong>No models</strong><span>Add a model ID for this provider.</span></div>') + '</div></div>';
-
+  root.innerHTML = html;
 }
 
 function openVideoConnectionModal(connectionId = null) {
@@ -785,9 +821,76 @@ async function setVideoProviderMode(mode) {
 
 async function startVideoOAuth(providerId) {
   try {
-    await vfPost("/api/video-flow/providers/oauth/start", {provider: providerId});
-    vfToast("Sign-in opened. Return here and press Refresh when it completes.");
+    const result = await vfPost("/api/video-flow/providers/oauth/start", {provider: providerId});
+    if (result.auth_url) {
+      openVideoOAuthModal(providerId, result.auth_url);
+    } else {
+      vfToast(result.message || "Sign-in opened. Return here and press Refresh when it completes.");
+    }
   } catch (error) { vfToast(error.message, true); }
+}
+
+function openVideoOAuthModal(providerId, authUrl) {
+  vfOAuthProvider = providerId;
+  const modal = document.getElementById("vf-oauth-modal");
+  const name = vfCurrentProviderDetails?.provider?.name || providerId;
+  document.getElementById("vf-oauth-provider-name").textContent = name;
+  document.getElementById("vf-oauth-open-link").href = authUrl;
+  document.getElementById("vf-oauth-code-input").value = "";
+  document.getElementById("vf-oauth-status").textContent = "Sign-in window opening…";
+  document.getElementById("vf-oauth-code-card")?.classList.add("hidden");
+  modal?.classList.remove("hidden");
+
+  if (!window.__vfOAuthMessageListener) {
+    window.__vfOAuthMessageListener = true;
+    window.addEventListener("message", async (event) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data || {};
+      if (data.type !== "OAUTH_CALLBACK_SUCCESS") return;
+      await exchangeVideoOAuthCode(vfOAuthProvider, data.code, data.state);
+    });
+  }
+
+  let popup = null;
+  try {
+    popup = window.open(authUrl, "oauth_popup", "width=580,height=700,menubar=no,toolbar=no,location=no,status=no");
+  } catch (_) { popup = null; }
+  if (!popup) {
+    document.getElementById("vf-oauth-status").textContent = "The popup was blocked. Open the login page, then paste the code here.";
+    document.getElementById("vf-oauth-code-card")?.classList.remove("hidden");
+    document.getElementById("vf-oauth-code-input").focus();
+  }
+}
+
+async function exchangeVideoOAuthCode(providerId, code, state) {
+  if (!providerId || !code) return;
+  try {
+    await vfPost("/api/video-flow/providers/oauth/exchange", {provider: providerId, code: code, state: state || ""});
+    closeVideoModal("vf-oauth-modal");
+    await loadVideoFlow();
+    if (vfCurrentProvider === providerId) {
+      await refreshCurrentVideoProviderDetail(providerId);
+    }
+    vfToast("Account connected to Video Flow. Models are now available.");
+  } catch (error) { vfToast(error.message, true); }
+}
+
+async function completeVideoOAuthFromInput() {
+  const raw = document.getElementById("vf-oauth-code-input")?.value.trim() || "";
+  if (!raw) {
+    vfToast("Paste the code or the full callback URL first.", true);
+    return;
+  }
+  let code = raw;
+  let state = "";
+  if (raw.includes("?") || raw.includes("&")) {
+    try {
+      const url = new URL(raw.startsWith("http") ? raw : "http://127.0.0.1/" + raw.replace(/^\//, ""));
+      code = url.searchParams.get("code") || code;
+      state = url.searchParams.get("state") || "";
+    } catch (_) {}
+  }
+  await exchangeVideoOAuthCode(vfOAuthProvider, code, state);
 }
 
 async function refreshVideoOAuth(providerId) {

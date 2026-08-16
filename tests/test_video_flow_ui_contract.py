@@ -28,8 +28,8 @@ def test_video_flow_assets_and_provider_detail_use_the_current_studio_contract()
 
     # A versioned URL prevents the desktop WebView from reviving an older
     # script or stylesheet, whose provider cards used the inline behavior.
-    assert 'href="video-flow.css?v=20260811"' in html
-    assert 'src="video-flow.js?v=20260811"' in html
+    assert re.search(r'href="video-flow\.css\?v=\d+"', html)
+    assert re.search(r'src="video-flow\.js\?v=\d+"', html)
 
     assert 'id="vf-provider-detail-panel"' in page
     assert 'class="vf-provider-detail-panel hidden"' in page

@@ -18,7 +18,7 @@
 
   <link rel="stylesheet" href="styles.css">
 
-  <link rel="stylesheet" href="video-flow.css?v=20260811">
+  <link rel="stylesheet" href="video-flow.css?v=20260816">
 
   <link rel="stylesheet" href="design-system.css">
 
@@ -1107,8 +1107,13 @@
           <div id="vf-combo-empty" class="vf-empty-state vf-compact-empty"><strong>No combos yet</strong><span>Create one to group models under a reusable Video Flow route.</span></div>
         </section>
 
-        <section id="vf-provider-detail-panel" class="vf-provider-detail-panel hidden" aria-live="polite">
-          <div class="vf-provider-detail-toolbar" style="display: none;"><button class="vf-provider-back" onclick="closeVideoProvider()">← Video Flow providers</button></div>
+        <section id="vf-provider-detail-panel" class="vf-provider-detail-panel hidden" aria-live="polite" aria-hidden="true">
+          <div class="vf-provider-detail-toolbar">
+            <button class="vf-provider-back" onclick="closeVideoProvider()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              <span>Back to Video Flow</span>
+            </button>
+          </div>
           <div id="vf-provider-detail-content"></div>
         </section>
       </section>
@@ -1372,6 +1377,29 @@
 
 
 
+  <div id="vf-oauth-modal" class="modal-overlay hidden vf-modal-layer">
+
+    <div class="vf-dialog vf-provider-dialog">
+
+      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO FLOW OAUTH</span><h3>Sign in to <span id="vf-oauth-provider-name">provider</span></h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-oauth-modal')">✕</button></div>
+
+      <p id="vf-oauth-status" class="vf-oauth-help">A sign-in window opened. Complete the login there — Voice Flow picks up the result automatically.</p>
+
+      <div class="vf-dialog-actions" style="justify-content:flex-start;"><a class="btn-primary" id="vf-oauth-open-link" href="#" target="_blank" rel="noopener">Open login page</a></div>
+
+      <div id="vf-oauth-code-card" class="hidden">
+        <label class="vf-field"><span>Authorization code <em>manual fallback</em></span><input id="vf-oauth-code-input" type="text" autocomplete="off" placeholder="Paste the code or the full callback URL"></label>
+        <small style="color:var(--text-muted);">If the sign-in window closed before connecting, paste the code from the final page here.</small>
+      </div>
+
+      <div class="vf-dialog-actions"><button class="btn-secondary" onclick="closeVideoModal('vf-oauth-modal')">Cancel</button><button class="btn-primary" onclick="completeVideoOAuthFromInput()">Complete sign-in</button></div>
+
+    </div>
+
+  </div>
+
+
+
   <div id="vf-custom-model-modal" class="modal-overlay hidden vf-modal-layer">
 
     <div class="vf-dialog vf-provider-dialog">
@@ -1486,7 +1514,9 @@
 
   <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
 
-  <script src="video-flow.js?v=20260811"></script>
+  </div>
+
+  <script src="video-flow.js?v=20260816"></script>
 
   <script src="app.js"></script>
 

@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -118,9 +120,12 @@ class VideoModelGateway:
         if provider == "codex":
             return self._call_codex(model_id, self._prompt(source, mode, title))
 
-        connections = video_flow_provider_service.active_connections(provider)
+        connections = [
+            connection for connection in video_flow_provider_service.active_connections(provider)
+            if video_flow_provider_service.connection_is_healthy(connection)
+        ]
         if not connections:
-            raise RuntimeError(f"No active {provider} connection.")
+            raise RuntimeError(f"No healthy {provider} connection.")
         load_balance_mode = video_flow_provider_service.get_setting(f"load_balance:{provider}", "priority")
         if load_balance_mode == "round_robin" and len(connections) > 1:
             cursor_key = f"video_flow_provider_cursor_{provider}"
@@ -129,17 +134,43 @@ class VideoModelGateway:
             connections = connections[cursor:] + connections[:cursor]
 
         prompt = self._prompt(source, mode, title)
+
+        def attempt(secret: str) -> dict[str, Any]:
+            if provider == "gemini":
+                return self._call_gemini(model_id, secret, prompt)
+            if provider in self._openai_endpoints:
+                return self._call_openai_compatible(provider, model_id, secret, prompt)
+            raise RuntimeError(f"{provider} does not expose a compatible planning endpoint yet.")
+
         failures: list[str] = []
         for connection in connections:
             try:
-                secret = str(connection.get("secret", ""))
-                if not secret and provider not in ("local", "ollama", "lm_studio", "llama_cpp"):
+                secret = video_flow_provider_service.resolve_connection_secret(connection)
+                if not secret:
                     continue
-                if provider == "gemini":
-                    return self._call_gemini(model_id, secret, prompt)
-                if provider in self._openai_endpoints:
-                    return self._call_openai_compatible(provider, model_id, secret, prompt)
-                raise RuntimeError(f"{provider} does not expose a compatible planning endpoint yet.")
+                started = time.monotonic()
+                try:
+                    result = attempt(secret)
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 401:
+                        try:
+                            video_flow_provider_service.oauth_refresh(int(connection["id"]))
+                            fresh = video_flow_provider_service.get_connection(int(connection["id"]), public=False)
+                            connection = fresh or connection
+                            secret = video_flow_provider_service.resolve_connection_secret(connection)
+                        except Exception as refresh_exc:
+                            failures.append(f"{provider}: token refresh failed ({refresh_exc})")
+                            continue
+                        result = attempt(secret)
+                    elif exc.code == 429:
+                        video_flow_provider_service.mark_cooldown(int(connection["id"]))
+                        failures.append(f"{provider}: rate limited (429) — 60s cooldown")
+                        continue
+                    else:
+                        raise
+                latency_ms = int((time.monotonic() - started) * 1000)
+                video_flow_provider_service.update_connection(int(connection["id"]), last_latency_ms=latency_ms)
+                return result
             except Exception as exc:
                 failures.append(str(exc))
         raise RuntimeError("; ".join(failures)[:700] or "Provider request failed.")

@@ -7,14 +7,18 @@ responses are masked.
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import sqlite3
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +27,25 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from voice_flow.storage import DB_PATH
+from voice_flow.video_flow_oauth import (
+    COOLDOWN_DEFAULT_SECONDS,
+    OAuthError,
+    _http_json,
+    clear_pending,
+    decrypt_token,
+    encrypt_token,
+    exchange_copilot_token,
+    generate_pkce_pair,
+    import_cli_session,
+    jwt_expiry,
+    load_pending,
+    looks_encrypted,
+    oauth_config,
+    poll_device_flow,
+    refresh_and_store,
+    save_pending,
+    start_device_flow,
+)
 
 
 def _now() -> str:
@@ -33,6 +56,9 @@ PROVIDERS: tuple[dict[str, Any], ...] = (
     {"id": "claude_code", "name": "Claude Code", "category": "oauth", "prefix": "claude-code", "icon": "✺", "auth": "oauth", "description": "Use a signed-in Claude Code subscription.", "login_command": ["claude", "auth", "login"], "status_command": ["claude", "auth", "status"], "get_key_url": "https://console.anthropic.com/settings/keys"},
     {"id": "antigravity", "name": "Antigravity", "category": "oauth", "prefix": "antigravity", "icon": "A", "auth": "oauth", "description": "Use the Google account signed into Antigravity.", "login_command": ["antigravity"], "status_command": [], "get_key_url": "https://aistudio.google.com/apikey"},
     {"id": "openai_codex", "name": "OpenAI Codex", "category": "oauth", "prefix": "codex", "icon": "◎", "auth": "oauth", "description": "Use a signed-in Codex account.", "login_command": ["codex", "login"], "status_command": ["codex", "login", "status"], "get_key_url": "https://platform.openai.com/api-keys"},
+    {"id": "cursor", "name": "Cursor", "category": "oauth", "prefix": "cursor", "icon": "C", "auth": "oauth", "description": "Use the Cursor Pro subscription signed into Cursor.", "login_command": [], "status_command": [], "get_key_url": "https://cursor.com/settings"},
+    {"id": "kiro", "name": "AWS Kiro", "category": "oauth", "prefix": "kiro", "icon": "K", "auth": "oauth", "description": "Use the AWS Kiro subscription signed into the Kiro CLI.", "login_command": ["kiro", "auth", "login"], "status_command": ["kiro", "auth", "status"], "get_key_url": "https://console.aws.amazon.com/kiro"},
+    {"id": "copilot", "name": "GitHub Copilot", "category": "oauth", "prefix": "copilot", "icon": "⌥", "auth": "oauth", "description": "Use a GitHub Copilot subscription via device sign-in.", "login_command": [], "status_command": [], "get_key_url": "https://github.com/settings/copilot"},
     {"id": "vertex_ai", "name": "Vertex AI", "category": "api_key", "prefix": "vx", "icon": "V", "auth": "api_key", "description": "Google Cloud Vertex models and custom model IDs.", "get_key_url": "https://console.cloud.google.com/vertex-ai"},
     {"id": "gemini", "name": "Google Gemini", "category": "api_key", "prefix": "gemini", "icon": "✦", "auth": "api_key", "description": "Gemini API free-tier and paid keys.", "get_key_url": "https://aistudio.google.com/apikey"},
     {"id": "openrouter", "name": "OpenRouter", "category": "api_key", "prefix": "openrouter", "icon": "↔", "auth": "api_key", "description": "A broad catalog including free-routed models.", "get_key_url": "https://openrouter.ai/settings/keys"},
@@ -55,14 +81,15 @@ def antigravity_executable_candidates() -> list[Path]:
     """Return deterministic Windows install locations for Antigravity.
 
     The desktop installer uses a per-user location that is not normally added to
-    PATH. Keep discovery explicit and side-effect free so the OAuth button can
+    PATH. Keep discovery explicit and side effect free so the OAuth button can
     launch the installed app without asking the user to download it again.
+    Installed application locations are checked before PATH lookups so a
+    leftover "Antigravity Setup" installer on PATH can never shadow the app.
     """
     candidates: list[Path] = []
     for value in (
         os.environ.get("ANTIGRAVITY_EXE"),
         os.environ.get("ANTIGRAVITY_EXECUTABLE"),
-        shutil.which("antigravity"),
     ):
         if value:
             candidates.append(Path(value))
@@ -79,6 +106,10 @@ def antigravity_executable_candidates() -> list[Path]:
         if root:
             candidates.append(Path(root) / "Antigravity" / "Antigravity.exe")
 
+    path_hit = shutil.which("antigravity")
+    if path_hit:
+        candidates.append(Path(path_hit))
+
     # Keep the historical custom install path as a final compatibility probe.
     candidates.append(Path("D:/Antigravity.exe"))
 
@@ -92,14 +123,63 @@ def antigravity_executable_candidates() -> list[Path]:
     return result
 
 
+def _file_description(path: Path) -> str:
+    """Return the FileDescription of a Windows PE file, or '' when unknown."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        size = ctypes.windll.version.GetFileVersionInfoSizeW(str(path), None)
+        if size <= 0:
+            return ""
+        data = ctypes.create_string_buffer(size)
+        if not ctypes.windll.version.GetFileVersionInfoW(str(path), 0, size, data):
+            return ""
+        out_ptr = wintypes.LPVOID()
+        out_len = wintypes.UINT()
+        block = r"\StringFileInfo\040904B0\FileDescription"
+        if not ctypes.windll.version.VerQueryValueW(data, block, ctypes.byref(out_ptr), ctypes.byref(out_len)):
+            return ""
+        return ctypes.wstring_at(out_ptr, out_len.value // 2).rstrip("\x00")
+    except Exception:
+        return ""
+
+
 def find_antigravity_executable() -> Path | None:
     for candidate in antigravity_executable_candidates():
         try:
-            if candidate.is_file():
-                return candidate
+            if not candidate.is_file():
+                continue
+            description = _file_description(candidate)
+            if description and any(marker in description.lower() for marker in ("setup", "installer")):
+                continue
+            return candidate
         except OSError:
             continue
     return None
+
+
+ANTIGRAVITY_ACCOUNT_URL = "https://antigravity.google/"
+
+
+def antigravity_open_account_selection() -> None:
+    """Open the Google account-selection page for Antigravity in the browser.
+
+    The web platform redirects unauthenticated visitors to the Google account
+    chooser, so the user can pick the account already signed into the installed
+    Antigravity desktop app. Best-effort: never raise into the OAuth flow.
+    """
+    try:
+        import webbrowser
+
+        opener = webbrowser.get("windows-default") if os.name == "nt" else webbrowser
+        if not opener.open(ANTIGRAVITY_ACCOUNT_URL):
+            os.startfile(ANTIGRAVITY_ACCOUNT_URL)
+    except Exception:
+        try:
+            os.startfile(ANTIGRAVITY_ACCOUNT_URL)
+        except Exception:
+            pass
 
 
 
@@ -272,6 +352,19 @@ class VideoFlowProviderService:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )""")
+            existing_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(video_flow_provider_connections)").fetchall()
+            }
+            for column, declaration in (
+                ("account_id", "TEXT NOT NULL DEFAULT ''"),
+                ("refresh_token", "TEXT NOT NULL DEFAULT ''"),
+                ("token_type", "TEXT NOT NULL DEFAULT 'Bearer'"),
+                ("expires_at", "TEXT NOT NULL DEFAULT ''"),
+                ("cooldown_until", "TEXT NOT NULL DEFAULT ''"),
+                ("last_latency_ms", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in existing_columns:
+                    conn.execute(f"ALTER TABLE video_flow_provider_connections ADD COLUMN {column} {declaration}")
             seed_row = conn.execute(
                 "SELECT value FROM video_flow_provider_settings WHERE key = 'seed_catalog_version'"
             ).fetchone()
@@ -340,6 +433,11 @@ class VideoFlowProviderService:
         secret: str = "",
         priority: int = 1,
         metadata: dict[str, Any] | None = None,
+        account_id: str = "",
+        refresh_token: str = "",
+        token_type: str = "Bearer",
+        expires_at: str = "",
+        cooldown_until: str = "",
     ) -> dict[str, Any]:
         provider = self.provider(provider_id)
         clean_name = (name or "Connection").strip()[:100]
@@ -353,9 +451,15 @@ class VideoFlowProviderService:
         with self._connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO video_flow_provider_connections
-                (provider, name, auth_type, secret, priority, is_active, status, metadata_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, 'untested', ?, ?, ?)""",
-                (provider_id, clean_name, provider["auth"], clean_secret, max(1, int(priority)), json.dumps(metadata), now, now),
+                (provider, name, auth_type, secret, priority, is_active, status, metadata_json, created_at, updated_at,
+                 account_id, refresh_token, token_type, expires_at, cooldown_until)
+                VALUES (?, ?, ?, ?, ?, 1, 'untested', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    provider_id, clean_name, provider["auth"], clean_secret, max(1, int(priority)),
+                    json.dumps(metadata), now, now,
+                    (account_id or "").strip()[:200], refresh_token.strip(), (token_type or "Bearer").strip()[:40],
+                    str(expires_at).strip()[:40], str(cooldown_until).strip()[:40],
+                ),
             )
             conn.commit()
             connection_id = int(cursor.lastrowid)
@@ -399,7 +503,7 @@ class VideoFlowProviderService:
 
     @staticmethod
     def _safe_connection(item: dict[str, Any]) -> dict[str, Any]:
-        safe = {key: value for key, value in item.items() if key != "secret"}
+        safe = {key: value for key, value in item.items() if key not in {"secret", "refresh_token"}}
         secret = str(item.get("secret", ""))
         safe["has_secret"] = bool(secret)
         safe["secret_hint"] = f"••••{secret[-4:]}" if secret else ""
@@ -410,9 +514,13 @@ class VideoFlowProviderService:
         if not current:
             return None
         allowed: dict[str, Any] = {}
-        for key in ("name", "secret", "status"):
+        for key in ("name", "secret", "status", "account_id", "token_type", "expires_at", "cooldown_until"):
             if key in changes and changes[key] is not None:
                 allowed[key] = str(changes[key]).strip()
+        if "refresh_token" in changes and changes["refresh_token"] is not None:
+            allowed["refresh_token"] = str(changes["refresh_token"]).strip()
+        if "last_latency_ms" in changes and changes["last_latency_ms"] is not None:
+            allowed["last_latency_ms"] = max(0, int(changes["last_latency_ms"]))
         if "priority" in changes:
             allowed["priority"] = max(1, int(changes["priority"]))
         if "is_active" in changes:
@@ -446,6 +554,11 @@ class VideoFlowProviderService:
         key = str(connection.get("secret", ""))
         metadata = connection.get("metadata", {})
         try:
+            if provider["category"] == "oauth" and provider_id in {"copilot", "cursor", "kiro"}:
+                if not self.connection_is_healthy(connection):
+                    raise RuntimeError("Connection is not healthy.")
+                self.update_connection(connection_id, status="active")
+                return {"success": True, "status": "active"}
             if provider["category"] == "local":
                 base_url = metadata.get("base_url") or provider.get("default_base_url", "")
                 url = base_url.rstrip("/") + ("/api/tags" if provider_id == "ollama" else "/models")
@@ -480,10 +593,12 @@ class VideoFlowProviderService:
                     headers["anthropic-version"] = "2023-06-01"
                     headers["x-api-key"] = key
                 request = urllib.request.Request(url, headers=headers, method="GET")
+            started = time.monotonic()
             with urllib.request.urlopen(request, timeout=12) as response:
                 response.read(512)
-            self.update_connection(connection_id, status="connected")
-            return {"success": True, "status": "connected"}
+            latency_ms = int((time.monotonic() - started) * 1000)
+            self.update_connection(connection_id, status="connected", last_latency_ms=latency_ms)
+            return {"success": True, "status": "connected", "latency_ms": latency_ms}
         except (OSError, urllib.error.URLError, RuntimeError) as exc:
             self.update_connection(connection_id, status="error")
             reason = getattr(exc, "reason", None) or str(exc)
@@ -686,6 +801,17 @@ class VideoFlowProviderService:
                     status["label"] = "Antigravity signed in; Video Flow bridge is not attached"
                 else:
                     status["label"] = "Antigravity account ready for Video Flow"
+            elif provider_id in {"copilot", "cursor"}:
+                active = [
+                    item for item in self.list_connections(provider_id)
+                    if item["is_active"] and item["status"] == "active"
+                ]
+                status["connected"] = bool(active)
+                status["label"] = "Account connected" if active else "Not connected"
+                if not active and provider_id == "cursor":
+                    config = oauth_config(provider_id)
+                    if any(Path(raw).expanduser().is_file() for raw in config.cli_files):
+                        status["label"] = "Cursor session found — press Sign in to import"
             else:
                 command = provider.get("status_command") or []
                 executable = shutil.which(command[0]) if command else None
@@ -704,6 +830,44 @@ class VideoFlowProviderService:
         provider = self.provider(provider_id)
         if provider["category"] != "oauth":
             raise ValueError("Provider does not use account authentication.")
+        config = oauth_config(provider_id)
+        if config.flow == "device":
+            info = start_device_flow(self, provider_id)
+            import webbrowser
+            webbrowser.open(info["verification_uri"])
+            self._spawn_device_poll(provider_id, info)
+            return {
+                "success": True,
+                "launched": True,
+                "provider": provider_id,
+                "flow": "device",
+                "device": info,
+                "message": f"Enter code {info['user_code']} at {info['verification_uri']} in your browser. Voice Flow connects automatically.",
+            }
+        if config.flow == "cli":
+            try:
+                imported = import_cli_session(self, provider_id)
+            except OAuthError as exc:
+                if not (provider.get("login_command") or []):
+                    raise RuntimeError(
+                        f"{provider['name']} session not found. Sign in to the {provider['name']} app first, then press Sign in here."
+                    ) from exc
+            else:
+                connection = self._create_oauth_connection(provider_id, imported)
+                return {
+                    "success": True,
+                    "launched": False,
+                    "imported": True,
+                    "provider": provider_id,
+                    "connection": connection,
+                    "message": f"Imported the {provider['name']} session from this machine.",
+                }
+        if config.flow == "pkce" and config.client_id:
+            if provider_id == "antigravity":
+                executable = find_antigravity_executable()
+                if executable:
+                    subprocess.Popen([str(executable)], close_fds=True)
+            return self._start_pkce_flow(provider_id, provider, config)
         command = list(provider.get("login_command") or [])
         if not command:
             raise RuntimeError("No login command is available.")
@@ -712,6 +876,7 @@ class VideoFlowProviderService:
             raise RuntimeError(f"{provider['name']} is not installed. Install it, then press Refresh.")
         if provider_id == "antigravity":
             subprocess.Popen([str(executable)], close_fds=True)
+            antigravity_open_account_selection()
         elif os.name == "nt":
             joined = " ".join(command)
             subprocess.Popen(
@@ -721,7 +886,249 @@ class VideoFlowProviderService:
             )
         else:
             subprocess.Popen(command, close_fds=True)
-        return {"success": True, "launched": True, "provider": provider_id, "message": "Antigravity opened. Video Flow will use the signed-in agy CLI; refresh this panel to see models." if provider_id == "antigravity" else "Authentication flow opened."}
+        return {"success": True, "launched": True, "provider": provider_id, "message": "Account sign-in opened in your browser. Choose your Google account, then press Refresh here." if provider_id == "antigravity" else "Authentication flow opened."}
+
+    def _spawn_device_poll(self, provider_id: str, info: dict[str, Any]) -> None:
+        """Watch an in-progress device flow in the background until it resolves.
+
+        The connection is created automatically once the user authorizes in the
+        browser, so the existing UI needs no polling logic of its own.
+        """
+        existing = getattr(self, "_device_poll_thread", None)
+        if existing is not None and existing.is_alive():
+            return
+        deadline = time.time() + max(60, int(info.get("expires_in") or 900))
+        interval = max(3, int(info.get("interval") or 5))
+
+        def worker() -> None:
+            delay = interval
+            while time.time() < deadline:
+                time.sleep(delay)
+                try:
+                    result = self.oauth_poll(provider_id)
+                except Exception:
+                    break
+                if result.get("status") == "connected":
+                    break
+                delay += 2  # GitHub recommends backoff on slow_down
+
+        self._device_poll_thread = threading.Thread(
+            target=worker,
+            name=f"vf-device-poll-{provider_id}",
+            daemon=True,
+        )
+        self._device_poll_thread.start()
+
+    def _start_pkce_flow(self, provider_id: str, provider: dict[str, Any], config: Any) -> dict[str, Any]:
+        verifier, challenge = generate_pkce_pair()
+        state = secrets.token_urlsafe(16)
+        # Google loopback redirects must be exactly http://localhost:{port} /
+        # http://127.0.0.1:{port} with no path component.
+        redirect_uri = os.environ.get(
+            "OAUTH_REDIRECT_URI",
+            "http://127.0.0.1:8991/",
+        )
+        save_pending(self, provider_id, {
+            "flow": "pkce",
+            "state": state,
+            "code_verifier": verifier,
+            "redirect_uri": redirect_uri,
+            "started_at": time.time(),
+        })
+        params = urllib.parse.urlencode({
+            "client_id": config.client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": config.scopes,
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        })
+        auth_url = f"{config.auth_url}?{params}"
+        import webbrowser
+        webbrowser.open(auth_url)
+        return {
+            "success": True,
+            "launched": True,
+            "provider": provider_id,
+            "flow": "pkce",
+            "auth_url": auth_url,
+            "message": "Sign-in opened in your browser. After choosing your account, this window will pick up the result.",
+        }
+
+    def _create_oauth_connection(self, provider_id: str, imported: dict[str, Any]) -> dict[str, Any]:
+        provider = self.provider(provider_id)
+        account_id = str(imported.get("account_id") or "").strip()
+        access = str(imported.get("access_token") or "")
+        name = f"{provider['name']} {account_id}" if account_id else f"{provider['name']} account"
+        connection = self.add_connection(
+            provider_id,
+            name=name[:100],
+            secret=encrypt_token(self, access) if access else "",
+            account_id=account_id,
+            refresh_token=encrypt_token(self, str(imported.get("refresh_token") or "")),
+            expires_at=str(imported.get("expires_at") or ""),
+            metadata={"source": str(imported.get("source") or "oauth")},
+        )
+        self.update_connection(
+            int(connection["id"]),
+            status="active",
+            token_type="Bearer",
+        )
+        return self.get_connection(int(connection["id"])) or {}
+
+    def oauth_callback(self, provider_id: str, code: str, state: str, *, code_verifier: str = "") -> dict[str, Any]:
+        """Complete a PKCE browser flow: exchange ``code`` and store the tokens."""
+        config = oauth_config(provider_id)
+        if config.flow != "pkce" or not config.client_id:
+            raise OAuthError("This provider does not use the PKCE browser flow.")
+        pending = load_pending(self, provider_id)
+        if not pending or pending.get("state") != state:
+            raise OAuthError("OAuth state mismatch. Start the sign-in flow again.")
+        redirect_uri = str(pending.get("redirect_uri") or "")
+        payload: dict[str, Any] = {
+            "client_id": config.client_id,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier or str(pending.get("code_verifier") or ""),
+        }
+        if config.client_secret:
+            payload["client_secret"] = config.client_secret
+        response = _http_json(config.token_url, data=payload)
+        access = str(response.get("access_token") or "")
+        if not access:
+            clear_pending(self, provider_id)
+            raise OAuthError(f"Token exchange failed: {response}")
+        expires_in = int(response.get("expires_in") or 0)
+        account_email = ""
+        id_token = str(response.get("id_token") or "")
+        if id_token:
+            try:
+                payload_data = json.loads(base64.urlsafe_b64decode(
+                    id_token.split(".")[1] + "=" * (-len(id_token.split(".")[1]) % 4)
+                ))
+                account_email = str(payload_data.get("email") or "")
+            except Exception:
+                account_email = ""
+        clear_pending(self, provider_id)
+        return self._create_oauth_connection(provider_id, {
+            "access_token": access,
+            "refresh_token": str(response.get("refresh_token") or ""),
+            "expires_at": int(time.time()) + expires_in if expires_in else "",
+            "account_id": account_email or provider_id,
+        })
+
+    def oauth_exchange(self, provider_id: str, code: str, state: str, *, code_verifier: str = "") -> dict[str, Any]:
+        """Exchange an authorization code delivered by the popup callback page."""
+        if not provider_id or not code:
+            raise OAuthError("Missing provider or authorization code.")
+        return self.oauth_callback(provider_id, code, state, code_verifier=code_verifier)
+
+    def oauth_poll(self, provider_id: str) -> dict[str, Any]:
+        """Poll an in-progress device-code flow and store tokens when authorized."""
+        config = oauth_config(provider_id)
+        if config.flow != "device":
+            raise OAuthError("This provider does not use the device-code flow.")
+        result = poll_device_flow(self, provider_id)
+        if result.get("status") != "authorized":
+            return result
+        if provider_id == "copilot":
+            exchanged = exchange_copilot_token(self, str(result.get("access_token") or ""))
+            access = str(exchanged.get("access_token") or "")
+            expires_at = str(exchanged.get("expires_at") or "") or jwt_expiry(access)
+            # The GitHub OAuth token is kept in refresh_token: the Copilot JWT
+            # lives ~30 minutes and is re-exchanged from it by the refresher.
+            connection = self._create_oauth_connection(provider_id, {
+                "access_token": access,
+                "refresh_token": str(result.get("access_token") or ""),
+                "expires_at": expires_at,
+                "account_id": "github-copilot",
+            })
+        else:
+            connection = self._create_oauth_connection(provider_id, {
+                "access_token": str(result.get("access_token") or ""),
+                "refresh_token": str(result.get("refresh_token") or ""),
+                "expires_at": int(result.get("expires_in") or 0),
+                "account_id": provider_id,
+            })
+        return {"status": "connected", "connection": connection}
+
+    def oauth_import(self, provider_id: str) -> dict[str, Any]:
+        """Import the provider's CLI session into a fresh connection."""
+        imported = import_cli_session(self, provider_id)
+        account_id = str(imported.get("account_id") or "").strip()
+        for connection in self.list_connections(provider_id):
+            if connection["is_active"] and str(connection.get("account_id") or "") == account_id:
+                refreshed = refresh_and_store(self, dict(connection, **{
+                    "secret": encrypt_token(self, str(imported.get("access_token") or "")),
+                    "refresh_token": encrypt_token(self, str(imported.get("refresh_token") or "")),
+                }))
+                return self.get_connection(int(connection["id"])) or refreshed
+        return self._create_oauth_connection(provider_id, imported)
+
+    def oauth_refresh(self, connection_id: int) -> dict[str, Any]:
+        """Force a token refresh for a connection; raise on failure."""
+        connection = self.get_connection(connection_id, public=False)
+        if not connection:
+            raise ValueError("Connection not found.")
+        refresh_and_store(self, connection)
+        return self.get_connection(connection_id) or {}
+
+    def list_all_connections(self) -> list[dict[str, Any]]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM video_flow_provider_connections ORDER BY provider, priority, id"
+            ).fetchall()
+        return [self._row_connection(row) for row in rows]
+
+    def connection_is_healthy(self, connection: dict[str, Any]) -> bool:
+        if not connection.get("is_active"):
+            return False
+        status = str(connection.get("status") or "")
+        if status in {"expired", "rate_limited"}:
+            return False
+        now = time.time()
+        cooldown = str(connection.get("cooldown_until") or "")
+        if cooldown:
+            try:
+                if float(cooldown) > now:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        expiry = str(connection.get("expires_at") or "")
+        if expiry:
+            try:
+                if 0 < float(expiry) <= now:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        return True
+
+    def pick_best_connection(self, provider_id: str) -> dict[str, Any] | None:
+        """Return the healthiest connection: lowest measured latency, then priority."""
+        best: dict[str, Any] | None = None
+        for connection in self.active_connections(provider_id):
+            if not self.connection_is_healthy(connection):
+                continue
+            latency = int(connection.get("last_latency_ms") or 0)
+            if best is None or latency < int(best.get("last_latency_ms") or 0):
+                best = connection
+        return best
+
+    def resolve_connection_secret(self, connection: dict[str, Any]) -> str:
+        secret = str(connection.get("secret") or "")
+        return decrypt_token(self, secret) if looks_encrypted(secret) else secret
+
+    def mark_connection_expired(self, connection_id: int) -> None:
+        self.update_connection(connection_id, status="expired")
+
+    def mark_cooldown(self, connection_id: int, seconds: int = COOLDOWN_DEFAULT_SECONDS) -> None:
+        self.update_connection(
+            connection_id,
+            status="rate_limited",
+            cooldown_until=str(int(time.time()) + max(1, int(seconds))),
+        )
 
 
 video_flow_provider_service = VideoFlowProviderService()

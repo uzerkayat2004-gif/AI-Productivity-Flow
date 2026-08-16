@@ -1,5 +1,5 @@
 // Voice Flow PWA Service Worker
-const CACHE_NAME = "voice-flow-cache-v6";
+const CACHE_NAME = "voice-flow-cache-v7";
 const APP_SHELL = "/index.html";
 const ASSETS_TO_CACHE = [
   APP_SHELL,
