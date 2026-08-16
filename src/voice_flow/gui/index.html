@@ -914,6 +914,46 @@
             </div>
           </div>
 
+          <!-- AUDIO FLOW SUMMARY MODEL SELECTOR HERO CARD -->
+          <div class="exec-policy-card" style="border-radius: 16px; padding: 20px 24px; margin-bottom: 24px; backdrop-filter: blur(20px);" id="af-summary-model-hero">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 16px;">
+              <div style="flex: 1; min-width: 280px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 24px;">📝</span>
+                  <h2 style="font-size: 18px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.5px; margin: 0;">AUDIO FLOW SUMMARY MODEL SELECTOR</h2>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">
+                  Select the LLM model used to generate spoken explanations (Quick, Standard, Detailed) before Text-to-Speech narration.
+                </p>
+              </div>
+              <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+                <span id="af-summary-status-badge" class="audio-status-badge">● Summary LLM Ready</span>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center;" class="af-inner-box">
+              <div>
+                <label for="af-summary-model-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Summary LLM Model</label>
+                <button id="af-summary-model-picker-button" class="vf-model-picker-button" type="button" onclick="openAudioSummaryModelPicker()" aria-haspopup="dialog" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                  <span class="vf-model-picker-copy"><strong id="af-summary-active-model-label">Voice Flow Local — Deterministic Summary</strong> <small id="af-summary-active-model-detail" style="color: var(--text-muted); margin-left: 6px;">(Select an LLM model)</small></span>
+                  <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>⌄</b></span>
+                </button>
+                <select id="af-summary-model-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
+              </div>
+              <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Summary Engine:</span>
+                  <strong style="color: var(--accent-text); font-weight: 700;" id="af-summary-active-engine-label">Local Extractive</strong>
+                </div>
+              </div>
+            </div>
+
+            <label id="af-summary-external-consent-row" class="vf-external-consent" style="display: flex; margin-top: 12px;">
+              <input id="af-summary-external-consent" type="checkbox" onchange="toggleAudioSummaryConsent(this.checked)">
+              <span><strong>Allow external AI for Audio Summaries</strong><small id="af-summary-external-consent-copy">Selected text will be sent to the selected LLM provider only for spoken summary synthesis.</small></span>
+            </label>
+          </div>
+
           <!-- AUDIO FLOW TTS API KEY PROVIDERS SECTION -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
             <div>

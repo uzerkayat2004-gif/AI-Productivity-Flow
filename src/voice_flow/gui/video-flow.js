@@ -262,7 +262,10 @@ function renderVideoModelPicker() {
   root.innerHTML = sections.join("") || '<div class="vf-empty-state vf-compact-empty"><strong>No connected models match</strong><span>Connect a provider, enable one of its models, or try another search.</span></div>';
 }
 
-function openVideoModelPicker() {
+let vfModelPickerContext = "video_flow";
+
+function openVideoModelPicker(context = "video_flow") {
+  vfModelPickerContext = context;
   const search = document.getElementById("vf-model-picker-search");
   if (search) search.value = "";
   renderVideoModelPicker();
@@ -271,10 +274,16 @@ function openVideoModelPicker() {
 }
 
 function chooseVideoModel(modelRef) {
-  const select = document.getElementById("vf-model-select");
-  if (select) select.value = modelRef;
   closeVideoModal("vf-model-picker-modal");
-  saveVideoModel(modelRef);
+  if (vfModelPickerContext === "audio_summary") {
+    if (typeof selectAudioSummaryModel === "function") {
+      selectAudioSummaryModel(modelRef);
+    }
+  } else {
+    const select = document.getElementById("vf-model-select");
+    if (select) select.value = modelRef;
+    saveVideoModel(modelRef);
+  }
 }
 function toggleVideoHistory() {
   const body = document.getElementById("vf-history-body");

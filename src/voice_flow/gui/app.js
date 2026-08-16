@@ -1569,6 +1569,82 @@ let currentAudioProvider = null;
 function loadAudioFlowPage() {
   loadAudioProvidersOverview();
   loadExecAudioFlowPolicy();
+  loadAudioSummarySettings();
+}
+
+let afSummaryModelRef = "";
+
+async function loadAudioSummarySettings() {
+  try {
+    const res = await fetch("/api/audio-summary/settings/get");
+    const data = await res.json();
+    if (data.success) {
+      afSummaryModelRef = data.model || "";
+      const consentBox = document.getElementById("af-summary-external-consent");
+      if (consentBox) consentBox.checked = Boolean(data.consent);
+      updateAudioSummaryModelUI(afSummaryModelRef);
+    }
+  } catch (err) {
+    console.warn("Could not load Audio Summary settings:", err);
+  }
+}
+
+function updateAudioSummaryModelUI(modelRef) {
+  const label = document.getElementById("af-summary-active-model-label");
+  const detail = document.getElementById("af-summary-active-model-detail");
+  const engineLabel = document.getElementById("af-summary-active-engine-label");
+  if (!label || !engineLabel) return;
+
+  if (!modelRef || modelRef === "local/deterministic") {
+    label.textContent = "Voice Flow Local — Deterministic Summary";
+    if (detail) detail.textContent = "(Works offline)";
+    engineLabel.textContent = "Local Extractive";
+  } else if (modelRef.startsWith("combo:")) {
+    label.textContent = "◈ " + modelRef.replace("combo:", "");
+    if (detail) detail.textContent = "Model combo";
+    engineLabel.textContent = "Combo";
+  } else {
+    const parts = modelRef.split("/", 2);
+    label.textContent = modelRef;
+    if (detail) detail.textContent = "Connected LLM Provider";
+    engineLabel.textContent = parts[0] || "LLM";
+  }
+}
+
+async function selectAudioSummaryModel(modelRef) {
+  try {
+    const res = await fetch("/api/audio-summary/settings/model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_ref: modelRef }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Could not set summary model.");
+    afSummaryModelRef = modelRef;
+    updateAudioSummaryModelUI(modelRef);
+    if (typeof vfToast === "function") vfToast("Audio Summary LLM selected.");
+  } catch (err) {
+    if (typeof vfToast === "function") vfToast(err.message, true);
+  }
+}
+
+async function toggleAudioSummaryConsent(enabled) {
+  try {
+    await fetch("/api/audio-summary/settings/consent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consent: Boolean(enabled) }),
+    });
+    if (typeof vfToast === "function") vfToast(`External AI for Audio Summary ${enabled ? "enabled" : "disabled"}.`);
+  } catch (err) {
+    if (typeof vfToast === "function") vfToast("Could not update summary consent.", true);
+  }
+}
+
+function openAudioSummaryModelPicker() {
+  if (typeof openVideoModelPicker === "function") {
+    openVideoModelPicker("audio_summary");
+  }
 }
 
 async function loadExecAudioFlowPolicy() {

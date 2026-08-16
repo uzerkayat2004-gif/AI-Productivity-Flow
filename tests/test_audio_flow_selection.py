@@ -30,6 +30,12 @@ class _Overlay:
     def show_reading(self, snippet: str) -> None:
         self.states.append(("reading", snippet))
 
+    def show_generating_audio(self) -> None:
+        self.states.append(("generating_audio", None))
+
+    def show_summarizing(self, mode: str = "") -> None:
+        self.states.append(("summarizing", mode))
+
 
 def _selection_app(injector: object) -> VoiceFlowApp:
     app = object.__new__(VoiceFlowApp)
@@ -40,6 +46,7 @@ def _selection_app(injector: object) -> VoiceFlowApp:
     app.recent_dictations = set()
     app.last_successful_transcript = None
     app._selection_generation = 0
+    app._audio_summary_generation = 0
     return app
 
 
@@ -170,4 +177,4 @@ def test_explicit_selection_bypasses_recent_dictation_guard(monkeypatch) -> None
     app._process_audio_flow_pipeline(text_override="intentionally selected dictation text")
 
     assert spoken == ["intentionally selected dictation text"]
-    assert app.overlay.states == []
+    assert not any(state[0] == "error" for state in app.overlay.states)

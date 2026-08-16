@@ -119,6 +119,7 @@ class VoiceFlowApp:
         self.overlay = FloatingOverlayBar()
         self.injector = ClipboardInjector()
         self.processing_lock = threading.Lock()
+        self._audio_summary_generation = 0
 
         # Connect Input Trigger Listener with expanded actions
         self.hotkeys = InputTriggerListener(
@@ -135,13 +136,13 @@ class VoiceFlowApp:
         self.overlay.on_start_click = self._on_dictation_start
         self.overlay.on_finish_click = self._on_dictation_finish
         self.overlay.on_cancel_click = self._on_dictation_cancel
-        self.overlay.on_listen_selected = lambda text: self._process_audio_flow_pipeline(text_override=text)
+        self.overlay.on_listen_selected = lambda text: self._process_audio_flow_pipeline(text_override=text, mode="full")
         self.overlay.on_video_flow = lambda text: self._process_video_flow_pipeline("summary", text)
         self.overlay.on_video_ready = lambda video_id: video_flow_widget.open_player(video_id)
         self.overlay.on_video_cancel = self._cancel_video_from_screen
 
         # Connect Audio Flow Floating Widget
-        audio_flow_widget.on_trigger = lambda text: self._process_audio_flow_pipeline(text_override=text)
+        audio_flow_widget.on_trigger = lambda text, mode="full", summary_depth=None: self._process_audio_flow_pipeline(text_override=text, mode=mode, summary_depth=summary_depth)
         audio_flow_widget.on_stop = lambda: self._stop_audio_flow_pipeline()
         video_flow_widget.on_generate = self._queue_video_from_screen
 
@@ -355,7 +356,8 @@ class VoiceFlowApp:
 
     def _on_mouse_release(self, x: int, y: int, drag_distance: float = 0.0, start_x: int = 0, start_y: int = 0) -> None:
         """Capture selected text and expose its actions on the persistent bar."""
-        self._selection_generation += 1
+        self._selection_generation = getattr(self, "_selection_generation", 0) + 1
+        self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
         selection_generation = self._selection_generation
         audio_enabled = storage.get_setting("audio_flow_enabled", True)
         video_enabled = storage.get_setting("video_flow_enabled", True)
@@ -364,7 +366,7 @@ class VoiceFlowApp:
             audio_flow_widget.hide()
             return
 
-        if drag_distance < 6.0:
+        if drag_distance < 2.0:
             self.overlay.clear_selected_text()
             audio_flow_widget.hide()
             return
@@ -462,8 +464,13 @@ class VoiceFlowApp:
         self,
         text_override: str | None = None,
         model_override: str | None = None,
+        mode: str = "full",
+        summary_depth: str | None = None,
     ) -> None:
-        """Capture selected text and read aloud via Audio Flow TTS Engine."""
+        """Capture selected text and read aloud via Audio Flow TTS Engine or Audio Summary."""
+        self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
+        gen_token = self._audio_summary_generation
+
         if tts_engine.is_speaking():
             tts_engine.stop()
             audio_flow_widget.set_playing(False)
@@ -475,9 +482,6 @@ class VoiceFlowApp:
             self.overlay.show_error("Audio Flow is disabled")
             return
 
-        # Text passed by the floating selection button is an explicit user request.
-        # Keep the dictation guard for the keyboard/clipboard fallback, but never
-        # block a user who deliberately selected text and clicked Audio Flow.
         explicit_selection = bool(text_override and str(text_override).strip())
         text_to_read = text_override
         if not text_to_read:
@@ -496,21 +500,23 @@ class VoiceFlowApp:
             return
 
         snippet = text_to_read[:35] + "…" if len(text_to_read) > 35 else text_to_read
-        log.info("Audio Flow reading selected text: '%s'", snippet)
 
         def _on_start():
-            audio_flow_widget.set_playing(True)
-            self.overlay.show_reading(snippet)
+            if self._audio_summary_generation == gen_token:
+                audio_flow_widget.set_playing(True)
+                self.overlay.show_reading(snippet)
 
         def _on_done():
-            audio_flow_widget.set_playing(False)
-            self.overlay.clear_selected_text()
-            self.overlay.show_ready()
+            if self._audio_summary_generation == gen_token:
+                audio_flow_widget.set_playing(False)
+                self.overlay.clear_selected_text()
+                self.overlay.show_ready()
 
         def _on_error(err_msg: str):
-            audio_flow_widget.set_playing(False)
-            log.warning("Audio Flow synthesis error: %s", err_msg)
-            self.overlay.show_error("Audio generation failed")
+            if self._audio_summary_generation == gen_token:
+                audio_flow_widget.set_playing(False)
+                log.warning("Audio Flow synthesis error: %s", err_msg)
+                self.overlay.show_error("Audio generation failed")
 
         speak_kwargs = {
             "on_start": _on_start,
@@ -519,7 +525,45 @@ class VoiceFlowApp:
         }
         if model_override is not None:
             speak_kwargs["model_override"] = model_override
-        tts_engine.speak(text_to_read, **speak_kwargs)
+
+        if mode == "summary":
+            depth = (summary_depth or "standard").lower().strip()
+            log.info("Audio Flow generating summary (%s depth) for text: '%s'", depth, snippet)
+            self.overlay.show_summarizing(depth.capitalize())
+
+            def _summary_worker():
+                try:
+                    from voice_flow.audio_summary import AudioSummaryError, audio_summary_service
+                    summary_text = audio_summary_service.summarize(
+                        text=text_to_read,
+                        depth=depth,
+                    )
+                    if self._audio_summary_generation != gen_token:
+                        log.info("Audio summary generation token %d invalidated", gen_token)
+                        return
+                    self.overlay.show_generating_audio()
+                    tts_engine.speak(summary_text, **speak_kwargs)
+                except PermissionError as perm_err:
+                    if self._audio_summary_generation == gen_token:
+                        audio_flow_widget.set_playing(False)
+                        self.overlay.show_error("External AI permission required")
+                        log.warning("Audio summary permission error: %s", perm_err)
+                except AudioSummaryError as sum_err:
+                    if self._audio_summary_generation == gen_token:
+                        audio_flow_widget.set_playing(False)
+                        self.overlay.show_error("Select Summary LLM in settings")
+                        log.warning("Audio summary service error: %s", sum_err)
+                except Exception as exc:
+                    if self._audio_summary_generation == gen_token:
+                        audio_flow_widget.set_playing(False)
+                        self.overlay.show_error("Summary failed")
+                        log.warning("Audio summary unexpected error: %s", exc)
+
+            threading.Thread(target=_summary_worker, daemon=True).start()
+        else:
+            log.info("Audio Flow reading selected text (Full Audio): '%s'", snippet)
+            self.overlay.show_generating_audio()
+            tts_engine.speak(text_to_read, **speak_kwargs)
 
     def _process_video_flow_pipeline(self, mode: str, text_override: str | None = None) -> None:
         """Open the primary system-wide composer for selected text."""
@@ -585,7 +629,8 @@ class VoiceFlowApp:
             )
             time.sleep(1.1)
     def _stop_audio_flow_pipeline(self) -> None:
-        """Stop active Audio Flow TTS playback."""
+        """Stop active Audio Flow TTS playback and invalidate in-flight summary generation."""
+        self._audio_summary_generation += 1
         tts_engine.stop()
         audio_flow_widget.set_playing(False)
         self.overlay.show_ready()

@@ -99,6 +99,7 @@ class TTSEngine:
         self._pause_event = threading.Event()
         self._speech_thread: threading.Thread | None = None
         self._player_proc: Any = None
+        self._active_mci_alias: str | None = None
         self._sentences: list[str] = []
         self._current_sentence_idx = 0
 
@@ -112,6 +113,12 @@ class TTSEngine:
         """Pause speech audio playback."""
         self._is_paused = True
         self._pause_event.set()
+        if self._active_mci_alias:
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW(f"pause {self._active_mci_alias}", None, 0, 0)
+            except Exception:
+                pass
         if self._player_proc is not None:
             try:
                 self._player_proc.terminate()
@@ -122,6 +129,12 @@ class TTSEngine:
         """Resume speech audio playback."""
         self._is_paused = False
         self._pause_event.clear()
+        if self._active_mci_alias:
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW(f"resume {self._active_mci_alias}", None, 0, 0)
+            except Exception:
+                pass
 
     def stop(self) -> None:
         """Immediately stop speech audio playback."""
@@ -129,6 +142,13 @@ class TTSEngine:
         self._pause_event.clear()
         self._is_speaking = False
         self._is_paused = False
+        if self._active_mci_alias:
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW(f"close {self._active_mci_alias}", None, 0, 0)
+            except Exception:
+                pass
+            self._active_mci_alias = None
         if self._player_proc is not None:
             try:
                 self._player_proc.terminate()
@@ -139,6 +159,116 @@ class TTSEngine:
             winsound.PlaySound(None, winsound.SND_PURGE)
         except Exception:
             pass
+
+    def supports_progressive_audio(self, full_model_id: str) -> bool:
+        """Return True if the provider adapter supports progressive audio streaming."""
+        parts = full_model_id.split("/", 1)
+        provider = parts[0].lower() if len(parts) > 1 else "edge"
+        return provider == "edge"
+
+    def _synthesize_and_play_progressive(
+        self,
+        clean_text: str,
+        full_model_id: str,
+        on_start: Callable[[], None] | None = None,
+    ) -> bool:
+        """Synthesize and play audio progressively using fast Windows MCI playback."""
+        parts = full_model_id.split("/", 1)
+        model_id = parts[1] if len(parts) > 1 else full_model_id
+        resolved_voice = resolve_edge_voice(model_id)
+        voice_name = self._detect_voice_for_text(clean_text, resolved_voice)
+
+        alias = f"vf_audio_{time.time_ns()}"
+        self._active_mci_alias = alias
+
+        try:
+            import edge_tts
+            import ctypes
+
+            winmm = ctypes.windll.winmm
+            rate_str = self._get_speed_rate_str()
+            pitch_str = "+0Hz"
+
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_f:
+                tmp_path = tmp_f.name
+
+            safe_path = tmp_path.replace("\\", "/")
+
+            playback_started = False
+            playback_completed_cleanly = False
+
+            async def _stream_and_play_async():
+                nonlocal playback_started, playback_completed_cleanly
+                valid_v = resolve_edge_voice(voice_name)
+                communicate = edge_tts.Communicate(
+                    clean_text, valid_v, rate=rate_str, pitch=pitch_str
+                )
+                data = bytearray()
+
+                async for chunk in communicate.stream():
+                    if self._stop_event.is_set():
+                        break
+                    if chunk.get("type") == "audio":
+                        chunk_bytes = chunk.get("data", b"")
+                        if chunk_bytes:
+                            data.extend(chunk_bytes)
+
+                if self._stop_event.is_set():
+                    return
+
+                if not data:
+                    return
+
+                with open(tmp_path, "wb") as fp:
+                    fp.write(data)
+
+                if self._stop_event.is_set():
+                    return
+
+                playback_started = True
+                if on_start:
+                    on_start()
+
+                open_res = winmm.mciSendStringW(f'open "{safe_path}" alias {alias}', None, 0, 0)
+                if open_res == 0:
+                    winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    buf = ctypes.create_unicode_buffer(128)
+                    while not self._stop_event.is_set():
+                        winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                        status = buf.value.lower()
+                        if status not in ("playing", "paused"):
+                            break
+                        time.sleep(0.05)
+                    if not self._stop_event.is_set():
+                        playback_completed_cleanly = True
+                else:
+                    log.warning("MCI open failed with code %d", open_res)
+
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(_stream_and_play_async())
+            finally:
+                loop.close()
+
+            return playback_started or playback_completed_cleanly
+        except Exception as e:
+            log.warning("Fast progressive audio error: %s", e)
+            return False
+        finally:
+            if hasattr(self, "_active_mci_alias") and self._active_mci_alias == alias:
+                try:
+                    import ctypes
+                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+                except Exception:
+                    pass
+                self._active_mci_alias = None
+            try:
+                if os.path.exists(tmp_path):
+                    time.sleep(0.05)
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
     def _get_fallback_edge_voice(self) -> str:
         active_model = storage.get_setting("exec_audio_policy_model", "edge/en-US-AvaNeural")
@@ -168,9 +298,6 @@ class TTSEngine:
 
         def _worker():
             try:
-                if on_start:
-                    on_start()
-
                 preprocessed = self._preprocess_text(text)
                 clean_text = format_document_structure_for_speech(preprocessed)
 
@@ -183,6 +310,19 @@ class TTSEngine:
                 active_model = model_override or storage.get_setting("exec_audio_policy_model", "edge/en-US-AvaNeural")
 
                 log.info("Audio Flow: Synthesizing continuous text (%d chars, %d sentences)", len(clean_text), len(sentences))
+
+                # Progressive playback route for streaming-capable providers
+                if self.supports_progressive_audio(active_model):
+                    success = self._synthesize_and_play_progressive(clean_text, active_model, on_start)
+                    if self._stop_event.is_set():
+                        return
+                    if success:
+                        return
+                    log.warning("Progressive audio path completed or failed; falling back to completed audio path if needed")
+
+                # Fallback / non-streaming completed audio path
+                if on_start:
+                    on_start()
 
                 audio_bytes = self._synthesize(clean_text, active_model)
 
@@ -675,20 +815,23 @@ class TTSEngine:
 
             ps_template = (
                 'Add-Type -AssemblyName presentationCore\n'
+                '$path = [System.IO.Path]::GetFullPath("__SAFE_PATH__")\n'
                 '$p = New-Object System.Windows.Media.MediaPlayer\n'
-                '$p.Open([System.Uri]"__SAFE_PATH__")\n'
+                '$p.Open([System.Uri]$path)\n'
                 '$timeout = 0\n'
-                'while (-not $p.NaturalDuration.HasTimeSpan -and $timeout -lt 30) {\n'
+                'while (-not $p.NaturalDuration.HasTimeSpan -and $timeout -lt 200) {\n'
                 '    Start-Sleep -Milliseconds 50\n'
                 '    $timeout++\n'
                 '}\n'
-                'Start-Sleep -Milliseconds 100\n'
-                '$p.Play()\n'
-                'Start-Sleep -Milliseconds 50\n'
-                'while ($p.NaturalDuration.HasTimeSpan -and ($p.Position -lt $p.NaturalDuration.TimeSpan)) {\n'
+                'if ($p.NaturalDuration.HasTimeSpan) {\n'
+                '    Start-Sleep -Milliseconds 100\n'
+                '    $p.Play()\n'
                 '    Start-Sleep -Milliseconds 50\n'
+                '    while ($p.NaturalDuration.HasTimeSpan -and ($p.Position -lt $p.NaturalDuration.TimeSpan)) {\n'
+                '        Start-Sleep -Milliseconds 50\n'
+                '    }\n'
+                '    Start-Sleep -Milliseconds 100\n'
                 '}\n'
-                'Start-Sleep -Milliseconds 100\n'
                 '$p.Close()\n'
             )
 
@@ -697,9 +840,8 @@ class TTSEngine:
 
             self._player_proc = subprocess.Popen(
                 ["powershell", "-NoProfile", "-EncodedCommand", encoded_cmd],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=0x08000000  # CREATE_NO_WINDOW
             )
 

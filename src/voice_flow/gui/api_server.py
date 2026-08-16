@@ -247,6 +247,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 print(f"[AUDIO FLOW] /api/audio-policy/get error: {exc}")
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
+        elif path == "/api/audio-summary/settings/get":
+            try:
+                model_ref = str(storage.get_setting("exec_audio_summary_model", "") or "")
+                consent = bool(storage.get_setting("exec_audio_summary_allow_external_ai", False))
+                self.send_json_response({"success": True, "model": model_ref, "consent": consent})
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
         elif path == "/api/audio-providers/overview":
             try:
                 data = storage.get_audio_providers_overview()
@@ -639,6 +646,23 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Could not persist Audio Flow speed"}, 500)
                 return
             self.send_json_response({"success": True, "speed": speed})
+
+        elif path == "/api/audio-summary/settings/model":
+            model_ref = str(data.get("model_ref", "") or data.get("model", "")).strip()
+            if model_ref and not video_flow_provider_service.is_selectable_model_ref(model_ref):
+                self.send_json_response({"success": False, "error": "Select a valid, enabled LLM model or combo."}, 400)
+                return
+            if not storage.save_setting("exec_audio_summary_model", model_ref):
+                self.send_json_response({"success": False, "error": "Could not persist Audio Flow Summary model"}, 500)
+                return
+            self.send_json_response({"success": True, "model": model_ref})
+
+        elif path == "/api/audio-summary/settings/consent":
+            consent = bool(data.get("consent", False))
+            if not storage.save_setting("exec_audio_summary_allow_external_ai", consent):
+                self.send_json_response({"success": False, "error": "Could not persist Audio Flow Summary consent"}, 500)
+                return
+            self.send_json_response({"success": True, "consent": consent})
 
 
         elif path == "/api/audio-flow/speak":

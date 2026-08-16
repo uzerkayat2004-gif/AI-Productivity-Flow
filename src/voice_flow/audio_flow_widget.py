@@ -27,12 +27,15 @@ class AudioFlowFloatingWidget:
     """Crisp White circular audio button anchored strictly at selected text end."""
 
     SIZE = 34  # Crisp 34x34px circle button
+    STAGE_MINIMAL = "minimal"
+    STAGE_MODE_SELECT = "mode_select"
+    STAGE_DEPTH_SELECT = "depth_select"
 
-    def __init__(self, root: tk.Tk | None = None, on_trigger: Callable[[str], None] | None = None) -> None:
+    def __init__(self, root: tk.Tk | None = None, on_trigger: Callable[..., None] | None = None) -> None:
         self.root = root
         self.win: tk.Toplevel | None = None
         self.canvas: tk.Canvas | None = None
-        self.on_trigger = on_trigger or (lambda text: None)
+        self.on_trigger = on_trigger or (lambda text, mode="full", summary_depth=None: None)
         self.on_stop = (lambda: None)
 
         self._is_visible = False
@@ -40,6 +43,9 @@ class AudioFlowFloatingWidget:
         self._current_text = ""
         self._pos_x = 100
         self._pos_y = 100
+        self._anchor_x = 100
+        self._anchor_y = 100
+        self._stage = self.STAGE_MINIMAL
         self._hide_timer: threading.Timer | None = None
         self._pending_show: tuple[int, int, str] | None = None
 
@@ -93,8 +99,15 @@ class AudioFlowFloatingWidget:
         except Exception:
             pass
 
+    def _get_current_dimensions(self) -> tuple[int, int]:
+        if self._stage == self.STAGE_MODE_SELECT:
+            return 176, 34
+        if self._stage == self.STAGE_DEPTH_SELECT:
+            return 216, 34
+        return 34, 34
+
     def show_at(self, x: int, y: int, selected_text: str) -> None:
-        """Display the crisp white circle button anchored strictly at (x, y)."""
+        """Display the white circle button anchored strictly at (x, y)."""
         if not selected_text or not selected_text.strip():
             self.hide()
             return
@@ -114,27 +127,37 @@ class AudioFlowFloatingWidget:
             self._current_text = clean_text
             self._is_visible = True
             self._is_playing = False
+            self._stage = self.STAGE_MINIMAL
 
-            screen_w = self.root.winfo_screenwidth() if self.root else 1920
-            screen_h = self.root.winfo_screenheight() if self.root else 1080
+            self._anchor_x = x + 4
+            self._anchor_y = y + 4
 
-            self._pos_x = max(10, min(x + 4, screen_w - self.SIZE - 10))
-            self._pos_y = max(10, min(y + 4, screen_h - self.SIZE - 10))
-
-            self.win.geometry(f"{self.SIZE}x{self.SIZE}+{self._pos_x}+{self._pos_y}")
-            self.win.deiconify()
-            self.win.lift()
-            self.win.attributes("-topmost", True)
-            self._apply_win32_noactivate()
-            self._draw()
-            try:
-                self.win.update()
-            except Exception:
-                pass
-
+            self._update_geometry_and_draw()
             self._reset_hide_timer()
 
         self._run_on_ui(_do)
+
+    def _update_geometry_and_draw(self) -> None:
+        if not self.win or not self.canvas:
+            return
+        w, h = self._get_current_dimensions()
+        screen_w = self.root.winfo_screenwidth() if self.root else 1920
+        screen_h = self.root.winfo_screenheight() if self.root else 1080
+
+        self._pos_x = max(10, min(self._anchor_x, screen_w - w - 10))
+        self._pos_y = max(10, min(self._anchor_y, screen_h - h - 10))
+
+        self.canvas.config(width=w, height=h)
+        self.win.geometry(f"{w}x{h}+{self._pos_x}+{self._pos_y}")
+        self.win.deiconify()
+        self.win.lift()
+        self.win.attributes("-topmost", True)
+        self._apply_win32_noactivate()
+        self._draw()
+        try:
+            self.win.update()
+        except Exception:
+            pass
 
     def hide(self) -> None:
         """Hide button, reset state, and invalidate a pre-Tk selection."""
@@ -143,6 +166,7 @@ class AudioFlowFloatingWidget:
         def _do():
             self._is_visible = False
             self._is_playing = False
+            self._stage = self.STAGE_MINIMAL
             self._current_text = ""
             if self.win:
                 self.win.withdraw()
@@ -159,26 +183,22 @@ class AudioFlowFloatingWidget:
         """Update playback state. WHILE PLAYING, STAY 100% VISIBLE ON SCREEN!"""
         def _do():
             self._is_playing = playing
-            # Cancel hide timer while playing so button NEVER disappears during audio!
             if playing:
                 if self._hide_timer:
                     self._hide_timer.cancel()
                     self._hide_timer = None
+                self._stage = self.STAGE_MINIMAL
                 if self.win and self._is_visible:
-                    self.win.deiconify()
-                    self.win.lift()
-                    self.win.attributes("-topmost", True)
-                    self._draw()
+                    self._update_geometry_and_draw()
             else:
                 self.hide()
         self._run_on_ui(_do)
 
-    def _reset_hide_timer(self) -> None:
+    def _reset_hide_timer(self, timeout: float = 5.0) -> None:
         if self._hide_timer:
             self._hide_timer.cancel()
-        # Auto hide after 5s ONLY IF NOT PLAYING
         if not self._is_playing:
-            self._hide_timer = threading.Timer(5.0, self.hide)
+            self._hide_timer = threading.Timer(timeout, self.hide)
             self._hide_timer.daemon = True
             self._hide_timer.start()
 
@@ -188,33 +208,82 @@ class AudioFlowFloatingWidget:
 
         c = self.canvas
         c.delete("all")
-        s = self.SIZE
+        w, h = self._get_current_dimensions()
 
-        # Crisp Circle Button Container
-        c.create_oval(1, 1, s - 1, s - 1, fill="#0f172a", outline="", width=0)
-        c.create_oval(2, 2, s - 2, s - 2, fill="#ffffff", outline="#ffd700" if self._is_playing else "#64748b", width=1.5)
+        if self._stage == self.STAGE_MINIMAL:
+            s = self.SIZE
+            c.create_oval(1, 1, s - 1, s - 1, fill="#0f172a", outline="", width=0)
+            c.create_oval(2, 2, s - 2, s - 2, fill="#ffffff", outline="#ffd700" if self._is_playing else "#64748b", width=1.5)
+            cy, cx = s / 2, s / 2
+            if self._is_playing:
+                c.create_text(cx, cy, text="⏸", fill="#0f172a", font=("Segoe UI Symbol", 10, "bold"), anchor="center")
+            else:
+                c.create_text(cx, cy, text="🔊", fill="#0f172a", font=("Segoe UI Emoji", 11), anchor="center")
+        elif self._stage == self.STAGE_MODE_SELECT:
+            c.create_rectangle(1, 1, w - 1, h - 1, fill="#0f172a", outline="#334155", width=1)
+            c.create_rectangle(3, 3, 85, h - 3, fill="#ffffff", outline="#64748b", width=1)
+            c.create_text(44, h / 2, text="Full Audio", fill="#0f172a", font=("Segoe UI", 9, "bold"), anchor="center")
 
-        cy = s / 2
-        cx = s / 2
+            c.create_rectangle(89, 3, w - 3, h - 3, fill="#ff6b00", outline="#ff8533", width=1)
+            c.create_text(89 + (w - 3 - 89) / 2, h / 2, text="⚡ Summary", fill="#ffffff", font=("Segoe UI", 9, "bold"), anchor="center")
+        elif self._stage == self.STAGE_DEPTH_SELECT:
+            c.create_rectangle(1, 1, w - 1, h - 1, fill="#0f172a", outline="#334155", width=1)
 
-        if self._is_playing:
-            # Minimalist Pause/Stop icon inside circle while playing
-            c.create_text(cx, cy, text="⏸", fill="#0f172a", font=("Segoe UI Symbol", 10, "bold"), anchor="center")
-        else:
-            # Minimalist speaker icon
-            c.create_text(cx, cy, text="🔊", fill="#0f172a", font=("Segoe UI Emoji", 11), anchor="center")
+            btn_w = (w - 8) / 3
+            # Quick
+            c.create_rectangle(3, 3, 3 + btn_w - 2, h - 3, fill="#1e293b", outline="#ff6b00", width=1)
+            c.create_text(3 + btn_w / 2 - 1, h / 2, text="Quick", fill="#ffffff", font=("Segoe UI", 8, "bold"), anchor="center")
+            # Standard
+            c.create_rectangle(3 + btn_w + 1, 3, 3 + 2 * btn_w - 1, h - 3, fill="#ff6b00", outline="#ff8533", width=1)
+            c.create_text(3 + 1.5 * btn_w, h / 2, text="Standard", fill="#ffffff", font=("Segoe UI", 8, "bold"), anchor="center")
+            # Detailed
+            c.create_rectangle(3 + 2 * btn_w + 2, 3, w - 3, h - 3, fill="#1e293b", outline="#06cfe5", width=1)
+            c.create_text(3 + 2.5 * btn_w + 1, h / 2, text="Detailed", fill="#ffffff", font=("Segoe UI", 8, "bold"), anchor="center")
 
-    def _on_click(self, _event: tk.Event) -> None:
-        """Handle click: If playing, stop & hide. If idle, start reading."""
+    def _on_click(self, event: tk.Event) -> None:
+        """Handle click based on current menu stage."""
         if self._is_playing:
             if self.on_stop:
                 self.on_stop()
             self.hide()
-        else:
-            text = self._current_text
-            if text and self.on_trigger:
+            return
+
+        text = self._current_text
+        if not text:
+            return
+
+        if self._stage == self.STAGE_MINIMAL:
+            self._stage = self.STAGE_MODE_SELECT
+            self._update_geometry_and_draw()
+            self._reset_hide_timer(8.0)
+            return
+
+        if self._stage == self.STAGE_MODE_SELECT:
+            if event.x <= 87:
+                # Full Audio selected
                 self.set_playing(True)
-                self.on_trigger(text)
+                if self.on_trigger:
+                    self.on_trigger(text, mode="full")
+            else:
+                # Summary selected -> go to depth selection stage
+                self._stage = self.STAGE_DEPTH_SELECT
+                self._update_geometry_and_draw()
+                self._reset_hide_timer(8.0)
+            return
+
+        if self._stage == self.STAGE_DEPTH_SELECT:
+            w, _ = self._get_current_dimensions()
+            btn_w = (w - 8) / 3
+            if event.x < 3 + btn_w:
+                depth = "quick"
+            elif event.x < 3 + 2 * btn_w:
+                depth = "standard"
+            else:
+                depth = "detailed"
+
+            self.set_playing(True)
+            if self.on_trigger:
+                self.on_trigger(text, mode="summary", summary_depth=depth)
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
         if self.root:

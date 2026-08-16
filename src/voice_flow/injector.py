@@ -335,9 +335,13 @@ class ClipboardInjector:
                 time.sleep(0.02)
 
                 _send_win32_ctrl_c()
-                time.sleep(0.08)
 
-                selected = _safe_paste_from_clipboard()
+                selected = ""
+                for _ in range(5):
+                    time.sleep(0.03)
+                    selected = _safe_paste_from_clipboard()
+                    if selected and len(selected.strip()) > 0:
+                        break
 
                 if original_clipboard:
                     _safe_copy_to_clipboard(original_clipboard)

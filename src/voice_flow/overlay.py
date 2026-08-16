@@ -474,6 +474,40 @@ class FloatingOverlayBar:
             self._animate(generation)
         self._run_on_ui(_do)
 
+    def show_summarizing(self, snippet: str = "Summarizing selected text...") -> None:
+        """Display the animated SUMMARIZING state while LLM creates the narration."""
+        def _do():
+            if not self.win: return
+            self.state = "SUMMARIZING"
+            self.reading_snippet = snippet
+            self._anim_phase = 0.0
+            self._animation_generation += 1
+            generation = self._animation_generation
+            self.win.deiconify()
+            self.win.lift()
+            self.win.attributes("-topmost", True)
+            self._apply_win32_styles()
+            self._draw()
+            self._animate(generation)
+        self._run_on_ui(_do)
+
+    def show_generating_audio(self, snippet: str = "Generating audio...") -> None:
+        """Display the animated GENERATING_AUDIO state during TTS synthesis."""
+        def _do():
+            if not self.win: return
+            self.state = "GENERATING_AUDIO"
+            self.reading_snippet = snippet
+            self._anim_phase = 0.0
+            self._animation_generation += 1
+            generation = self._animation_generation
+            self.win.deiconify()
+            self.win.lift()
+            self.win.attributes("-topmost", True)
+            self._apply_win32_styles()
+            self._draw()
+            self._animate(generation)
+        self._run_on_ui(_do)
+
     def _animate(self, generation: int = -1) -> None:
         if generation != -1 and generation != self._animation_generation:
             return
@@ -481,7 +515,7 @@ class FloatingOverlayBar:
             return
         self._anim_phase += 0.12
         self._draw()
-        if self.state in ("RECORDING", "PROCESSING", "READING"):
+        if self.state in ("RECORDING", "PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO"):
             self.root.after(33, lambda: self._animate(generation))
 
     # -- Drawing --
@@ -509,7 +543,7 @@ class FloatingOverlayBar:
             base_height = self.hover_height
             extra = self.video_progress_hover_height + 4 if self.video_status == "processing" else 0
             self._set_bar_size(max(self.recording_width, self.video_progress_width), base_height + extra)
-        elif self.state in ("PROCESSING", "READING", "ERROR"):
+        elif self.state in ("PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
             base_height = self.working_height
             extra = self.video_progress_hover_height + 4 if self.video_status == "processing" else 0
             self._set_bar_size(max(self.working_width, self.video_progress_width), base_height + extra)
@@ -524,7 +558,7 @@ class FloatingOverlayBar:
         if self.video_status == "processing" and self.state != "READY":
             flow_height = h - self.video_progress_hover_height - 4
 
-        if self.state in ("PROCESSING", "READING", "ERROR"):
+        if self.state in ("PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
             self._draw_working_shell(w, flow_height)
         elif not (self.state == "READY" and self.video_status == "processing"):
             self._draw_pill(2, 2, w - 2, flow_height - 2, flow_height // 2 - 2, self.BG, self.BORDER_COLOR)
@@ -535,6 +569,10 @@ class FloatingOverlayBar:
             self._draw_recording(w, flow_height)
         elif self.state == "PROCESSING":
             self._draw_processing(w, flow_height)
+        elif self.state == "SUMMARIZING":
+            self._draw_working_state(w, flow_height, "Summarizing")
+        elif self.state == "GENERATING_AUDIO":
+            self._draw_working_state(w, flow_height, "Generating Audio")
         elif self.state == "READING":
             self._draw_reading(w, flow_height)
         elif self.state == "DONE":
