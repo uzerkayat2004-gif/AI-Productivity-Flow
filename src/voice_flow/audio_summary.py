@@ -89,7 +89,7 @@ class AudioSummaryService:
         name = model_ref.split(":", 1)[1]
         combo = next((item for item in video_flow_provider_service.store.list_combos() if item["name"] == name), None)
         if not combo:
-            raise ValueError(f"Model combo '{name}' no longer exists.")
+            raise AudioSummaryError(f"Model combo '{name}' no longer exists.")
         refs = list(combo.get("models", []))
         if combo.get("strategy") == "round_robin" and refs:
             key = f"audio_summary_combo_cursor_{combo['id']}"

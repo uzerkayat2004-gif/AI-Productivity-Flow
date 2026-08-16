@@ -22,6 +22,11 @@ WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_TOPMOST = 0x00000008
 
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+
 
 class AudioFlowFloatingWidget:
     """Crisp White circular audio button anchored strictly at selected text end."""
@@ -30,6 +35,7 @@ class AudioFlowFloatingWidget:
     STAGE_MINIMAL = "minimal"
     STAGE_MODE_SELECT = "mode_select"
     STAGE_DEPTH_SELECT = "depth_select"
+    STAGE_PLAYBACK_CONTROL = "playback_control"
 
     def __init__(self, root: tk.Tk | None = None, on_trigger: Callable[..., None] | None = None) -> None:
         self.root = root
@@ -37,9 +43,11 @@ class AudioFlowFloatingWidget:
         self.canvas: tk.Canvas | None = None
         self.on_trigger = on_trigger or (lambda text, mode="full", summary_depth=None: None)
         self.on_stop = (lambda: None)
+        self.on_pause_toggle = (lambda: None)
 
         self._is_visible = False
         self._is_playing = False
+        self._is_paused = False
         self._current_text = ""
         self._pos_x = 100
         self._pos_y = 100
@@ -48,6 +56,7 @@ class AudioFlowFloatingWidget:
         self._stage = self.STAGE_MINIMAL
         self._hide_timer: threading.Timer | None = None
         self._pending_show: tuple[int, int, str] | None = None
+        self._show_generation = 0
 
     def attach_root(self, root: tk.Tk) -> None:
         """Attach to main Tkinter root window and replay an early selection."""
@@ -104,6 +113,8 @@ class AudioFlowFloatingWidget:
             return 176, 34
         if self._stage == self.STAGE_DEPTH_SELECT:
             return 216, 34
+        if self._stage == self.STAGE_PLAYBACK_CONTROL:
+            return 90, 34
         return 34, 34
 
     def show_at(self, x: int, y: int, selected_text: str) -> None:
@@ -117,6 +128,9 @@ class AudioFlowFloatingWidget:
             self._pending_show = (x, y, clean_text)
             return
         self._pending_show = None
+        # Invalidate any hide() already queued by an older selection or a
+        # playback that just finished, so it cannot kill this fresh show.
+        self._show_generation += 1
 
         def _do():
             if not self.win:
@@ -127,6 +141,7 @@ class AudioFlowFloatingWidget:
             self._current_text = clean_text
             self._is_visible = True
             self._is_playing = False
+            self._is_paused = False
             self._stage = self.STAGE_MINIMAL
 
             self._anchor_x = x + 4
@@ -137,15 +152,29 @@ class AudioFlowFloatingWidget:
 
         self._run_on_ui(_do)
 
+    def _virtual_screen_bounds(self) -> tuple[int, int, int, int]:
+        """Return (x, y, width, height) of the full virtual desktop for clamping."""
+        if self.root is not None:
+            try:
+                vx = ctypes.windll.user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+                vy = ctypes.windll.user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+                vw = ctypes.windll.user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+                vh = ctypes.windll.user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+                if vw > 0 and vh > 0:
+                    return vx, vy, vw, vh
+            except Exception:
+                pass
+            return 0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        return 0, 0, 1920, 1080
+
     def _update_geometry_and_draw(self) -> None:
         if not self.win or not self.canvas:
             return
         w, h = self._get_current_dimensions()
-        screen_w = self.root.winfo_screenwidth() if self.root else 1920
-        screen_h = self.root.winfo_screenheight() if self.root else 1080
+        vx, vy, vw, vh = self._virtual_screen_bounds()
 
-        self._pos_x = max(10, min(self._anchor_x, screen_w - w - 10))
-        self._pos_y = max(10, min(self._anchor_y, screen_h - h - 10))
+        self._pos_x = max(vx + 10, min(self._anchor_x, vx + vw - w - 10))
+        self._pos_y = max(vy + 10, min(self._anchor_y, vy + vh - h - 10))
 
         self.canvas.config(width=w, height=h)
         self.win.geometry(f"{w}x{h}+{self._pos_x}+{self._pos_y}")
@@ -162,10 +191,15 @@ class AudioFlowFloatingWidget:
     def hide(self) -> None:
         """Hide button, reset state, and invalidate a pre-Tk selection."""
         self._pending_show = None
+        generation = self._show_generation
 
         def _do():
+            if generation != self._show_generation:
+                # A newer selection superseded this hide request.
+                return
             self._is_visible = False
             self._is_playing = False
+            self._is_paused = False
             self._stage = self.STAGE_MINIMAL
             self._current_text = ""
             if self.win:
@@ -181,17 +215,36 @@ class AudioFlowFloatingWidget:
 
     def set_playing(self, playing: bool) -> None:
         """Update playback state. WHILE PLAYING, STAY 100% VISIBLE ON SCREEN!"""
+        generation = self._show_generation
+
         def _do():
+            if generation != self._show_generation:
+                # A newer selection superseded this playback update; the fresh
+                # widget must keep its idle state and its own hide timer.
+                return
             self._is_playing = playing
             if playing:
                 if self._hide_timer:
                     self._hide_timer.cancel()
                     self._hide_timer = None
+                self._is_paused = False
                 self._stage = self.STAGE_MINIMAL
                 if self.win and self._is_visible:
                     self._update_geometry_and_draw()
             else:
                 self.hide()
+
+    def set_paused(self, paused: bool) -> None:
+        """Sync the widget's paused glyph with the engine's true pause state."""
+        generation = self._show_generation
+
+        def _do():
+            if generation != self._show_generation:
+                return
+            if self._is_playing and self._is_paused != bool(paused):
+                self._is_paused = bool(paused)
+                self._draw()
+        self._run_on_ui(_do)
         self._run_on_ui(_do)
 
     def _reset_hide_timer(self, timeout: float = 5.0) -> None:
@@ -239,13 +292,35 @@ class AudioFlowFloatingWidget:
             # Detailed
             c.create_rectangle(3 + 2 * btn_w + 2, 3, w - 3, h - 3, fill="#1e293b", outline="#06cfe5", width=1)
             c.create_text(3 + 2.5 * btn_w + 1, h / 2, text="Detailed", fill="#ffffff", font=("Segoe UI", 8, "bold"), anchor="center")
+        elif self._stage == self.STAGE_PLAYBACK_CONTROL:
+            c.create_rectangle(1, 1, w - 1, h - 1, fill="#0f172a", outline="#334155", width=1)
+            # Pause/Resume toggle (left button)
+            c.create_rectangle(3, 3, 45, h - 3, fill="#ffffff", outline="#ffd700", width=1)
+            toggle_glyph = "▶" if self._is_paused else "⏸"
+            c.create_text(24, h / 2, text=toggle_glyph, fill="#0f172a", font=("Segoe UI Symbol", 11, "bold"), anchor="center")
+            # Stop (right button)
+            c.create_rectangle(47, 3, w - 3, h - 3, fill="#ff6b00", outline="#ff8533", width=1)
+            c.create_text(47 + (w - 3 - 47) / 2, h / 2, text="⏹", fill="#ffffff", font=("Segoe UI Symbol", 10, "bold"), anchor="center")
 
     def _on_click(self, event: tk.Event) -> None:
         """Handle click based on current menu stage."""
-        if self._is_playing:
-            if self.on_stop:
-                self.on_stop()
-            self.hide()
+        if self._is_playing and self._stage == self.STAGE_MINIMAL:
+            # Expand into playback controls: pause/resume + stop. The bar stays
+            # visible until playback ends or the user stops it.
+            self._stage = self.STAGE_PLAYBACK_CONTROL
+            self._update_geometry_and_draw()
+            return
+
+        if self._stage == self.STAGE_PLAYBACK_CONTROL:
+            if event.x <= 46:
+                self._is_paused = not self._is_paused
+                if self.on_pause_toggle:
+                    self.on_pause_toggle()
+                self._draw()
+            else:
+                if self.on_stop:
+                    self.on_stop()
+                self.hide()
             return
 
         text = self._current_text

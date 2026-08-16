@@ -166,6 +166,17 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "contract_version": RUNTIME_CONTRACT_VERSION,
                 "features": RUNTIME_FEATURES,
             })
+        elif path == "/api/settings/get":
+            params = urllib.parse.parse_qs(parsed.query)
+            key = (params.get("key", [""])[0] or "").strip()
+            allowed_get = {
+                "voice_flow_enabled", "audio_flow_enabled", "video_flow_enabled",
+                "polishing_enabled", "press_enter_enabled",
+            }
+            if key not in allowed_get:
+                self.send_json_response({"success": False, "error": "Unknown setting"}, 400)
+                return
+            self.send_json_response({"success": True, "key": key, "value": bool(storage.get_setting(key, True))})
         elif path == "/api/history":
             self.send_json_response(storage.get_recent_history())
         elif path == "/api/insights":
@@ -974,6 +985,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             value = data.get("value")
             allowed_settings = {
                 "polishing_enabled": bool,
+                "voice_flow_enabled": bool,
                 "audio_flow_enabled": bool,
                 "video_flow_enabled": bool,
                 "press_enter_enabled": bool,

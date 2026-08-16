@@ -428,6 +428,129 @@ body {
   font-weight: 700;
 }
 
+/* --- Voice Flow collapsible parent & its feature dropdown --- */
+.nav-parent .nav-chevron {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-light);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.nav-parent-group.open .nav-chevron {
+  transform: rotate(180deg);
+}
+
+.nav-submenu {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+  margin-top: 2px;
+}
+
+.nav-parent-group.open .nav-submenu {
+  max-height: 260px;
+}
+
+.nav-submenu .nav-item {
+  font-size: 13px;
+  padding: 8px 10px 8px 20px;
+  margin-left: 14px;
+  border-left: 2px solid var(--border-color);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.nav-submenu .nav-item:hover {
+  border-left-color: var(--primary-orange);
+}
+
+.nav-submenu .nav-item.active {
+  border-left-color: var(--primary-orange);
+}
+
+.nav-submenu .nav-icon {
+  font-size: 14px;
+  width: 18px;
+}
+
+/* In the collapsed sidebar the dropdown has no room to breathe. */
+.sidebar.collapsed .nav-submenu {
+  display: none;
+}
+
+.sidebar.collapsed .nav-chevron {
+  display: none;
+}
+
+/* --- Audio Flow summary model selector (dropdown layout) --- */
+.af-model-selector {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.af-model-selector-main {
+  flex: 1;
+  min-width: 280px;
+}
+
+.af-model-selector-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 8px;
+  letter-spacing: 0.6px;
+}
+
+.af-model-selector-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+  flex: 0 0 auto;
+}
+
+.af-model-engine-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.25);
+  padding-bottom: 8px;
+}
+
+.af-model-engine-caption {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.af-model-engine-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--accent-text, #00f2fe);
+}
+
+.af-model-depth-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.af-model-depth-pills span {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+}
+
+
 .nav-icon {
   font-size: 16px;
   width: 20px;

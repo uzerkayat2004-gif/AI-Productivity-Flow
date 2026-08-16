@@ -97,6 +97,7 @@ class TTSEngine:
         self._is_paused = False
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
+        self._session = 0
         self._speech_thread: threading.Thread | None = None
         self._player_proc: Any = None
         self._active_mci_alias: str | None = None
@@ -110,7 +111,9 @@ class TTSEngine:
         return self._is_paused
 
     def pause(self) -> None:
-        """Pause speech audio playback."""
+        """Pause speech audio playback in place (resumable via resume())."""
+        if not self._is_speaking or self._is_paused:
+            return
         self._is_paused = True
         self._pause_event.set()
         if self._active_mci_alias:
@@ -119,14 +122,11 @@ class TTSEngine:
                 ctypes.windll.winmm.mciSendStringW(f"pause {self._active_mci_alias}", None, 0, 0)
             except Exception:
                 pass
-        if self._player_proc is not None:
-            try:
-                self._player_proc.terminate()
-            except Exception:
-                pass
 
     def resume(self) -> None:
-        """Resume speech audio playback."""
+        """Resume speech audio playback after pause()."""
+        if not self._is_paused:
+            return
         self._is_paused = False
         self._pause_event.clear()
         if self._active_mci_alias:
@@ -171,8 +171,15 @@ class TTSEngine:
         clean_text: str,
         full_model_id: str,
         on_start: Callable[[], None] | None = None,
+        session: int = 0,
     ) -> bool:
         """Synthesize and play audio progressively using fast Windows MCI playback."""
+        if session != self._session:
+            return False
+
+        def _cancelled() -> bool:
+            return self._stop_event.is_set() or session != self._session
+
         parts = full_model_id.split("/", 1)
         model_id = parts[1] if len(parts) > 1 else full_model_id
         resolved_voice = resolve_edge_voice(model_id)
@@ -180,6 +187,7 @@ class TTSEngine:
 
         alias = f"vf_audio_{time.time_ns()}"
         self._active_mci_alias = alias
+        tmp_path: str | None = None
 
         try:
             import edge_tts
@@ -206,14 +214,14 @@ class TTSEngine:
                 data = bytearray()
 
                 async for chunk in communicate.stream():
-                    if self._stop_event.is_set():
+                    if _cancelled():
                         break
                     if chunk.get("type") == "audio":
                         chunk_bytes = chunk.get("data", b"")
                         if chunk_bytes:
                             data.extend(chunk_bytes)
 
-                if self._stop_event.is_set():
+                if _cancelled():
                     return
 
                 if not data:
@@ -222,7 +230,7 @@ class TTSEngine:
                 with open(tmp_path, "wb") as fp:
                     fp.write(data)
 
-                if self._stop_event.is_set():
+                if _cancelled():
                     return
 
                 playback_started = True
@@ -232,14 +240,17 @@ class TTSEngine:
                 open_res = winmm.mciSendStringW(f'open "{safe_path}" alias {alias}', None, 0, 0)
                 if open_res == 0:
                     winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    if self._is_paused:
+                        # Honor a pause requested while the stream was still downloading.
+                        winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
                     buf = ctypes.create_unicode_buffer(128)
-                    while not self._stop_event.is_set():
+                    while not _cancelled():
                         winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
                         status = buf.value.lower()
                         if status not in ("playing", "paused"):
                             break
                         time.sleep(0.05)
-                    if not self._stop_event.is_set():
+                    if not _cancelled():
                         playback_completed_cleanly = True
                 else:
                     log.warning("MCI open failed with code %d", open_res)
@@ -264,7 +275,7 @@ class TTSEngine:
                     pass
                 self._active_mci_alias = None
             try:
-                if os.path.exists(tmp_path):
+                if tmp_path and os.path.exists(tmp_path):
                     time.sleep(0.05)
                     os.remove(tmp_path)
             except Exception:
@@ -291,12 +302,28 @@ class TTSEngine:
             return
 
         self.stop()
+        # Invalidate any still-running previous speak() so it cannot overlap
+        # playback, fire stale callbacks, or clobber _is_speaking afterwards.
+        self._session += 1
+        session = self._session
         self._stop_event.clear()
         self._pause_event.clear()
         self._is_speaking = True
         self._is_paused = False
 
         def _worker():
+            def _cancelled() -> bool:
+                return self._stop_event.is_set() or session != self._session
+
+            started = [False]
+            errored = [False]
+
+            def _fire_on_start() -> None:
+                if not started[0]:
+                    started[0] = True
+                    if on_start:
+                        on_start()
+
             try:
                 preprocessed = self._preprocess_text(text)
                 clean_text = format_document_structure_for_speech(preprocessed)
@@ -313,36 +340,46 @@ class TTSEngine:
 
                 # Progressive playback route for streaming-capable providers
                 if self.supports_progressive_audio(active_model):
-                    success = self._synthesize_and_play_progressive(clean_text, active_model, on_start)
-                    if self._stop_event.is_set():
+                    success = self._synthesize_and_play_progressive(clean_text, active_model, _fire_on_start, session)
+                    if _cancelled():
                         return
                     if success:
                         return
                     log.warning("Progressive audio path completed or failed; falling back to completed audio path if needed")
 
+                if _cancelled():
+                    return
+
                 # Fallback / non-streaming completed audio path
-                if on_start:
-                    on_start()
+                _fire_on_start()
 
                 audio_bytes = self._synthesize(clean_text, active_model)
 
-                if self._stop_event.is_set():
+                if _cancelled():
                     return
 
                 if audio_bytes:
-                    self._play_audio(audio_bytes)
+                    self._play_audio(audio_bytes, session)
                 else:
                     log.warning("Audio Flow synthesis returned empty audio.")
+                    if on_error and not _cancelled():
+                        errored[0] = True
+                        on_error("TTS synthesis failed: no audio generated.")
 
             except Exception as e:
                 log.error("Audio Flow TTS error: %s", e)
-                if on_error:
+                if on_error and session == self._session:
+                    errored[0] = True
                     on_error(str(e))
             finally:
-                self._is_speaking = False
-                self._is_paused = False
-                if on_done:
-                    on_done()
+                if session == self._session:
+                    self._is_speaking = False
+                    self._is_paused = False
+                    # on_error and on_done are mutually exclusive terminal
+                    # callbacks: firing on_done after on_error would immediately
+                    # flip the caller's error UI back to the ready state.
+                    if on_done and not errored[0]:
+                        on_done()
 
         self._speech_thread = threading.Thread(target=_worker, daemon=True)
         self._speech_thread.start()
@@ -795,9 +832,9 @@ class TTSEngine:
         log.warning("NVIDIA TTS: falling back to Edge TTS")
         return self._synthesize_edge_tts(text, self._get_fallback_edge_voice())
 
-    def _play_audio(self, audio_bytes: bytes) -> None:
-        """Play audio_bytes via Windows MediaPlayer."""
-        if not audio_bytes or self._stop_event.is_set():
+    def _play_audio(self, audio_bytes: bytes, session: int = 0) -> None:
+        """Play audio_bytes via MCI (pausable), falling back to PowerShell MediaPlayer."""
+        if not audio_bytes or self._stop_event.is_set() or session != self._session:
             return
 
         # Detect format by magic bytes: WAV starts with RIFF, MP3 with ID3 or 0xFF 0xFB
@@ -809,7 +846,49 @@ class TTSEngine:
             tmp_path = tmp.name
 
         safe_path = tmp_path.replace("\\", "/")
+        alias = f"vf_audio_{time.time_ns()}"
+        mci_played = False
 
+        try:
+            import ctypes
+
+            winmm = ctypes.windll.winmm
+            self._active_mci_alias = alias
+            open_res = winmm.mciSendStringW(f'open "{safe_path}" alias {alias}', None, 0, 0)
+            if open_res == 0:
+                mci_played = True
+                winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                if self._is_paused:
+                    winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
+                buf = ctypes.create_unicode_buffer(128)
+                while not (self._stop_event.is_set() or session != self._session):
+                    winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                    if buf.value.lower() not in ("playing", "paused"):
+                        break
+                    time.sleep(0.05)
+            else:
+                log.warning("MCI open failed with code %d; using PowerShell playback", open_res)
+        except Exception as e:
+            log.error("MCI playback error: %s", e)
+        finally:
+            if self._active_mci_alias == alias:
+                try:
+                    import ctypes
+                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+                except Exception:
+                    pass
+                self._active_mci_alias = None
+
+        if mci_played or self._stop_event.is_set() or session != self._session:
+            try:
+                if os.path.exists(tmp_path):
+                    time.sleep(0.1)
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            return
+
+        # Codec fallback: MCI cannot open this format; MediaPlayer is not pausable.
         try:
             import subprocess
 
@@ -846,7 +925,7 @@ class TTSEngine:
             )
 
             while self._player_proc.poll() is None:
-                if self._stop_event.is_set():
+                if self._stop_event.is_set() or session != self._session:
                     self._player_proc.terminate()
                     break
                 time.sleep(0.05)
