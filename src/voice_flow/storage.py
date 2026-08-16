@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -517,16 +518,6 @@ class StorageEngine:
             conn.commit()
             return {"success": True, "id": record_id, "is_pinned": bool(new_pinned)}
 
-    def delete_history_record(self, record_id: int) -> dict[str, Any]:
-        """Delete a single history record from database."""
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM history WHERE id = ?", (record_id,))
-            conn.commit()
-            if cursor.rowcount > 0:
-                return {"success": True, "id": record_id}
-            return {"success": False, "error": "Record not found"}
-
     def get_insights(self, range_filter: str = "all") -> dict[str, Any]:
         """Compute rich desktop dictation telemetry and insights metrics."""
         with self._get_conn() as conn:
@@ -645,11 +636,14 @@ class StorageEngine:
                 w_count = app.get("total_words", 0) or 0
                 c_count = app.get("count", 0) or 0
 
-                if key in merged_apps:
-                    merged_apps[key]["total_words"] += w_count
-                    merged_apps[key]["count"] += c_count
+                # Merge on the canonical display name: distinct raw window
+                # titles ("claude", "claude code") must not surface as
+                # duplicate rows once they resolve to the same display name.
+                if display_name in merged_apps:
+                    merged_apps[display_name]["total_words"] += w_count
+                    merged_apps[display_name]["count"] += c_count
                 else:
-                    merged_apps[key] = {
+                    merged_apps[display_name] = {
                         "app_name": display_name,
                         "category": category_tag,
                         "count": c_count,
@@ -705,14 +699,19 @@ class StorageEngine:
             for d_str in dates:
                 try:
                     d_obj = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
-                    if d_obj == check_date:
-                        streak += 1
-                        check_date -= datetime.timedelta(days=1)
-                    elif d_obj == check_date - datetime.timedelta(days=1):
-                        streak += 1
-                        check_date = d_obj - datetime.timedelta(days=1)
                 except Exception:
-                    pass
+                    continue
+                if d_obj == check_date:
+                    streak += 1
+                    check_date -= datetime.timedelta(days=1)
+                elif streak == 0 and check_date == today and d_obj == check_date - datetime.timedelta(days=1):
+                    # Today has no dictation yet; start the streak from
+                    # yesterday. Once the chain has started, a missed day
+                    # must break it instead of being skipped.
+                    streak += 1
+                    check_date = d_obj - datetime.timedelta(days=1)
+                elif d_obj < check_date - datetime.timedelta(days=1):
+                    break
 
             # Hourly Time-of-Day Velocity Buckets
             cursor = conn.execute(
@@ -1586,5 +1585,18 @@ class StorageEngine:
         return dict(row)
 
 
-# Singleton Storage Instance
-storage = StorageEngine()
+# Singleton Storage Instance. Constructed lazily so importing this module
+# never opens or writes the user's live database (tests and tooling that
+# only need StorageEngine stay fully isolated from production data).
+_storage_singleton: StorageEngine | None = None
+_storage_singleton_lock = threading.Lock()
+
+
+def __getattr__(name: str) -> Any:
+    if name == "storage":
+        global _storage_singleton
+        with _storage_singleton_lock:
+            if _storage_singleton is None:
+                _storage_singleton = StorageEngine()
+            return _storage_singleton
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

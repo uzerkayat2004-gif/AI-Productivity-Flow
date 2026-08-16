@@ -144,6 +144,7 @@ class VoiceFlowApp:
         # Connect Audio Flow Floating Widget
         audio_flow_widget.on_trigger = lambda text, mode="full", summary_depth=None: self._process_audio_flow_pipeline(text_override=text, mode=mode, summary_depth=summary_depth)
         audio_flow_widget.on_stop = lambda: self._stop_audio_flow_pipeline()
+        audio_flow_widget.on_pause_toggle = lambda: self._toggle_audio_flow_pause()
         video_flow_widget.on_generate = self._queue_video_from_screen
 
     @property
@@ -152,6 +153,9 @@ class VoiceFlowApp:
             return self.state == DictationState.RECORDING
 
     def _on_dictation_start(self, mode: str = "ptt") -> bool:
+        if not storage.get_setting("voice_flow_enabled", True):
+            log.info("Voice Flow dictation is disabled via the feature toggle.")
+            return False
         with self._state_lock:
             if self.state != DictationState.IDLE:
                 log.info("Refusing start dictation while in state %s", self.state)
@@ -630,10 +634,18 @@ class VoiceFlowApp:
             time.sleep(1.1)
     def _stop_audio_flow_pipeline(self) -> None:
         """Stop active Audio Flow TTS playback and invalidate in-flight summary generation."""
-        self._audio_summary_generation += 1
+        self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
         tts_engine.stop()
         audio_flow_widget.set_playing(False)
         self.overlay.show_ready()
+    def _toggle_audio_flow_pause(self) -> None:
+        """Suspend or reinstate Audio Flow TTS playback from the widget control bar."""
+        if tts_engine.is_speaking():
+            if tts_engine.is_paused():
+                tts_engine.resume()
+            else:
+                tts_engine.pause()
+        audio_flow_widget.set_paused(tts_engine.is_paused())
     def _watch_gui_state_file(self) -> None:
         """Monitor ~/.voice_flow/recording_state.json for recording toggle events from GUI."""
         import json

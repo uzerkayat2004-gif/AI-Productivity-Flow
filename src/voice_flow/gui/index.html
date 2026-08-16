@@ -18,9 +18,12 @@
 
   <link rel="stylesheet" href="styles.css">
 
-  <link rel="stylesheet" href="video-flow.css?v=20260816">
-
   <link rel="stylesheet" href="design-system.css">
+
+  <!-- video-flow.css must load AFTER design-system.css: both style the shared
+       .vf-model-picker-* / .vf-* components with !important, and this sheet
+       holds the current redesign, so it must win the cascade ties. -->
+  <link rel="stylesheet" href="video-flow.css?v=20260817">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
 
@@ -72,31 +75,7 @@
 
         <nav class="nav-group">
 
-          <div class="nav-item active" data-page="home">
-
-            <span class="nav-icon">⊞</span> <span class="nav-label">Home</span>
-
-          </div>
-
-          <div class="nav-item" data-page="insights">
-
-            <span class="nav-icon">📊</span> <span class="nav-label">Insights</span>
-
-          </div>
-
-          <div class="nav-item" data-page="dictionary">
-
-            <span class="nav-icon">📖</span> <span class="nav-label">Dictionary</span>
-
-          </div>
-
-          <div class="nav-item" data-page="style">
-
-            <span class="nav-icon">Tτ</span> <span class="nav-label">Style</span>
-
-          </div>
-
-          <div class="nav-item" data-page="audioflow">
+          <div class="nav-item active" data-page="audioflow">
 
             <span class="nav-icon">🔊</span> <span class="nav-label">Audio Flow</span>
 
@@ -106,9 +85,54 @@
 
             <span class="nav-icon">🎬</span> <span class="nav-label">Video Flow</span>
 
-          </div>          <div class="nav-item" data-page="providers">
+          </div>
 
-            <span class="nav-icon">🔌</span> <span class="nav-label">Providers</span>
+          <!-- Voice Flow parent: toggles a dropdown holding its five features.
+               The parent has NO data-page; children keep theirs so the
+               existing switchPage wiring is untouched. -->
+          <div class="nav-parent-group" id="voiceflow-nav-group">
+
+            <div class="nav-item nav-parent" id="voiceflow-nav-toggle" onclick="toggleVoiceFlowMenu(event)">
+
+              <span class="nav-icon">⊞</span> <span class="nav-label">Voice Flow</span>
+
+              <span class="nav-chevron" aria-hidden="true">⌄</span>
+
+            </div>
+
+            <div class="nav-submenu" id="voiceflow-nav-submenu">
+
+            <div class="nav-item" data-page="home">
+
+              <span class="nav-icon">⊞</span> <span class="nav-label">Home</span>
+
+            </div>
+
+              <div class="nav-item" data-page="insights">
+
+                <span class="nav-icon">📊</span> <span class="nav-label">Insights</span>
+
+              </div>
+
+              <div class="nav-item" data-page="dictionary">
+
+                <span class="nav-icon">📖</span> <span class="nav-label">Dictionary</span>
+
+              </div>
+
+              <div class="nav-item" data-page="style">
+
+                <span class="nav-icon">Tτ</span> <span class="nav-label">Style</span>
+
+              </div>
+
+              <div class="nav-item" data-page="providers">
+
+                <span class="nav-icon">🔌</span> <span class="nav-label">Providers</span>
+
+              </div>
+
+            </div>
 
           </div>
 
@@ -150,7 +174,7 @@
 
       <!-- PAGE 1: HOME PAGE -->
 
-      <section id="page-home" class="page-view">
+      <section id="page-home" class="page-view" style="display: none;">
 
 
 
@@ -649,6 +673,20 @@
 
                 <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.35); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip">
 
+                  <span style="font-size: 12px; font-weight: 700; color: var(--text-main);">Voice Flow</span>
+
+                  <label class="toggle-switch">
+
+                    <input type="checkbox" id="toggle-voice-flow-feature" checked onchange="toggleVoiceFlowFeature(this.checked)">
+
+                    <span class="toggle-slider"></span>
+
+                  </label>
+
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.35); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip">
+
                   <span style="font-size: 12px; font-weight: 700; color: var(--text-main);">AI Polishing</span>
 
                   <label class="toggle-switch">
@@ -675,11 +713,13 @@
 
                 <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.5px;">Voice Flow Model Selector</label>
 
-                <select id="exec-policy-model-select" class="mode-select-dropdown" onchange="updateExecVoiceFlowPolicy(this.value)">
-
-                  <!-- Dynamically populated from active provider connections -->
-
-                </select>
+                <button id="exec-policy-model-picker-button" class="vf-model-picker-button" type="button" onclick="openVoiceFlowModelPicker()" aria-haspopup="dialog" style="width: 100%;">
+                  <span class="vf-model-picker-copy">
+                    <strong id="exec-policy-model-label">Google Gemini — Gemini 2.5 Flash</strong>
+                    <small id="exec-policy-model-detail">Connected LLM Provider</small>
+                  </span>
+                  <span class="vf-model-picker-action">Change <b>⌄</b></span>
+                </button>
 
               </div>
 
@@ -833,7 +873,7 @@
 
 
       <!-- PAGE: AUDIO FLOW DEDICATED FEATURE SCREEN -->
-      <section id="page-audioflow" class="page-view" style="display: none; padding-bottom: 60px;">
+      <section id="page-audioflow" class="page-view" style="padding-bottom: 60px;">
 
         <!-- SUB-VIEW 1: AUDIO PROVIDERS OVERVIEW -->
         <div id="audio-providers-view-overview" style="margin-bottom: 16px;">
@@ -844,6 +884,13 @@
                 <span class="af-engine-badge" style="font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 20px;">🔊 Text-to-Speech Engine</span>
               </div>
               <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px; margin-bottom: 0; line-height: 1.5;">Read any selected text across your applications using neural AI voices or connected provider TTS models.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.45); padding: 8px 18px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);" class="pill-chip">
+              <span style="font-size: 13px; font-weight: 700; color: #fff;">Audio Flow</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-audio-flow-titlebar" checked onchange="toggleAudioFlowSetting(this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
             </div>
           </div>
 
@@ -875,10 +922,14 @@
             <!-- Active Voice Dropdown + Stats Box Grid -->
             <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 16px;" class="af-inner-box">
               <div>
-                <label for="exec-audio-policy-model-select" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Voice / Engine Selector</label>
-                <select id="exec-audio-policy-model-select" class="mode-select-dropdown" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc;" onchange="updateExecAudioFlowPolicy(this.value)">
-                  <!-- Dynamically populated from active provider connections & Edge-TTS -->
-                </select>
+                <label style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Voice / Engine Selector</label>
+                <button id="exec-audio-policy-model-picker-button" class="vf-model-picker-button" type="button" onclick="openAudioVoiceModelPicker()" aria-haspopup="dialog" style="width: 100%;">
+                  <span class="vf-model-picker-copy">
+                    <strong id="exec-audio-policy-model-label">Edge Ava (Calm Female)</strong>
+                    <small id="exec-audio-policy-model-detail">Active TTS voice</small>
+                  </span>
+                  <span class="vf-model-picker-action">Change <b>⌄</b></span>
+                </button>
               </div>
               <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -931,19 +982,25 @@
               </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center;" class="af-inner-box">
-              <div>
-                <label for="af-summary-model-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Summary LLM Model</label>
-                <button id="af-summary-model-picker-button" class="vf-model-picker-button" type="button" onclick="openAudioSummaryModelPicker()" aria-haspopup="dialog" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
-                  <span class="vf-model-picker-copy"><strong id="af-summary-active-model-label">Voice Flow Local — Deterministic Summary</strong> <small id="af-summary-active-model-detail" style="color: var(--text-muted); margin-left: 6px;">(Select an LLM model)</small></span>
-                  <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>⌄</b></span>
+            <div class="af-model-selector">
+              <div class="af-model-selector-main">
+                <label class="af-model-selector-label">Active Summary LLM Model</label>
+                <button id="af-summary-model-picker-button" class="vf-model-picker-button" type="button" onclick="openAudioSummaryModelPicker()" aria-haspopup="dialog">
+                  <span class="vf-model-picker-copy">
+                    <strong id="af-summary-active-model-label">Voice Flow Local — Deterministic Summary</strong>
+                    <small id="af-summary-active-model-detail">Private · offline · no account required</small>
+                  </span>
+                  <span class="vf-model-picker-action">Change <b>⌄</b></span>
                 </button>
-                <select id="af-summary-model-select" class="hidden" aria-hidden="true" tabindex="-1"></select>
               </div>
-              <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
-                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                  <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Summary Engine:</span>
-                  <strong style="color: var(--accent-text); font-weight: 700;" id="af-summary-active-engine-label">Local Extractive</strong>
+              <div class="af-model-selector-side">
+                <div class="af-model-engine-row">
+                  <span class="af-model-engine-caption">Summary Engine</span>
+                  <strong class="af-model-engine-value" id="af-summary-active-engine-label">Local Extractive</strong>
+                </div>
+                <div class="af-model-engine-row">
+                  <span class="af-model-engine-caption">Depth Modes</span>
+                  <span class="af-model-depth-pills"><span>Quick</span><span>Standard</span><span>Detailed</span></span>
                 </div>
               </div>
             </div>
@@ -1029,6 +1086,13 @@
             <p>The in-app studio is a secondary way to create videos. Your screen-wide Voice Flow bar remains the primary experience.</p>
           </div>
           <span class="vf-live-pill" id="vf-engine-status">● Renderer ready</span>
+          <div style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.45); padding: 8px 18px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);" class="pill-chip">
+            <span style="font-size: 13px; font-weight: 700; color: #fff;">Video Flow</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggle-video-flow-feature" checked onchange="toggleVideoFlowFeature(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <section class="vf-panel vf-history-panel" id="vf-history-panel">
@@ -1161,6 +1225,127 @@
     </main>
 
   <!-- ENLARGED SETTINGS MODAL -->
+
+  <div id="settings-modal" class="modal-overlay hidden" style="z-index: 1100;">
+    <div class="modal-card" style="display: flex; padding: 0; overflow: hidden;">
+
+      <div class="modal-sidebar" style="display: flex; flex-direction: column; gap: 6px;">
+        <h3 style="font-size: 17px; font-weight: 800; margin-bottom: 18px;">Settings</h3>
+        <div class="nav-item active" onclick="switchSettingsTab('general', this)">
+          <span class="nav-icon">⚙️</span> <span class="nav-label">General</span>
+        </div>
+        <div class="nav-item" onclick="switchSettingsTab('system', this)">
+          <span class="nav-icon">💻</span> <span class="nav-label">System</span>
+        </div>
+        <div style="margin-top: auto;">
+          <button class="action-btn" style="width: 100%;" onclick="closeSettings()">Done</button>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div id="set-tab-general">
+          <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 12px;">Dictation &amp; Input</h3>
+          <div class="settings-group-card">
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-title">Push to Talk Shortcut</div>
+                <div class="setting-desc">Hold this combination anywhere on your PC to start dictating.</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="kbd-pill" id="ptt-current-kbd">Ctrl+Win</span>
+                <button class="action-btn" onclick="changePushToTalkKey()">Change</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-title">Microphone Input</div>
+                <div class="setting-desc">Choose the hardware microphone Voice Flow listens on.</div>
+              </div>
+              <button class="action-btn" onclick="openMicrophoneDialog()">🎤 Select Microphone</button>
+            </div>
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <div class="setting-title">Dictation Mode</div>
+                <div class="setting-desc">Switch between hold-to-talk and tap-to-toggle triggers.</div>
+              </div>
+              <button class="action-btn" onclick="openShortcutDialog()">⌨️ Shortcuts</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="set-tab-system" style="display: none;">
+          <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 12px;">System</h3>
+          <div class="settings-group-card">
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-title">Auto-Startup</div>
+                <div class="setting-desc">Voice Flow launches silently at Windows startup (Registry + Startup folder) and is supervised by the background watchdog.</div>
+              </div>
+              <span class="status-badge status-connected">✓ Enabled</span>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <div class="setting-title">Local Data</div>
+                <div class="setting-desc">Dictation history, insights, dictionary, and settings are stored locally in <code>~/.voice_flow/voice_flow.db</code>. Nothing leaves your machine unless you connect a provider.</div>
+              </div>
+            </div>
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <div class="setting-title">Runtime</div>
+                <div class="setting-desc">Local API server on <code>http://127.0.0.1:8991</code> · Faster-Whisper local STT · Windows 10/11 x64.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SETTINGS SUB-MODAL: MICROPHONE -->
+
+  <div id="mic-sub-modal" class="modal-overlay hidden" style="z-index: 1250;">
+    <div class="perfect-keys-card" style="width: 460px;">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;">Microphone Input</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Detected hardware microphones. The selected device is used for all dictation.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
+      </div>
+      <div id="mic-devices-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 12px;"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS SUB-MODAL: SHORTCUTS -->
+
+  <div id="shortcuts-sub-modal" class="modal-overlay hidden" style="z-index: 1250;">
+    <div class="perfect-keys-card" style="width: 460px;">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800;">Dictation Shortcuts</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose how the global trigger behaves, then fine-tune the hotkey.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('shortcuts-sub-modal')">✕</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
+        <div class="shortcut-option-card active-option" onclick="selectShortcutMode('hold', this)">
+          <div>
+            <div style="font-weight: 700; font-size: 14px;">Hold to Talk</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Press and hold to record; release to transcribe and paste.</div>
+          </div>
+          <span class="kbd-pill" id="ptt-display-kbd">Ctrl+Win</span>
+        </div>
+        <div class="shortcut-option-card" onclick="selectShortcutMode('toggle', this)">
+          <div>
+            <div style="font-weight: 700; font-size: 14px;">Tap to Toggle</div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Tap to start, tap again to finish. Holds under 0.3s count as taps.</div>
+          </div>
+          <span class="kbd-pill">Middle Click</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: ADD / EDIT API KEY CONNECTION MODAL -->
 
@@ -1482,13 +1667,21 @@
 
     <div class="vf-dialog vf-model-picker-dialog">
 
-      <div class="vf-dialog-header"><div><span class="vf-kicker">VIDEO FLOW MODEL</span><h3>Select the planning model</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-model-picker-modal')">✕</button></div>
+      <div class="vf-dialog-header"><div><span class="vf-kicker" id="vf-model-picker-kicker">VIDEO FLOW MODEL</span><h3 id="vf-model-picker-title">Select the planning model</h3></div><button class="close-icon-btn" onclick="closeVideoModal('vf-model-picker-modal')">✕</button></div>
 
-      <div class="vf-picker-note">Only enabled models from connected Video Flow providers appear here. Combos are listed first.</div>
+      <div class="vf-picker-note" id="vf-model-picker-note">Only enabled models from connected Video Flow providers appear here. Combos are listed first.</div>
 
-      <input id="vf-model-picker-search" class="vf-picker-search" type="search" placeholder="Search models, providers, or capabilities…" oninput="renderVideoModelPicker()">
+      <div class="vf-picker-search-row">
+        <span class="vf-picker-search-icon">🔍</span>
+        <input id="vf-model-picker-search" class="vf-picker-search" type="search" placeholder="Search models, providers, or capabilities…" oninput="renderVideoModelPicker()">
+      </div>
 
       <div id="vf-model-picker-list" class="vf-grouped-model-picker"></div>
+
+      <div class="vf-picker-footer">
+        <span>Models come from your connected providers.</span>
+        <button class="vf-picker-footer-link" onclick="closeVideoModal('vf-model-picker-modal'); switchPage('providers')">Manage providers →</button>
+      </div>
 
     </div>
 

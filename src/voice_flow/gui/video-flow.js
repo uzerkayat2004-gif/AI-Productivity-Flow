@@ -1,4 +1,5 @@
 let vfCatalog = {providers: [], models: [], combos: [], active_model: "local/deterministic"};
+let vfCatalogLoaded = false;
 let vfVideos = [];
 let vfPollTimer = null;
 let vfDeleteTarget = null;
@@ -9,6 +10,22 @@ let vfConnectionMode = "single";
 let vfComboDraftModels = [];
 let vfProviderOpenRequest = 0;
 let vfOAuthProvider = null;
+
+// The model picker is shared by Video Flow and the Audio Flow summary
+// selector, so it must be able to hydrate the catalog on its own — not only
+// after the Video Flow page happened to load it.
+async function vfEnsureCatalog() {
+  if (vfCatalogLoaded) return true;
+  try {
+    const res = await fetch("/api/video-flow/catalog");
+    if (!res.ok) return false;
+    vfCatalog = await res.json();
+    vfCatalogLoaded = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const VF_PERMANENT_CONFIRMATION = "DELETE_VIDEO_FROM_THIS_PC";
 const vfProviderIcons = {
@@ -50,6 +67,7 @@ async function loadVideoFlow() {
     if (!historyResponse.ok || !catalogResponse.ok) throw new Error("Video Flow backend is unavailable.");
     const historyData = await historyResponse.json();
     vfCatalog = await catalogResponse.json();
+    vfCatalogLoaded = true;
     vfVideos = historyData.videos || [];
     renderVideoHistory();
     renderVideoCatalog();
@@ -229,47 +247,131 @@ function renderVideoCatalog() {
   renderVideoModelPicker();
 }
 
+function vfPickerActiveRef() {
+  if (vfModelPickerContext === "audio_summary") {
+    if (typeof afSummaryModelRef === "string" && afSummaryModelRef) return afSummaryModelRef;
+    return "local/deterministic";
+  }
+  if (vfModelPickerContext === "voice_flow") {
+    if (typeof voiceFlowPolicyModelRef === "string" && voiceFlowPolicyModelRef) return voiceFlowPolicyModelRef;
+  }
+  if (vfModelPickerContext === "audio_voice") {
+    if (typeof audioVoicePolicyModelRef === "string" && audioVoicePolicyModelRef) return audioVoicePolicyModelRef;
+  }
+  return vfCatalog.active_model || "local/deterministic";
+}
+
+function vfPickerProviderIcon(key) {
+  const icon = vfProviderIcons[key];
+  if (icon) return icon;
+  const model = (vfCatalog.models || []).find(m => m.provider_name === key);
+  return (model && vfProviderIcons[model.provider]) || "✦";
+}
+
 function renderVideoModelPicker() {
   const root = document.getElementById("vf-model-picker-list");
   if (!root) return;
   const query = (document.getElementById("vf-model-picker-search")?.value || "").trim().toLowerCase();
-  const models = vfSelectableVideoModels().filter(model =>
+  let models = vfSelectableVideoModels().filter(model =>
     !query || [model.provider_name, model.display_name, model.full_id, ...(model.capabilities || [])].join(" ").toLowerCase().includes(query)
   );
   const combos = vfSelectableVideoCombos().filter(combo =>
     !query || [combo.name, combo.strategy, ...(combo.models || [])].join(" ").toLowerCase().includes(query)
   );
+  // Restricted contexts (e.g. the Voice Flow polishing policy or the Audio
+  // Flow voice catalogue) only offer the models their backend supports.
+  if (vfPickerAllowedRefs) {
+    models = models.filter(model => vfPickerAllowedRefs.has(model.full_id));
+    // Policy-only models absent from the shared catalog (different provider
+    // hosting) are injected so they remain selectable.
+    const extras = vfModelPickerContext === "audio_voice"
+      ? (typeof audioVoicePolicyModels !== "undefined" ? audioVoicePolicyModels : [])
+      : (typeof voiceFlowPolicyModels !== "undefined" ? voiceFlowPolicyModels : []);
+    for (const pm of extras) {
+      const matchesQuery = !query || [pm.provider_name, pm.display_name, pm.full_id, ...(pm.capabilities || [])].join(" ").toLowerCase().includes(query);
+      if (matchesQuery && vfPickerAllowedRefs.has(pm.full_id) && !models.some(m => m.full_id === pm.full_id)) {
+        models.push(pm);
+      }
+    }
+    combos.length = 0;
+  }
   const groups = new Map();
   for (const model of models) {
     const name = model.provider_name || model.provider;
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(model);
   }
+  const activeRef = vfPickerActiveRef();
   const sections = [];
   if (combos.length) {
     sections.push('<section class="vf-picker-group"><h4>◈ Model Combos <span>' + combos.length + '</span></h4>' + combos.map(combo =>
-      '<button class="vf-picker-model ' + (combo.ref === vfCatalog.active_model ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(combo.ref) + '\')"><span><strong>' + vfEscape(combo.name) + '</strong><small>' + combo.models.length + ' models · ' + vfEscape(combo.strategy.replace("_", " ")) + '</small></span><b>✓</b></button>'
+      '<button class="vf-picker-model ' + (combo.ref === activeRef ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(combo.ref) + '\')"><span class="vf-picker-model-icon">◈</span><span class="vf-picker-model-copy"><strong>' + vfEscape(combo.name) + '</strong><small>' + combo.models.length + ' models · ' + vfEscape(combo.strategy.replace("_", " ")) + ' failover</small></span><b class="vf-picker-check">✓</b></button>'
     ).join("") + '</section>');
   }
-  if (!query || "on this pc built-in deterministic private offline".includes(query)) {
-    sections.push('<section class="vf-picker-group"><h4>⌂ On this PC <span>1</span></h4><button class="vf-picker-model ' + (vfCatalog.active_model === "local/deterministic" ? "selected" : "") + '" onclick="chooseVideoModel(\'local/deterministic\')"><span><strong>Built-in deterministic planner</strong><small>Private · offline · no account required</small></span><b>✓</b></button></section>');
+  if (!vfPickerAllowedRefs && (!query || "on this pc built-in deterministic private offline".includes(query))) {
+    sections.push('<section class="vf-picker-group"><h4>⌂ On this PC <span>1</span></h4><button class="vf-picker-model ' + (activeRef === "local/deterministic" ? "selected" : "") + '" onclick="chooseVideoModel(\'local/deterministic\')"><span class="vf-picker-model-icon">⌂</span><span class="vf-picker-model-copy"><strong>Built-in deterministic planner</strong><small>Private · offline · no account required</small></span><b class="vf-picker-check">✓</b></button></section>');
   }
   for (const [providerName, items] of groups.entries()) {
+    const icon = vfPickerProviderIcon(items[0].provider || providerName);
     sections.push('<section class="vf-picker-group"><h4>' + vfEscape(providerName) + ' <span>' + items.length + '</span></h4>' + items.map(model =>
-      '<button class="vf-picker-model ' + (model.full_id === vfCatalog.active_model ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(model.full_id) + '\')"><span><strong>' + vfEscape(model.display_name) + '</strong><small>' + vfEscape(model.full_id) + '</small></span><span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span><b>✓</b></button>'
+      '<button class="vf-picker-model ' + (model.full_id === activeRef ? "selected" : "") + '" onclick="chooseVideoModel(\'' + vfEscape(model.full_id) + '\')"><span class="vf-picker-model-icon">' + vfEscape(icon) + '</span><span class="vf-picker-model-copy"><strong>' + vfEscape(model.display_name) + '</strong><small>' + vfEscape(model.full_id) + '</small></span><span class="vf-capability-list">' + vfCapabilityBadges(model) + '</span><b class="vf-picker-check">✓</b></button>'
     ).join("") + '</section>');
   }
   root.innerHTML = sections.join("") || '<div class="vf-empty-state vf-compact-empty"><strong>No connected models match</strong><span>Connect a provider, enable one of its models, or try another search.</span></div>';
 }
 
 let vfModelPickerContext = "video_flow";
+let vfPickerAllowedRefs = null;
+
+function vfUpdateModelPickerChrome() {
+  const kicker = document.getElementById("vf-model-picker-kicker");
+  const title = document.getElementById("vf-model-picker-title");
+  const note = document.getElementById("vf-model-picker-note");
+  if (vfModelPickerContext === "audio_summary") {
+    if (kicker) kicker.textContent = "AUDIO FLOW SUMMARY MODEL";
+    if (title) title.textContent = "Select the summary LLM";
+    if (note) note.textContent = "The selected LLM condenses highlighted text into a spoken explanation before Text-to-Speech narration.";
+  } else if (vfModelPickerContext === "audio_voice") {
+    if (kicker) kicker.textContent = "AUDIO FLOW VOICE";
+    if (title) title.textContent = "Select the TTS voice";
+    if (note) note.textContent = "Neural voices from connected TTS providers plus the free Edge engine. The selected voice reads your highlighted text aloud.";
+  } else if (vfModelPickerContext === "voice_flow") {
+    if (kicker) kicker.textContent = "VOICE FLOW MODEL";
+    if (title) title.textContent = "Select the polishing model";
+    if (note) note.textContent = "The selected model polishes every dictation before it is pasted. Only models supported by the polishing policy are listed.";
+  } else {
+    if (kicker) kicker.textContent = "VIDEO FLOW MODEL";
+    if (title) title.textContent = "Select the planning model";
+    if (note) note.textContent = "Only enabled models from connected Video Flow providers appear here. Combos are listed first.";
+  }
+}
 
 function openVideoModelPicker(context = "video_flow") {
   vfModelPickerContext = context;
+  // Restricted contexts only offer the models their backend supports.
+  if (context === "voice_flow" && typeof voiceFlowPolicyModelSet !== "undefined" && voiceFlowPolicyModelSet) {
+    vfPickerAllowedRefs = voiceFlowPolicyModelSet;
+  } else if (context === "audio_voice" && typeof audioVoicePolicySet !== "undefined" && audioVoicePolicySet) {
+    vfPickerAllowedRefs = audioVoicePolicySet;
+  } else {
+    vfPickerAllowedRefs = null;
+  }
   const search = document.getElementById("vf-model-picker-search");
   if (search) search.value = "";
-  renderVideoModelPicker();
+  vfUpdateModelPickerChrome();
+  const list = document.getElementById("vf-model-picker-list");
   document.getElementById("vf-model-picker-modal")?.classList.remove("hidden");
+  if (!vfCatalogLoaded && list) {
+    list.innerHTML = '<div class="vf-picker-loading"><span class="vf-picker-spinner" aria-hidden="true"></span>Loading connected models…</div>';
+    vfEnsureCatalog().then(ok => {
+      // The modal may have been closed again before the catalog arrived.
+      if (document.getElementById("vf-model-picker-modal")?.classList.contains("hidden")) return;
+      renderVideoModelPicker();
+      if (!ok && typeof vfToast === "function") vfToast("Could not load the model catalog.", true);
+    });
+  } else {
+    renderVideoModelPicker();
+  }
   requestAnimationFrame(() => search?.focus());
 }
 
@@ -278,6 +380,14 @@ function chooseVideoModel(modelRef) {
   if (vfModelPickerContext === "audio_summary") {
     if (typeof selectAudioSummaryModel === "function") {
       selectAudioSummaryModel(modelRef);
+    }
+  } else if (vfModelPickerContext === "audio_voice") {
+    if (typeof updateExecAudioFlowPolicy === "function") {
+      updateExecAudioFlowPolicy(modelRef);
+    }
+  } else if (vfModelPickerContext === "voice_flow") {
+    if (typeof updateExecVoiceFlowPolicy === "function") {
+      updateExecVoiceFlowPolicy(modelRef);
     }
   } else {
     const select = document.getElementById("vf-model-select");

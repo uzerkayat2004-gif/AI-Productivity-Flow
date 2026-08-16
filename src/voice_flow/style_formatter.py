@@ -151,20 +151,25 @@ def apply_capitalization_policy(
 
     # 1. Very Casual Mode: Lowercase first letter and words
     if config.id == "very_casual":
-        words = text.split(" ")
-        formatted_words = []
-        for w in words:
-            if w.startswith("__STYLE_TOKEN_") and w.endswith("__"):
-                formatted_words.append(w)
-            else:
-                formatted_words.append(w.lower())
-        return " ".join(formatted_words)
+        # A protected placeholder may carry adjacent punctuation (for example
+        # "__STYLE_TOKEN_0__,"), so lowercase only the literal segments of
+        # each word; lowercasing the key itself would break unprotection.
+        def _lower_word(word: str) -> str:
+            segments = re.split(r"(__STYLE_TOKEN_\d+__)", word)
+            return "".join(
+                seg if seg.startswith("__STYLE_TOKEN_") else seg.lower()
+                for seg in segments
+            )
+
+        return " ".join(_lower_word(w) for w in text.split(" "))
 
     # 2. Capitalize standalone pronoun "I" and contractions ("I'm", "I'll", "I've", "I'd")
     if config.capitalize_pronoun_i:
         text = re.sub(r"\b(i)\b", "I", text)
         text = re.sub(r"\bi('m|'ll|'ve|'d)\b", r"I\1", text, flags=re.I)
-        text = re.sub(r"\bi(m|ll|ve|d)\b", r"I'\1", text, flags=re.I)
+        # Only "im" is unambiguously not an English word; "id" and "ill"
+        # must survive verbatim ("the user id", "grandma is ill").
+        text = re.sub(r"\bim\b", "I'm", text, flags=re.I)
 
     # 3. Sentence-start capitalization
     if sentence_start and not config.allow_lowercase_first_letter:
@@ -296,6 +301,8 @@ class StyleFormatter:
             style_key = style_key.replace("work_", "")
         elif style_key.startswith("email_"):
             style_key = style_key.replace("email_", "")
+        elif style_key.startswith("developer_"):
+            style_key = style_key.replace("developer_", "")
         elif style_key.startswith("other_"):
             style_key = style_key.replace("other_", "")
 

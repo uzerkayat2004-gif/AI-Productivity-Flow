@@ -162,19 +162,24 @@ let selectedStyles = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  // The app opens on the Audio Flow feature (first sidebar position), not on
+  // Voice Flow Home. switchPage triggers its own page loaders.
+  currentPageId = "audioflow";
   initNavigation();
-  loadHistory();
-  loadInsights();
-  loadDictionary();
+  switchPage("audioflow");
   loadSavedApiKeys();
   loadStyleSettings();
   renderStyleCategory("personal");
+  loadFeatureToggleStates();
   startFloatingBarStartupSequence();
 
-  // Real-time auto-refresh polling every 3 seconds
+  // Real-time auto-refresh: only refresh the data of the page the user is
+  // actually looking at. Re-rendering every page's feed every 3s caused DOM
+  // churn (and scrollbar-induced layout shift) that made clicks feel flaky.
   setInterval(() => {
-    loadHistory();
-    loadInsights();
+    if (document.hidden) return;
+    if (currentPageId === "home") loadHistory();
+    else if (currentPageId === "insights") loadInsights();
   }, 3000);
 });
 
@@ -347,6 +352,31 @@ function toggleSidebar() {
 }
 
 // Navigation between sidebar pages
+let currentPageId = "home";
+
+// The five Voice Flow features live inside the collapsible parent menu.
+const VOICEFLOW_CHILD_PAGES = ["home", "insights", "dictionary", "style", "providers"];
+
+function toggleVoiceFlowMenu(event) {
+  if (event) event.stopPropagation();
+  const group = document.getElementById("voiceflow-nav-group");
+  if (group) group.classList.toggle("open");
+}
+
+function setVoiceFlowMenuOpen(open) {
+  const group = document.getElementById("voiceflow-nav-group");
+  if (group) group.classList.toggle("open", Boolean(open));
+}
+
+function updateVoiceFlowParentState(pageId) {
+  const toggle = document.getElementById("voiceflow-nav-toggle");
+  if (!toggle) return;
+  const isChild = VOICEFLOW_CHILD_PAGES.includes(pageId);
+  toggle.classList.toggle("active", isChild);
+  // Keep the current page's entry visible even if the menu was collapsed.
+  if (isChild) setVoiceFlowMenuOpen(true);
+}
+
 function initNavigation() {
   const navItems = document.querySelectorAll(".sidebar .nav-item[data-page]");
   navItems.forEach(item => {
@@ -355,12 +385,16 @@ function initNavigation() {
       switchPage(pageId);
     });
   });
+  // Start with the dropdown open when the landing page is one of its children.
+  updateVoiceFlowParentState(currentPageId);
 }
 
 function switchPage(pageId) {
+  currentPageId = pageId;
   document.querySelectorAll(".sidebar .nav-item[data-page]").forEach(nav => {
     nav.classList.toggle("active", nav.getAttribute("data-page") === pageId);
   });
+  updateVoiceFlowParentState(pageId);
 
   document.querySelectorAll(".page-view").forEach(page => {
     page.style.display = "none";
@@ -597,7 +631,8 @@ function renderHistoryFeed(records) {
           </div>
           <div class="dictation-actions">
             <button onclick="copyToClipboard('${escapeJs(r.polished_text)}')" class="action-btn" title="Copy to clipboard">📋 Copy</button>
-            <button onclick="this.classList.toggle('flagged')" class="action-btn" title="Bookmark">🚩</button>
+            <button onclick="toggleHistoryPin(${r.id})" class="action-btn ${r.is_pinned ? "flagged pinned-bookmark" : ""}" title="${r.is_pinned ? "Unpin — remove from top" : "Pin — keep at top"}">🚩</button>
+            <button onclick="deleteHistoryRecord(${r.id})" class="action-btn" title="Delete this record">🗑</button>
           </div>
         </div>
       `;
@@ -607,24 +642,59 @@ function renderHistoryFeed(records) {
   container.innerHTML = html;
 }
 
+async function toggleHistoryPin(recordId) {
+  try {
+    const res = await fetch("/api/history/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recordId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Re-fetch so the server's pinned-first ordering applies.
+    loadHistory();
+  } catch (err) {
+    console.error("Error toggling history pin:", err);
+  }
+}
+
+async function deleteHistoryRecord(recordId) {
+  try {
+    const res = await fetch("/api/history/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recordId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allHistoryRecords = allHistoryRecords.filter(r => r.id !== recordId);
+    filterHistory();
+  } catch (err) {
+    console.error("Error deleting history record:", err);
+  }
+}
+
 function filterHistory() {
   const query = document.getElementById("history-search").value.toLowerCase().trim();
   if (!query) {
     renderHistoryFeed(allHistoryRecords);
     return;
   }
-  const filtered = allHistoryRecords.filter(r => 
-    r.polished_text.toLowerCase().includes(query) || 
+  const filtered = allHistoryRecords.filter(r =>
+    r.polished_text.toLowerCase().includes(query) ||
     r.app_name.toLowerCase().includes(query)
   );
   renderHistoryFeed(filtered);
 }
 
+function _localDateKey(date) {
+  // Storage serves local-naive dates; toISOString() would shift them to UTC.
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function formatGroupDate(dateStr) {
-  const today = new Date().toISOString().split("T")[0];
-  if (dateStr === today) return "TODAY";
-  const resolver = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-  if (dateStr === resolver) return "YESTERDAY";
+  const now = new Date();
+  if (dateStr === _localDateKey(now)) return "TODAY";
+  const yesterday = new Date(now.getTime() - 86400000);
+  if (dateStr === _localDateKey(yesterday)) return "YESTERDAY";
   return dateStr.toUpperCase();
 }
 
@@ -838,7 +908,7 @@ function renderHeatmap(dailyActivityData) {
   for (let i = 27; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = _localDateKey(d);
     const formattedDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
 
     const match = activityList.find(a => a.date === dateStr);
@@ -1220,9 +1290,30 @@ async function loadProvidersOverview() {
   }
 }
 
+// Voice Flow polishing-policy model picker state (shared with video-flow.js).
+let voiceFlowPolicyModelRef = "";
+let voiceFlowPolicyModelSet = null;
+let voiceFlowPolicyModels = [];
+
+const VOICEFLOW_POLICY_PROVIDER_NAMES = {
+  gemini: "Google Gemini", groq: "Groq", openai: "OpenAI",
+  together: "Together AI", deepseek: "DeepSeek", anthropic: "Anthropic",
+};
+
+function openVoiceFlowModelPicker() {
+  // The polishing policy only supports its own model list; restrict the
+  // shared picker to it before opening.
+  if (voiceFlowPolicyModelSet) {
+    openVideoModelPicker("voice_flow");
+    return;
+  }
+  loadExecVoiceFlowPolicy().then(() => openVideoModelPicker("voice_flow"));
+}
+
 async function loadExecVoiceFlowPolicy() {
-  const selectEl = document.getElementById("exec-policy-model-select");
-  if (!selectEl) return;
+  const labelEl = document.getElementById("exec-policy-model-label");
+  const detailEl = document.getElementById("exec-policy-model-detail");
+  if (!labelEl) return;
 
   try {
     const res = await fetch("/api/policy/get");
@@ -1232,20 +1323,31 @@ async function loadExecVoiceFlowPolicy() {
     const policy = data.policy;
     const activeModel = policy.active_model || "gemini/gemini-2.5-flash";
     const models = policy.models || [];
+    voiceFlowPolicyModelRef = activeModel;
+    voiceFlowPolicyModelSet = models.length
+      ? new Set(models.map(m => m.full_id))
+      : null; // No policy list available — do not restrict.
+    // Policy models may not exist in the shared catalog (different provider
+    // hosting); expose them so the picker can still render them.
+    voiceFlowPolicyModels = models.map(m => {
+      const provider = String(m.full_id || "").split("/", 1)[0];
+      return {
+        full_id: m.full_id,
+        display_name: m.label || m.full_id,
+        provider: provider,
+        provider_name: VOICEFLOW_POLICY_PROVIDER_NAMES[provider] || provider,
+        capabilities: [],
+      };
+    });
 
-    if (models.length === 0) {
-      selectEl.innerHTML = `<option value="gemini/gemini-2.5-flash">[Google] Gemini 2.5 Flash (Default)</option>`;
-    } else {
-      selectEl.innerHTML = models.map(m => `
-        <option value="${m.full_id}" ${m.full_id === activeModel ? 'selected' : ''}>
-          ${escapeHtml(m.label)}
-        </option>
-      `).join("");
+    const activeObj = models.find(m => m.full_id === activeModel);
+    labelEl.textContent = activeObj ? activeObj.label : activeModel;
+    if (detailEl) {
+      detailEl.textContent = activeObj ? activeObj.full_id : "Connected LLM Provider";
     }
 
     const engineEl = document.getElementById("exec-policy-active-engine");
     if (engineEl) {
-      const activeObj = models.find(m => m.full_id === activeModel);
       engineEl.textContent = activeObj ? activeObj.label : activeModel;
     }
   } catch (err) {
@@ -1587,27 +1689,43 @@ async function loadAudioSummarySettings() {
   } catch (err) {
     console.warn("Could not load Audio Summary settings:", err);
   }
+  // Warm the shared catalog so the picker opens instantly.
+  if (typeof vfEnsureCatalog === "function") {
+    await vfEnsureCatalog();
+  }
 }
 
 function updateAudioSummaryModelUI(modelRef) {
   const label = document.getElementById("af-summary-active-model-label");
   const detail = document.getElementById("af-summary-active-model-detail");
   const engineLabel = document.getElementById("af-summary-active-engine-label");
-  if (!label || !engineLabel) return;
 
-  if (!modelRef || modelRef === "local/deterministic") {
-    label.textContent = "Voice Flow Local — Deterministic Summary";
-    if (detail) detail.textContent = "(Works offline)";
-    engineLabel.textContent = "Local Extractive";
-  } else if (modelRef.startsWith("combo:")) {
-    label.textContent = "◈ " + modelRef.replace("combo:", "");
-    if (detail) detail.textContent = "Model combo";
-    engineLabel.textContent = "Combo";
-  } else {
-    const parts = modelRef.split("/", 2);
-    label.textContent = modelRef;
-    if (detail) detail.textContent = "Connected LLM Provider";
-    engineLabel.textContent = parts[0] || "LLM";
+  if (label) {
+    if (!modelRef || modelRef === "local/deterministic") {
+      label.textContent = "Voice Flow Local — Deterministic Summary";
+    } else if (modelRef.startsWith("combo:")) {
+      label.textContent = "◈ " + modelRef.replace("combo:", "");
+    } else {
+      label.textContent = modelRef;
+    }
+  }
+  if (detail) {
+    if (!modelRef || modelRef === "local/deterministic") {
+      detail.textContent = "Private · offline · no account required";
+    } else if (modelRef.startsWith("combo:")) {
+      detail.textContent = "Model combo · multi-model failover";
+    } else {
+      detail.textContent = "Connected LLM Provider";
+    }
+  }
+  if (engineLabel) {
+    if (!modelRef || modelRef === "local/deterministic") {
+      engineLabel.textContent = "Local Extractive";
+    } else if (modelRef.startsWith("combo:")) {
+      engineLabel.textContent = "Combo";
+    } else {
+      engineLabel.textContent = modelRef.split("/", 1)[0] || "LLM";
+    }
   }
 }
 
@@ -1647,9 +1765,24 @@ function openAudioSummaryModelPicker() {
   }
 }
 
+// Audio Flow TTS voice picker state (shared with video-flow.js).
+let audioVoicePolicyModels = [];
+let audioVoicePolicySet = null;
+let audioVoicePolicyModelRef = "";
+
+function openAudioVoiceModelPicker() {
+  if (typeof openVideoModelPicker !== "function") return;
+  if (!audioVoicePolicyModels.length) {
+    loadExecAudioFlowPolicy().then(() => openVideoModelPicker("audio_voice"));
+    return;
+  }
+  openVideoModelPicker("audio_voice");
+}
+
 async function loadExecAudioFlowPolicy() {
-  const selectEl = document.getElementById("exec-audio-policy-model-select");
-  if (!selectEl) return;
+  const labelEl = document.getElementById("exec-audio-policy-model-label");
+  const detailEl = document.getElementById("exec-audio-policy-model-detail");
+  if (!labelEl) return;
 
   try {
     const res = await fetch("/api/audio-policy/get");
@@ -1661,33 +1794,32 @@ async function loadExecAudioFlowPolicy() {
     const models = policy.models || [];
     const grouped = policy.grouped_models || [];
 
-    if (models.length === 0) {
-      selectEl.innerHTML = `<option value="edge/en-US-AvaNeural">✨ Microsoft Edge Neural — Ava (Calm Female)</option>`;
-    } else if (grouped.length > 0) {
-      selectEl.innerHTML = grouped.map(g => `
-        <optgroup label="${escapeHtml(`${g.provider_logo} ${g.provider_name}`)}">
-          ${g.models.map(m => {
-            const specIcons = (m.has_vision ? "👁️ " : "") + (m.has_brain ? "🧠" : "");
-            return `
-              <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
-                ${escapeHtml(m.display_name || m.label)} ${specIcons}
-              </option>
-            `;
-          }).join("")}
-        </optgroup>
-      `).join("");
-    } else {
-      selectEl.innerHTML = models.map(m => `
-        <option value="${m.full_id}" ${m.full_id === activeModel ? "selected" : ""}>
-          ${escapeHtml(m.label)}
-        </option>
-      `).join("");
-    }
+    // Build picker rows from the grouped TTS catalogue.
+    const providerNames = new Map(grouped.map(g => [String(g.provider_name || "").toLowerCase(), g.provider_name]));
+    audioVoicePolicyModels = models.map(m => {
+      const provider = String(m.full_id || "").split("/", 1)[0];
+      const group = (grouped || []).find(g => (g.models || []).some(gm => gm.full_id === m.full_id));
+      const caps = [];
+      if (m.has_brain) caps.push("🧠 Reasoning");
+      if (m.has_vision) caps.push("👁 Vision");
+      return {
+        full_id: m.full_id,
+        display_name: m.display_name || m.label || m.full_id,
+        provider: provider,
+        provider_name: (group && group.provider_name) || providerNames.get(provider) || provider,
+        capabilities: caps,
+      };
+    });
+    audioVoicePolicySet = models.length ? new Set(models.map(m => m.full_id)) : null;
+    audioVoicePolicyModelRef = activeModel;
+
+    const activeObj = models.find(m => m.full_id === activeModel);
+    labelEl.textContent = activeObj ? (activeObj.display_name || activeObj.label) : activeModel;
+    if (detailEl) detailEl.textContent = activeObj ? activeObj.full_id : "Active TTS voice";
 
     const engineEl = document.getElementById("exec-audio-active-engine");
     const specialtyEl = document.getElementById("exec-audio-model-specialty");
     if (engineEl) {
-      const activeObj = models.find(m => m.full_id === activeModel);
       engineEl.textContent = activeObj ? activeObj.display_name : activeModel.split("/").pop();
       if (specialtyEl && activeObj) {
         let tags = [];
@@ -1707,6 +1839,8 @@ async function loadExecAudioFlowPolicy() {
 
     const toggle = document.getElementById("toggle-audio-flow");
     if (toggle) toggle.checked = policy.audio_flow_enabled !== false;
+    const titlebarToggle = document.getElementById("toggle-audio-flow-titlebar");
+    if (titlebarToggle) titlebarToggle.checked = policy.audio_flow_enabled !== false;
     updateAudioFlowStatusBadge(policy.audio_flow_enabled !== false);
 
     const speed = parseFloat(policy.audio_flow_speed);
@@ -1750,8 +1884,56 @@ async function toggleAudioFlowSetting(checked) {
       body: JSON.stringify({ enabled: !!checked }),
     });
     updateAudioFlowStatusBadge(!!checked);
+    // Keep the card toggle and the title-bar toggle in sync.
+    const card = document.getElementById("toggle-audio-flow");
+    const titlebar = document.getElementById("toggle-audio-flow-titlebar");
+    if (card) card.checked = !!checked;
+    if (titlebar) titlebar.checked = !!checked;
   } catch (err) {
     console.error("Error toggling Audio Flow:", err);
+  }
+}
+
+async function toggleVoiceFlowFeature(checked) {
+  try {
+    await fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "voice_flow_enabled", value: !!checked }),
+    });
+    if (typeof vfToast === "function") vfToast(`Voice Flow dictation ${checked ? "enabled" : "disabled"}.`);
+  } catch (err) {
+    console.error("Error toggling Voice Flow:", err);
+  }
+}
+
+async function toggleVideoFlowFeature(checked) {
+  try {
+    await fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "video_flow_enabled", value: !!checked }),
+    });
+    if (typeof vfToast === "function") vfToast(`Video Flow ${checked ? "enabled" : "disabled"}.`);
+  } catch (err) {
+    console.error("Error toggling Video Flow:", err);
+  }
+}
+
+async function loadFeatureToggleStates() {
+  try {
+    const [voiceRes, videoRes] = await Promise.all([
+      fetch("/api/settings/get?key=voice_flow_enabled"),
+      fetch("/api/settings/get?key=video_flow_enabled"),
+    ]);
+    const voice = await voiceRes.json();
+    const video = await videoRes.json();
+    const voiceToggle = document.getElementById("toggle-voice-flow-feature");
+    if (voiceToggle && voice.success) voiceToggle.checked = voice.value !== false;
+    const videoToggle = document.getElementById("toggle-video-flow-feature");
+    if (videoToggle && video.success) videoToggle.checked = video.value !== false;
+  } catch (err) {
+    console.warn("Could not load feature toggle states:", err);
   }
 }
 

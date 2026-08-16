@@ -143,13 +143,13 @@ STYLE_PRESETS: dict[str, StylePreset] = {
     "cleanup_high": StylePreset("cleanup_high", "High", "Thorough cleanup", "We should probably leave earlier for coffee.", STYLE_INSTRUCTIONS["cleanup_high"], "autocleanup"),
 }
 
-STYLE_PRESETS_BY_CATEGORY: dict[str, list[StylePreset]] = {
-    "personal": [STYLE_PRESETS["personal_formal"], STYLE_PRESETS["personal_casual"], STYLE_PRESETS["personal_very_casual"], STYLE_PRESETS["personal_excited"]],
-    "work": [STYLE_PRESETS["work_formal"], STYLE_PRESETS["work_casual"], STYLE_PRESETS["work_very_casual"], STYLE_PRESETS["work_excited"]],
-    "email": [STYLE_PRESETS["email_formal"], STYLE_PRESETS["email_casual"], STYLE_PRESETS["email_very_casual"], STYLE_PRESETS["email_excited"]],
-    "developer": [STYLE_PRESETS["developer_formal"], STYLE_PRESETS["developer_casual"], STYLE_PRESETS["developer_very_casual"], STYLE_PRESETS["developer_excited"]],
-    "other": [STYLE_PRESETS["other_formal"], STYLE_PRESETS["other_casual"], STYLE_PRESETS["other_very_casual"], STYLE_PRESETS["other_excited"]],
-    "autocleanup": [STYLE_PRESETS["cleanup_none"], STYLE_PRESETS["cleanup_light"], STYLE_PRESETS["cleanup_medium"], STYLE_PRESETS["cleanup_high"]],
+STYLE_PRESETS_BY_CATEGORY: dict[str, dict[str, StylePreset]] = {
+    "personal": {p.id: p for p in (STYLE_PRESETS["personal_formal"], STYLE_PRESETS["personal_casual"], STYLE_PRESETS["personal_very_casual"], STYLE_PRESETS["personal_excited"])},
+    "work": {p.id: p for p in (STYLE_PRESETS["work_formal"], STYLE_PRESETS["work_casual"], STYLE_PRESETS["work_very_casual"], STYLE_PRESETS["work_excited"])},
+    "email": {p.id: p for p in (STYLE_PRESETS["email_formal"], STYLE_PRESETS["email_casual"], STYLE_PRESETS["email_very_casual"], STYLE_PRESETS["email_excited"])},
+    "developer": {p.id: p for p in (STYLE_PRESETS["developer_formal"], STYLE_PRESETS["developer_casual"], STYLE_PRESETS["developer_very_casual"], STYLE_PRESETS["developer_excited"])},
+    "other": {p.id: p for p in (STYLE_PRESETS["other_formal"], STYLE_PRESETS["other_casual"], STYLE_PRESETS["other_very_casual"], STYLE_PRESETS["other_excited"])},
+    "autocleanup": {p.id: p for p in (STYLE_PRESETS["cleanup_none"], STYLE_PRESETS["cleanup_light"], STYLE_PRESETS["cleanup_medium"], STYLE_PRESETS["cleanup_high"])},
 }
 
 
@@ -246,7 +246,7 @@ class AppClassifier:
             return "personal"
 
         # Email apps
-        if any(e in exe_lower or e in title_lower for e in ("outlook", "thunderbird", "superhuman", "mailbird", "winmail")):
+        if any(e in exe_lower or e in title_lower for e in ("outlook", "thunderbird", "superhuman", "mailbird", "winmail", "gmail")):
             return "email"
 
         # Developer apps
@@ -381,6 +381,47 @@ def get_active_app_info() -> tuple[str, str]:
         return ("General App", "general.exe")
 
 
+def _window_title_for_hwnd(hwnd: int | None) -> str:
+    """Return the raw window title (e.g. the browser tab text) for classification.
+
+    The normalized display name collapses every Chrome/Edge window to
+    "Google Chrome", which would hide the site-specific tab title the
+    classifier needs (WhatsApp Web, Slack, GitHub, ...).
+    """
+    if sys.platform != "win32" or not hwnd:
+        return ""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        length = user32.GetWindowTextLengthW(hwnd)
+        buff = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buff, length + 1)
+        return buff.value.strip()
+    except Exception:
+        return ""
+
+
+def _active_window_title() -> str:
+    if sys.platform != "win32":
+        return ""
+    try:
+        import ctypes
+        return _window_title_for_hwnd(ctypes.windll.user32.GetForegroundWindow())
+    except Exception:
+        return ""
+
+
+_CATEGORY_STYLE_PREFIXES = ("personal_", "work_", "email_", "developer_", "other_")
+
+
+def _canonical_style(style_id: str) -> str:
+    """Strip any category card prefix so an id resolves to its base style."""
+    for prefix in _CATEGORY_STYLE_PREFIXES:
+        if style_id.startswith(prefix):
+            return style_id[len(prefix):]
+    return style_id
+
+
 class StyleEngine:
     """Orchestrates active application detection, user category styles, overrides, and formatting resolution."""
 
@@ -397,8 +438,7 @@ class StyleEngine:
         default_val = CATEGORY_DEFAULTS.get(category, "casual")
         raw_val = storage.get_setting(f"style_{category}", default_val)
         # Normalize to canonical short style if stored as full card ID or vice-versa
-        clean = raw_val.replace(f"{category}_", "") if raw_val.startswith(f"{category}_") else raw_val
-        return clean
+        return _canonical_style(raw_val)
 
     def set_category_style(self, category: str, style_id: str) -> None:
         storage.save_setting(f"style_{category}", style_id)
@@ -410,7 +450,8 @@ class StyleEngine:
         consume_override: bool = False,
     ) -> ResolvedStyle:
         app_name, exe_name = get_app_info_for_hwnd(hwnd) if hwnd else get_active_app_info()
-        category = self.classifier.classify(app_name, exe_name, domain=site_host)
+        raw_title = _window_title_for_hwnd(hwnd) if hwnd else _active_window_title()
+        category = self.classifier.classify(raw_title or app_name, exe_name, domain=site_host)
 
         # Default style for category
         cat_style_id = self.get_category_style(category)
@@ -423,7 +464,7 @@ class StyleEngine:
         )
 
         resolved_short = temp_override or cat_style_id
-        clean_short = resolved_short.replace(f"{category}_", "") if resolved_short.startswith(f"{category}_") else resolved_short
+        clean_short = _canonical_style(resolved_short)
         if clean_short not in STYLE_CONFIGS:
             clean_short = "casual"
 
@@ -457,21 +498,34 @@ class StyleEngine:
         log.info("[STYLE ENGINE] App: '%s' | Category: '%s' | Selected Style ID: '%s'", app_title, category, style_id)
         return (app_title, category, instruction)
 
-    def resolve_for_target(self, hwnd: int | None) -> ResolvedStyle:
+    def resolve_for_target(self, hwnd: int | None, consume_override: bool = True) -> ResolvedStyle:
         app_name, exe_name = get_app_info_for_hwnd(hwnd) if hwnd else get_active_app_info()
-        category = self.classifier.classify(app_name, exe_name)
+        raw_title = _window_title_for_hwnd(hwnd) if hwnd else _active_window_title()
+        category = self.classifier.classify(raw_title or app_name, exe_name)
+
+        # A temporary override is an explicit user choice for the next
+        # dictation and applies regardless of the detected category.
+        temp_override = (
+            self.override_manager.consume_temporary_override()
+            if consume_override
+            else self.override_manager.get_temporary_override()
+        )
 
         stored = storage.get_setting(f"style_{category}", CATEGORY_DEFAULTS.get(category, "other_formal"))
+        if temp_override:
+            style_id = temp_override
         # Check if stored setting belongs to this category
-        if not stored.startswith(f"{category}_") and stored not in ("formal", "casual", "very_casual", "excited"):
+        elif not stored.startswith(f"{category}_") and stored not in ("formal", "casual", "very_casual", "excited"):
             style_id = CATEGORY_DEFAULTS.get(category, "other_formal")
         else:
             style_id = stored
 
-        clean_short = style_id.replace(f"{category}_", "") if style_id.startswith(f"{category}_") else style_id
+        clean_short = _canonical_style(style_id)
+        if clean_short not in STYLE_CONFIGS:
+            clean_short = "casual"
         preset = STYLE_PRESETS.get(style_id) or STYLE_PRESETS.get(f"{category}_{clean_short}")
         name = preset.name if preset else clean_short.capitalize()
-        instruction = STYLE_INSTRUCTIONS.get(style_id, "Format text.")
+        instruction = STYLE_INSTRUCTIONS.get(style_id) or STYLE_INSTRUCTIONS.get(f"{category}_{clean_short}", "Format text.")
 
         result = ResolvedStyle(
             app_name=app_name,
@@ -480,6 +534,7 @@ class StyleEngine:
             name=name,
             instruction=instruction,
             resolved_style=clean_short,
+            temporary_override=temp_override,
             config=STYLE_CONFIGS.get(clean_short, FORMAL_STYLE_CONFIG),
         )
         self._last_resolved = result

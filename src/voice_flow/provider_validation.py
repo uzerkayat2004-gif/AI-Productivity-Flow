@@ -55,7 +55,7 @@ def validate_provider_key(
             target_url = validate_url
             if auth_header == "key-query":
                 sep = "&" if "?" in target_url else "?"
-                target_url = f"{target_url}{sep}key={clean_key}"
+                target_url = f"{target_url}{sep}key={urllib.parse.quote(clean_key, safe='')}"
 
             req = urllib.request.Request(target_url, headers=headers, method="GET")
             with urllib.request.urlopen(req, timeout=8.0) as resp:
@@ -66,7 +66,7 @@ def validate_provider_key(
             target_url = effective_base_url
             if auth_header == "key-query":
                 sep = "&" if "?" in target_url else "?"
-                target_url = f"{target_url}{sep}key={clean_key}"
+                target_url = f"{target_url}{sep}key={urllib.parse.quote(clean_key, safe='')}"
 
             default_model = spec.models[0].id if spec.models else "gpt-4o-mini"
             if format_type == "anthropic":
