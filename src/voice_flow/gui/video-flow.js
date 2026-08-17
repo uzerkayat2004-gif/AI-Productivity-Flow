@@ -1266,9 +1266,9 @@ function previewVideoFlow(videoId) {
           const prog = data.program;
           const scenes = prog.scenes;
           const updateStage = () => {
-            const currentTime = player ? player.currentTime : 0;
-            const dur = player && player.duration ? player.duration : 15;
-            const sceneIdx = Math.min(scenes.length - 1, Math.floor((currentTime / dur) * scenes.length));
+            const currentTime = player ? (player.currentTime || 0) : 0;
+            const totalDuration = player && player.duration && player.duration > 0 ? player.duration : 1;
+            const sceneIdx = Math.min(scenes.length - 1, Math.floor((currentTime / totalDuration) * scenes.length));
             const sc = scenes[sceneIdx] || scenes[0];
             const goalEl = document.getElementById("vf-v3-stage-goal");
             const headerEl = document.getElementById("vf-v3-stage-header");

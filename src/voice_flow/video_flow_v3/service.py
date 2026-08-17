@@ -114,10 +114,13 @@ class VideoFlowV3Service:
                         with open(audio_path, "wb") as af:
                             af.write(audio_bytes)
 
-                # Fix 4-5s duration limit: Probe REAL audio duration and update scene timeline
+                # Fix 4-5s duration limit & null duration_sec: Probe REAL audio duration and update scene timeline
                 from voice_flow.video_flow_v3.audio.narration import probe_audio_duration_sec, concatenate_narration_audio
                 actual_audio_sec = probe_audio_duration_sec(str(audio_path))
-                executable_scene.duration_sec = max(3.5, round(actual_audio_sec + 0.8, 2))
+                scene_dur = max(3.5, round(actual_audio_sec + 0.8, 2))
+                executable_scene.duration_sec = scene_dur
+                scene_semantic.suggested_duration_sec = scene_dur
+                scene_semantic.duration_sec = scene_dur
                 executable_scene.audio_segment_url = f"/api/video-flow/v3/audio?id={job_id}&scene={executable_scene.scene_id}"
 
                 compiled_scenes.append(executable_scene)
@@ -134,6 +137,19 @@ class VideoFlowV3Service:
             all_audio_files = [str(project_store_v3.get_audio_segment_path(job_id, s.scene_id)) for s in compiled_scenes]
             master_audio_path = str(project_store_v3.get_project_dir(job_id) / "master_narration.mp3")
             concatenate_narration_audio(all_audio_files, master_audio_path)
+
+            master_audio_dur = probe_audio_duration_sec(master_audio_path)
+            if master_audio_dur > 0 and program.scenes:
+                scene_count = len(program.scenes)
+                per_scene_dur = max(3.5, round(master_audio_dur / scene_count, 2))
+                for s in program.scenes:
+                    s.suggested_duration_sec = per_scene_dur
+                    s.duration_sec = per_scene_dur
+                for s in compiled_scenes:
+                    s.duration_sec = per_scene_dur
+                program.total_estimated_duration_sec = master_audio_dur
+
+            project_store_v3.save_json_artifact(job_id, "video_program.json", program)
 
             job.program_complete = True
             job.update_status(GenerationStateV3.COMPLETE, "Complete", 100)
