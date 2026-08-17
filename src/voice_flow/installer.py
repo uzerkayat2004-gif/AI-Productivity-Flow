@@ -175,7 +175,7 @@ def register_startup_folder() -> bool:
         arguments=f'"{vbs_path}"',
         working_dir=str(root),
         icon_path=str(icon_path),
-        description="Voice Flow - AI Speech Desktop App (Auto-Start)",
+        description="AI Productivity Flow - AI Speech Desktop App (Auto-Start)",
     )
     if success:
         print(f"[OK] Startup folder shortcut registered: {shortcut_path}")
@@ -215,7 +215,7 @@ def register_desktop_shortcuts() -> bool:
             arguments=f'"{vbs_path}"',
             working_dir=str(root),
             icon_path=str(icon_path),
-            description="Voice Flow - AI Speech Desktop App",
+            description="AI Productivity Flow - AI Speech Desktop App",
         )
         if ok:
             print(f"[OK] Desktop shortcut created: {dt_sc}")
@@ -231,7 +231,7 @@ def register_desktop_shortcuts() -> bool:
         arguments=f'"{vbs_path}"',
         working_dir=str(root),
         icon_path=str(icon_path),
-        description="Voice Flow - AI Speech Desktop App",
+        description="AI Productivity Flow - AI Speech Desktop App",
     )
     if ok_sm:
         print(f"[OK] Start Menu shortcut created: {sm_sc}")
