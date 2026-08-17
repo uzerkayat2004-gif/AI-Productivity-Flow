@@ -272,6 +272,16 @@ class StorageEngine:
                 ("gemini-2.5-flash-preview-tts:Charon", "Gemini Flash TTS — Charon (Deep Male)"),
                 ("gemini-2.5-flash-preview-tts:Puck", "Gemini Flash TTS — Puck (Playful)"),
                 ("gemini-2.5-flash-preview-tts:Aoede", "Gemini Flash TTS — Aoede (Narrator)"),
+                # Latest generation (verified against ai.google.dev, Aug 2026):
+                # expressive audio tags + steerable prompts, lowest latency.
+                ("gemini-3.1-flash-tts-preview:Kore", "Gemini 3.1 Flash TTS — Kore (Warm Female) ⚡ Latest"),
+                ("gemini-3.1-flash-tts-preview:Puck", "Gemini 3.1 Flash TTS — Puck (Playful) ⚡ Latest"),
+                ("gemini-3.1-flash-tts-preview:Zephyr", "Gemini 3.1 Flash TTS — Zephyr (Bright Female) ⚡ Latest"),
+                ("gemini-3.1-flash-tts-preview:Orus", "Gemini 3.1 Flash TTS — Orus (Firm Male) ⚡ Latest"),
+                # Pro tier for highest-quality narration.
+                ("gemini-2.5-pro-preview-tts:Charon", "Gemini Pro TTS — Charon (Deep Male)"),
+                ("gemini-2.5-pro-preview-tts:Aoede", "Gemini Pro TTS — Aoede (Narrator)"),
+                ("gemini-2.5-pro-preview-tts:Leda", "Gemini Pro TTS — Leda (Youthful Female)"),
             ],
             "azure": [
                 ("en-US-JennyNeural", "Azure Jenny (Warm Female)"),

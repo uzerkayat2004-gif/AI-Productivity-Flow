@@ -162,7 +162,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"ok": False, "error": str(e)})
         elif path == "/api/runtime":
             self.send_json_response({
-                "name": "Voice Flow",
+                "name": "AI Productivity Flow",
                 "contract_version": RUNTIME_CONTRACT_VERSION,
                 "features": RUNTIME_FEATURES,
             })
@@ -171,12 +171,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             key = (params.get("key", [""])[0] or "").strip()
             allowed_get = {
                 "voice_flow_enabled", "audio_flow_enabled", "video_flow_enabled",
-                "polishing_enabled", "press_enter_enabled",
+                "polishing_enabled", "press_enter_enabled", "has_viewed_onboarding",
             }
             if key not in allowed_get:
                 self.send_json_response({"success": False, "error": "Unknown setting"}, 400)
                 return
-            self.send_json_response({"success": True, "key": key, "value": bool(storage.get_setting(key, True))})
+            default_val = False if key == "has_viewed_onboarding" else True
+            self.send_json_response({"success": True, "key": key, "value": bool(storage.get_setting(key, default_val))})
         elif path == "/api/history":
             self.send_json_response(storage.get_recent_history())
         elif path == "/api/insights":
@@ -691,6 +692,23 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 runtime_controller._stop_audio_flow_pipeline()
             self.send_json_response({"success": True})
 
+        elif path == "/api/audio-flow/tts-control":
+            action = str(data.get("action", "")).lower()
+            try:
+                import voice_flow.tts_engine as _tts
+                if action == "pause":
+                    _tts.tts_engine.pause()
+                elif action == "resume":
+                    _tts.tts_engine.resume()
+                elif action == "stop":
+                    _tts.tts_engine.stop()
+                else:
+                    self.send_json_response({"success": False, "error": "Unknown action"}, 400)
+                    return
+                self.send_json_response({"success": True, "action": action})
+            except Exception as e:
+                self.send_json_response({"success": False, "error": str(e)}, 500)
+
         elif path == "/api/audio-providers/connections/add":
             provider = data.get("provider", "")
             name = data.get("name", "Key #1")
@@ -989,6 +1007,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "audio_flow_enabled": bool,
                 "video_flow_enabled": bool,
                 "press_enter_enabled": bool,
+                "has_viewed_onboarding": bool,
                 "dictionary_auto_learning_enabled": bool,
                 "launch_at_login_enabled": bool,
                 "push_to_talk_shortcut": str,

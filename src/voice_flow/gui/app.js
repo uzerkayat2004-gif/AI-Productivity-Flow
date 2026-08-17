@@ -172,6 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderStyleCategory("personal");
   loadFeatureToggleStates();
   startFloatingBarStartupSequence();
+  maybeShowOnboarding();
 
   // Real-time auto-refresh: only refresh the data of the page the user is
   // actually looking at. Re-rendering every page's feed every 3s caused DOM
@@ -576,7 +577,8 @@ async function loadHistory() {
   try {
     const res = await fetch("/api/history");
     allHistoryRecords = await res.json();
-    
+    maybeCelebrateFirstDictation(allHistoryRecords ? allHistoryRecords.length : 0);
+
     // Only re-render if user is not currently typing in search box
     const searchInput = document.getElementById("history-search");
     if (!searchInput || !searchInput.value.trim()) {
@@ -839,7 +841,7 @@ async function loadInsights() {
     const previewEl = document.getElementById("share-snippet-preview");
     if (previewEl) {
       const timeStr = savedHours >= 1 ? `${savedHours} hrs` : `${Math.round(savedMinutes)} mins`;
-      previewEl.textContent = `🚀 I dictated ${totalWords.toLocaleString()} words at ${avgWpm} WPM and saved ${timeStr} with Voice Flow (${speedMult}x faster than typing)! #VoiceFlow`;
+      previewEl.textContent = `🚀 I dictated ${totalWords.toLocaleString()} words at ${avgWpm} WPM and saved ${timeStr} with AI Productivity Flow (${speedMult}x faster than typing)! #AIProductivityFlow`;
     }
 
   } catch (err) {
@@ -1884,6 +1886,8 @@ async function toggleAudioFlowSetting(checked) {
       body: JSON.stringify({ enabled: !!checked }),
     });
     updateAudioFlowStatusBadge(!!checked);
+    featureStates.audio = !!checked;
+    applyFeatureDisabledUI();
     // Keep the card toggle and the title-bar toggle in sync.
     const card = document.getElementById("toggle-audio-flow");
     const titlebar = document.getElementById("toggle-audio-flow-titlebar");
@@ -1901,6 +1905,8 @@ async function toggleVoiceFlowFeature(checked) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "voice_flow_enabled", value: !!checked }),
     });
+    featureStates.voice = !!checked;
+    applyFeatureDisabledUI();
     if (typeof vfToast === "function") vfToast(`Voice Flow dictation ${checked ? "enabled" : "disabled"}.`);
   } catch (err) {
     console.error("Error toggling Voice Flow:", err);
@@ -1914,24 +1920,261 @@ async function toggleVideoFlowFeature(checked) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "video_flow_enabled", value: !!checked }),
     });
+    featureStates.video = !!checked;
+    applyFeatureDisabledUI();
     if (typeof vfToast === "function") vfToast(`Video Flow ${checked ? "enabled" : "disabled"}.`);
   } catch (err) {
     console.error("Error toggling Video Flow:", err);
   }
 }
 
+// =========================================================
+// Onboarding: welcome screen + pre-recorded explanatory tour
+// =========================================================
+const ONBOARDING_NARRATION = [
+  "Welcome to AI Productivity Flow. Here is a clear introduction to your complete voice-driven productivity suite for Windows.",
+  "Welcome to the Audio Flow feature, our first feature. Imagine scrolling through Twitter and coming across a lengthy article that you don't want to read. Simply select the text, and a small audio button will appear. Click it to select the summary option, converting the article into an audio summary.",
+  "Next is Video Flow, our second feature. If you want to convert that article into a visual summary, Video Flow transforms your text into an animated visual explainer right on your screen.",
+  "Now that you have all the context about the article, you can use the Voice Flow feature to post about the article by speaking, and it will write it down for you. Zoom in on your context and let your voice write down your thoughts.",
+  "Here is an overview of all five features built into AI Productivity Flow: Audio Summaries, Visual Summaries, Voice Flow Dictation, Article Conversion, and Feedback Insights.",
+  "We hope you enjoy using AI Productivity Flow! If you like the app, please visit our GitHub repository to check reports, provide feedback, and give us a star on GitHub. Your feedback is appreciated!",
+];
+
+// Dedicated pre-recorded narrator voice & explanatory pacing configuration
+const ONBOARDING_NARRATOR_VOICE = "edge/en-US-AvaNeural";
+const ONBOARDING_VOICE_SPEED = "-15%";
+
+const ONBOARDING_PAGE_MAP = {
+  0: "audioflow",
+  1: "audioflow",
+  2: "videoflow",
+  3: "home",
+  4: "insights",
+  5: "home"
+};
+
+let onboardingSlide = 0;
+let onboardingNarrationPaused = false;
+
+function onboardingFlag(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function setOnboardingFlag(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+}
+
+async function maybeShowOnboarding() {
+  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
+  if (localFlag === "true" || localFlag === "1") return;
+
+  try {
+    const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
+    const data = await res.json();
+    if (data.success && data.value === true) {
+      setOnboardingFlag("hasViewedOnboarding", "true");
+      setOnboardingFlag("vf_onboarding.done", "1");
+      return;
+    }
+  } catch (e) {}
+
+  // First time launch: mark hasViewedOnboarding = true immediately so it never shows again on future launches
+  setOnboardingFlag("hasViewedOnboarding", "true");
+  setOnboardingFlag("vf_onboarding.done", "1");
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "has_viewed_onboarding", value: true }),
+  }).catch(() => {});
+
+  const overlay = document.getElementById("onboarding-overlay");
+  if (!overlay) return;
+  onboardingSlide = 0;
+  renderOnboardingSlide();
+  overlay.classList.remove("hidden");
+  speakOnboardingNarration();
+}
+
+function renderOnboardingDots() {
+  const dots = document.getElementById("onboarding-dots");
+  if (!dots) return;
+  dots.innerHTML = ONBOARDING_NARRATION.map((_, i) =>
+    `<span class="${i === onboardingSlide ? "active" : ""}" onclick="gotoOnboardingSlide(${i})"></span>`
+  ).join("");
+}
+
+function renderOnboardingSlide() {
+  document.querySelectorAll(".onboarding-slide").forEach(s => {
+    s.classList.toggle("active", Number(s.dataset.slide) === onboardingSlide);
+  });
+  renderOnboardingDots();
+  const player = document.getElementById("onboarding-player");
+  if (player) player.style.display = onboardingSlide === 0 ? "none" : "flex";
+
+  // Auto-navigate app background to match current tour topic
+  const targetPage = ONBOARDING_PAGE_MAP[onboardingSlide];
+  if (targetPage && typeof switchPage === "function") {
+    switchPage(targetPage);
+  }
+}
+
+// Embedded pre-recorded narration player (Deepgram Aura Zeus Professional Male)
+let onboardingAudioPlayer = null;
+
+function getOnboardingAudioPath(slideIdx) {
+  return `/assets/onboarding/slide_${slideIdx}.mp3`;
+}
+
+function speakOnboardingNarration() {
+  stopOnboardingNarration();
+  onboardingNarrationPaused = false;
+  updateOnboardingNarrationUI(false);
+
+  const audioPath = getOnboardingAudioPath(onboardingSlide);
+  onboardingAudioPlayer = new Audio(audioPath);
+  
+  onboardingAudioPlayer.addEventListener("ended", () => {
+    updateOnboardingNarrationUI(true);
+  });
+
+  onboardingAudioPlayer.play().catch(err => {
+    console.warn("Could not play embedded onboarding audio:", err);
+  });
+}
+
+function stopOnboardingNarration() {
+  if (onboardingAudioPlayer) {
+    try {
+      onboardingAudioPlayer.pause();
+      onboardingAudioPlayer.currentTime = 0;
+    } catch (e) {}
+    onboardingAudioPlayer = null;
+  }
+}
+
+function updateOnboardingNarrationUI(paused) {
+  const btn = document.getElementById("onboarding-narration-toggle");
+  const label = document.getElementById("onboarding-narration-label");
+  if (btn) btn.textContent = paused ? "▶" : "⏸";
+  if (label) label.textContent = paused ? "Paused" : "Narrating…";
+}
+
+function toggleOnboardingNarration() {
+  if (!onboardingAudioPlayer) {
+    speakOnboardingNarration();
+    return;
+  }
+  if (onboardingAudioPlayer.paused) {
+    onboardingAudioPlayer.play().then(() => {
+      onboardingNarrationPaused = false;
+      updateOnboardingNarrationUI(false);
+    }).catch(() => {});
+  } else {
+    onboardingAudioPlayer.pause();
+    onboardingNarrationPaused = true;
+    updateOnboardingNarrationUI(true);
+  }
+}
+
+function gotoOnboardingSlide(idx) {
+  if (idx < 0 || idx >= ONBOARDING_NARRATION.length) return;
+  onboardingSlide = idx;
+  renderOnboardingSlide();
+  stopOnboardingNarration();
+  setTimeout(speakOnboardingNarration, 350);
+}
+
+function nextOnboardingSlide() {
+  if (onboardingSlide >= ONBOARDING_NARRATION.length - 1) { finishOnboarding(); return; }
+  gotoOnboardingSlide(onboardingSlide + 1);
+}
+
+function prevOnboardingSlide() {
+  gotoOnboardingSlide(Math.max(1, onboardingSlide - 1));
+}
+
+function startOnboardingTour() {
+  const source = document.getElementById("onboarding-source");
+  if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
+  gotoOnboardingSlide(1);
+}
+
+function finishOnboarding() {
+  stopOnboardingNarration();
+  const source = document.getElementById("onboarding-source");
+  if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
+  setOnboardingFlag("vf_onboarding.done", "1");
+  const overlay = document.getElementById("onboarding-overlay");
+  if (overlay) overlay.classList.add("hidden");
+}
+
+function replayOnboarding() {
+  setOnboardingFlag("vf_onboarding.done", "");
+  if (typeof closeSettings === "function") closeSettings();
+  onboardingSlide = 0;
+  renderOnboardingSlide();
+  const overlay = document.getElementById("onboarding-overlay");
+  if (overlay) overlay.classList.remove("hidden");
+  speakOnboardingNarration();
+}
+
+// One-time celebration the first time real dictation data appears.
+function maybeCelebrateFirstDictation(recordCount) {
+  if (!recordCount || onboardingFlag("vf_onboarding.firstDictation")) return;
+  setOnboardingFlag("vf_onboarding.firstDictation", "1");
+  if (typeof vfToast === "function") {
+    vfToast("🎉 Your first dictation! It's saved in Home — Insights start counting from here.");
+  }
+}
+
+// Centralized feature on/off state, mirrored into body classes + banners.
+const featureStates = { voice: true, audio: true, video: true };
+
+function applyFeatureDisabledUI() {
+  document.body.classList.toggle("feature-voice-off", !featureStates.voice);
+  document.body.classList.toggle("feature-audio-off", !featureStates.audio);
+  document.body.classList.toggle("feature-video-off", !featureStates.video);
+
+  const banners = [
+    { pageId: "page-audioflow", active: !featureStates.audio, label: "🔇 Audio Flow is disabled — flip the toggle on this page's title bar to re-enable it." },
+    { pageId: "page-videoflow", active: !featureStates.video, label: "🎬 Video Flow is disabled — flip the toggle on this page's title bar to re-enable it." },
+  ];
+  for (const b of banners) {
+    const page = document.getElementById(b.pageId);
+    if (!page) continue;
+    let banner = page.querySelector(".feature-disabled-banner");
+    if (b.active && !banner) {
+      banner = document.createElement("div");
+      banner.className = "feature-disabled-banner";
+      banner.textContent = b.label;
+      page.insertBefore(banner, page.firstChild);
+    } else if (!b.active && banner) {
+      banner.remove();
+    }
+  }
+}
+
 async function loadFeatureToggleStates() {
   try {
-    const [voiceRes, videoRes] = await Promise.all([
+    const [voiceRes, videoRes, audioRes] = await Promise.all([
       fetch("/api/settings/get?key=voice_flow_enabled"),
       fetch("/api/settings/get?key=video_flow_enabled"),
+      fetch("/api/settings/get?key=audio_flow_enabled"),
     ]);
     const voice = await voiceRes.json();
     const video = await videoRes.json();
+    const audio = await audioRes.json();
+    featureStates.voice = !(voice.success && voice.value === false);
+    featureStates.video = !(video.success && video.value === false);
+    featureStates.audio = !(audio.success && audio.value === false);
     const voiceToggle = document.getElementById("toggle-voice-flow-feature");
-    if (voiceToggle && voice.success) voiceToggle.checked = voice.value !== false;
+    if (voiceToggle) voiceToggle.checked = featureStates.voice;
     const videoToggle = document.getElementById("toggle-video-flow-feature");
-    if (videoToggle && video.success) videoToggle.checked = video.value !== false;
+    if (videoToggle) videoToggle.checked = featureStates.video;
+    const card = document.getElementById("toggle-audio-flow");
+    const titlebar = document.getElementById("toggle-audio-flow-titlebar");
+    if (card) card.checked = featureStates.audio;
+    if (titlebar) titlebar.checked = featureStates.audio;
+    applyFeatureDisabledUI();
   } catch (err) {
     console.warn("Could not load feature toggle states:", err);
   }
@@ -2319,7 +2562,7 @@ function downloadProductivityCardImage(btnElement = null) {
   // Header Title
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 22px Inter, sans-serif";
-  ctx.fillText("🎙️ Voice Flow Productivity Card", 30, 48);
+  ctx.fillText("🎙️ AI Productivity Flow Productivity Card", 30, 48);
 
   // Badge
   ctx.fillStyle = "#ff6020";
@@ -2352,7 +2595,7 @@ function downloadProductivityCardImage(btnElement = null) {
   // Footer Tagline
   ctx.fillStyle = "#cbd5e1";
   ctx.font = "italic 13px Inter, sans-serif";
-  ctx.fillText("⚡ Verified by Voice Flow Speech Telemetry • #VoiceFlow", 30, 215);
+  ctx.fillText("⚡ Verified by AI Productivity Flow Speech Telemetry • #AIProductivityFlow", 30, 215);
 
   // Heatmap Mini Indicator Text
   ctx.fillStyle = "#64748b";

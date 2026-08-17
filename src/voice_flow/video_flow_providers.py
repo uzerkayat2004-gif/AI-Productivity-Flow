@@ -169,6 +169,8 @@ def antigravity_open_account_selection() -> None:
     chooser, so the user can pick the account already signed into the installed
     Antigravity desktop app. Best-effort: never raise into the OAuth flow.
     """
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP"):
+        return
     try:
         import webbrowser
 
@@ -833,8 +835,9 @@ class VideoFlowProviderService:
         config = oauth_config(provider_id)
         if config.flow == "device":
             info = start_device_flow(self, provider_id)
-            import webbrowser
-            webbrowser.open(info["verification_uri"])
+            if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
+                import webbrowser
+                webbrowser.open(info["verification_uri"])
             self._spawn_device_poll(provider_id, info)
             return {
                 "success": True,
@@ -945,8 +948,9 @@ class VideoFlowProviderService:
             "code_challenge_method": "S256",
         })
         auth_url = f"{config.auth_url}?{params}"
-        import webbrowser
-        webbrowser.open(auth_url)
+        if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
+            import webbrowser
+            webbrowser.open(auth_url)
         return {
             "success": True,
             "launched": True,

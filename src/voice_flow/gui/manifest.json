@@ -1,6 +1,6 @@
 {
-  "name": "Voice Flow - AI Speech Desktop App",
-  "short_name": "Voice Flow",
+  "name": "AI Productivity Flow - AI Speech Desktop App",
+  "short_name": "AI Productivity Flow",
   "description": "Wispr Flow-style AI speech dictation for Windows — hold mouse button or Ctrl+Win, speak, text appears",
   "start_url": "/index.html",
   "display": "standalone",
