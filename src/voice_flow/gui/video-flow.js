@@ -1237,15 +1237,22 @@ async function deleteVideoCombo(comboId) {
 }
 
 function previewVideoFlow(videoId) {
-  const video = vfVideos.find(item => item.id === videoId);
-  if (!video || (video.status !== "completed" && video.status !== "complete" && video.status !== "ready" && !video.playable)) return;
+  const video = vfVideos.find(item => String(item.id) === String(videoId));
+  if (!video) return;
   vfPreviewVideo = video;
   const player = document.getElementById("vf-preview-player");
   const title = document.getElementById("vf-preview-title");
   const download = document.getElementById("vf-preview-download");
-  if (player) player.src = video.view_url;
+  const viewUrl = video.view_url || (`/api/video-flow/videos/file?id=` + encodeURIComponent(video.id));
+  const downloadUrl = video.download_url || (`/api/video-flow/videos/file?id=` + encodeURIComponent(video.id) + `&download=1`);
+  if (player) {
+    player.setAttribute("src", viewUrl);
+    player.src = viewUrl;
+    player.load();
+    player.play().catch(() => {});
+  }
   if (title) title.textContent = video.title;
-  if (download) download.href = video.download_url;
+  if (download) download.href = downloadUrl;
   document.getElementById("vf-preview-modal")?.classList.remove("hidden");
 }
 
