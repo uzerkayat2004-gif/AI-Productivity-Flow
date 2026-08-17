@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build:bundle": "esbuild src/v3/index.ts --bundle --format=iife --global-name=VideoFlowV3Runtime --footer:js=\"if(typeof window!=='undefined'){window.VideoFlowV3Runtime=VideoFlowV3Runtime;}if(typeof globalThis!=='undefined'){globalThis.VideoFlowV3Runtime=VideoFlowV3Runtime;}if(typeof module!=='undefined'&&module.exports){module.exports=VideoFlowV3Runtime;}\" --outfile=dist/v3-renderer.bundle.js --target=es2020",
     "preview": "remotion studio src/index.ts",
     "render:sample": "remotion render src/index.ts VideoFlow out/sample.mp4"
   },

@@ -296,6 +296,9 @@ class VideoFlowStore:
         row.pop("source_text", None)
         row["download_url"] = f"/api/video-flow/videos/file?id={row['id']}&download=1"
         row["view_url"] = f"/api/video-flow/videos/file?id={row['id']}"
+        status = str(row.get("status", "")).lower()
+        progress = int(row.get("progress", 0) or 0)
+        row["playable"] = status in {"ready", "complete", "completed"} or progress >= 100
         return row
 
     def get_video(self, video_id: str) -> dict[str, Any] | None:

@@ -10,7 +10,7 @@ SECURITY & ARCHITECTURAL INVARIANT:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from voice_flow.video_flow_v3.contracts import (
     SourceBundle,
     SourceUnit,
@@ -19,6 +19,7 @@ from voice_flow.video_flow_v3.contracts import (
     ArtDirectionGenome,
     SceneSemanticV3,
     SemanticObject,
+    SemanticRepresentationType,
     VideoProgramV3,
     FidelityClass3D,
     validate_no_executable_code,
@@ -31,6 +32,9 @@ log = logging.getLogger(__name__)
 class CreativeDirectorV3:
     """Authors high-level semantic video programs without low-level renderer coordinates."""
 
+    def __init__(self, model_gateway: Any = None) -> None:
+        self.model_gateway = model_gateway
+
     def build_program(
         self,
         bundle: SourceBundle,
@@ -42,13 +46,13 @@ class CreativeDirectorV3:
         title: str = "Visual Explanation",
         model_ref: str = "local/deterministic",
         visual_direction: str = "",
-        allow_external_ai: bool = True,
+        allow_external_ai: bool = False,
     ) -> VideoProgramV3:
         if not units:
             return VideoProgramV3(title=title, mode=mode)
 
         from voice_flow.video_flow_v3.director.gateway import V3CreativeDirectorGateway
-        gateway = V3CreativeDirectorGateway()
+        gateway = V3CreativeDirectorGateway(model_gateway=self.model_gateway)
         scenes = gateway.author_semantic_plan(
             bundle, units, evidence, genome,
             mode=mode, model_ref=model_ref,
@@ -90,12 +94,14 @@ class CreativeDirectorV3:
             viewer_question="What is the core subject of this explanation?",
             intended_understanding=units[0].normalized_text[:120] if units else "Core topic introduction",
             narration_text=units[0].normalized_text if units else "Welcome to this explanation.",
+            representation_type=SemanticRepresentationType.OBJECT_FOCUS.value,
             semantic_objects=[
-                SemanticObject(object_id="obj_hero", label=units[0].normalized_text[:40] if units else "Topic", role="primary", semantic_type="claim_card")
+                SemanticObject(object_id="obj_hero", label=units[0].normalized_text[:40] if units else "Topic", role="primary", semantic_type="object_focus")
             ],
             motion_purpose="reveal",
             shot_grammar="HeroFocus",
             suggested_duration_sec=4.5,
+            duration_sec=4.5,
             evidence_refs=[units[0].unit_id] if units else [],
         ))
 
@@ -107,6 +113,9 @@ class CreativeDirectorV3:
                 continue
             seq = len(scenes)
             combined_text = " ".join(u.normalized_text for u in chunk_units)
+            rep_type = SemanticRepresentationType.PROCESS.value
+            if "versus" in combined_text.lower() or "than" in combined_text.lower() or "compared" in combined_text.lower():
+                rep_type = SemanticRepresentationType.COMPARISON.value
             scenes.append(SceneSemanticV3(
                 scene_id=f"scene_{seq}",
                 chapter_id="chap_0",
@@ -115,18 +124,20 @@ class CreativeDirectorV3:
                 viewer_question="How does this core component work?",
                 intended_understanding=chunk_units[0].normalized_text[:120],
                 narration_text=combined_text,
+                representation_type=rep_type,
                 semantic_objects=[
                     SemanticObject(
                         object_id=f"obj_{seq}",
                         label=u.normalized_text[:35],
                         role="primary" if idx == 0 else "secondary",
-                        semantic_type="process_step" if "step" in u.normalized_text.lower() else "claim_card",
+                        semantic_type=rep_type.lower(),
                     )
                     for idx, u in enumerate(chunk_units[:3])
                 ],
-                motion_purpose="compare" if "versus" in combined_text.lower() or "than" in combined_text.lower() else "flow",
+                motion_purpose="compare" if rep_type == SemanticRepresentationType.COMPARISON.value else "flow",
                 shot_grammar="Inspect" if seq % 2 == 1 else "HeroFocus",
                 suggested_duration_sec=5.5,
+                duration_sec=5.5,
                 evidence_refs=[u.unit_id for u in chunk_units],
             ))
             if len(scenes) >= 8:
@@ -151,6 +162,8 @@ class CreativeDirectorV3:
                 current_chap_id = f"chap_{len(chapters)}"
                 chapters.append({"chapter_id": current_chap_id, "title": unit.normalized_text, "sequence": len(chapters)})
 
+            rep_type = SemanticRepresentationType.CODE_EXPLANATION.value if unit.content_type == "code_block" else SemanticRepresentationType.PROCESS.value
+
             scenes.append(SceneSemanticV3(
                 scene_id=f"scene_{seq}",
                 chapter_id=current_chap_id,
@@ -159,17 +172,19 @@ class CreativeDirectorV3:
                 viewer_question="What does this paragraph specify?",
                 intended_understanding=unit.normalized_text[:120],
                 narration_text=unit.normalized_text,
+                representation_type=rep_type,
                 semantic_objects=[
                     SemanticObject(
                         object_id=f"obj_full_{seq}",
                         label=unit.normalized_text[:40],
                         role="primary",
-                        semantic_type="code_explanation" if unit.content_type == "code_block" else "claim_card",
+                        semantic_type=rep_type.lower(),
                     )
                 ],
                 motion_purpose="reveal",
                 shot_grammar="HeroFocus",
                 suggested_duration_sec=4.0,
+                duration_sec=4.0,
                 evidence_refs=[unit.unit_id],
             ))
 
@@ -190,6 +205,7 @@ class CreativeDirectorV3:
 
             spatial_types = SpatialAffordanceAnalyzer.extract_spatial_types(text)
             sem_type = "Assembly" if "assembly" in spatial_types else ("FlowPath" if "flow" in spatial_types else "Component")
+            rep_type = SemanticRepresentationType.ASSEMBLY_3D.value if use_3d else SemanticRepresentationType.OBJECT_FOCUS.value
 
             scenes.append(SceneSemanticV3(
                 scene_id=f"scene_{seq}",
@@ -199,6 +215,7 @@ class CreativeDirectorV3:
                 viewer_question="How is this structured physically or spatially?",
                 intended_understanding=text[:120],
                 narration_text=text,
+                representation_type=rep_type,
                 semantic_objects=[
                     SemanticObject(
                         object_id=f"obj_3d_{seq}",
@@ -210,6 +227,7 @@ class CreativeDirectorV3:
                 motion_purpose="explode" if "exploded" in text.lower() else ("flow" if "flow" in text.lower() else "focus"),
                 shot_grammar="ExplodedAssembly" if "exploded" in text.lower() else "HeroFocus",
                 suggested_duration_sec=5.0,
+                duration_sec=5.0,
                 use_3d=use_3d,
                 fidelity_3d=fidelity,
                 evidence_refs=[unit.unit_id],

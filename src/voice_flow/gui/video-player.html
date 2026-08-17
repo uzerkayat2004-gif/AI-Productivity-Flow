@@ -16,9 +16,9 @@
     #title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
     button, a { border: 1px solid #2b4056; border-radius: 9px; padding: 7px 10px; color: #f7fbff; background: #142131; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
     button:hover, a:hover { border-color: #06cfe5; }
-    main { position: relative; min-height: 0; display: grid; place-items: center; background: #02050a; }
-    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-    #status { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #17283d, #050a11 70%); }
+    main { position: relative; width: 100%; height: 100%; min-height: 0; background: #02050a; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #02050a; position: absolute; inset: 0; z-index: 1; }
+    #status { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #17283d, #050a11 70%); z-index: 50; }
     #status.hidden { display: none; }
     .status-card { width: min(360px, 80%); text-align: center; }
     .spinner { width: 46px; height: 46px; margin: 0 auto 16px; border: 4px solid #23374b; border-top-color: #06cfe5; border-radius: 50%; animation: spin .9s linear infinite; }
@@ -31,13 +31,29 @@
 </head>
 <body>
   <header><span class="brand">VIDEO FLOW</span><strong id="title">Preparing video…</strong><button onclick="toggleFullscreen()">⛶ Full screen</button></header>
-  <main><video id="player" controls preload="metadata"></video><div id="status"><div class="status-card"><div class="spinner"></div><strong id="status-title">Creating your video</strong><p id="stage">Checking progress…</p><div class="progress"><span id="progress-bar"></span></div></div></div></main>
+  <main id="player-container" class="vf-player-container">
+    <video id="player" controls preload="metadata"></video>
+    <div id="status">
+      <div class="status-card">
+        <div class="spinner"></div>
+        <strong id="status-title">Creating your video</strong>
+        <p id="stage">Checking progress…</p>
+        <div class="progress"><span id="progress-bar"></span></div>
+      </div>
+    </div>
+  </main>
   <footer><span id="footer-stage">Video Flow</span><span id="percent">0%</span><a id="download" href="#" download>↓ Download</a></footer>
+
+  <script src="v3-renderer.bundle.js?v=3.2.0"></script>
+  <script src="v3-canvas-player.js?v=3.2.0"></script>
   <script>
     const params = new URLSearchParams(location.search);
     const videoId = params.get("id") || "";
     const player = document.getElementById("player");
+    const container = document.getElementById("player-container");
     let timer = null;
+    let v3PlayerMounted = false;
+
     async function refresh() {
       try {
         const response = await fetch("/api/video-flow/jobs/status?id=" + encodeURIComponent(videoId));
@@ -49,11 +65,53 @@
         document.getElementById("footer-stage").textContent = video.stage || video.status;
         document.getElementById("percent").textContent = (video.progress || 0) + "%";
         document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
-        if (video.playable || video.status === "ready" || video.status === "completed") {
+
+        const isReady = Boolean(
+          video.playable ||
+          video.status === "ready" ||
+          video.status === "complete" ||
+          video.status === "completed" ||
+          Number(video.progress || 0) >= 100 ||
+          (video.stage && String(video.stage).toLowerCase().includes("complete"))
+        );
+
+        if (isReady) {
           document.getElementById("status").classList.add("hidden");
-          if (video.view_url && player.src !== video.view_url) {
-            player.src = video.view_url;
-            player.play().catch(() => {});
+
+          if (video.view_url) {
+            const targetUrl = new URL(video.view_url, location.origin).href;
+            if (player.src !== targetUrl) {
+              player.src = targetUrl;
+              player.play().catch(() => {});
+            }
+          }
+
+          // Mount V3 Layered WebGL player if not yet mounted
+          if (!v3PlayerMounted && container && window.V3CanvasPlayer) {
+            v3PlayerMounted = true;
+            fetch("/api/video-flow/v3/program?id=" + encodeURIComponent(videoId))
+              .then(res => res.json())
+              .then(progData => {
+                if (progData && progData.success && (progData.program || progData.scenes)) {
+                  window.V3CanvasPlayer.mount(container, progData, {
+                    syncMediaElement: player,
+                    bottomPadding: 52,
+                    autoPlay: true,
+                  }).then(p => {
+                    window.__v3Player = p;
+                  }).catch(err => {
+                    console.warn("[Standalone Player] V3 mount warning:", err);
+                  });
+                }
+              })
+              .catch(err => {
+                console.warn("[Standalone Player] Could not load V3 program:", err);
+              });
+          }
+
+          if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
+              (video.export_status === "exported" || video.export_status === "not_requested")) {
+            clearInterval(timer);
           }
           const dl = document.getElementById("download");
           if (video.export_status === "exported" && video.download_url) {
@@ -83,11 +141,13 @@
         document.getElementById("stage").textContent = error.message || "Waiting for Voice Flow…";
       }
     }
+
     function toggleFullscreen() {
       if (window.pywebview?.api?.toggle_fullscreen) window.pywebview.api.toggle_fullscreen();
       else if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
     }
+
     refresh();
     timer = setInterval(refresh, 1200);
   </script>

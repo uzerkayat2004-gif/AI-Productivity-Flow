@@ -25,6 +25,26 @@ voice_flow_debug.log
 test_audio.mp3
 test_gemini_output.wav
 
+# Screenshots and temp media
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.wav
+*.map
+
+# Promo build scratch directories
+master_build/
+outro_build/
+scene1_build/
+scene1_remaster/
+scene2_build/
+scene3_build/
+patch_live_tts.py
+CLAUDE_CODE_CONTEXT.md
+REVIEW.md
+research-01-video-flow-provider-models.md
+
 # Video Flow renderer build artifacts
 video_flow_renderer/node_modules/
 video_flow_renderer/out/
@@ -32,7 +52,4 @@ video_flow_renderer/dist/
 video_flow_renderer/.cache/
 
 # Test output directories
-scratch/motion-*
-scratch/video-flow-*
-scratch/renderer-*
-scratch/production-*
+scratch/

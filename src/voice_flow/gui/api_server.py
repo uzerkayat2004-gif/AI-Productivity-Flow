@@ -117,11 +117,17 @@ def register_runtime_controller(controller) -> None:
 class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
     """Handles static GUI files + API endpoints (/api/history, /api/insights, /api/dictionary, /api/microphones, /api/apikeys)."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=GUI_DIR, **kwargs)
+
     def log_message(self, format, *args):
         pass  # Suppress HTTP logging to prevent UnicodeEncodeError on Windows console
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=GUI_DIR, **kwargs)
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
 
     def _discard_small_request_body(self) -> None:
         """Drain a bounded already-sent body after rejecting its headers."""
@@ -192,7 +198,93 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.video_flow_v3.storage.project_store import project_store_v3
             program = project_store_v3.load_json_artifact(job_id, "video_program.json")
             genome = project_store_v3.load_json_artifact(job_id, "art_genome.json")
-            self.send_json_response({"success": True, "program": program, "art_genome": genome})
+            scenes = []
+            scenes_dir = project_store_v3.get_project_dir(job_id) / "scenes"
+            if scenes_dir.exists():
+                for sf in sorted(scenes_dir.glob("*.json")):
+                    try:
+                        with open(sf, "r", encoding="utf-8") as f:
+                            scenes.append(json.load(f))
+                    except Exception:
+                        pass
+            if not scenes and program and "scenes" in program:
+                scenes = program["scenes"]
+            master_audio_url = f"/api/video-flow/v3/audio?id={job_id}"
+            self.send_json_response({
+                "success": True,
+                "program": program,
+                "art_genome": genome,
+                "scenes": scenes,
+                "master_audio_url": master_audio_url,
+            })
+        elif path == "/api/video-flow/v3/audio":
+            params = urllib.parse.parse_qs(parsed.query)
+            job_id = (params.get("id", [""])[0] or "").strip()
+            scene_id = (params.get("scene", [""])[0] or "").strip()
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            if scene_id:
+                audio_path = project_store_v3.get_audio_segment_path(job_id, scene_id)
+            else:
+                audio_path = project_store_v3.get_project_dir(job_id) / "master_narration.mp3"
+            if not audio_path.exists():
+                self.send_error(404, "Audio file not found")
+                return
+            with open(audio_path, "rb") as af:
+                data = af.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+        elif path in ("/api/video-flow/v3/video", "/api/video-flow/v3/export/download"):
+            params = urllib.parse.parse_qs(parsed.query)
+            job_id = (params.get("id", [""])[0] or "").strip()
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            mp4_candidates = [
+                project_store_v3.get_project_dir(job_id) / "export" / "video.mp4",
+                project_store_v3.get_export_path(job_id),
+                project_store_v3.get_project_dir(job_id) / "video.mp4",
+            ]
+            video_file = next((p for p in mp4_candidates if p.exists() and p.stat().st_size > 0), None)
+            if not video_file:
+                self.send_error(404, "Rendered video file not found")
+                return
+            size = video_file.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="video_{job_id}.mp4"')
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            with open(video_file, "rb") as vf:
+                shutil.copyfileobj(vf, self.wfile)
+        elif path == "/api/video-flow/v3/export":
+            params = urllib.parse.parse_qs(parsed.query)
+            job_id = (params.get("id", [""])[0] or "").strip()
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            req = project_store_v3.load_json_artifact(job_id, "export_request.json")
+            if req:
+                self.send_json_response({"success": True, "job_id": job_id, "export_status": req.get("status", "exported"), "download_url": f"/api/video-flow/v3/video?id={job_id}&download=1"})
+            else:
+                self.send_json_response({"success": False, "job_id": job_id, "export_status": "not_requested"}, 404)
+        elif path == "/api/video-flow/v3/runtime-bundle.js":
+            bundle_paths = [
+                os.path.join(GUI_DIR, "v3-renderer.bundle.js"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(GUI_DIR))), "video_flow_renderer", "dist", "v3-renderer.bundle.js"),
+            ]
+            bundle_file = next((p for p in bundle_paths if os.path.isfile(p)), None)
+            if bundle_file:
+                with open(bundle_file, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(content)
+            else:
+                self.send_error(404, "V3 runtime bundle not found")
         elif path == "/api/providers/catalog":
             specs = [s.to_dict() for s in get_all_provider_specs()]
             self.send_json_response({"providers": specs})
@@ -308,10 +400,29 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response(video_flow_provider_service.provider_details(provider_id))
             except ValueError as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
-        elif path.startswith("/api/video-flow/jobs/status"):
+        elif path.startswith("/api/video-flow/jobs/status") or path.startswith("/api/video-flow/v3/status"):
             params = urllib.parse.parse_qs(parsed.query)
             video_id = params.get("id", [""])[0]
-            video = video_flow_service.store.get_video(video_id)
+            video = None
+            try:
+                video = video_flow_service.store.get_video(video_id)
+            except Exception:
+                video = None
+            if not video:
+                from voice_flow.video_flow_v3.service import video_flow_v3_service
+                job = video_flow_v3_service.jobs.get(video_id)
+                if job:
+                    video = {
+                        "id": job.job_id,
+                        "title": job.title,
+                        "status": job.status.value,
+                        "stage": job.stage,
+                        "progress": job.progress,
+                        "playable": job.playable,
+                        "view_url": f"/api/video-flow/v3/audio?id={job.job_id}",
+                        "export_status": getattr(job, "export_status", "not_requested").value if hasattr(getattr(job, "export_status", None), "value") else str(getattr(job, "export_status", "not_requested")),
+                        "download_url": f"/api/video-flow/v3/video?id={job.job_id}&download=1",
+                    }
             self.send_json_response({"video": video}, status=200 if video else 404)
         elif path.startswith("/api/video-flow/videos/file"):
             params = urllib.parse.parse_qs(parsed.query)
@@ -990,22 +1101,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         elif path == "/api/video-flow/v3/export":
             try:
-                job_id = str(data.get("id", ""))
-                from voice_flow.video_flow_v3.scheduler.job import ExportStateV3
-                from voice_flow.video_flow_v3.storage.project_store import project_store_v3
-                project_store_v3.save_json_artifact(job_id, "export_request.json", {"status": ExportStateV3.EXPORTED.value})
-                self.send_json_response({"success": True, "job_id": job_id, "export_status": "exported"})
+                job_id = str(data.get("id") or data.get("job_id") or "")
+                from voice_flow.video_flow_v3.service import video_flow_v3_service
+                result = video_flow_v3_service.export_job(job_id)
+                self.send_json_response(result)
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
-            try:
-                combo = video_flow_service.store.create_combo(
-                    str(data.get("name", "")),
-                    list(data.get("models", [])),
-                    str(data.get("strategy", "fallback")),
-                )
-                self.send_json_response({"success": True, "combo": combo})
-            except (ValueError, sqlite3.IntegrityError) as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 400)
 
         elif path == "/api/video-flow/combos/delete":
             deleted = video_flow_service.store.delete_combo(int(data.get("id", 0)))

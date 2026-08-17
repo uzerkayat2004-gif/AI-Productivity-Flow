@@ -9,6 +9,7 @@ Deterministic Compilers -> Segmented TTS -> READY_TO_WATCH -> Player
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import uuid
@@ -22,6 +23,7 @@ from voice_flow.video_flow_v3.contracts import (
     ExecutableSceneProgram,
     ExecutableElement2D,
     ExecutableNode3D,
+    SemanticRepresentationType,
     PerformanceProfile,
 )
 from voice_flow.video_flow_v3.source.units import SourceNormalizer
@@ -39,10 +41,18 @@ log = logging.getLogger(__name__)
 class VideoFlowV3Service:
     """Master backend service for Video Flow V3 visual explanation engine."""
 
-    def __init__(self) -> None:
+    def __init__(self, model_gateway: Any = None) -> None:
         self.jobs: Dict[str, JobV3] = {}
         self._lock = threading.Lock()
-        self.director = CreativeDirectorV3()
+        if model_gateway is None:
+            try:
+                from voice_flow.video_flow_models import VideoModelGateway
+                from voice_flow.video_flow import VideoFlowStore, VideoFlowPlanner
+                model_gateway = VideoModelGateway(VideoFlowStore(), VideoFlowPlanner())
+            except Exception:
+                model_gateway = None
+        self.model_gateway = model_gateway
+        self.director = CreativeDirectorV3(model_gateway=self.model_gateway)
 
     def create_job(
         self,
@@ -53,7 +63,7 @@ class VideoFlowV3Service:
         job_id: str | None = None,
         model_ref: str = "local/deterministic",
         visual_direction: str = "",
-        allow_external_ai: bool = True,
+        allow_external_ai: bool = False,
     ) -> JobV3:
         if not job_id:
             job_id = f"v3_{uuid.uuid4().hex[:12]}"
@@ -107,7 +117,7 @@ class VideoFlowV3Service:
                 mode=job.mode, title=job.title,
                 model_ref=getattr(job, "model_ref", "local/deterministic"),
                 visual_direction=getattr(job, "visual_direction", ""),
-                allow_external_ai=getattr(job, "allow_external_ai", True),
+                allow_external_ai=getattr(job, "allow_external_ai", False),
             )
             project_store_v3.save_json_artifact(job_id, "art_genome.json", genome)
             project_store_v3.save_json_artifact(job_id, "video_program.json", program)
@@ -138,7 +148,7 @@ class VideoFlowV3Service:
                         with open(audio_path, "wb") as af:
                             af.write(audio_bytes)
 
-                # Fix 4-5s duration limit & null duration_sec: Probe REAL audio duration and update scene timeline
+                # Probe REAL audio duration and update scene timeline for live segmented playback
                 from voice_flow.video_flow_v3.audio.narration import probe_audio_duration_sec, concatenate_narration_audio
                 actual_audio_sec = probe_audio_duration_sec(str(audio_path))
                 scene_dur = max(3.5, round(actual_audio_sec + 0.8, 2))
@@ -157,20 +167,13 @@ class VideoFlowV3Service:
                 pct = int(60 + (idx + 1) / len(program.scenes) * 35)
                 job.update_status(GenerationStateV3.GENERATING_AHEAD, f"Generating scene {idx+1}/{len(program.scenes)}...", pct)
 
-            # Master audio concatenation for continuous full-length video playback
+            # Master audio concatenation for MP4 export
             all_audio_files = [str(project_store_v3.get_audio_segment_path(job_id, s.scene_id)) for s in compiled_scenes]
             master_audio_path = str(project_store_v3.get_project_dir(job_id) / "master_narration.mp3")
             concatenate_narration_audio(all_audio_files, master_audio_path)
 
             master_audio_dur = probe_audio_duration_sec(master_audio_path)
             if master_audio_dur > 0 and program.scenes:
-                scene_count = len(program.scenes)
-                per_scene_dur = max(3.5, round(master_audio_dur / scene_count, 2))
-                for s in program.scenes:
-                    s.suggested_duration_sec = per_scene_dur
-                    s.duration_sec = per_scene_dur
-                for s in compiled_scenes:
-                    s.duration_sec = per_scene_dur
                 program.total_estimated_duration_sec = master_audio_dur
 
             project_store_v3.save_json_artifact(job_id, "video_program.json", program)
@@ -192,17 +195,63 @@ class VideoFlowV3Service:
         """Deterministic Compiler Layer: converts semantic intent to layout bounds & transforms."""
         elements_2d: List[ExecutableElement2D] = []
         nodes_3d: List[ExecutableNode3D] = []
+        rep_type = getattr(semantic, "representation_type", SemanticRepresentationType.PROCESS.value)
+        num_objects = max(1, len(semantic.semantic_objects))
 
-        # 2D Elements layout calculation (Process / Comparison / Timeline)
+        # 2D Elements layout calculation based on representation_type
         for i, obj in enumerate(semantic.semantic_objects):
-            x = 80 + (i % 3) * 360
-            y = 120 + (i // 3) * 220
+            # Deterministic responsive bounds calculation per representation family
+            if rep_type in ("COMPARISON", "BEFORE_AFTER"):
+                col_w = 480.0
+                x = 100.0 if i % 2 == 0 else 660.0
+                y = 160.0 + (i // 2) * 260.0
+                w, h = col_w, 240.0
+            elif rep_type in ("TIMELINE", "SEQUENCE"):
+                step_x = 1080.0 / max(1, num_objects)
+                x = 80.0 + i * step_x
+                y = 180.0 if (i % 2 == 0) else 340.0
+                w, h = min(220.0, step_x - 20.0), 140.0
+            elif rep_type in ("HIERARCHY", "DECISION_TREE"):
+                if i == 0:
+                    x, y, w, h = 480.0, 150.0, 320.0, 100.0
+                else:
+                    child_x = 80.0 + (i - 1) * (1120.0 / max(1, num_objects - 1))
+                    x, y, w, h = child_x, 320.0, 240.0, 120.0
+            elif rep_type in ("NETWORK", "GRAPH"):
+                angle = (i * 2 * math.pi) / num_objects
+                radius = 200.0 if i > 0 else 0.0
+                x = 560.0 + radius * math.cos(angle)
+                y = 280.0 + radius * math.sin(angle) * 0.7
+                w, h = 160.0, 90.0
+            elif rep_type in ("QUANTITATIVE", "STAT_GRID", "CHART"):
+                card_w = 1120.0 / max(1, num_objects)
+                x = 80.0 + i * card_w
+                y = 180.0
+                w, h = min(320.0, card_w - 30.0), 260.0
+            elif rep_type in ("SYSTEM_ARCHITECTURE", "LAYER_STACK"):
+                x = 120.0
+                y = 160.0 + i * 110.0
+                w, h = 1040.0, 85.0
+            elif rep_type in ("OBJECT_FOCUS", "CONCEPTUAL_METAPHOR"):
+                if i == 0:
+                    x, y, w, h = 420.0, 180.0, 440.0, 220.0
+                else:
+                    x = 100.0 if i % 2 == 1 else 900.0
+                    y = 160.0 + (i // 2) * 140.0
+                    w, h = 240.0, 110.0
+            else:
+                # Default PROCESS / FLOW / LIST_BREAKDOWN
+                spacing = 1120.0 / max(1, num_objects)
+                x = 80.0 + i * spacing
+                y = 180.0
+                w, h = min(280.0, spacing - 24.0), 220.0
+
             elements_2d.append(ExecutableElement2D(
                 element_id=obj.object_id,
                 layer="node" if obj.role == "primary" else "text",
-                compositor="Process" if semantic.motion_purpose == "flow" else "Comparison",
-                layout_bounds={"x": float(x), "y": float(y), "width": 320.0, "height": 180.0},
-                style={"fill": genome.palette.get("surface", "#1e293b"), "accent": genome.palette.get("accent", "#ff6b00")},
+                compositor=rep_type,
+                layout_bounds={"x": float(x), "y": float(y), "width": float(w), "height": float(h)},
+                style={"fill": genome.palette.get("surface", "#1e293b"), "accent": genome.palette.get("accent", "#ff6b00"), "label": obj.label},
             ))
 
             if semantic.use_3d:
@@ -217,10 +266,41 @@ class VideoFlowV3Service:
             scene_id=semantic.scene_id,
             sequence=semantic.sequence,
             duration_sec=semantic.suggested_duration_sec,
+            representation_type=rep_type,
             elements_2d=elements_2d,
             nodes_3d=nodes_3d,
             camera_path=[{"time": 0.0, "type": semantic.shot_grammar}],
         )
 
+    def export_job(self, job_id: str, fps: int = 30) -> Dict[str, Any]:
+        """Trigger deterministic frame rendering & MP4 video generation."""
+        with self._lock:
+            job = self.jobs.get(job_id)
+
+        if job:
+            job.update_export_status(ExportStateV3.EXPORTING, 10)
+
+        try:
+            from voice_flow.video_flow_v3.export.renderer import video_renderer_v3
+            mp4_path = video_renderer_v3.export_job_mp4(job_id=job_id, fps=fps)
+
+            if job:
+                job.update_export_status(ExportStateV3.EXPORTED, 100)
+
+            download_url = f"/api/video-flow/v3/video?id={job_id}&download=1"
+            return {
+                "success": True,
+                "job_id": job_id,
+                "export_status": ExportStateV3.EXPORTED.value,
+                "file_path": str(mp4_path),
+                "download_url": download_url,
+            }
+        except Exception as exc:
+            log.error("Export for job %s failed: %s", job_id, exc, exc_info=True)
+            if job:
+                job.update_export_status(ExportStateV3.FAILED)
+            raise
+
 
 video_flow_v3_service = VideoFlowV3Service()
+
