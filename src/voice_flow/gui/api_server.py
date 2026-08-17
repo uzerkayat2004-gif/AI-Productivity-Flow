@@ -186,6 +186,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response(storage.get_insights(range_filter=range_val))
         elif path == "/api/dictionary":
             self.send_json_response(storage.get_dictionary_words())
+        elif path == "/api/video-flow/v3/program":
+            params = urllib.parse.parse_qs(parsed.query)
+            job_id = (params.get("id", [""])[0] or "").strip()
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            program = project_store_v3.load_json_artifact(job_id, "video_program.json")
+            genome = project_store_v3.load_json_artifact(job_id, "art_genome.json")
+            self.send_json_response({"success": True, "program": program, "art_genome": genome})
         elif path == "/api/providers/catalog":
             specs = [s.to_dict() for s in get_all_provider_specs()]
             self.send_json_response({"providers": specs})
