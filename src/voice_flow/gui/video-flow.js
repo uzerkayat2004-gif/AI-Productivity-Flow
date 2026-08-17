@@ -102,7 +102,7 @@ function renderVideoHistory() {
   empty.style.display = vfVideos.length ? "none" : "flex";
   grid.style.display = vfVideos.length ? "grid" : "none";
   grid.innerHTML = vfVideos.map(video => {
-    const complete = video.status === "completed";
+    const complete = video.status === "completed" || video.status === "complete" || video.status === "ready" || Boolean(video.playable);
     const failed = video.status === "failed";
     const mode = video.mode === "full" ? "Full explanation" : "Summary";
     const engineVersion = video.engine_version || "legacy";
@@ -1238,7 +1238,7 @@ async function deleteVideoCombo(comboId) {
 
 function previewVideoFlow(videoId) {
   const video = vfVideos.find(item => item.id === videoId);
-  if (!video || video.status !== "completed") return;
+  if (!video || (video.status !== "completed" && video.status !== "complete" && video.status !== "ready" && !video.playable)) return;
   vfPreviewVideo = video;
   const player = document.getElementById("vf-preview-player");
   const title = document.getElementById("vf-preview-title");
