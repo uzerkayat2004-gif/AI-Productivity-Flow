@@ -44,11 +44,29 @@ class VideoFlowV3Service:
         self._lock = threading.Lock()
         self.director = CreativeDirectorV3()
 
-    def create_job(self, source_text: str, mode: str = "summary", title: str = "", visual_style: str = "Auto", job_id: str | None = None) -> JobV3:
+    def create_job(
+        self,
+        source_text: str,
+        mode: str = "summary",
+        title: str = "",
+        visual_style: str = "Auto",
+        job_id: str | None = None,
+        model_ref: str = "local/deterministic",
+        visual_direction: str = "",
+        allow_external_ai: bool = True,
+    ) -> JobV3:
         if not job_id:
             job_id = f"v3_{uuid.uuid4().hex[:12]}"
         title_clean = (title or source_text[:40].replace("\n", " ") or "Visual Explanation").strip()
-        job = JobV3(job_id=job_id, mode=mode, title=title_clean, source_text=source_text)
+        job = JobV3(
+            job_id=job_id,
+            mode=mode,
+            title=title_clean,
+            source_text=source_text,
+            model_ref=model_ref,
+            visual_direction=visual_direction,
+            allow_external_ai=allow_external_ai,
+        )
         with self._lock:
             self.jobs[job_id] = job
         return job
@@ -84,7 +102,13 @@ class VideoFlowV3Service:
             job.update_status(GenerationStateV3.DIRECTING, "Directing visual explanation...", 40)
             resolver = ArtDirectionResolverV3()
             genome = resolver.resolve(source_text=bundle.source_text, source_hash=bundle.source_hash, family_override=visual_style)
-            program = self.director.build_program(bundle, units, evidence, ledger, genome, mode=job.mode, title=job.title)
+            program = self.director.build_program(
+                bundle, units, evidence, ledger, genome,
+                mode=job.mode, title=job.title,
+                model_ref=getattr(job, "model_ref", "local/deterministic"),
+                visual_direction=getattr(job, "visual_direction", ""),
+                allow_external_ai=getattr(job, "allow_external_ai", True),
+            )
             project_store_v3.save_json_artifact(job_id, "art_genome.json", genome)
             project_store_v3.save_json_artifact(job_id, "video_program.json", program)
 

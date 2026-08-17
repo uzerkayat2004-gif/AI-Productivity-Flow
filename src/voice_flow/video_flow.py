@@ -439,8 +439,17 @@ class VideoFlowService:
 
                 self.store.update_video(video_id, status="understanding", progress=20, stage="Understanding source...")
 
-                # Create & run V3 job
-                v3_job = video_flow_v3_service.create_job(source, mode=mode, title=title, visual_style=style, job_id=video_id)
+                # Create & run V3 job with full model_ref, visual_direction & allow_external_ai parameters
+                v3_job = video_flow_v3_service.create_job(
+                    source,
+                    mode=mode,
+                    title=title,
+                    visual_style=style,
+                    job_id=video_id,
+                    model_ref=str(video.get("model_ref", "local/deterministic")),
+                    visual_direction=str(video.get("visual_direction", "")),
+                    allow_external_ai=bool(video.get("external_ai_allowed", True)),
+                )
 
                 # Monitor V3 job progress & update SQLite store
                 def _sync_progress():

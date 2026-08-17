@@ -39,11 +39,14 @@ BUFFER_THRESHOLD_SEC = 10.0
 class JobV3:
     """Represents a V3 Video Generation Job with independent export state."""
 
-    def __init__(self, job_id: str, mode: str, title: str, source_text: str) -> None:
+    def __init__(self, job_id: str, mode: str, title: str, source_text: str, model_ref: str = "local/deterministic", visual_direction: str = "", allow_external_ai: bool = True) -> None:
         self.job_id = job_id
         self.mode = mode
         self.title = title
         self.source_text = source_text
+        self.model_ref = model_ref
+        self.visual_direction = visual_direction
+        self.allow_external_ai = allow_external_ai
 
         self.status = GenerationStateV3.CREATED
         self.export_status = ExportStateV3.NOT_REQUESTED

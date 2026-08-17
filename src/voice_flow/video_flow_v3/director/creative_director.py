@@ -40,21 +40,22 @@ class CreativeDirectorV3:
         genome: ArtDirectionGenome,
         mode: str = "summary",
         title: str = "Visual Explanation",
+        model_ref: str = "local/deterministic",
+        visual_direction: str = "",
+        allow_external_ai: bool = True,
     ) -> VideoProgramV3:
         if not units:
             return VideoProgramV3(title=title, mode=mode)
 
-        scenes: List[SceneSemanticV3] = []
+        from voice_flow.video_flow_v3.director.gateway import V3CreativeDirectorGateway
+        gateway = V3CreativeDirectorGateway()
+        scenes = gateway.author_semantic_plan(
+            bundle, units, evidence, genome,
+            mode=mode, model_ref=model_ref,
+            visual_direction=visual_direction,
+            allow_external_ai=allow_external_ai,
+        )
         chapters: List[Dict[str, Any]] = []
-
-        if mode == "summary":
-            scenes = self._plan_summary_scenes(units, evidence, genome)
-        elif mode == "full":
-            scenes, chapters = self._plan_full_scenes(units, evidence, genome)
-        elif mode == "spatial_3d":
-            scenes = self._plan_spatial_3d_scenes(units, evidence, genome)
-        else:
-            scenes = self._plan_summary_scenes(units, evidence, genome)
 
         program = VideoProgramV3(
             project_id=bundle.source_hash,
