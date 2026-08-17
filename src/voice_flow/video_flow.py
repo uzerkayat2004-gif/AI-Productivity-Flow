@@ -444,12 +444,11 @@ class VideoFlowService:
                 self.store.update_video(video_id, status="understanding", progress=20, stage="Understanding source...")
 
                 # Create & run V3 job
-                v3_job = video_flow_v3_service.create_job(source, mode=mode, title=title, visual_style=style)
-                v3_job.job_id = video_id  # Sync job_id with SQLite record ID
+                v3_job = video_flow_v3_service.create_job(source, mode=mode, title=title, visual_style=style, job_id=video_id)
 
                 # Monitor V3 job progress & update SQLite store
                 def _sync_progress():
-                    while v3_job.status not in ("complete", "ready", "failed", "cancelled"):
+                    while v3_job.status not in ("complete", "failed", "cancelled"):
                         time.sleep(0.3)
                         self.store.update_video(
                             video_id,
@@ -469,8 +468,8 @@ class VideoFlowService:
                 self.store.update_video(
                     video_id,
                     status="completed" if v3_job.program_complete else "ready",
-                    progress=100,
-                    stage="Ready to watch",
+                    progress=100 if v3_job.program_complete else v3_job.progress,
+                    stage="Ready to watch" if v3_job.program_complete else v3_job.stage_message,
                     error="",
                 )
                 return
@@ -582,14 +581,34 @@ class VideoFlowService:
 
     def file_for(self, video_id: str) -> Path | None:
         video = self.store.get_video(video_id)
-        if not video or not video.get("output_path"):
+        if not video:
             return None
-        output = Path(video["output_path"]).resolve()
-        try:
-            output.relative_to(self.store.output_root)
-        except ValueError:
-            return None
-        return output if output.is_file() else None
+
+        # 1. Check primary output_path if provided
+        if video.get("output_path"):
+            output = Path(video["output_path"]).resolve()
+            if output.is_file():
+                return output
+
+        # 2. Check for any generated .mp4 video files in project directories
+        project_dir = self.store.output_root / video_id
+        v3_export_dir = self.store.output_root / "v3" / video_id / "export"
+
+        for search_dir in (v3_export_dir, project_dir):
+            if search_dir.is_dir():
+                mp4_files = list(search_dir.glob("*.mp4"))
+                if mp4_files:
+                    return mp4_files[0]
+
+        # 3. Fall back to scene audio narration segments (.mp3 / .wav) for instant playback
+        v3_audio_dir = self.store.output_root / "v3" / video_id / "audio"
+        for search_dir in (v3_audio_dir, project_dir):
+            if search_dir.is_dir():
+                audio_files = sorted(list(search_dir.glob("*.mp3")) + list(search_dir.glob("*.wav")))
+                if audio_files:
+                    return audio_files[0]
+
+        return None
 
     def _source_for(self, video_id: str) -> str:
         with self.store._connection() as conn:
