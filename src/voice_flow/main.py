@@ -617,7 +617,7 @@ class VoiceFlowApp:
                 self.overlay.show_video_failed(video_id, "Video job disappeared")
                 return
             status = str(video.get("status", ""))
-            if status == "completed":
+            if status in ("completed", "ready", "complete") or bool(video.get("playable")):
                 self.overlay.show_video_ready(video_id)
                 return
             if status == "failed":

@@ -1243,57 +1243,37 @@ function previewVideoFlow(videoId) {
   const player = document.getElementById("vf-preview-player");
   const title = document.getElementById("vf-preview-title");
   const download = document.getElementById("vf-preview-download");
-  const stage = document.getElementById("vf-v3-canvas-stage");
+  const container = document.querySelector("#vf-preview-modal .vf-player-container");
   const viewUrl = video.view_url || (`/api/video-flow/videos/file?id=` + encodeURIComponent(video.id));
   const downloadUrl = video.download_url || (`/api/video-flow/videos/file?id=` + encodeURIComponent(video.id) + `&download=1`);
 
+  if (title) title.textContent = video.title;
+  if (download) download.href = downloadUrl;
+
+  // Set media source for native controls bar if available
   if (player) {
     player.setAttribute("src", viewUrl);
     player.src = viewUrl;
     player.load();
     player.play().catch(() => {});
   }
-  if (title) title.textContent = video.title;
-  if (download) download.href = downloadUrl;
 
-  // Load V3 Visual Explanation Program & render live visual stage
+  // Fetch V3 Program & mount real Layered WebGL VideoPlayerV3 (Three.js + PixiJS)
   fetch(`/api/video-flow/v3/program?id=${encodeURIComponent(videoId)}`)
     .then(res => res.json())
     .then(data => {
-      if (data && data.success && data.program && data.program.scenes && data.program.scenes.length > 0) {
-        if (stage) {
-          stage.style.opacity = "1";
-          const prog = data.program;
-          const scenes = prog.scenes;
-          const updateStage = () => {
-            const currentTime = player ? (player.currentTime || 0) : 0;
-            const totalDuration = player && player.duration && player.duration > 0 ? player.duration : 1;
-            const sceneIdx = Math.min(scenes.length - 1, Math.floor((currentTime / totalDuration) * scenes.length));
-            const sc = scenes[sceneIdx] || scenes[0];
-            const goalEl = document.getElementById("vf-v3-stage-goal");
-            const headerEl = document.getElementById("vf-v3-stage-header");
-            const cardsEl = document.getElementById("vf-v3-stage-cards");
-            if (headerEl) headerEl.textContent = `SCENE ${sceneIdx + 1} OF ${scenes.length} · VISUAL EXPLANATION`;
-            if (goalEl) goalEl.textContent = sc.intended_understanding || sc.teaching_goal || video.title;
-            if (cardsEl) {
-              const objs = sc.semantic_objects || [];
-              cardsEl.innerHTML = objs.map(o => `
-                <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 10px; padding: 10px 14px; font-size: 13px; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
-                  <span style="color: var(--primary-orange, #ff6b00); font-weight: 800;">✦</span>
-                  <strong>${vfEscape(o.label || o.object_id)}</strong>
-                </div>
-              `).join("") || `<div style="font-size: 13px; color: #94a3b8;">✦ ${vfEscape(sc.narration_text || "")}</div>`;
-            }
-          };
-          updateStage();
-          if (player) player.ontimeupdate = updateStage;
-        }
-      } else {
-        if (stage) stage.style.opacity = "0";
+      if (data && data.success && (data.program || data.scenes) && container && window.V3CanvasPlayer) {
+        window.V3CanvasPlayer.mount(container, data, {
+          syncMediaElement: player,
+          bottomPadding: 52,
+          autoPlay: true,
+        }).catch(err => {
+          console.warn("[VideoFlow] V3CanvasPlayer mount warning:", err);
+        });
       }
     })
-    .catch(() => {
-      if (stage) stage.style.opacity = "0";
+    .catch(err => {
+      console.warn("[VideoFlow] Could not load V3 program:", err);
     });
 
   document.getElementById("vf-preview-modal")?.classList.remove("hidden");
@@ -1407,6 +1387,10 @@ function closeVideoModal(modalId) {
     const player = document.getElementById("vf-preview-player");
     player?.pause();
     if (player) player.removeAttribute("src");
+    const container = document.querySelector("#vf-preview-modal .vf-player-container");
+    if (container && window.V3CanvasPlayer) {
+      window.V3CanvasPlayer.destroy(container);
+    }
     vfPreviewVideo = null;
   }
 }
