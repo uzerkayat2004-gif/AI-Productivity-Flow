@@ -343,18 +343,22 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
-  padding-left: 4px;
+  padding-left: 0;
+  gap: 6px;
+  width: 100%;
 }
 
 .brand-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .brand-icon {
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   background: linear-gradient(135deg, var(--primary-orange), #ff8833);
   border-radius: 8px;
   display: flex;
@@ -362,32 +366,36 @@ body {
   justify-content: center;
   color: white;
   font-weight: bold;
-  font-size: 15px;
+  font-size: 14px;
   box-shadow: 0 2px 8px rgba(255, 107, 0, 0.3);
   flex-shrink: 0;
 }
 
 .brand-title {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
   color: var(--text-main);
-  letter-spacing: -0.4px;
+  letter-spacing: -0.3px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .sidebar-toggle-btn {
   background: white;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: var(--text-muted);
   transition: all 0.15s ease;
-  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
   flex-shrink: 0;
 }
 
