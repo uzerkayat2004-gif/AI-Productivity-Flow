@@ -8,7 +8,7 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>Voice Flow - AI Speech Desktop App</title>
+  <title>AI Productivity Flow - AI Speech Desktop App</title>
 
   <link rel="manifest" href="manifest.json">
 
@@ -51,9 +51,9 @@
 
           <div class="brand-left">
 
-            <img src="assets/logo.png" alt="Voice Flow" class="brand-icon" style="width: 28px; height: 28px; border-radius: 8px; object-fit: cover;">
+            <img src="assets/logo.png" alt="AI Productivity Flow" class="brand-icon" style="width: 28px; height: 28px; border-radius: 8px; object-fit: cover;">
 
-            <span class="brand-title">Voice Flow</span>
+            <span class="brand-title">AI Productivity Flow</span>
 
           </div>
 
@@ -1224,6 +1224,145 @@
 
     </main>
 
+  <!-- ONBOARDING: WELCOME SCREEN + NARRATED TOUR -->
+
+  <div id="onboarding-overlay" class="onboarding-overlay hidden">
+    <div class="onboarding-card">
+
+      <!-- SLIDE 0: WELCOME -->
+      <div class="onboarding-slide" data-slide="0">
+        <div class="onboarding-waveform" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="onboarding-logo">🎙️</div>
+        <h1 class="onboarding-title">Welcome to AI Productivity Flow</h1>
+        <p class="onboarding-tagline">Your complete voice-driven productivity suite for Windows.</p>
+        <div class="onboarding-features">
+          <div class="onboarding-feature-card">
+            <span class="onboarding-feature-icon">🔊</span>
+            <strong>1. Audio Flow</strong>
+            <small>Turn lengthy text into instant audio summaries</small>
+          </div>
+          <div class="onboarding-feature-card">
+            <span class="onboarding-feature-icon">🎬</span>
+            <strong>2. Video Flow</strong>
+            <small>Convert documents into rich visual explainers</small>
+          </div>
+          <div class="onboarding-feature-card">
+            <span class="onboarding-feature-icon">🗣️</span>
+            <strong>3. Voice Flow</strong>
+            <small>Speak your thoughts &amp; dictate across any app</small>
+          </div>
+        </div>
+        <div class="onboarding-survey">
+          <label for="onboarding-source">Where did you find us?</label>
+          <select id="onboarding-source">
+            <option value="">Optional…</option>
+            <option value="twitter">Twitter / X</option>
+            <option value="youtube">YouTube</option>
+            <option value="reddit">Reddit</option>
+            <option value="search">Search engine</option>
+            <option value="friend">A friend</option>
+            <option value="other">Somewhere else</option>
+          </select>
+        </div>
+        <div class="onboarding-trust">
+          <span>🔒 100% Private &amp; Local First · Works offline out of the box</span>
+          <span id="onboarding-engine-status">✅ Engine ready · Watchdog active</span>
+        </div>
+        <button class="onboarding-cta" onclick="startOnboardingTour()">▶&nbsp; Start Guided Explanation Tour</button>
+        <button class="onboarding-skip" onclick="finishOnboarding()">Skip — I'll explore myself</button>
+      </div>
+
+      <!-- SLIDE 1: AUDIO FLOW -->
+      <div class="onboarding-slide" data-slide="1">
+        <span class="onboarding-kicker">FEATURE 1 · AUDIO FLOW</span>
+        <h2>🔊 Audio Flow: Instant Text to Speech &amp; Summaries</h2>
+        <p class="onboarding-copy">Welcome to Audio Flow, our first feature. Imagine scrolling through Twitter or reading a long document that you don't want to read. Simply select the text, and a small Audio Flow button appears. Click it to convert the article into a spoken audio summary.</p>
+        <div class="onboarding-demo">
+          <div class="onboarding-demo-doc">
+            <span class="onboarding-demo-sel">"Long Twitter thread or article selected..."</span>
+            <span class="onboarding-demo-fab">🔊</span>
+          </div>
+        </div>
+        <p class="onboarding-hint">Pause anytime to read at your own pace or adjust narration speed.</p>
+      </div>
+
+      <!-- SLIDE 2: VIDEO FLOW -->
+      <div class="onboarding-slide" data-slide="2">
+        <span class="onboarding-kicker">FEATURE 2 · VIDEO FLOW</span>
+        <h2>🎬 Video Flow: Visual Summaries &amp; Explainers</h2>
+        <p class="onboarding-copy">Next is Video Flow, our second feature. If you want to convert that article into a visual summary, Video Flow transforms your document into an animated visual explainer right on your screen.</p>
+        <div class="onboarding-demo">
+          <div class="onboarding-demo-video">
+            <span class="onboarding-demo-play">▶</span>
+            <small>Article → Visual Explanation Motion Graphic</small>
+          </div>
+        </div>
+        <p class="onboarding-hint">Switch seamlessly from audio to visual understanding in one click.</p>
+      </div>
+
+      <!-- SLIDE 3: VOICE FLOW DICTATION FOCUS -->
+      <div class="onboarding-slide" data-slide="3">
+        <span class="onboarding-kicker">FEATURE 3 · VOICE FLOW</span>
+        <h2>🗣️ Voice Flow: Speak &amp; Post Your Thoughts</h2>
+        <p class="onboarding-copy">Now that you have all the context about the article, you can use the Voice Flow feature to post about the article by speaking, and it will write it down for you. Zoom in on your context and let your voice do the writing.</p>
+        <div class="onboarding-kbd-diagram">
+          <span class="kbd-pill">🖱️ Hold Middle Click</span>
+          <span class="onboarding-kbd-arrow">→</span>
+          <span class="kbd-pill">💬 Speak Your Thoughts</span>
+          <span class="onboarding-kbd-arrow">→</span>
+          <span class="kbd-pill">⌨️ Release — Text Appears</span>
+        </div>
+        <p class="onboarding-hint">AI polishing automatically cleans grammar and spoken punctuation as you talk.</p>
+      </div>
+
+      <!-- SLIDE 4: SUMMARY OF ALL FEATURES -->
+      <div class="onboarding-slide" data-slide="4">
+        <span class="onboarding-kicker">FEATURE SUMMARY</span>
+        <h2>⚡ Complete System Capabilities Overview</h2>
+        <p class="onboarding-copy">Here is the complete overview of all integrated features built into AI Productivity Flow:</p>
+        <ul class="onboarding-tools">
+          <li><span>🔊</span><div><strong>1. Audio Summary</strong><small>Convert long articles &amp; text into spoken summaries</small></div></li>
+          <li><span>🎬</span><div><strong>2. Visual Summary</strong><small>Transform documents into animated visual explainer videos</small></div></li>
+          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small>Speak your thoughts &amp; dictate across any Windows application</small></div></li>
+          <li><span>📄</span><div><strong>4. Article Conversion</strong><small>Convert articles into audio or visual formats</small></div></li>
+          <li><span>📊</span><div><strong>5. Insights &amp; History</strong><small>Track telemetry, speaking velocity, streaks, and dictionary</small></div></li>
+        </ul>
+      </div>
+
+      <!-- SLIDE 5: GITHUB & FEEDBACK -->
+      <div class="onboarding-slide" data-slide="5">
+        <span class="onboarding-kicker">COMMUNITY &amp; FEEDBACK</span>
+        <h2>⭐ Join Us on GitHub &amp; Give Feedback</h2>
+        <p class="onboarding-copy">If you like AI Productivity Flow, please give us a star on GitHub! You can access reports and provide feedback to help us build the best voice tools for everyone.</p>
+        <div class="onboarding-github-box">
+          <div class="github-badge-card">
+            <span style="font-size: 28px;">⭐</span>
+            <div>
+              <strong>Star Voice Flow on GitHub</strong>
+              <small>Access reports, file issues, and share your feedback</small>
+            </div>
+            <a href="https://github.com/uzerkayat2004-gif/Voice-Flow" target="_blank" class="btn-github-link">Give Star ⭐</a>
+          </div>
+        </div>
+        <p class="onboarding-hint">Your feedback and support drive our next updates!</p>
+        <button class="onboarding-cta" onclick="finishOnboarding()">Finish Tour &amp; Start Using AI Productivity Flow</button>
+      </div>
+
+      <!-- TOUR PLAYER BAR -->
+      <div class="onboarding-player" id="onboarding-player">
+        <button class="onboarding-player-btn" id="onboarding-narration-toggle" onclick="toggleOnboardingNarration()" title="Pause / resume narration">⏸</button>
+        <div class="onboarding-player-label" id="onboarding-narration-label">Narrating…</div>
+        <div class="onboarding-dots" id="onboarding-dots"></div>
+        <button class="onboarding-player-btn" onclick="prevOnboardingSlide()" title="Previous">‹</button>
+        <button class="onboarding-player-btn onboarding-next" id="onboarding-next-btn" onclick="nextOnboardingSlide()" title="Next">›</button>
+        <button class="onboarding-skip" onclick="stopOnboardingNarration(); finishOnboarding();" style="margin-left:8px;">Exit tour</button>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ENLARGED SETTINGS MODAL -->
 
   <div id="settings-modal" class="modal-overlay hidden" style="z-index: 1100;">
@@ -1289,11 +1428,18 @@
                 <div class="setting-desc">Dictation history, insights, dictionary, and settings are stored locally in <code>~/.voice_flow/voice_flow.db</code>. Nothing leaves your machine unless you connect a provider.</div>
               </div>
             </div>
-            <div class="setting-row" style="border-bottom: none;">
+            <div class="setting-row">
               <div class="setting-info">
                 <div class="setting-title">Runtime</div>
                 <div class="setting-desc">Local API server on <code>http://127.0.0.1:8991</code> · Faster-Whisper local STT · Windows 10/11 x64.</div>
               </div>
+            </div>
+            <div class="setting-row" style="border-bottom: none;">
+              <div class="setting-info">
+                <div class="setting-title">Onboarding &amp; Tour</div>
+                <div class="setting-desc">Replay the voice-narrated welcome tour and product introduction.</div>
+              </div>
+              <button class="action-btn" onclick="replayOnboarding()">▶ Replay Tour</button>
             </div>
           </div>
         </div>

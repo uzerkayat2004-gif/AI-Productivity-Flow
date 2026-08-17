@@ -88,7 +88,7 @@ class VoiceFlowApp:
     """Core Coordinator for Voice Flow Dictation System."""
 
     def __init__(self) -> None:
-        log.info("Starting Voice Flow System Engine...")
+        log.info("Starting AI Productivity Flow System Engine...")
         self._state_lock = threading.RLock()
         self.state = DictationState.IDLE
         self.last_successful_transcript: str | None = None
