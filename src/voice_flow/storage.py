@@ -1537,6 +1537,8 @@ class StorageEngine:
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         """Retrieve a setting value by key."""
+        if key == "video_flow_v3_enabled" and default is None:
+            default = True
         with self._get_conn() as conn:
             cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
             row = cursor.fetchone()

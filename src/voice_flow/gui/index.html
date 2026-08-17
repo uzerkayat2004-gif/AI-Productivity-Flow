@@ -1128,16 +1128,20 @@
               <span class="vf-field-title">Explanation type</span>
               <label class="vf-mode-card active" data-mode="summary">
                 <input type="radio" name="vf-mode" value="summary" checked onchange="selectVideoMode('summary')"><span class="vf-mode-icon">✦</span>
-                <span><strong>Summary Video</strong><small>Distills the research into the clearest key points and visual story.</small></span><span class="vf-check">✓</span>
+                <span><strong>Visual Summary</strong><small>Understands the complete source and turns essential ideas into a concise visual explanation.</small></span><span class="vf-check">✓</span>
               </label>
               <label class="vf-mode-card" data-mode="full">
                 <input type="radio" name="vf-mode" value="full" onchange="selectVideoMode('full')"><span class="vf-mode-icon">≡</span>
-                <span><strong>Full Explanation</strong><small>Covers the complete source in order without dropping any characters.</small></span><span class="vf-check">✓</span>
+                <span><strong>Full Visual Explanation</strong><small>Transforms the complete source into a chaptered visual explanation with no meaningful omissions.</small></span><span class="vf-check">✓</span>
               </label>
-              <label class="vf-field"><span>Visual theme</span><select id="vf-theme-select"><option value="auto">Auto — choose from the permanent visual policy</option><option value="voice-flow">Voice Flow</option><option value="midnight">Midnight</option><option value="paper">Paper</option><option value="neon">Neon</option><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="mono">Monochrome</option></select></label>
-              <label class="vf-field"><span>Your visual direction <em>optional — always wins</em></span><textarea id="vf-visual-direction" rows="3" maxlength="1000" placeholder="e.g. A quiet midnight kitchen with deep blue light and warm copper details"></textarea><small>If you leave this blank, Video Flow chooses a consistent theme from the subject.</small></label>
-              <div class="vf-coverage-note" id="vf-coverage-note"><strong>Summary mode</strong><span>Video Flow samples the opening, middle, and conclusion to create a shorter explanation.</span></div>
-              <button class="vf-generate-button" id="vf-generate-button" onclick="generateVideoFlow()"><span>▶</span><span><strong>Generate Summary Video</strong><small>Plan → narrate → render MP4</small></span></button>
+              <label class="vf-mode-card" data-mode="spatial_3d">
+                <input type="radio" name="vf-mode" value="spatial_3d" onchange="selectVideoMode('spatial_3d')"><span class="vf-mode-icon">🧊</span>
+                <span><strong>Spatial 3D</strong><small>Finds structures, mechanisms, layers and spatial relationships that benefit from 3D and explains them visually.</small></span><span class="vf-check">✓</span>
+              </label>
+              <label class="vf-field"><span>Visual Style</span><select id="vf-theme-select"><option value="auto">Auto — Art Director chooses</option><option value="Industrial Product">Industrial Product</option><option value="Technical Systems">Technical Systems</option><option value="Scientific Visualization">Scientific Visualization</option><option value="Data Editorial">Data Editorial</option><option value="Editorial Documentary">Editorial Documentary</option><option value="Software Architecture">Software Architecture</option><option value="Historical / Archival">Historical / Archival</option><option value="Architectural / Spatial">Architectural / Spatial</option><option value="Minimal Conceptual">Minimal Conceptual</option></select></label>
+              <label class="vf-field"><span>Your visual direction <em>optional — source facts take priority</em></span><textarea id="vf-visual-direction" rows="3" maxlength="1000" placeholder="e.g. Focus on physical assembly structure or financial metrics in section 2"></textarea><small>Influences presentation. Source facts always take priority.</small></label>
+              <div class="vf-coverage-note" id="vf-coverage-note"><strong>Visual Summary mode</strong><span>Analyzes 100% of the source and preserves central claims, key numbers, and causal relationships.</span></div>
+              <button class="vf-generate-button" id="vf-generate-button" onclick="generateVideoFlow()"><span>▶</span><span><strong>Generate Visual Explanation</strong><small>Direct → compile → progressive live watch</small></span></button>
               <div id="vf-generate-message" class="vf-inline-message"></div>
             </div>
           </div>
@@ -1152,7 +1156,7 @@
                 <h2 style="font-size: 18px; font-weight: 800; color: var(--accent-text); letter-spacing: 0.5px; margin: 0;">VIDEO FLOW MODEL SELECTOR</h2>
               </div>
               <p style="font-size: 13px; color: var(--text-muted); margin-top: 6px; margin-bottom: 0; line-height: 1.5;">
-                Select the planning model for video generation. Eye (👁) means vision-aware; brain (🧠) means reasoning-capable.
+                Select the Creative Director model for Video Flow V3. Understands the source and creates the semantic visual plan. Rendering remains deterministic.
               </p>
             </div>
             <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
@@ -1169,7 +1173,7 @@
 
           <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 16px;" class="af-inner-box">
             <div>
-              <label for="vf-model-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Active Planning Model</label>
+              <label for="vf-model-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Creative Director Model</label>
               <button id="vf-model-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker()" aria-haspopup="dialog" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
                 <span class="vf-model-picker-copy"><strong id="vf-active-model-label">Voice Flow Local — Deterministic Storyboard</strong> <small id="vf-active-model-detail" style="color: var(--text-muted); margin-left: 6px;">(Works without an API key)</small></span>
                 <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>⌄</b></span>

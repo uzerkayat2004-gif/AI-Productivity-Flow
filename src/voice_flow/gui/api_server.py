@@ -171,7 +171,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             key = (params.get("key", [""])[0] or "").strip()
             allowed_get = {
                 "voice_flow_enabled", "audio_flow_enabled", "video_flow_enabled",
-                "polishing_enabled", "press_enter_enabled", "has_viewed_onboarding",
+                "video_flow_v3_enabled", "polishing_enabled", "press_enter_enabled", "has_viewed_onboarding",
             }
             if key not in allowed_get:
                 self.send_json_response({"success": False, "error": "Unknown setting"}, 400)
@@ -958,6 +958,38 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
         elif path == "/api/video-flow/combos/create":
+            try:
+                combo = video_flow_service.store.create_combo(
+                    str(data.get("name", "")),
+                    list(data.get("models", [])),
+                    str(data.get("strategy", "fallback")),
+                )
+                self.send_json_response({"success": True, "combo": combo})
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/v3/generate":
+            try:
+                from voice_flow.video_flow_v3.service import video_flow_v3_service
+                source_text = str(data.get("source_text", ""))
+                mode = str(data.get("mode", "summary"))
+                title = str(data.get("title", ""))
+                style = str(data.get("visual_style", "Auto"))
+                job = video_flow_v3_service.create_job(source_text, mode, title, style)
+                threading.Thread(target=video_flow_v3_service.run_job, args=(job.job_id, style), daemon=True).start()
+                self.send_json_response({"success": True, "job_id": job.job_id, "status": job.status.value})
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
+
+        elif path == "/api/video-flow/v3/export":
+            try:
+                job_id = str(data.get("id", ""))
+                from voice_flow.video_flow_v3.scheduler.job import ExportStateV3
+                from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+                project_store_v3.save_json_artifact(job_id, "export_request.json", {"status": ExportStateV3.EXPORTED.value})
+                self.send_json_response({"success": True, "job_id": job_id, "export_status": "exported"})
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
             try:
                 combo = video_flow_service.store.create_combo(
                     str(data.get("name", "")),

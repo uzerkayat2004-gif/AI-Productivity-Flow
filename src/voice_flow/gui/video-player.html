@@ -49,12 +49,30 @@
         document.getElementById("footer-stage").textContent = video.stage || video.status;
         document.getElementById("percent").textContent = (video.progress || 0) + "%";
         document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
-        if (video.status === "completed") {
-          clearInterval(timer);
+        if (video.playable || video.status === "ready" || video.status === "completed") {
           document.getElementById("status").classList.add("hidden");
-          player.src = video.view_url;
-          document.getElementById("download").href = video.download_url;
-          player.play().catch(() => {});
+          if (video.view_url && player.src !== video.view_url) {
+            player.src = video.view_url;
+            player.play().catch(() => {});
+          }
+          const dl = document.getElementById("download");
+          if (video.export_status === "exported" && video.download_url) {
+            dl.textContent = "↓ Download MP4";
+            dl.href = video.download_url;
+          } else if (video.export_status === "exporting") {
+            dl.textContent = `Exporting ${video.export_progress || 0}%`;
+          } else {
+            dl.textContent = "Export MP4";
+            dl.href = "#";
+            dl.onclick = (e) => {
+              e.preventDefault();
+              fetch("/api/video-flow/v3/export", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: videoId }),
+              }).catch(() => {});
+            };
+          }
         } else if (video.status === "failed") {
           clearInterval(timer);
           document.querySelector(".spinner").style.display = "none";

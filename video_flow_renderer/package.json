@@ -8,11 +8,18 @@
     "render:sample": "remotion render src/index.ts VideoFlow out/sample.mp4"
   },
   "dependencies": {
+    "@react-three/fiber": "^9.7.0",
     "@remotion/cli": "^4.0.240",
     "@remotion/media": "^4.0.240",
+    "@remotion/three": "^4.0.512",
+    "@types/d3": "^7.4.3",
+    "@types/three": "^0.185.4",
+    "d3": "^7.9.0",
+    "pixi.js": "^8.19.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "remotion": "^4.0.240"
+    "remotion": "^4.0.240",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
