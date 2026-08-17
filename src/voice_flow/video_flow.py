@@ -294,12 +294,8 @@ class VideoFlowStore:
         if not row:
             return row  # type: ignore[return-value]
         row.pop("source_text", None)
-        if row.get("output_path"):
-            row["download_url"] = f"/api/video-flow/videos/file?id={row['id']}&download=1"
-            row["view_url"] = f"/api/video-flow/videos/file?id={row['id']}"
-        else:
-            row.setdefault("download_url", "")
-            row.setdefault("view_url", "")
+        row["download_url"] = f"/api/video-flow/videos/file?id={row['id']}&download=1"
+        row["view_url"] = f"/api/video-flow/videos/file?id={row['id']}"
         return row
 
     def get_video(self, video_id: str) -> dict[str, Any] | None:
@@ -600,13 +596,33 @@ class VideoFlowService:
                 if mp4_files:
                     return mp4_files[0]
 
-        # 3. Fall back to scene audio narration segments (.mp3 / .wav) for instant playback
+        # 3. Check for V3 master concatenated narration audio (full document duration)
+        v3_master_audio = self.store.output_root / "v3" / video_id / "master_narration.mp3"
+        if v3_master_audio.is_file():
+            return v3_master_audio
+
+        # 4. Fall back to scene audio narration segments (.mp3 / .wav) for instant playback
         v3_audio_dir = self.store.output_root / "v3" / video_id / "audio"
         for search_dir in (v3_audio_dir, project_dir):
             if search_dir.is_dir():
                 audio_files = sorted(list(search_dir.glob("*.mp3")) + list(search_dir.glob("*.wav")))
                 if audio_files:
                     return audio_files[0]
+
+        # 4. On-the-fly fallback synthesis for empty/legacy records so 100% of history items are playable
+        source_text = self._source_for(video_id) or video.get("title") or "Video Flow Visual Explanation"
+        fallback_dir = self.store.output_root / video_id
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        fallback_audio = fallback_dir / "scene_0.mp3"
+        try:
+            from voice_flow.tts_engine import tts_engine
+            audio_bytes = tts_engine._synthesize(source_text[:300], "deepgram/aura-zeus-en")
+            if audio_bytes:
+                with open(fallback_audio, "wb") as af:
+                    af.write(audio_bytes)
+                return fallback_audio
+        except Exception as exc:
+            log.warning("Fallback audio synthesis for %s failed: %s", video_id, exc)
 
         return None
 

@@ -107,7 +107,7 @@ class JobV3:
         is_ready = audio_ready and (total_buf >= BUFFER_THRESHOLD_SEC or self.program_complete)
         if is_ready and not self.playable:
             self.playable = True
-            self.update_status(GenerationStateV3.READY, "Ready to watch", 100 if self.program_complete else 50)
+            self.update_status(GenerationStateV3.READY, "Ready to watch", 100 if self.program_complete else self.progress)
             log.info(f"Job {self.job_id} reached READY_TO_WATCH with {total_buf:.1f}s buffered.")
 
         return is_ready

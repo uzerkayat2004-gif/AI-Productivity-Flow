@@ -44,8 +44,9 @@ class VideoFlowV3Service:
         self._lock = threading.Lock()
         self.director = CreativeDirectorV3()
 
-    def create_job(self, source_text: str, mode: str = "summary", title: str = "", visual_style: str = "Auto") -> JobV3:
-        job_id = f"v3_{uuid.uuid4().hex[:12]}"
+    def create_job(self, source_text: str, mode: str = "summary", title: str = "", visual_style: str = "Auto", job_id: str | None = None) -> JobV3:
+        if not job_id:
+            job_id = f"v3_{uuid.uuid4().hex[:12]}"
         title_clean = (title or source_text[:40].replace("\n", " ") or "Visual Explanation").strip()
         job = JobV3(job_id=job_id, mode=mode, title=title_clean, source_text=source_text)
         with self._lock:
@@ -113,6 +114,12 @@ class VideoFlowV3Service:
                         with open(audio_path, "wb") as af:
                             af.write(audio_bytes)
 
+                # Fix 4-5s duration limit: Probe REAL audio duration and update scene timeline
+                from voice_flow.video_flow_v3.audio.narration import probe_audio_duration_sec, concatenate_narration_audio
+                actual_audio_sec = probe_audio_duration_sec(str(audio_path))
+                executable_scene.duration_sec = max(3.5, round(actual_audio_sec + 0.8, 2))
+                executable_scene.audio_segment_url = f"/api/video-flow/v3/audio?id={job_id}&scene={executable_scene.scene_id}"
+
                 compiled_scenes.append(executable_scene)
 
                 # Evaluate READY_TO_WATCH after Scene 1 / Initial Buffer
@@ -122,6 +129,11 @@ class VideoFlowV3Service:
                 # Progressive status update
                 pct = int(60 + (idx + 1) / len(program.scenes) * 35)
                 job.update_status(GenerationStateV3.GENERATING_AHEAD, f"Generating scene {idx+1}/{len(program.scenes)}...", pct)
+
+            # Master audio concatenation for continuous full-length video playback
+            all_audio_files = [str(project_store_v3.get_audio_segment_path(job_id, s.scene_id)) for s in compiled_scenes]
+            master_audio_path = str(project_store_v3.get_project_dir(job_id) / "master_narration.mp3")
+            concatenate_narration_audio(all_audio_files, master_audio_path)
 
             job.program_complete = True
             job.update_status(GenerationStateV3.COMPLETE, "Complete", 100)
