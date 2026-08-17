@@ -28,6 +28,8 @@ from voice_flow.storage import DB_PATH, storage
 from voice_flow.video_flow_models import VideoModelGateway
 from voice_flow.video_flow_providers import video_flow_provider_service
 
+import time
+
 log = logging.getLogger(__name__)
 
 VIDEO_FLOW_ROOT = Path.home() / ".voice_flow" / "videos"
@@ -430,6 +432,49 @@ class VideoFlowService:
             source = self._source_for(video_id)
             if not source:
                 raise ValueError("Video source is missing.")
+
+            # Route to Video Flow V3 Engine if enabled (and no custom legacy visual_engine set)
+            if not self.visual_engine and storage.get_setting("video_flow_v3_enabled", True):
+                from voice_flow.video_flow_v3.service import video_flow_v3_service
+                video = self.store.get_video(video_id) or {}
+                mode = str(video.get("mode", "summary"))
+                title = str(video.get("title", ""))
+                style = str(video.get("theme", "Auto"))
+
+                self.store.update_video(video_id, status="understanding", progress=20, stage="Understanding source...")
+
+                # Create & run V3 job
+                v3_job = video_flow_v3_service.create_job(source, mode=mode, title=title, visual_style=style)
+                v3_job.job_id = video_id  # Sync job_id with SQLite record ID
+
+                # Monitor V3 job progress & update SQLite store
+                def _sync_progress():
+                    while v3_job.status not in ("complete", "ready", "failed", "cancelled"):
+                        time.sleep(0.3)
+                        self.store.update_video(
+                            video_id,
+                            status=v3_job.status.value,
+                            progress=v3_job.progress,
+                            stage=v3_job.stage_message,
+                        )
+
+                sync_thread = threading.Thread(target=_sync_progress, daemon=True)
+                sync_thread.start()
+
+                video_flow_v3_service.run_job(v3_job.job_id, visual_style=style)
+
+                if v3_job.error:
+                    raise RuntimeError(v3_job.error)
+
+                self.store.update_video(
+                    video_id,
+                    status="completed" if v3_job.program_complete else "ready",
+                    progress=100,
+                    stage="Ready to watch",
+                    error="",
+                )
+                return
+
             self.store.update_video(video_id, status="planning", progress=8, stage="Planning scenes")
             video = self.store.get_video(video_id)
             if not video:
