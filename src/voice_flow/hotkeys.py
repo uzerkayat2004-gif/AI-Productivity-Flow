@@ -200,7 +200,9 @@ class InputTriggerListener:
 
                 # Alt+C or Ctrl+C / Ctrl+Shift+C — copy-last ONLY when Voice Flow's own window is focused
                 vk_menu = (key == keyboard.Key.alt or key == keyboard.Key.alt_l or key == keyboard.Key.alt_r)
-                vk_c = key == keyboard.KeyCode.from_char("c")
+                # With Shift held, pynput reports uppercase "C" — match both so
+                # the advertised Ctrl+Shift+C copy-last shortcut actually fires.
+                vk_c = key in (keyboard.KeyCode.from_char("c"), keyboard.KeyCode.from_char("C"))
                 shift_down = _is_shift_down()
                 if (vk_menu and vk_c) or (ctrl_down and not shift_down and vk_c) or (ctrl_down and shift_down and vk_c):
                     if self._on_copy_last and not self._is_recording:

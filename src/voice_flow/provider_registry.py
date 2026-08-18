@@ -163,6 +163,7 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ),
         models=[
             ProviderModel("gpt-4o-mini", "GPT-4o Mini"),
+            ProviderModel("gpt-4.1-mini", "GPT-4.1 Mini"),
             ProviderModel("gpt-4o", "GPT-4o"),
         ],
         models_fetcher=ProviderModelsFetcher(
@@ -210,7 +211,7 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
             color="#4285F4",
             website="https://aistudio.google.com",
             notice=ProviderNotice(
-                text="Fast and capable Gemini 2.5 Flash & 2.0 Flash models.",
+                text="Fast and capable Gemini 3.6 Flash & 2.5 Flash models.",
                 api_key_url="https://aistudio.google.com/app/apikey",
             ),
         ),
@@ -220,13 +221,13 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ),
         transport=ProviderTransport(
             format="gemini",
-            base_url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            base_url="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
             validate_url="https://generativelanguage.googleapis.com/v1beta/models",
             auth_header="key-query",
         ),
         models=[
-            ProviderModel("gemini-2.5-flash", "Gemini 2.5 Flash"),
-            ProviderModel("gemini-2.0-flash-exp", "Gemini 2.0 Flash Exp"),
+            ProviderModel("gemini-3.6-flash", "Gemini 3.6 Flash"),
+            ProviderModel("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"),
         ],
         passthrough_models=True,
     ),
@@ -322,8 +323,8 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
             auth_header="bearer",
         ),
         models=[
-            ProviderModel("llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
-            ProviderModel("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
+            ProviderModel("llama-3.3-70b-specdec", "Llama 3.3 70B SpecDec"),
+            ProviderModel("meta-llama/llama-4-scout-17b-16e-instruct", "Llama 4 Scout 17B"),
         ],
         models_fetcher=ProviderModelsFetcher(
             url="https://api.groq.com/openai/v1/models", type="openai"

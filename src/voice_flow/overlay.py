@@ -797,11 +797,14 @@ class FloatingOverlayBar:
         c.create_text(w / 2 + 10, cy, text="Done", fill=self.DONE_GREEN, font=(config.bar_font_family, 12, "bold"), anchor="center")
 
     def _draw_error(self, w: int, h: int) -> None:
-        """Keep recoverable failures neutral and avoid exposing raw provider errors."""
+        """Show the recorded error message instead of a generic label."""
+        message = (self.error_message or "Something went wrong").strip()
+        if len(message) > 60:
+            message = message[:57].rstrip() + "..."
         self.canvas.create_text(
             w / 2,
             h / 2,
-            text="Working",
+            text=message,
             fill=self.TEXT_WHITE,
             font=(config.bar_font_family, 10, "bold"),
             anchor="center",

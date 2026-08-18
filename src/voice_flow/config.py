@@ -18,11 +18,30 @@ class Config:
     language: str = "en"
     device: str = "cpu"
     compute_type: str = "int8"
-    cpu_threads: int = field(default_factory=lambda: max(2, min(4, (os.cpu_count() or 8) // 2)))
+    # Benchmarked on 12-thread CPUs: 8 threads beats 4 by ~25%; leaving 4 threads
+    # of headroom keeps the GUI, audio capture, and watchdog responsive.
+    cpu_threads: int = field(default_factory=lambda: max(2, min(8, (os.cpu_count() or 8) - 4)))
 
     # --- Speed & Accuracy Settings ---
     beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
+
+    # --- Whisper Anti-Hallucination & Repetition Control ---
+    no_speech_threshold: float = 0.6  # Segments scored below this are treated as silence
+    compression_ratio_threshold: float = 2.4  # Drop segments that compress too well (hallucinated tails)
+    repetition_penalty: float = 1.2  # Discourage pathological word repetition loops
+
+    # --- Auto Punctuation From Natural Pauses ---
+    auto_punctuation_enabled: bool = True
+    pause_sentence_gap_s: float = 0.55  # Silence gap that becomes a period
+    pause_paragraph_gap_s: float = 1.0  # Silence gap that becomes a paragraph break
+
+    # --- Spoken Number Normalization ("twenty five" -> "25") ---
+    number_normalization_enabled: bool = True
+
+    # --- AI Polish Latency Budget ---
+    polish_api_timeout_s: float = 1.5  # Hard per-request timeout for polish LLM calls
+    polish_budget_s: float = 2.5  # Total wall-clock budget for all polish API attempts
 
     # --- Noise & Background Voice Filtering ---
     vad_threshold: float = 0.20  # Lower = catches softer speech and natural pauses

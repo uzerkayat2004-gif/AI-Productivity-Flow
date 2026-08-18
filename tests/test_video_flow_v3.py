@@ -424,3 +424,234 @@ def test_v3_deterministic_fallback_resolves_semantic_representation_types():
     # Process
     assert classify_semantic_representation("Step 1: initialize the buffer. Step 2: stream data.", "sentence") == SemanticRepresentationType.PROCESS
 
+
+def test_v3_nine_art_direction_families_validation():
+    """Verify all 9 curated Art Direction Families are fully configured, distinct, and anti-generic compliant."""
+    from voice_flow.video_flow_v3.art_direction.families import VISUAL_FAMILIES, VisualFamilyName, get_visual_family_spec
+    from voice_flow.video_flow_v3.art_direction.genome import build_genome_from_family, validate_art_genome
+
+    expected_families = [
+        VisualFamilyName.INDUSTRIAL_PRODUCT.value,
+        VisualFamilyName.TECHNICAL_SYSTEMS.value,
+        VisualFamilyName.SCIENTIFIC_VISUALIZATION.value,
+        VisualFamilyName.DATA_EDITORIAL.value,
+        VisualFamilyName.EDITORIAL_DOCUMENTARY.value,
+        VisualFamilyName.SOFTWARE_ARCHITECTURE.value,
+        VisualFamilyName.HISTORICAL_ARCHIVAL.value,
+        VisualFamilyName.ARCHITECTURAL_SPATIAL.value,
+        VisualFamilyName.MINIMAL_CONCEPTUAL.value,
+    ]
+
+    assert len(VISUAL_FAMILIES) == 9
+    for fam_name in expected_families:
+        assert fam_name in VISUAL_FAMILIES
+        spec = get_visual_family_spec(fam_name)
+        assert spec.name == fam_name
+        assert spec.description != ""
+        assert spec.palette.environment != ""
+        assert spec.palette.accent != ""
+        assert spec.typography.font_family_primary != ""
+        assert spec.materials.surface_type != ""
+        assert spec.lighting_rig.name != ""
+        assert spec.camera_grammar.name != ""
+        assert spec.motion_grammar.name != ""
+
+        # Validate anti-generic AI policy
+        genome = build_genome_from_family(spec, source_hash=f"test_hash_{fam_name}")
+        assert validate_art_genome(genome) is True
+        assert genome.materials.get("bloom_enabled") is False
+        assert genome.materials.get("glassmorphism") is False
+        assert genome.materials.get("lens_flare") is False
+
+
+def test_v3_resolver_auto_classification_and_diversity():
+    """Verify ArtDirectionResolverV3 classifies keywords, respects visual_direction, and guarantees diversity via source_hash."""
+    from voice_flow.video_flow_v3.art_direction.families import VisualFamilyName
+    resolver = ArtDirectionResolverV3()
+
+    # Keyword classification
+    assert resolver.classify_family(source_text="The mechanical chassis is machined from aluminum alloy.") == "Industrial Product"
+    assert resolver.classify_family(source_text="Distributed microservices telemetry stream over the network.") == "Technical Systems"
+    assert resolver.classify_family(source_text="The molecular structure of cellular DNA reveals RNA protein interactions.") == "Scientific Visualization"
+    assert resolver.classify_family(source_text="Quarterly GDP growth and inflation metrics in economic dataset.") == "Data Editorial"
+    assert resolver.classify_family(source_text="The historical archive contains manuscript documents and parchment scrolls.") == "Historical / Archival"
+    assert resolver.classify_family(source_text="The AST compiler runtime optimizes syntax tree in Python code.") == "Software Architecture"
+    assert resolver.classify_family(source_text="Blueprint elevation and concrete cantilever structure in urban zoning.") == "Architectural / Spatial"
+    assert resolver.classify_family(source_text="Pure mathematical logic and axiomatic metaphysics.") == "Minimal Conceptual"
+
+    # User visual direction override/hint
+    assert resolver.classify_family(
+        source_text="Some generic overview text.",
+        visual_direction="Use an Industrial Product style with copper highlights and machined chassis",
+    ) == "Industrial Product"
+
+    # Source-hash seeded diversification for untagged neutral text
+    genome1 = resolver.resolve(source_text="Item 1 overview.", source_hash="1a2b3c4d")
+    genome2 = resolver.resolve(source_text="Item 2 overview.", source_hash="9f8e7d6c")
+    assert genome1.family in [f.value for f in VisualFamilyName]
+    assert genome2.family in [f.value for f in VisualFamilyName]
+
+
+def test_v3_visual_summary_mode_adaptive_duration_and_scene_beats():
+    """Verify Visual Summary Mode produces 1-3 points, adaptive duration, SceneBeats, and non-slideshow semantic types."""
+    from voice_flow.video_flow_v3.director.gateway import V3CreativeDirectorGateway
+
+    source = (
+        "# Quantum Computing Architecture\n"
+        "Qubits utilize quantum superposition to process calculations exponentially faster than classical bits. "
+        "Cryogenic dilution refrigerators maintain temperatures near absolute zero to preserve coherence. "
+        "Error correction algorithms monitor syndrome measurements across the distributed qubit lattice."
+    )
+    bundle = SourceBundle(source_text=source, source_name="Quantum Summary")
+    units = SourceNormalizer.segment_source_units(bundle)
+    evidence = EvidenceGraphBuilder.build_evidence_graph(units)
+    genome = ArtDirectionResolverV3().resolve(source_text=source, source_hash=bundle.source_hash)
+
+    gateway = V3CreativeDirectorGateway()
+    scenes = gateway.author_semantic_plan(
+        bundle=bundle,
+        units=units,
+        evidence=evidence,
+        genome=genome,
+        mode="summary",
+        model_ref="local/deterministic",
+    )
+
+    assert len(scenes) >= 1
+    for sc in scenes:
+        assert 1 <= len(sc.semantic_objects) <= 3
+        assert sc.suggested_duration_sec >= 4.5
+        assert len(sc.scene_beats) >= 2
+        for beat in sc.scene_beats:
+            assert beat.beat_id.startswith(f"{sc.scene_id}_beat_")
+            assert beat.time_offset_sec >= 0.0
+            assert beat.visual_action in ("reveal", "highlight_target", "expand_node", "route_signal", "compare_delta", "assemble", "focus", "morph_state")
+            assert len(beat.target_element_ids) > 0
+
+
+def test_v3_full_visual_explanation_mode_unit_accounting_and_chapters():
+    """Verify Full Visual Explanation Mode guarantees 100% unit accounting, structured chaptering, and progressive generation."""
+    source = (
+        "# Chapter 1: Introduction\n"
+        "This is the first foundational principle.\n"
+        "Here is a supporting data detail.\n\n"
+        "# Chapter 2: Implementation\n"
+        "```python\ndef execute_task():\n    return True\n```\n"
+        "The implementation runs securely in memory."
+    )
+    bundle = SourceBundle(source_text=source, source_name="Full Explanation Document")
+    units = SourceNormalizer.segment_source_units(bundle)
+    evidence = EvidenceGraphBuilder.build_evidence_graph(units)
+    ledger = CoverageLedgerTracker.create_ledger(units, mode="full")
+    genome = ArtDirectionResolverV3().resolve(source_text=source, source_hash=bundle.source_hash)
+
+    director = CreativeDirectorV3()
+    program = director.build_program(
+        bundle=bundle,
+        units=units,
+        evidence=evidence,
+        ledger=ledger,
+        genome=genome,
+        mode="full",
+        model_ref="local/deterministic",
+    )
+
+    assert len(program.scenes) == len(units)
+    assert len(program.chapters) >= 2
+    assert ledger.coverage_ratio == 1.0
+
+    valid_dispositions = {"covered_both", "covered_narration", "covered_visual", "merged", "disposed", "included"}
+    for item in ledger.items:
+        assert item.disposition in valid_dispositions
+        assert len(item.scene_refs) > 0
+
+
+def test_v3_spatial_3d_mode_selective_routing():
+    """Verify Spatial 3D Mode selectively routes physical/mechanical to 3D and non-spatial to 2D/2.5D."""
+    from voice_flow.video_flow_v3.director.gateway import V3CreativeDirectorGateway
+
+    source = (
+        "The engine block assembly specifications have exact CAD dimensions and physical components.\n"
+        "Project planning meeting schedule and team allocations."
+    )
+    bundle = SourceBundle(source_text=source, source_name="Spatial Routing Test")
+    units = SourceNormalizer.segment_source_units(bundle)
+    evidence = EvidenceGraphBuilder.build_evidence_graph(units)
+    genome = ArtDirectionResolverV3().resolve(source_text=source, source_hash=bundle.source_hash, mode="spatial_3d")
+
+    gateway = V3CreativeDirectorGateway()
+    scenes = gateway.author_semantic_plan(
+        bundle=bundle,
+        units=units,
+        evidence=evidence,
+        genome=genome,
+        mode="spatial_3d",
+        model_ref="local/deterministic",
+    )
+
+    assert len(scenes) == 2
+    # First scene: physical structure -> 3D enabled (F1)
+    assert scenes[0].use_3d is True
+    assert scenes[0].fidelity_3d == FidelityClass3D.F1_PHYSICAL
+    assert scenes[0].representation_type in ("ASSEMBLY_3D", "CUTAWAY_3D")
+
+    # Second scene: plain non-spatial -> graceful fallback to 2D/2.5D (F4)
+    assert scenes[1].use_3d is False
+    assert scenes[1].fidelity_3d == FidelityClass3D.F4_INSUFFICIENT
+
+
+def test_v3_scene_semantic_transitions():
+    """Verify semantic transitions (MATCH_TRANSITION, CARRY, EXPAND, COLLAPSE) are authored between scenes."""
+    from voice_flow.video_flow_v3.director.gateway import V3CreativeDirectorGateway
+    from voice_flow.video_flow_v3.contracts import SemanticTransitionType
+
+    source = (
+        "# System Architecture\n"
+        "The API Gateway distributes incoming client requests across the cluster.\n"
+        "Worker nodes process asynchronous tasks from the queue.\n"
+        "In summary, the distributed architecture guarantees high availability."
+    )
+    bundle = SourceBundle(source_text=source, source_name="Transitions Test")
+    units = SourceNormalizer.segment_source_units(bundle)
+    evidence = EvidenceGraphBuilder.build_evidence_graph(units)
+    genome = ArtDirectionResolverV3().resolve(source_text=source, source_hash=bundle.source_hash)
+
+    gateway = V3CreativeDirectorGateway()
+    scenes = gateway.author_semantic_plan(
+        bundle=bundle,
+        units=units,
+        evidence=evidence,
+        genome=genome,
+        mode="summary",
+        model_ref="local/deterministic",
+    )
+
+    assert len(scenes) >= 2
+    valid_transitions = {t.value for t in SemanticTransitionType}
+    for sc in scenes:
+        assert sc.transition_in in valid_transitions
+        assert sc.transition_out in valid_transitions
+
+
+def test_v3_service_multi_doc_handling_and_budgeting():
+    """Verify VideoFlowV3Service processes multi-document bundles and applies adaptive budgeting."""
+    service = VideoFlowV3Service()
+    job = service.create_job(
+        source_text="Doc 1 content.\nDoc 2 content.",
+        mode="summary",
+        title="Multi-Doc Project",
+    )
+    job.metadata = {
+        "documents": [
+            {"name": "Architecture Spec", "content": "# Architecture\nMicroservices topology and signal flow."},
+            {"name": "Metrics Report", "content": "# Metrics\nRevenue increased by 35% with 99.99% uptime."},
+        ]
+    }
+
+    service.run_job(job.job_id, visual_style="Auto")
+
+    assert job.status in (GenerationStateV3.READY, GenerationStateV3.COMPLETE)
+    assert job.planned_scenes > 0
+    assert job.error is None
+
+

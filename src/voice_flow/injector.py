@@ -11,15 +11,11 @@ import re
 import threading
 import time
 
-import pyautogui
 import pyperclip
 
 from voice_flow.config import config
 
 log = logging.getLogger(__name__)
-
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0.02
 
 # Win32 Virtual Key Codes
 VK_SHIFT = 0x10
@@ -34,8 +30,26 @@ VK_RWIN = 0x5C
 KEYEVENTF_KEYUP = 0x0002
 
 # Win32 Clipboard Formats
+CF_BITMAP = 2
 CF_UNICODETEXT = 13
+CF_HDROP = 15
 GMEM_MOVEABLE = 0x0002
+IMAGE_BITMAP = 0
+LR_COPYRETURNORG = 0x0002
+
+# ctypes defaults to 32-bit ints for Win32 handles; clipboard APIs hand back
+# 64-bit pointers on modern Windows and would silently truncate.
+ctypes.windll.user32.GetClipboardData.restype = ctypes.c_void_p
+ctypes.windll.user32.SetClipboardData.restype = ctypes.c_void_p
+ctypes.windll.user32.CopyImage.restype = ctypes.c_void_p
+ctypes.windll.kernel32.GlobalAlloc.restype = ctypes.c_void_p
+ctypes.windll.kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+ctypes.windll.kernel32.GlobalFree.restype = ctypes.c_void_p
+ctypes.windll.kernel32.GlobalSize.restype = ctypes.c_size_t
+ctypes.windll.kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
+ctypes.windll.kernel32.GlobalLock.restype = ctypes.c_void_p
+ctypes.windll.kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+ctypes.windll.kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
 
 
 def get_active_window_title() -> str:
@@ -142,12 +156,19 @@ def _set_clipboard_win32(text: str) -> bool:
                 user32.EmptyClipboard()
                 text_bytes = text.encode("utf-16le") + b"\x00\x00"
                 h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(text_bytes))
-                if h_mem:
-                    p_mem = kernel32.GlobalLock(h_mem)
-                    if p_mem:
-                        ctypes.memmove(p_mem, text_bytes, len(text_bytes))
-                        kernel32.GlobalUnlock(h_mem)
-                        user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+                if not h_mem:
+                    return False
+                p_mem = kernel32.GlobalLock(h_mem)
+                if not p_mem:
+                    kernel32.GlobalFree(h_mem)
+                    return False
+                try:
+                    ctypes.memmove(p_mem, text_bytes, len(text_bytes))
+                finally:
+                    kernel32.GlobalUnlock(h_mem)
+                if not user32.SetClipboardData(CF_UNICODETEXT, h_mem):
+                    kernel32.GlobalFree(h_mem)
+                    return False
                 return True
             finally:
                 user32.CloseClipboard()
@@ -174,6 +195,87 @@ def _safe_paste_from_clipboard() -> str:
         except Exception:
             time.sleep(0.02)
     return ""
+
+
+def _snapshot_clipboard() -> list[tuple[int, object]]:
+    """Snapshot clipboard content (text, file lists, bitmaps) for later restore.
+
+    Returning a copy of the payload instead of borrowing handles means the
+    user's clipboard (an image, a copied file, a URL) survives dictation
+    intact — previously non-text content was silently destroyed. Returns an
+    empty list when the clipboard is empty or holds only unsupported formats.
+    """
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    for _ in range(5):
+        if not user32.OpenClipboard(None):
+            time.sleep(0.02)
+            continue
+        try:
+            snapshot: list[tuple[int, object]] = []
+            fmt = 0
+            while True:
+                fmt = user32.EnumClipboardFormats(fmt)
+                if not fmt:
+                    break
+                handle = user32.GetClipboardData(fmt)
+                if not handle:
+                    continue
+                if fmt in (CF_UNICODETEXT, CF_HDROP):
+                    size = kernel32.GlobalSize(handle)
+                    if not size:
+                        continue
+                    p = kernel32.GlobalLock(handle)
+                    if not p:
+                        continue
+                    try:
+                        payload = ctypes.string_at(p, size)
+                    finally:
+                        kernel32.GlobalUnlock(handle)
+                    snapshot.append((fmt, payload))
+                elif fmt == CF_BITMAP:
+                    copy = user32.CopyImage(handle, IMAGE_BITMAP, 0, 0, LR_COPYRETURNORG)
+                    if copy:
+                        snapshot.append((fmt, copy))
+            return snapshot
+        finally:
+            user32.CloseClipboard()
+    return []
+
+
+def _restore_clipboard(snapshot: list[tuple[int, object]]) -> None:
+    """Restore a clipboard snapshot; empties the clipboard when the snapshot
+    was empty so dictation text never lingers."""
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    for _ in range(5):
+        if not user32.OpenClipboard(None):
+            time.sleep(0.02)
+            continue
+        try:
+            if not user32.EmptyClipboard():
+                return
+            for fmt, payload in snapshot:
+                if fmt == CF_BITMAP:
+                    if not user32.SetClipboardData(CF_BITMAP, payload):
+                        user32.DeleteObject(payload)
+                    continue
+                h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(payload))
+                if not h_mem:
+                    continue
+                p_mem = kernel32.GlobalLock(h_mem)
+                if not p_mem:
+                    kernel32.GlobalFree(h_mem)
+                    continue
+                try:
+                    ctypes.memmove(p_mem, payload, len(payload))
+                finally:
+                    kernel32.GlobalUnlock(h_mem)
+                if not user32.SetClipboardData(fmt, h_mem):
+                    kernel32.GlobalFree(h_mem)
+            return
+        finally:
+            user32.CloseClipboard()
 
 
 def _send_win32_ctrl_v() -> None:
@@ -244,7 +346,7 @@ def _format_text_for_title(text: str, window_title: str) -> str:
 
 def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = False) -> bool:
     """Paste *text* into the currently focused or target window."""
-    if not text:
+    if not text and not press_enter:
         log.warning("[INJECTOR] inject_text called with empty text, skipping.")
         return False
 
@@ -254,15 +356,32 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
             _wait_for_modifiers_released(timeout_ms=120)
 
             if target_hwnd:
+                # The target window may have closed mid-dictation — pasting
+                # then would land the text in the wrong (foreground) window.
+                if not ctypes.windll.user32.IsWindow(target_hwnd):
+                    log.error("[INJECTOR] Target window (hwnd %d) no longer exists; aborting paste.", target_hwnd)
+                    return False
                 focus_target_window(target_hwnd)
+                if ctypes.windll.user32.GetForegroundWindow() != target_hwnd:
+                    log.error("[INJECTOR] Could not restore focus to target window (hwnd %d); aborting paste.", target_hwnd)
+                    return False
 
             active_hwnd = ctypes.windll.user32.GetForegroundWindow()
             active_title = get_active_window_title()
             active_class = get_window_class_name(active_hwnd)
+
+            # Action-only utterance ("press enter" alone): just send the key.
+            if not text.strip():
+                if press_enter:
+                    _send_win32_enter()
+                    log.info("[INJECTOR] Sent Enter keypress to '%s'.", active_title)
+                    return True
+                return False
+
             formatted_text = _format_text_for_title(text, active_title)
 
-            # Preserve existing clipboard
-            original_clipboard = _safe_paste_from_clipboard()
+            # Preserve the existing clipboard — text, file list, or bitmap
+            clipboard_snapshot = _snapshot_clipboard()
 
             # Copy text to clipboard
             _safe_copy_to_clipboard(formatted_text)
@@ -286,8 +405,7 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
             # Delay before restoring previous clipboard content
             time.sleep(config.clipboard_restore_delay_ms / 1000.0)
 
-            if original_clipboard:
-                _safe_copy_to_clipboard(original_clipboard)
+            _restore_clipboard(clipboard_snapshot)
 
             log.info("[INJECTOR] Text injected successfully into '%s' (%d chars).", active_title, len(formatted_text))
             return True
@@ -329,7 +447,7 @@ class ClipboardInjector:
                     log.info("[INJECTOR] Skipping synthetic Ctrl+C text capture in console window to preserve running CLI processes.")
                     return ""
 
-                original_clipboard = _safe_paste_from_clipboard()
+                original_clipboard = _snapshot_clipboard()
 
                 _safe_copy_to_clipboard("")
                 time.sleep(0.02)
@@ -343,8 +461,7 @@ class ClipboardInjector:
                     if selected and len(selected.strip()) > 0:
                         break
 
-                if original_clipboard:
-                    _safe_copy_to_clipboard(original_clipboard)
+                _restore_clipboard(original_clipboard)
 
                 return selected or ""
             except Exception as e:

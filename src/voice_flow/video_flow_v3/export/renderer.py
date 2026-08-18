@@ -384,64 +384,117 @@ class V3FrameRenderer:
         self, draw: ImageDraw.ImageDraw, elements: List[ExecutableElement2D],
         progress: float, surface: str, accent: str, sec_accent: str, text_col: str, muted_col: str
     ) -> None:
-        card_w = (self.width - 240) // 3
-        card_h = 260
-        y_pos = 180
+        # 1. Central Hero LED Dot-Matrix Display (0%)
+        led_w, led_h = 360, 160
+        led_x = (self.width - led_w) // 2
+        led_y = 120
 
-        metrics = [("99.4%", "System Reliability"), ("3.8x", "Throughput Gain"), ("<12ms", "Response Latency")]
-        for i, (val, title) in enumerate(metrics):
-            x = 80 + i * (card_w + 40)
-            draw.rounded_rectangle([(x, y_pos), (x + card_w, y_pos + card_h)], radius=12, fill=self._hex_to_rgba(surface, 220), outline=self._hex_to_rgba(accent if i == 0 else sec_accent, 180), width=2)
-            draw.text((x + 24, y_pos + 30), val, fill=self._hex_to_rgb(accent if i == 0 else sec_accent), font=self._get_font(36, bold=True))
-            draw.text((x + 24, y_pos + 95), title, fill=self._hex_to_rgb(text_col), font=self._get_font(16, bold=True))
-            # Bar chart fill
-            draw.rounded_rectangle([(x + 24, y_pos + 180), (x + card_w - 24, y_pos + 200)], radius=6, fill=(30, 41, 59, 255))
-            fill_w = int((card_w - 48) * (0.4 + 0.5 * (i == 0 or progress > 0.5)))
-            draw.rounded_rectangle([(x + 24, y_pos + 180), (x + 24 + fill_w, y_pos + 200)], radius=6, fill=self._hex_to_rgb(accent if i == 0 else sec_accent))
+        draw.rounded_rectangle([(led_x, led_y), (led_x + led_w, led_y + led_h)], radius=12, fill=(17, 24, 39, 255), outline=self._hex_to_rgba(accent, 220), width=2)
+
+        # Dot matrix grid pattern approximation
+        dot_size, dot_gap = 8, 4
+        cols = (led_w - 24) // (dot_size + dot_gap)
+        rows = (led_h - 24) // (dot_size + dot_gap)
+        start_x = led_x + (led_w - (cols * (dot_size + dot_gap) - dot_gap)) // 2
+        start_y = led_y + (led_h - (rows * (dot_size + dot_gap) - dot_gap)) // 2
+
+        acc_rgb = self._hex_to_rgb(accent)
+        for r in range(rows):
+            for c in range(cols):
+                dx = start_x + c * (dot_size + dot_gap)
+                dy = start_y + r * (dot_size + dot_gap)
+                is_num = (r == 1 or r == rows - 2 or c == 2 or c == cols - 3 or r == rows // 2) and (c < cols // 2 or c > cols - 7)
+                col = (acc_rgb[0], acc_rgb[1], acc_rgb[2], 240) if is_num else (30, 41, 59, 100)
+                draw.rectangle([(dx, dy), (dx + dot_size, dy + dot_size)], fill=col)
+
+        draw.text((self.width // 2 - 110, led_y + led_h + 12), "0% MARKUP ON YOUR TOKENS", fill=self._hex_to_rgb(accent), font=self._get_font(13, bold=True))
+
+        # 2. Bottom Row: 3 Crossed-out Badges (Visa, Mastercard, Stripe)
+        badge_w, badge_h = 220, 80
+        badge_y = self.height - 240
+        badge_names = ["VISA", "MASTERCARD", "STRIPE"]
+        total_w = len(badge_names) * badge_w + (len(badge_names) - 1) * 30
+        start_bx = (self.width - total_w) // 2
+
+        for idx, name in enumerate(badge_names):
+            bx = start_bx + idx * (badge_w + 30)
+            draw.rounded_rectangle([(bx, badge_y), (bx + badge_w, badge_y + badge_h)], radius=10, fill=(30, 41, 59, 220), outline=self._hex_to_rgba(muted_col, 120), width=1)
+            draw.text((bx + badge_w // 2 - 25, badge_y + badge_h // 2 - 10), name, fill=(148, 163, 184, 255), font=self._get_font(16, bold=True))
+
+            # Red Pixel X Crossout line
+            draw.line([(bx + 12, badge_y + 12), (bx + badge_w - 12, badge_y + badge_h - 12)], fill=(239, 68, 68, 240), width=5)
+            draw.line([(bx + badge_w - 12, badge_y + 12), (bx + 12, badge_y + badge_h - 12)], fill=(239, 68, 68, 240), width=5)
 
     def _render_architecture_layout(
         self, draw: ImageDraw.ImageDraw, elements: List[ExecutableElement2D],
         progress: float, surface: str, accent: str, sec_accent: str, text_col: str, muted_col: str
     ) -> None:
-        tiers = [("Presentation Layer", "UI WebGL Canvas & Audio Flow Player"), ("Service Orchestration Tier", "VideoFlowV3 Master Orchestrator"), ("Data & Hardware Storage Layer", "Content-Addressed Cache & Project Store")]
-        y_start = 160
-        layer_h = 75
-        spacing = 100
+        # 1. Left Industrial Network Switch Appliance
+        sw_x, sw_y, sw_w, sw_h = 80, 140, 320, 200
+        draw.rounded_rectangle([(sw_x, sw_y), (sw_x + sw_w, sw_y + sw_h)], radius=12, fill=(34, 42, 54, 255), outline=self._hex_to_rgba(accent, 200), width=2)
+        # Faceplate
+        draw.rounded_rectangle([(sw_x + 12, sw_y + 12), (sw_x + sw_w - 12, sw_y + sw_h - 12)], radius=8, fill=(45, 55, 72, 255))
+        # Central Radar Screen
+        draw.rounded_rectangle([(sw_x + 20, sw_y + 24), (sw_x + 160, sw_y + sw_h - 24)], radius=6, fill=(245, 243, 237, 255))
+        draw.ellipse([(sw_x + 55, sw_y + 55), (sw_x + 125, sw_y + 125)], outline=(45, 55, 72, 255), width=4)
+        draw.text((sw_x + 50, sw_y + 140), "CORE ROUTER", fill=(45, 55, 72, 255), font=self._get_font(11, bold=True))
 
-        for i, (name, sub) in enumerate(tiers):
-            y = y_start + i * spacing
-            draw.rounded_rectangle([(100, y), (self.width - 100, y + layer_h)], radius=10, fill=self._hex_to_rgba(surface, 230), outline=self._hex_to_rgba(accent if i == 1 else sec_accent, 180), width=2)
-            draw.rounded_rectangle([(120, y + 15), (190, y + 45)], radius=6, fill=self._hex_to_rgba(accent if i == 1 else sec_accent, 60))
-            draw.text((130, y + 22), f"TIER {i+1}", fill=self._hex_to_rgb(accent if i == 1 else sec_accent), font=self._get_font(12, bold=True))
-            draw.text((210, y + 16), name, fill=self._hex_to_rgb(text_col), font=self._get_font(16, bold=True))
-            draw.text((210, y + 42), sub, fill=self._hex_to_rgb(muted_col), font=self._get_font(13))
+        # RJ45 Ethernet Port Array
+        for p in range(5):
+            py = sw_y + 26 + p * 28
+            draw.rounded_rectangle([(sw_x + sw_w - 60, py), (sw_x + sw_w - 20, py + 22)], radius=4, fill=(17, 24, 39, 255), outline=(74, 85, 104, 255))
+            # Blinking LED
+            led_col = (16, 185, 129, 255) if p % 2 == 0 else (245, 158, 11, 255)
+            draw.ellipse([(sw_x + sw_w - 74, py + 7), (sw_x + sw_w - 66, py + 15)], fill=led_col)
+
+        # 2. Right 3 Vintage CRT Service Monitors (Anthropic, Bedrock, Vertex AI)
+        target_labels = ["ANTHROPIC DIRECT", "AWS BEDROCK", "GOOGLE VERTEX"]
+        latencies = ["310ms", "180ms", "95ms"]
+        crt_x = self.width - 380
+        crt_w, crt_h = 160, 110
+
+        for idx, t_name in enumerate(target_labels):
+            cy = 100 + idx * 135
+            # Vintage CRT Chassis
+            draw.rounded_rectangle([(crt_x, cy), (crt_x + crt_w, cy + crt_h)], radius=12, fill=(227, 219, 204, 255), outline=(184, 173, 153, 255), width=2)
+            # Screen Bezel & Screen
+            draw.rounded_rectangle([(crt_x + 10, cy + 10), (crt_x + crt_w - 10, cy + crt_h - 26)], radius=6, fill=(15, 23, 42, 255))
+            draw.text((crt_x + 20, cy + 30), t_name.split()[0], fill=self._hex_to_rgb(accent), font=self._get_font(11, bold=True))
+            # Power LED & Dials
+            draw.ellipse([(crt_x + crt_w - 22, cy + crt_h - 18), (crt_x + crt_w - 14, cy + crt_h - 10)], fill=(16, 185, 129, 255))
+
+            # Telemetry Pill
+            draw.rounded_rectangle([(crt_x + crt_w + 14, cy + 24), (crt_x + crt_w + 150, cy + 74)], radius=8, fill=self._hex_to_rgba(surface, 240), outline=self._hex_to_rgba(accent, 160))
+            draw.text((crt_x + crt_w + 24, cy + 32), t_name[:14], fill=self._hex_to_rgb(text_col), font=self._get_font(11, bold=True))
+            draw.text((crt_x + crt_w + 24, cy + 50), latencies[idx], fill=self._hex_to_rgb(accent), font=self._get_font(13, bold=True))
+
+            # Curved Laser Link Line from Switch to CRT
+            draw.line([(sw_x + sw_w, sw_y + 100), (crt_x, cy + 55)], fill=self._hex_to_rgba(accent, 180), width=3)
 
     def _render_code_layout(
         self, draw: ImageDraw.ImageDraw, elements: List[ExecutableElement2D],
         progress: float, surface: str, accent: str, sec_accent: str, text_col: str, muted_col: str
     ) -> None:
-        box_x, box_y, box_w, box_h = 100, 160, self.width - 200, 300
-        draw.rounded_rectangle([(box_x, box_y), (box_x + box_w, box_y + box_h)], radius=12, fill=(13, 17, 23, 250), outline=self._hex_to_rgba(accent, 160), width=2)
-        # Editor Header
-        draw.rectangle([(box_x, box_y), (box_x + box_w, box_y + 36)], fill=(22, 27, 34, 255))
-        # Window buttons
-        draw.ellipse([(box_x + 16, box_y + 12), (box_x + 28, box_y + 24)], fill=(239, 68, 68, 255))
-        draw.ellipse([(box_x + 36, box_y + 12), (box_x + 48, box_y + 24)], fill=(234, 179, 8, 255))
-        draw.ellipse([(box_x + 56, box_y + 12), (box_x + 68, box_y + 24)], fill=(34, 197, 94, 255))
-        draw.text((box_x + 90, box_y + 10), "model_executor.py", fill=self._hex_to_rgb(muted_col), font=self._get_font(12))
+        # Authentic Vintage CRT Code Terminal
+        crt_x, crt_y, crt_w, crt_h = 100, 120, self.width - 200, 340
+        # Beige Chassis
+        draw.rounded_rectangle([(crt_x, crt_y), (crt_x + crt_w, crt_y + crt_h)], radius=16, fill=(227, 219, 204, 255), outline=(184, 173, 153, 255), width=2)
+        # Phosphor Screen
+        draw.rounded_rectangle([(crt_x + 20, crt_y + 20), (crt_x + crt_w - 20, crt_y + crt_h - 40)], radius=10, fill=(246, 243, 234, 255), outline=(210, 201, 182, 255), width=2)
 
-        lines = [
-            ("def", " execute_semantic_pipeline(source_bundle: SourceBundle):"),
-            ("    ", "evidence_graph = EvidenceGraphBuilder.build(source_bundle)"),
-            ("    ", "ledger = CoverageLedgerTracker.account(source_bundle)"),
-            ("    ", "program = CreativeDirectorV3.build_program(evidence, ledger)"),
-            ("    ", "return VisualCompiler2D.evaluate_at(program, t_sec)"),
-        ]
-        for idx, (kw, rest) in enumerate(lines):
-            ly = box_y + 55 + idx * 38
-            draw.text((box_x + 20, ly), f"{idx+1:2d}", fill=self._hex_to_rgb(muted_col), font=self._get_font(13))
-            draw.text((box_x + 60, ly), kw, fill=self._hex_to_rgb(accent), font=self._get_font(14, bold=True))
-            draw.text((box_x + 60 + len(kw) * 9, ly), rest, fill=self._hex_to_rgb(text_col), font=self._get_font(14))
+        # Terminal Lines
+        draw.text((crt_x + 40, crt_y + 40), "$ python app.py", fill=(31, 41, 55, 255), font=self._get_font(16, bold=True))
+        draw.text((crt_x + 40, crt_y + 75), "> why use Voice Flow?", fill=(31, 41, 55, 255), font=self._get_font(16, bold=True))
+        draw.text((crt_x + 40, crt_y + 120), "■ 0% markup · instant deterministic dispatch", fill=self._hex_to_rgb(accent), font=self._get_font(15, bold=True))
+        draw.text((crt_x + 40, crt_y + 155), "■ active model: Claude 3.5 Sonnet / GPT-4o", fill=self._hex_to_rgb(accent), font=self._get_font(15, bold=True))
+        draw.text((crt_x + 40, crt_y + 190), "■ state: ready for high-fidelity execution █", fill=(75, 85, 99, 255), font=self._get_font(14, bold=True))
+
+        # Bottom Grille & Dials
+        for vx in range(crt_x + 40, crt_x + 200, 10):
+            draw.line([(vx, crt_y + crt_h - 28), (vx, crt_y + crt_h - 12)], fill=(184, 173, 153, 255), width=2)
+        draw.ellipse([(crt_x + crt_w - 70, crt_y + crt_h - 28), (crt_x + crt_w - 54, crt_y + crt_h - 12)], fill=(210, 201, 182, 255))
+        draw.ellipse([(crt_x + crt_w - 40, crt_y + crt_h - 26), (crt_x + crt_w - 26, crt_y + crt_h - 12)], fill=(16, 185, 129, 255))
+
 
     def _render_object_focus_layout(
         self, draw: ImageDraw.ImageDraw, elements: List[ExecutableElement2D],
@@ -608,7 +661,7 @@ class V3FrameRenderer:
             ])
 
             log.info("Running FFmpeg export for job %s to %s", job_id, out_mp4_path)
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             try:
                 for frame_idx in range(total_frames):
@@ -645,9 +698,9 @@ class V3FrameRenderer:
                     proc.stdin.write(frame_img.tobytes())
 
                 proc.stdin.close()
-                _, stderr = proc.communicate(timeout=60)
+                proc.wait(timeout=60)
                 if proc.returncode != 0:
-                    log.error("FFmpeg export failed with code %d: %s", proc.returncode, stderr.decode(errors="ignore"))
+                    log.error("FFmpeg export failed with code %d", proc.returncode)
                     self._write_valid_synthetic_mp4(out_mp4_path)
             except Exception as e:
                 log.error("Error during FFmpeg frame streaming: %s", e)

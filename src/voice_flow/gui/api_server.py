@@ -237,13 +237,18 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
-        elif path in ("/api/video-flow/v3/video", "/api/video-flow/v3/export/download"):
+        elif path in ("/api/video-flow/v3/video", "/api/video-flow/v3/export/download") or path.startswith("/api/video-flow/v3/video/"):
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
+            if not job_id and path.startswith("/api/video-flow/v3/video/"):
+                parts = [p for p in path.split("/") if p]
+                if len(parts) >= 4:
+                    job_id = parts[3].replace("video.mp4", "").replace(".mp4", "").strip()
+
             from voice_flow.video_flow_v3.storage.project_store import project_store_v3
             mp4_candidates = [
-                project_store_v3.get_project_dir(job_id) / "export" / "video.mp4",
                 project_store_v3.get_export_path(job_id),
+                project_store_v3.get_project_dir(job_id) / "export" / "video.mp4",
                 project_store_v3.get_project_dir(job_id) / "video.mp4",
             ]
             video_file = next((p for p in mp4_candidates if p.exists() and p.stat().st_size > 0), None)
@@ -251,10 +256,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_error(404, "Rendered video file not found")
                 return
             size = video_file.stat().st_size
+            download_mode = (params.get("download", ["0"])[0] == "1")
             self.send_response(200)
             self.send_header("Content-Type", "video/mp4")
             self.send_header("Content-Length", str(size))
-            self.send_header("Content-Disposition", f'attachment; filename="video_{job_id}.mp4"')
+            self.send_header("Accept-Ranges", "bytes")
+            if download_mode:
+                self.send_header("Content-Disposition", f'attachment; filename="video_{job_id}.mp4"')
+            else:
+                self.send_header("Content-Disposition", f'inline; filename="video_{job_id}.mp4"')
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             with open(video_file, "rb") as vf:
@@ -419,7 +429,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         "stage": job.stage,
                         "progress": job.progress,
                         "playable": job.playable,
-                        "view_url": f"/api/video-flow/v3/audio?id={job.job_id}",
+                        "view_url": f"/api/video-flow/v3/video?id={job.job_id}",
                         "export_status": getattr(job, "export_status", "not_requested").value if hasattr(getattr(job, "export_status", None), "value") else str(getattr(job, "export_status", "not_requested")),
                         "download_url": f"/api/video-flow/v3/video?id={job.job_id}&download=1",
                     }
@@ -904,6 +914,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
         elif path == "/api/video-flow/generate":
             source_text = str(data.get("source_text", ""))
+            sources = data.get("sources")
+            if isinstance(sources, list) and sources:
+                combined_texts = [str(item.get("content", "")) for item in sources if isinstance(item, dict) and item.get("content")]
+                if combined_texts:
+                    source_text = "\n\n".join(combined_texts)
             mode = str(data.get("mode", "summary"))
             try:
                 video = video_flow_service.queue(
@@ -1149,6 +1164,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "press_enter_enabled": bool,
                 "has_viewed_onboarding": bool,
                 "dictionary_auto_learning_enabled": bool,
+                "dictionary_fuzzy_enabled": bool,
                 "launch_at_login_enabled": bool,
                 "push_to_talk_shortcut": str,
                 "selected_mic_device": (str, int),

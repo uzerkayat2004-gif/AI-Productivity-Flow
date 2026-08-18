@@ -23,7 +23,7 @@ class TestPolisherErrorRecovery(unittest.TestCase):
         # Save real _try_provider_call
         orig_call = self.polisher._try_provider_call
 
-        def mock_slow_call(provider, key, system_prompt, user_payload):
+        def mock_slow_call(provider, key, system_prompt, user_payload, model_override=None):
             time.sleep(2.0)
             return None
 

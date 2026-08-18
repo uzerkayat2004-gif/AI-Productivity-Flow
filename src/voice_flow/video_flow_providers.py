@@ -297,7 +297,7 @@ DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("openai", "gpt-5.6-sol", "GPT-5.6 Sol", ("vision", "reasoning")),
     ("openai", "gpt-5.6-terra", "GPT-5.6 Terra", ("vision", "reasoning")),
     ("openai", "gpt-5.6-luna", "GPT-5.6 Luna", ("vision", "reasoning")),
-    ("groq", "llama-3.3-70b-versatile", "Llama 3.3 70B Versatile", ("reasoning",)),
+    ("groq", "llama-3.3-70b-specdec", "Llama 3.3 70B SpecDec", ("reasoning",)),
     ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Turbo", ("reasoning",)),
     ("cloudflare", "@cf/meta/llama-3.1-8b-instruct", "Llama 3.1 8B Instruct", ()),
     ("ollama", "llama3.2", "Llama 3.2", ()),

@@ -55,6 +55,7 @@ class PerformanceProfile(str, Enum):
 
 
 class SemanticRepresentationType(str, Enum):
+    # Canonical 2D types
     PROCESS = "PROCESS"
     CAUSE_EFFECT = "CAUSE_EFFECT"
     COMPARISON = "COMPARISON"
@@ -76,24 +77,76 @@ class SemanticRepresentationType(str, Enum):
     BEFORE_AFTER = "BEFORE_AFTER"
     FLOW = "FLOW"
     CONCEPTUAL_METAPHOR = "CONCEPTUAL_METAPHOR"
-    ASSEMBLY_3D = "ASSEMBLY_3D"
-    CUTAWAY_3D = "CUTAWAY_3D"
     LIST_BREAKDOWN = "LIST_BREAKDOWN"
     STAT_GRID = "STAT_GRID"
     QUOTE_CALLOUT = "QUOTE_CALLOUT"
     SUMMARY_RECAP = "SUMMARY_RECAP"
 
+    # Canonical 3D types
+    ASSEMBLY_3D = "ASSEMBLY_3D"
+    EXPLODED_ASSEMBLY_3D = "EXPLODED_ASSEMBLY_3D"
+    CUTAWAY_3D = "CUTAWAY_3D"
+    COMPONENT_3D = "COMPONENT_3D"
+    LAYER_STACK_3D = "LAYER_STACK_3D"
+    FLOW_PATH_3D = "FLOW_PATH_3D"
+    TRAJECTORY_3D = "TRAJECTORY_3D"
+    MECHANISM_3D = "MECHANISM_3D"
+    SPATIAL_SYSTEM_3D = "SPATIAL_SYSTEM_3D"
+
+
+class SemanticTransitionType(str, Enum):
+    MATCH_TRANSITION = "MATCH_TRANSITION"
+    CARRY = "CARRY"
+    TRAVERSE = "TRAVERSE"
+    EXPAND = "EXPAND"
+    COLLAPSE = "COLLAPSE"
+    DISSOLVE = "DISSOLVE"
+    CUT = "CUT"
+    FADE = "FADE"
+
+
+class SemanticMotionType(str, Enum):
+    MERGE = "MERGE"
+    SPLIT = "SPLIT"
+    GROW = "GROW"
+    SHRINK = "SHRINK"
+    FLOW = "FLOW"
+    CONNECT = "CONNECT"
+    EXPLODE = "EXPLODE"
+    MORPH = "MORPH"
+    ISOLATE = "ISOLATE"
+    PROGRESS = "PROGRESS"
+    REVEAL_LEVELS = "REVEAL_LEVELS"
+
+
+class UnitDispositionType(str, Enum):
+    COVERED_NARRATION = "covered_narration"
+    COVERED_VISUAL = "covered_visual"
+    COVERED_BOTH = "covered_both"
+    MERGED = "merged"
+    DISPOSED = "disposed"
+    INCLUDED = "included"
+    COMPRESSED = "compressed"
+    SUPPORTING_ONLY = "supporting_only"
+    UNRESOLVED = "unresolved"
+
 
 @dataclass
-class SourceBundle:
-    source_text: str
-    source_name: str = "Selection"
-    source_type: str = "text"  # text, document, url
-    source_url: Optional[str] = None
-    app_name: Optional[str] = None
-    source_hash: str = ""
-    privacy_consent: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+class SceneBeat:
+    beat_id: str
+    start_sec: float = 0.0
+    end_sec: float = 0.0
+    action: str = ""
+    target_ids: List[str] = field(default_factory=list)
+    narration_cue: str = ""
+    description: str = ""
+    time_offset_sec: Optional[float] = None
+    beat_type: Optional[str] = None
+    narration_subphrase: Optional[str] = None
+    visual_action: Optional[str] = None
+    target_element_ids: Optional[List[str]] = None
+    duration_sec: Optional[float] = None
+    properties: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -102,9 +155,37 @@ class SourceUnit:
     order: int
     raw_text: str
     normalized_text: str
-    content_type: str  # heading, sentence, code_block, table_row, quote
+    content_type: str  # heading, sentence, code_block, table_row, quote, list_item
     section_id: str = "section_0"
     source_hash: str = ""
+    doc_id: str = ""
+    provenance: str = ""
+
+
+@dataclass
+class DocumentSourceItem:
+    doc_id: str
+    title: str = ""
+    filename: str = ""
+    order: int = 0
+    provenance: str = ""
+    section_id: str = ""
+    units: List[SourceUnit] = field(default_factory=list)
+    content: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SourceBundle:
+    source_text: str = ""
+    source_name: str = "Selection"
+    source_type: str = "text"  # text, document, url
+    source_url: Optional[str] = None
+    app_name: Optional[str] = None
+    source_hash: str = ""
+    privacy_consent: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    documents: List[DocumentSourceItem] = field(default_factory=list)
 
 
 @dataclass
@@ -116,6 +197,9 @@ class ClaimEvidence:
     raw_quantity: Optional[str] = None
     normalized_quantity: Optional[float] = None
     unit: Optional[str] = None
+    doc_refs: List[str] = field(default_factory=list)
+    importance_score: float = 0.0
+    semantic_type: str = ""
 
 
 @dataclass
@@ -125,6 +209,8 @@ class EvidenceGraph:
     entities: List[Dict[str, Any]] = field(default_factory=list)
     relationships: List[Dict[str, Any]] = field(default_factory=list)
     spatial_affordances: List[Dict[str, Any]] = field(default_factory=list)
+    cross_doc_links: List[Dict[str, Any]] = field(default_factory=list)
+    synthesized_themes: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -133,7 +219,7 @@ class LedgerItem:
     analyzed: bool = True
     claim_refs: List[str] = field(default_factory=list)
     scene_refs: List[str] = field(default_factory=list)
-    disposition: str = "included"  # included, compressed, duplicate, supporting_only, unresolved
+    disposition: str = "covered_both"  # covered_narration, covered_visual, covered_both, merged, disposed, included
     reason: str = ""
 
 
@@ -188,6 +274,12 @@ class SceneSemanticV3:
     use_3d: bool = False
     fidelity_3d: FidelityClass3D = FidelityClass3D.F4_INSUFFICIENT
     evidence_refs: List[str] = field(default_factory=list)
+    beats: List[SceneBeat] = field(default_factory=list)
+    transition_type: SemanticTransitionType = SemanticTransitionType.DISSOLVE
+    scene_beats: List[SceneBeat] = field(default_factory=list)
+    transition_in: str = SemanticTransitionType.MATCH_TRANSITION.value
+    transition_out: str = SemanticTransitionType.CARRY.value
+    source_unit_dispositions: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -235,6 +327,11 @@ class ExecutableSceneProgram:
     camera_path: List[Dict[str, Any]] = field(default_factory=list)
     audio_segment_url: str = ""
     word_timestamps: List[Dict[str, Any]] = field(default_factory=list)
+    beats: List[SceneBeat] = field(default_factory=list)
+    transition_type: SemanticTransitionType = SemanticTransitionType.DISSOLVE
+    scene_beats: List[Dict[str, Any]] = field(default_factory=list)
+    transition_in: str = SemanticTransitionType.MATCH_TRANSITION.value
+    transition_out: str = SemanticTransitionType.CARRY.value
     contract_version: str = V3_CONTRACT_VERSION
 
 
@@ -276,4 +373,6 @@ def export_contract_schema() -> Dict[str, Any]:
         "fidelities": [f.value for f in FidelityClass3D],
         "performance_profiles": [p.value for p in PerformanceProfile],
         "semantic_representation_types": [s.value for s in SemanticRepresentationType],
+        "semantic_transition_types": [s.value for s in SemanticTransitionType],
+        "semantic_motion_types": [s.value for s in SemanticMotionType],
     }

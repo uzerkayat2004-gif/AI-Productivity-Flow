@@ -44,8 +44,7 @@
   </main>
   <footer><span id="footer-stage">Video Flow</span><span id="percent">0%</span><a id="download" href="#" download>↓ Download</a></footer>
 
-  <script src="v3-renderer.bundle.js?v=3.2.0"></script>
-  <script src="v3-canvas-player.js?v=3.2.0"></script>
+
   <script>
     const params = new URLSearchParams(location.search);
     const videoId = params.get("id") || "";
@@ -78,35 +77,10 @@
         if (isReady) {
           document.getElementById("status").classList.add("hidden");
 
-          if (video.view_url) {
-            const targetUrl = new URL(video.view_url, location.origin).href;
-            if (player.src !== targetUrl) {
-              player.src = targetUrl;
-              player.play().catch(() => {});
-            }
-          }
-
-          // Mount V3 Layered WebGL player if not yet mounted
-          if (!v3PlayerMounted && container && window.V3CanvasPlayer) {
-            v3PlayerMounted = true;
-            fetch("/api/video-flow/v3/program?id=" + encodeURIComponent(videoId))
-              .then(res => res.json())
-              .then(progData => {
-                if (progData && progData.success && (progData.program || progData.scenes)) {
-                  window.V3CanvasPlayer.mount(container, progData, {
-                    syncMediaElement: player,
-                    bottomPadding: 52,
-                    autoPlay: true,
-                  }).then(p => {
-                    window.__v3Player = p;
-                  }).catch(err => {
-                    console.warn("[Standalone Player] V3 mount warning:", err);
-                  });
-                }
-              })
-              .catch(err => {
-                console.warn("[Standalone Player] Could not load V3 program:", err);
-              });
+          const targetUrl = `/api/video-flow/v3/video/${encodeURIComponent(videoId)}/video.mp4`;
+          if (!player.src.endsWith(targetUrl)) {
+            player.src = targetUrl;
+            player.play().catch(() => {});
           }
 
           if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&

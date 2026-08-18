@@ -6,7 +6,7 @@
 export * from "./contracts/video-program";
 export * from "./runtime/clock";
 export * from "./compiler2d/types";
-export { VisualCompiler2D, compiler2D, CompositorLibrary2D, compositorLibrary2D, CompositorRegistry, compositorRegistry, createSceneContainer, updateSceneAt } from "./compiler2d/index";
+export { VisualCompiler2D, compiler2D, CompositorLibrary2D, compositorLibrary2D, CompositorRegistry, compositorRegistry, createSceneContainer, updateSceneAt, extractDynamicLabels } from "./compiler2d/index";
 export * from "./compiler3d/index";
 export * from "./export/exporter";
 export * from "./runtime/player";

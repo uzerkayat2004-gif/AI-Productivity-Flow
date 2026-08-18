@@ -4,7 +4,6 @@ SQLite Storage, Multi-API Key Polishing, Clipboard Injection, and Desktop GUI.
 """
 
 from __future__ import annotations
-import re
 import string
 
 import ctypes
@@ -29,14 +28,21 @@ if sys.stdout is None:
 
 from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
+from voice_flow.context_capture import capture_cursor_context
 from voice_flow.dictionary import dictionary_engine
 from voice_flow.hotkeys import InputTriggerListener
 from voice_flow.injector import ClipboardInjector, get_active_window_title
+from voice_flow.intent_router import route_utterance
 from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher
 from voice_flow.storage import storage
 from voice_flow.style_engine import style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, split_press_enter
+from voice_flow.text_processing import (
+    adapt_first_letter,
+    apply_spoken_punctuation,
+    normalize_spoken_numbers,
+    split_press_enter,
+)
 from voice_flow.transcriber import Transcriber
 
 # Hide console window on Windows immediately so the application runs silently in the background
@@ -196,9 +202,24 @@ class VoiceFlowApp:
         return True
 
     def _on_dictation_finish(self) -> bool:
-        with self._state_lock:
-            if self.state != DictationState.RECORDING:
+        # A quick hotkey tap can fire finish while the start thread is still
+        # opening the audio stream (state not yet RECORDING). Wait a bounded
+        # moment for start to land instead of silently dropping the tap and
+        # leaving the recorder stuck on.
+        deadline = time.time() + 1.0
+        while True:
+            with self._state_lock:
+                state = self.state
+            if state == DictationState.RECORDING:
+                break
+            if state != DictationState.IDLE:
                 return False
+            if time.time() > deadline:
+                log.warning("Dictation finish fired but start never reached RECORDING; ignoring.")
+                return False
+            time.sleep(0.01)
+
+        with self._state_lock:
             self.state = DictationState.PROCESSING
 
         if self._record_watchdog:
@@ -307,11 +328,43 @@ class VoiceFlowApp:
                 # Step 3: Check opt-in Press Enter action
                 press_enter_enabled = storage.get_setting("press_enter_enabled", False)
                 split_res = split_press_enter(raw_transcript, press_enter_enabled)
+
+                # Step 3b: Route the utterance (Wispr-style gatekeeper) — decide
+                # cleanup level, AI budget, and context-aware casing in O(1).
+                # Route on the split text: a trailing "press enter" is an action,
+                # not a command, and must not skip AI polish for a long email.
+                cursor_ctx = capture_cursor_context(target_h)
+                routing = route_utterance(
+                    split_res.text,
+                    category=resolved_style.category,
+                    style_id=resolved_style.style_id,
+                    before=cursor_ctx.before,
+                    after=cursor_ctx.after,
+                    trustworthy_context=cursor_ctx.trustworthy,
+                )
+                log.info(
+                    "Routing '%s' -> %s (level=%s, ai=%s%s)",
+                    raw_transcript[:60], routing.reason, routing.level, routing.allow_ai,
+                    ", command" if routing.is_command else (", question" if routing.is_question else ""),
+                )
+
                 text_to_polish = apply_spoken_punctuation(split_res.text)
+                if config.number_normalization_enabled:
+                    text_to_polish = normalize_spoken_numbers(text_to_polish)
                 should_press_enter = split_res.press_enter
 
                 # Step 4: The polisher owns the single deterministic vocabulary pass.
-                polished_text = polisher.polish(text_to_polish, resolved_style)
+                t_polish_start = time.time()
+                polished_text = polisher.polish(
+                    text_to_polish,
+                    resolved_style,
+                    cleanup_level=routing.level,
+                    allow_ai=routing.allow_ai,
+                )
+                t_polish = (time.time() - t_polish_start) * 1000
+                # Step 4b: Match the first letter to the surrounding text (mid-sentence
+                # continuations start lowercase; new sentences capitalize).
+                polished_text = adapt_first_letter(polished_text, routing.capitalize_first)
                 polished_words = len(polished_text.split()) if polished_text else 0
                 log.info("Pipeline complete (%d words -> %d words): '%s'", raw_words, polished_words, polished_text)
 
@@ -337,10 +390,18 @@ class VoiceFlowApp:
                             app_name=resolved_style.app_name,
                             duration_sec=duration,
                             style_mode=resolved_style.style_id,
+                            stt_ms=int(t_stt * 1000),
+                            polish_ms=int(t_polish),
                         )
                         log.info("Saved dictation record #%d into SQLite history database", record.id)
                     except Exception as db_err:
                         log.warning("[STORAGE] Could not persist dictation history: %s", db_err)
+                    # Suggest new vocabulary for the learning pipeline (suggestions only,
+                    # never auto-rewrites).
+                    try:
+                        storage.add_learning_candidates(raw_transcript.split())
+                    except Exception as learn_err:
+                        log.warning("[LEARNING] Could not record vocabulary candidates: %s", learn_err)
                 else:
                     log.warning("[INSIGHTS SKIPPED] Text paste failed; app not logged in Insights.")
 

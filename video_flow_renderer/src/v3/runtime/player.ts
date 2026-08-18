@@ -6,7 +6,17 @@
  * - Layer 2 (Middle): Three.js WebGL canvas (procedural 3D spatial world / assemblies / meshes)
  * - Layer 3 (Top): PixiJS v8 WebGL canvas (foreground 2D compositors / charts / typography / hud)
  * - Authoritative Master Clock & Media Sync: state = Scene(t) evaluated on every requestAnimationFrame tick
- * - Pointer Events: Both canvases have pointer-events: none so native video controls (play, pause, scrub, volume) remain 100% interactive
+ * - Pointer Events: Both WebGL canvases maintain pointer-events: none so native player controls
+ *   (play, pause, scrub, volume, speed) stay 100% interactive and clickable at all times.
+ *
+ * Scene Graph Lifecycle:
+ * - Fixes the "One-Page Animation" bug by cleanly unmounting and disposing previous scene graphs,
+ *   retaining continuity objects across scene transitions, creating new scene-specific Pixi and Three.js
+ *   structures, and re-binding the camera grammar controller on every scene transition.
+ *
+ * Global Audio Timeline Seeking:
+ * - seek(tSec) maps timeline time to active scene index and scene-local time t_local,
+ *   smoothly synchronizing audio offset across both single-master and per-scene audio tracks.
  */
 
 import * as THREE from "three";
@@ -15,21 +25,29 @@ import {
   ArtDirectionGenome,
   DEFAULT_ART_GENOME,
   ExecutableSceneProgram,
+  ExecutableElement2D,
+  ExecutableNode3D,
   SemanticRepresentationType,
   VideoProgramV3,
 } from "../contracts/video-program";
-import { AbsoluteTimeClock } from "./clock";
 import { compiler2D, createSceneContainer, updateSceneAt } from "../compiler2d/index";
-import { compiler3D } from "../compiler3d/index";
-import { compositorLibrary2D } from "../compiler2d/composers";
+import { compiler3D, createCameraController, CameraGrammarController } from "../compiler3d/index";
+import { safeColor, geometryCompiler3D } from "../compiler3d/geometry";
+import { AbsoluteTimeClock } from "./clock";
 
 export interface VideoPlayerV3Options {
   bottomPadding?: number;
   syncMediaElement?: HTMLMediaElement | null;
   autoPlay?: boolean;
-  onStateUpdate?: ((state: any) => void) | null;
+  onStateUpdate?: ((state: { currentTime: number; sceneIndex: number; scene: ExecutableSceneProgram; sceneTime: number }) => void) | null;
   width?: number;
   height?: number;
+}
+
+export interface SeekResult {
+  sceneIndex: number;
+  sceneLocalTime: number;
+  currentScene: ExecutableSceneProgram;
 }
 
 export class VideoPlayerV3 {
@@ -53,14 +71,18 @@ export class VideoPlayerV3 {
   public threeMeshes: THREE.Mesh[] = [];
   public threeGroup: THREE.Group | null = null;
   public threeCanvas: HTMLCanvasElement | null = null;
+  private cameraController: CameraGrammarController | null = null;
+  private continuityMeshes3D: Map<string, THREE.Object3D> = new Map();
 
   // PixiJS Runtime (Layer 3)
   public pixiApp: Application | null = null;
   public pixiCanvas: HTMLCanvasElement | null = null;
   public activePixiSceneContainer: Container | null = null;
+  private continuityObjects2D: Map<string, Container> = new Map();
 
   // State Tracking
   public currentRenderedSceneId: string | null = null;
+  public activeSceneIndex: number = 0;
   public isReady: boolean = false;
   private initPromise: Promise<void>;
   private isDestroyed: boolean = false;
@@ -92,6 +114,7 @@ export class VideoPlayerV3 {
 
   /**
    * Initialize both Three.js and PixiJS canvas layers and mount inside container.
+   * Both canvases strictly receive pointer-events: none so player controls remain 100% interactive.
    */
   public async initRenderers(): Promise<void> {
     const W = this.width;
@@ -101,13 +124,16 @@ export class VideoPlayerV3 {
     try {
       this.threeScene = new THREE.Scene();
       this.threeCamera = new THREE.PerspectiveCamera(45, W / H, 0.1, 1000);
-      this.threeCamera.position.set(0, 0, 10);
+      this.threeCamera.position.set(0, 2, 8);
 
       // Studio Lighting Rig
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      ambientLight.name = "AmbientLight";
       const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+      keyLight.name = "KeyLight";
       keyLight.position.set(6, 12, 8);
       const rimLight = new THREE.PointLight(0x06cfe5, 1.2, 50);
+      rimLight.name = "RimLight";
       rimLight.position.set(-8, -4, -6);
 
       this.threeScene.add(ambientLight);
@@ -115,7 +141,10 @@ export class VideoPlayerV3 {
       this.threeScene.add(rimLight);
 
       this.threeGroup = new THREE.Group();
+      this.threeGroup.name = "Scene3DRoot";
       this.threeScene.add(this.threeGroup);
+
+      this.cameraController = createCameraController("HeroFocus", new THREE.Vector3(0, 0, 0));
 
       if (typeof document !== "undefined") {
         const canvas3D = document.createElement("canvas");
@@ -142,7 +171,7 @@ export class VideoPlayerV3 {
           this.threeRenderer.setSize(W, H);
           this.threeRenderer.setPixelRatio(Math.min(2, typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1));
         } catch {
-          // WebGL fallback
+          // WebGL fallback for headless/test environments
         }
       }
     } catch (e) {
@@ -208,14 +237,14 @@ export class VideoPlayerV3 {
   ): Promise<void> {
     this.program = program;
     const rawScenes = scenes && scenes.length > 0 ? scenes : (program && (program as any).scenes ? (program as any).scenes : []);
-    this.scenes = (rawScenes || []).map((s: any) => {
+    this.scenes = (rawScenes || []).map((s: any, idx: number) => {
       const dur = s.duration_sec || s.suggested_duration_sec || 5.0;
       const repType = s.representation_type || (s.elements_2d?.[0]?.compositor) || SemanticRepresentationType.PROCESS;
-      const elements_2d = s.elements_2d && s.elements_2d.length > 0 ? s.elements_2d : (s.semantic_objects ? s.semantic_objects.map((obj: any, idx: number) => ({
-        element_id: obj.object_id || `elem_${idx}`,
+      const elements_2d = s.elements_2d && s.elements_2d.length > 0 ? s.elements_2d : (s.semantic_objects ? s.semantic_objects.map((obj: any, oIdx: number) => ({
+        element_id: obj.object_id || `elem_${idx}_${oIdx}`,
         compositor: repType,
         layer: obj.role || "primary",
-        style: { label: obj.label, fill: "#0f172a", accent: idx === 0 ? "#00e5ff" : "#38bdf8" },
+        style: { label: obj.label, fill: "#0f172a", accent: oIdx === 0 ? "#00e5ff" : "#38bdf8" },
         data: obj.properties || {},
       })) : []);
       return {
@@ -239,6 +268,7 @@ export class VideoPlayerV3 {
 
     if (this.scenes.length > 0) {
       this.currentRenderedSceneId = null;
+      this.activeSceneIndex = 0;
       this.updateAtTime(0);
     }
 
@@ -348,14 +378,63 @@ export class VideoPlayerV3 {
     this.stopLoop();
   }
 
-  public seek(timeSec: number): void {
-    this.clock.seek(timeSec);
-    if (this.syncMediaElement) {
-      this.syncMediaElement.currentTime = timeSec;
-    } else if (this.internalAudio) {
-      this.internalAudio.currentTime = timeSec;
+  /**
+   * Global Audio Timeline Seeking:
+   * Calculates active scene index, scene-local time t_local, and smoothly synchronizes narration audio offset.
+   */
+  public seek(timeSec: number): SeekResult | null {
+    if (!this.scenes.length) return null;
+
+    const totalDur = this.clock.getDuration();
+    const clampedTime = Math.max(0, Math.min(totalDur > 0 ? totalDur : timeSec, timeSec));
+    this.clock.seek(clampedTime);
+
+    let accumulatedSec = 0;
+    let sceneIndex = 0;
+    let currentScene = this.scenes[0];
+    let sceneStartSec = 0;
+
+    for (let i = 0; i < this.scenes.length; i++) {
+      const s = this.scenes[i];
+      const dur = s.duration_sec || (s as any).suggested_duration_sec || 5.0;
+      if (clampedTime >= accumulatedSec && clampedTime < accumulatedSec + dur) {
+        currentScene = s;
+        sceneIndex = i;
+        sceneStartSec = accumulatedSec;
+        break;
+      }
+      accumulatedSec += dur;
     }
-    this.updateAtTime(timeSec);
+
+    if (clampedTime >= accumulatedSec && this.scenes.length > 0) {
+      sceneIndex = this.scenes.length - 1;
+      currentScene = this.scenes[sceneIndex];
+      const lastDur = currentScene.duration_sec || (currentScene as any).suggested_duration_sec || 5.0;
+      sceneStartSec = Math.max(0, accumulatedSec - lastDur);
+    }
+
+    const sceneLocalTime = Math.max(0, clampedTime - sceneStartSec);
+    this.activeSceneIndex = sceneIndex;
+
+    // Synchronize media offset
+    if (this.syncMediaElement) {
+      this.syncMediaElement.currentTime = clampedTime;
+    } else if (this.internalAudio) {
+      if (currentScene.audio_segment_url && this.internalAudio.src !== currentScene.audio_segment_url) {
+        this.internalAudio.src = currentScene.audio_segment_url;
+        this.internalAudio.currentTime = sceneLocalTime;
+      } else if (this.internalAudio.src) {
+        this.internalAudio.currentTime = clampedTime;
+      }
+    }
+
+    this.updateAtTime(clampedTime);
+
+    return {
+      sceneIndex,
+      sceneLocalTime,
+      currentScene,
+    };
   }
 
   /**
@@ -367,12 +446,15 @@ export class VideoPlayerV3 {
     let accumulatedSec = 0;
     let currentScene = this.scenes[0];
     let sceneStartSec = 0;
+    let sceneIndex = 0;
     let found = false;
 
-    for (const s of this.scenes) {
+    for (let i = 0; i < this.scenes.length; i++) {
+      const s = this.scenes[i];
       const dur = s.duration_sec || (s as any).suggested_duration_sec || 5.0;
       if (timeSec >= accumulatedSec && timeSec < accumulatedSec + dur) {
         currentScene = s;
+        sceneIndex = i;
         sceneStartSec = accumulatedSec;
         found = true;
         break;
@@ -381,17 +463,20 @@ export class VideoPlayerV3 {
     }
 
     if (!found && this.scenes.length > 0) {
-      currentScene = this.scenes[this.scenes.length - 1];
+      sceneIndex = this.scenes.length - 1;
+      currentScene = this.scenes[sceneIndex];
       const lastDur = currentScene.duration_sec || (currentScene as any).suggested_duration_sec || 5.0;
       sceneStartSec = Math.max(0, accumulatedSec - lastDur);
     }
 
+    this.activeSceneIndex = sceneIndex;
     const sceneTimeSec = Math.max(0, timeSec - sceneStartSec);
     this.renderScene(currentScene, sceneTimeSec);
 
     if (typeof this.options.onStateUpdate === "function") {
       this.options.onStateUpdate({
         currentTime: timeSec,
+        sceneIndex,
         scene: currentScene,
         sceneTime: sceneTimeSec,
       });
@@ -400,6 +485,7 @@ export class VideoPlayerV3 {
 
   /**
    * Render active scene state: updates PixiJS 2D objects and Three.js 3D meshes.
+   * Handles scene unmounting, continuity extraction, and camera re-binding.
    */
   public renderScene(scene: ExecutableSceneProgram, sceneTimeSec: number): void {
     const isNewScene = this.currentRenderedSceneId !== scene.scene_id;
@@ -412,19 +498,49 @@ export class VideoPlayerV3 {
     this.updatePixiScene(scene, sceneTimeSec, isNewScene);
   }
 
+  /**
+   * PixiJS 2D Scene Graph Lifecycle:
+   * Retains continuity objects, cleanly unmounts and disposes previous scene graph,
+   * mounts and lays out the new scene-specific Pixi container.
+   */
   private updatePixiScene(scene: ExecutableSceneProgram, sceneTimeSec: number, isNewScene: boolean): void {
     if (!this.pixiApp || !this.pixiApp.stage) return;
 
     if (isNewScene || !this.activePixiSceneContainer) {
-      // Clear previous scene container
+      // 1. Extract and retain continuity objects marked for carry/match
+      const preservedContinuity = new Map<string, Container>();
       if (this.activePixiSceneContainer) {
+        const nextContinuityKeys = new Set(
+          (scene.elements_2d || [])
+            .map((e) => e.continuity_key || (e.data && e.data.continuity_key) || (e.style && e.style.continuity_id) || (e.carry_over ? e.element_id : null))
+            .filter((k): k is string => Boolean(k))
+        );
+
+        if (nextContinuityKeys.size > 0) {
+          this.activePixiSceneContainer.children.forEach((child) => {
+            const childKey = (child as any).continuityKey || (child as any).name;
+            if (childKey && nextContinuityKeys.has(childKey)) {
+              preservedContinuity.set(childKey, child as Container);
+              this.activePixiSceneContainer?.removeChild(child);
+            }
+          });
+        }
+
+        // 2. Cleanly unmount and dispose previous scene graph
         this.pixiApp.stage.removeChild(this.activePixiSceneContainer);
         this.activePixiSceneContainer.destroy({ children: true });
         this.activePixiSceneContainer = null;
       }
 
-      // Create new dynamic 2D scene using full 25-compositor registry
+      // 3. Mount and layout the new scene-specific Pixi container
       this.activePixiSceneContainer = createSceneContainer(scene, this.genome, this.width, this.height);
+
+      // Re-inject preserved continuity objects if applicable
+      preservedContinuity.forEach((child, key) => {
+        (child as any).continuityKey = key;
+        this.activePixiSceneContainer?.addChild(child);
+      });
+
       this.pixiApp.stage.addChild(this.activePixiSceneContainer);
     }
 
@@ -438,69 +554,86 @@ export class VideoPlayerV3 {
     }
   }
 
+  private active3DCompiledResult: { dispose: () => void; update: (t: number, dur: number) => void } | null = null;
+
+  /**
+   * Three.js 3D Scene Graph Lifecycle:
+   * Compiles and animates real procedural 3D assemblies, exploded structures, layer stacks,
+   * rotating dotted globes, and mechanisms from geometryCompiler3D with studio lighting & camera grammar.
+   */
   private updateThreeScene(scene: ExecutableSceneProgram, sceneTimeSec: number, isNewScene: boolean): void {
     if (!this.threeScene || !this.threeGroup) return;
 
     if (isNewScene) {
-      // Remove old meshes
+      // 1. Cleanly dispose previous procedural 3D result
+      if (this.active3DCompiledResult) {
+        try {
+          this.active3DCompiledResult.dispose();
+        } catch (_) {}
+        this.active3DCompiledResult = null;
+      }
+
       while (this.threeGroup.children.length > 0) {
         const obj = this.threeGroup.children[0];
         this.threeGroup.remove(obj);
-        if ((obj as THREE.Mesh).geometry) {
-          (obj as THREE.Mesh).geometry.dispose();
-        }
       }
       this.threeMeshes = [];
 
       const nodes3D = scene.nodes_3d || [];
       const repType = String(scene.representation_type || "").toUpperCase();
 
-      if (nodes3D.length > 0) {
-        for (let i = 0; i < nodes3D.length; i++) {
-          const n = nodes3D[i];
-          const geom = new THREE.BoxGeometry(1.4, 1.4, 1.4);
-          const mat = new THREE.MeshStandardMaterial({
-            color: n.material_spec?.color || (i === 0 ? 0xff6b00 : 0x06cfe5),
-            roughness: n.material_spec?.roughness ?? 0.25,
-            metalness: n.material_spec?.metalness ?? 0.5,
-          });
-          const mesh = new THREE.Mesh(geom, mat);
-          const pos = n.transform?.position || [(i - (nodes3D.length - 1) / 2) * 2.6, 0, 0];
-          mesh.position.set(pos[0], pos[1], pos[2]);
-          this.threeGroup.add(mesh);
-          this.threeMeshes.push(mesh);
+      // 2. Compile real procedural 3D geometry scene
+      try {
+        let activeNode = nodes3D[0];
+
+        if (!activeNode) {
+          let procType = "ASSEMBLY";
+          if (repType.includes("EXPLODE") || repType.includes("EXPLODED")) procType = "EXPLODED_ASSEMBLY";
+          else if (repType.includes("CUTAWAY")) procType = "CUTAWAY";
+          else if (repType.includes("LAYER_STACK") || repType.includes("LAYERSTACK")) procType = "LAYER_STACK_3D";
+          else if (repType.includes("FLOW") || repType.includes("PIPE")) procType = "FLOW_PATH";
+          else if (repType.includes("TRAJECTORY") || repType.includes("ORBIT")) procType = "TRAJECTORY";
+          else if (repType.includes("MECHANISM") || repType.includes("GEAR")) procType = "MECHANISM";
+          else if (repType.includes("SPATIAL") || repType.includes("NETWORK") || repType.includes("MAP") || repType.includes("SYSTEM")) procType = "SPATIAL_SYSTEM";
+
+          activeNode = {
+            node_id: `proc_${scene.scene_id}`,
+            procedural_type: procType,
+            transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+            material_spec: {},
+            animation_keyframes: [],
+          };
         }
-      } else if (repType.includes("3D") || repType.includes("ASSEMBLY") || repType.includes("FLOW") || repType.includes("NETWORK")) {
-        // Procedural ambient background geometry for 3D-afforded scenes
-        for (let i = 0; i < 3; i++) {
-          const geom = i === 0
-            ? new THREE.TorusGeometry(2.4, 0.15, 16, 64)
-            : new THREE.CylinderGeometry(0.8, 0.8, 1.6, 32);
-          const mat = new THREE.MeshStandardMaterial({
-            color: i === 0 ? 0x06cfe5 : 0xff6b00,
-            roughness: 0.3,
-            metalness: 0.7,
-            wireframe: i === 0,
-            transparent: true,
-            opacity: 0.45,
-          });
-          const mesh = new THREE.Mesh(geom, mat);
-          mesh.position.set((i - 1) * 3.5, 0, -2);
-          this.threeGroup.add(mesh);
-          this.threeMeshes.push(mesh);
-        }
+
+        const result = geometryCompiler3D.compileProceduralNode(activeNode, this.genome);
+        this.threeGroup.add(result.group);
+        this.active3DCompiledResult = result;
+      } catch (err) {
+        console.warn("[VideoPlayerV3] 3D procedural compiler fallback:", err);
+      }
+
+      // 3. Re-bind Camera Grammar Controller & Target
+      const shotGrammar = (scene as any).shot_grammar || this.genome?.camera_grammar || "HeroFocus";
+      this.cameraController = createCameraController(shotGrammar, new THREE.Vector3(0, 0, 0));
+      if (this.threeCamera) {
+        this.threeCamera.aspect = this.width / Math.max(1, this.height);
+        this.threeCamera.updateProjectionMatrix();
       }
     }
 
-    // Dynamic procedural rotations & camera orbits
-    for (let i = 0; i < this.threeMeshes.length; i++) {
-      this.threeMeshes[i].rotation.y = sceneTimeSec * 0.6 + i * 1.2;
-      this.threeMeshes[i].rotation.x = Math.sin(sceneTimeSec * 0.4 + i) * 0.3;
+    const dur = scene.duration_sec || 5.0;
+
+    // 4. Smooth Procedural 3D Motion Updates (Explode progress, gear rotations, pulse rings)
+    if (this.active3DCompiledResult && typeof this.active3DCompiledResult.update === "function") {
+      this.active3DCompiledResult.update(sceneTimeSec, dur);
     }
 
-    if (this.threeCamera) {
+    // 5. Camera Grammar Updates
+    if (this.threeCamera && this.cameraController) {
+      this.cameraController.update(this.threeCamera, sceneTimeSec, dur);
+    } else if (this.threeCamera) {
       this.threeCamera.position.x = Math.sin(sceneTimeSec * 0.2) * 0.8;
-      this.threeCamera.position.y = Math.cos(sceneTimeSec * 0.25) * 0.4;
+      this.threeCamera.position.y = Math.cos(sceneTimeSec * 0.25) * 0.4 + 2;
       this.threeCamera.lookAt(0, 0, 0);
     }
 
@@ -509,6 +642,11 @@ export class VideoPlayerV3 {
     }
   }
 
+
+  /**
+   * Dynamic Resizing:
+   * Handles container bounds resize while keeping bottom player controls interactive.
+   */
   private handleResize(): void {
     if (!this.container || this.isDestroyed) return;
     const newW = this.container.clientWidth || 1280;
@@ -519,7 +657,7 @@ export class VideoPlayerV3 {
     this.height = newH;
 
     if (this.threeRenderer && this.threeCamera) {
-      this.threeCamera.aspect = newW / newH;
+      this.threeCamera.aspect = newW / Math.max(1, newH);
       this.threeCamera.updateProjectionMatrix();
       this.threeRenderer.setSize(newW, newH);
     }
@@ -530,6 +668,9 @@ export class VideoPlayerV3 {
         this.currentRenderedSceneId = null; // Re-layout active scene on resize
       }
     }
+
+    const currentTime = this.syncMediaElement ? this.syncMediaElement.currentTime : this.clock.getTime();
+    this.updateAtTime(currentTime);
   }
 
   public getCurrentState(): { currentScene: ExecutableSceneProgram; timeSec: number; elements2D: any[]; nodes3D: any[] } | null {
@@ -591,6 +732,11 @@ export class VideoPlayerV3 {
         const obj = this.threeGroup.children[0];
         this.threeGroup.remove(obj);
         if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose();
+        if ((obj as THREE.Mesh).material) {
+          const mat = (obj as THREE.Mesh).material;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat.dispose();
+        }
       }
     }
     if (this.threeRenderer) {
@@ -617,4 +763,3 @@ export class VideoPlayerV3 {
     }
   }
 }
-

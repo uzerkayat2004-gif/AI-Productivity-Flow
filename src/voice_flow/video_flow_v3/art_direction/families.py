@@ -188,7 +188,7 @@ class VisualFamilySpec:
 
 INDUSTRIAL_PRODUCT_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.INDUSTRIAL_PRODUCT.value,
-    description="High-precision engineering aesthetic with tactile anodized metals and dark workspace tones.",
+    description="Chassis, precision machined, metallic/matte, amber/copper highlights.",
     palette=PaletteSpec(
         environment="#121417",
         structural_neutral="#2A2E35",
@@ -209,8 +209,8 @@ INDUSTRIAL_PRODUCT_FAMILY = VisualFamilySpec(
     ),
     materials=MaterialSpec(
         surface_type="anodized_aluminum",
-        roughness=0.4,
-        metalness=0.8,
+        roughness=0.38,
+        metalness=0.82,
         clearcoat=0.1,
         subsurface=0.0,
         opacity=1.0,
@@ -253,15 +253,15 @@ INDUSTRIAL_PRODUCT_FAMILY = VisualFamilySpec(
 
 TECHNICAL_SYSTEMS_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.TECHNICAL_SYSTEMS.value,
-    description="System diagrams, cyber-physical architecture, telemetry, and crisp node schematics.",
+    description="Cool technical neutrals, signal flow, cyan/emerald accents, monospace.",
     palette=PaletteSpec(
-        environment="#0F172A",
-        structural_neutral="#334155",
+        environment="#0B132B",
+        structural_neutral="#1E293B",
         primary_info="#F8FAFC",
-        accent="#0EA5E9",
-        highlight="#F59E0B",
+        accent="#06B6D4",
+        highlight="#10B981",
         secondary_info="#94A3B8",
-        border="#475569",
+        border="#334155",
     ),
     typography=TypographySpec(
         font_family_primary="Inter",
@@ -318,13 +318,13 @@ TECHNICAL_SYSTEMS_FAMILY = VisualFamilySpec(
 
 SCIENTIFIC_VISUALIZATION_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.SCIENTIFIC_VISUALIZATION.value,
-    description="Clean laboratory precision, molecular/physical structures, observational data clarity.",
+    description="Organic structures, neutral scientific palette, layer reveal.",
     palette=PaletteSpec(
         environment="#F8FAFC",
         structural_neutral="#E2E8F0",
         primary_info="#0F172A",
         accent="#2563EB",
-        highlight="#D97706",
+        highlight="#10B981",
         secondary_info="#64748B",
         border="#CBD5E1",
     ),
@@ -339,10 +339,10 @@ SCIENTIFIC_VISUALIZATION_FAMILY = VisualFamilySpec(
     ),
     materials=MaterialSpec(
         surface_type="diffuse_ceramic",
-        roughness=0.3,
+        roughness=0.35,
         metalness=0.0,
         clearcoat=0.2,
-        subsurface=0.1,
+        subsurface=0.15,
         opacity=1.0,
         bloom_enabled=False,
         lens_flare=False,
@@ -383,13 +383,13 @@ SCIENTIFIC_VISUALIZATION_FAMILY = VisualFamilySpec(
 
 DATA_EDITORIAL_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.DATA_EDITORIAL.value,
-    description="Information design and statistical journalism in warm FT/Economist press style.",
+    description="High-contrast quantitative hierarchy, editorial annotations, terracotta/gold.",
     palette=PaletteSpec(
         environment="#FFFBEB",
-        structural_neutral="#E5E7EB",
+        structural_neutral="#E7E5E4",
         primary_info="#1C1917",
         accent="#C2410C",
-        highlight="#0369A1",
+        highlight="#D97706",
         secondary_info="#78716C",
         border="#D6D3D1",
     ),
@@ -404,7 +404,7 @@ DATA_EDITORIAL_FAMILY = VisualFamilySpec(
     ),
     materials=MaterialSpec(
         surface_type="newsprint_paper",
-        roughness=0.9,
+        roughness=0.92,
         metalness=0.0,
         clearcoat=0.0,
         subsurface=0.0,
@@ -448,7 +448,7 @@ DATA_EDITORIAL_FAMILY = VisualFamilySpec(
 
 EDITORIAL_DOCUMENTARY_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.EDITORIAL_DOCUMENTARY.value,
-    description="Cinematic storytelling, warm sepia depth, tactile narrative elements, filmic tones.",
+    description="Archival paper textures, typography, timeline, serif/grotesk.",
     palette=PaletteSpec(
         environment="#141210",
         structural_neutral="#2C2723",
@@ -468,9 +468,9 @@ EDITORIAL_DOCUMENTARY_FAMILY = VisualFamilySpec(
         mono_weight=400,
     ),
     materials=MaterialSpec(
-        surface_type="archival_vellum",
-        roughness=0.85,
-        metalness=0.15,
+        surface_type="archival_paper",
+        roughness=0.88,
+        metalness=0.1,
         clearcoat=0.0,
         subsurface=0.05,
         opacity=1.0,
@@ -513,13 +513,13 @@ EDITORIAL_DOCUMENTARY_FAMILY = VisualFamilySpec(
 
 SOFTWARE_ARCHITECTURE_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.SOFTWARE_ARCHITECTURE.value,
-    description="Modern developer infrastructure, stack topography, and clean terminal/IDE visual language.",
+    description="Dark IDE frame, AST syntax colors, bus connectors, purple/cyan.",
     palette=PaletteSpec(
         environment="#0B0F19",
         structural_neutral="#1E293B",
         primary_info="#E2E8F0",
-        accent="#6366F1",
-        highlight="#10B981",
+        accent="#8B5CF6",
+        highlight="#06B6D4",
         secondary_info="#64748B",
         border="#334155",
     ),
@@ -533,7 +533,7 @@ SOFTWARE_ARCHITECTURE_FAMILY = VisualFamilySpec(
         mono_weight=500,
     ),
     materials=MaterialSpec(
-        surface_type="dark_matte_panel",
+        surface_type="dark_ide_panel",
         roughness=0.5,
         metalness=0.05,
         clearcoat=0.0,
@@ -578,12 +578,12 @@ SOFTWARE_ARCHITECTURE_FAMILY = VisualFamilySpec(
 
 HISTORICAL_ARCHIVAL_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.HISTORICAL_ARCHIVAL.value,
-    description="Primary document analysis, museum-grade exhibition, and textured artifact mapping.",
+    description="Sepia/parchment, document fragments, timeline spine.",
     palette=PaletteSpec(
         environment="#F5F0EB",
         structural_neutral="#D6CCC2",
         primary_info="#2B2D42",
-        accent="#8D99AE",
+        accent="#8C502E",
         highlight="#9E2A2B",
         secondary_info="#6C757D",
         border="#B8B2A6",
@@ -643,12 +643,12 @@ HISTORICAL_ARCHIVAL_FAMILY = VisualFamilySpec(
 
 ARCHITECTURAL_SPATIAL_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.ARCHITECTURAL_SPATIAL.value,
-    description="Structural spatial geometry, concrete-and-steel blueprint aesthetics, forms in void.",
+    description="Isometric grid, concrete/glass neutrals, structural callouts.",
     palette=PaletteSpec(
         environment="#1E2022",
         structural_neutral="#373A40",
         primary_info="#EEEEEE",
-        accent="#686D76",
+        accent="#94A3B8",
         highlight="#DC5F00",
         secondary_info="#8D939D",
         border="#4A4E57",
@@ -664,8 +664,8 @@ ARCHITECTURAL_SPATIAL_FAMILY = VisualFamilySpec(
     ),
     materials=MaterialSpec(
         surface_type="raw_concrete",
-        roughness=0.7,
-        metalness=0.0,
+        roughness=0.75,
+        metalness=0.05,
         clearcoat=0.0,
         subsurface=0.0,
         opacity=1.0,
@@ -708,7 +708,7 @@ ARCHITECTURAL_SPATIAL_FAMILY = VisualFamilySpec(
 
 MINIMAL_CONCEPTUAL_FAMILY = VisualFamilySpec(
     name=VisualFamilyName.MINIMAL_CONCEPTUAL.value,
-    description="Bauhaus abstraction, high-contrast pure canvas clarity, zero superfluous decoration.",
+    description="Ultra-clean typography, monochrome, single focal accent.",
     palette=PaletteSpec(
         environment="#FAFAFA",
         structural_neutral="#E0E0E0",

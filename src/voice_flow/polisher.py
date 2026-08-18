@@ -5,8 +5,10 @@ and multi-API key Google Gemini/Groq/OpenAI load balancing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
 import time
 import urllib.parse
@@ -177,14 +179,72 @@ def _preserves_fidelity(source: str, candidate: str) -> bool:
 class TextPolisher:
     """Intelligent AI Text Cleaning & Polish Engine."""
 
+    _COOLDOWNS_FILE = os.path.join(os.path.expanduser("~"), ".voice_flow", "polish_cooldowns.json")
+
     def __init__(self) -> None:
         self._rate_limited_keys: dict[str, float] = {}
+        self._dead_keys: dict[str, float] = {}
+        self._load_cooldowns()
+
+    # --- Persistent cooldowns -------------------------------------------------
+    # Dead/limited keys are remembered across restarts (as a key hash, never the
+    # raw secret). Without this, every app start wastes a network round-trip on
+    # credentials that are known to be invalid.
+
+    def _cooldown_key(self, key: str) -> str:
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+
+    def _load_cooldowns(self) -> None:
+        try:
+            with open(self._COOLDOWNS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            now = time.time()
+            self._dead_keys = {k: float(v) for k, v in data.get("dead", {}).items() if float(v) > now}
+            self._rate_limited_keys = {k: float(v) for k, v in data.get("limited", {}).items() if float(v) > now}
+        except FileNotFoundError:
+            pass
+        except Exception:
+            log.exception("Could not load polish cooldowns")
+
+    def _persist_cooldowns(self) -> None:
+        try:
+            data = {"dead": self._dead_keys, "limited": self._rate_limited_keys}
+            os.makedirs(os.path.dirname(self._COOLDOWNS_FILE), exist_ok=True)
+            with open(self._COOLDOWNS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception:
+            log.exception("Could not persist polish cooldowns")
+
+    def _mark_dead(self, key: str, seconds: float = 900.0) -> None:
+        self._dead_keys[self._cooldown_key(key)] = time.time() + seconds
+        self._persist_cooldowns()
+
+    def _mark_limited(self, key: str, seconds: float = 60.0) -> None:
+        self._rate_limited_keys[self._cooldown_key(key)] = time.time() + seconds
+        self._persist_cooldowns()
+
+    def _key_in_cooldown(self, key: str, now: float) -> bool:
+        key_id = self._cooldown_key(key)
+        if key_id in self._dead_keys:
+            if now < self._dead_keys[key_id]:
+                return True
+            del self._dead_keys[key_id]
+        if key_id in self._rate_limited_keys:
+            if now < self._rate_limited_keys[key_id]:
+                return True
+            del self._rate_limited_keys[key_id]
+        return False
+
+    def _past_pool_deadline(self) -> bool:
+        deadline = getattr(self, "_pool_deadline", None)
+        return deadline is not None and time.time() > deadline
 
     def polish(
         self,
         raw_text: str,
         style_instruction: Any = "",
         cleanup_level: str | None = None,
+        allow_ai: bool = True,
         **kwargs: Any,
     ) -> str:
         """Clean and polish raw speech text."""
@@ -222,7 +282,7 @@ class TextPolisher:
         except Exception:
             saved_keys = {}
 
-        if saved_keys:
+        if saved_keys and allow_ai:
             polished_api = self._polish_with_api_pool(raw_text, saved_keys, instruction)
             if polished_api:
                 sanitized_api = self._post_process_ai_response(polished_api, raw_text)
@@ -238,18 +298,30 @@ class TextPolisher:
         return dictionary_engine.apply_dictionary_post_processing(cleaned)
 
     def _polish_with_api_pool(self, raw_text: str, api_keys: dict[str, str], style_instruction: str = "") -> str | None:
-        """Rotate through pool of user API keys and multi-connections for AI polishing with priority failover."""
+        """Rotate through pool of user API keys and multi-connections for AI polishing with priority failover.
+
+        Latency guarantees:
+        - Total wall-clock budget capped at ``config.polish_budget_s`` so dictation
+          never stalls behind dead providers.
+        - Hard per-request timeout ``config.polish_api_timeout_s``.
+        - 401/403 responses mark a key dead for 15 minutes (no repeat attempts
+          on every dictation); transient failures (429/5xx/timeout) get 60s
+          cooldown. A 404 is a dead model name — the key stays alive and the
+          next model is tried.
+        """
         user_content = (
             f"Style instruction: {style_instruction}\n"
             f"<input_transcript>\n{raw_text}\n</input_transcript>"
         )
 
         # Check Exec Voice Flow Policy active model preference (ignoring audio STT models for text polish)
-        exec_policy_model = storage.get_setting("exec_policy_model", "gemini/gemini-2.0-flash")
+        exec_policy_model = storage.get_setting("exec_policy_model", "gemini/gemini-3.6-flash")
         preferred_provider = None
         preferred_model = None
         if "/" in exec_policy_model:
-            p_prov, p_mod = exec_policy_model.split("/", 1)
+            p_prov, p_mod = str(exec_policy_model).strip().strip('"').split("/", 1)
+            p_prov = p_prov.strip().lower()
+            p_mod = p_mod.strip()
             if not any(stt_kw in p_mod.lower() for stt_kw in ["whisper", "audio", "stt", "speech"]):
                 preferred_provider = p_prov
                 preferred_model = p_mod
@@ -268,47 +340,64 @@ class TextPolisher:
             providers.insert(0, preferred_provider)
             log.info("[EXEC VOICE FLOW POLICY] Primary polishing routed via: %s / %s", preferred_provider.upper(), preferred_model or "default")
 
-        now = time.time()
-        for provider in providers:
-            conns = []
-            if provider in api_keys and api_keys[provider].strip():
-                conns = [{"id": 0, "name": f"{provider.capitalize()} Key", "api_key": api_keys[provider].strip(), "priority": 1, "is_active": 1}]
-            elif provider in all_conns:
-                conns = [c for c in all_conns[provider] if c.get("is_active", 1)]
+        deadline = time.time() + config.polish_budget_s
+        self._pool_deadline = deadline
+        try:
+            now = time.time()
+            for provider in providers:
+                if time.time() > deadline:
+                    log.info("[AI POLISH] Latency budget (%.1fs) exhausted; falling back to deterministic cleanup.", config.polish_budget_s)
+                    break
 
-            if not conns:
-                continue
+                conns = []
+                if provider in api_keys and api_keys[provider].strip():
+                    conns = [{"id": 0, "name": f"{provider.capitalize()} Key", "api_key": api_keys[provider].strip(), "priority": 1, "is_active": 1}]
+                elif provider in all_conns:
+                    conns = [c for c in all_conns[provider] if c.get("is_active", 1)]
 
-            for conn in conns:
-                key = conn["api_key"].strip()
-                cname = conn.get("name", "Key")
-                cid = conn.get("id", 0)
+                if not conns:
+                    continue
 
-                # Skip rate-limited keys during cooldown
-                if key in self._rate_limited_keys:
-                    if now < self._rate_limited_keys[key]:
+                for conn in conns:
+                    if time.time() > deadline:
+                        log.info("[AI POLISH] Latency budget (%.1fs) exhausted; falling back to deterministic cleanup.", config.polish_budget_s)
+                        break
+                    key = conn["api_key"].strip()
+                    cname = conn.get("name", "Key")
+                    cid = conn.get("id", 0)
+
+                    # Skip keys that can never work for these REST APIs: Google
+                    # OAuth access tokens (AQ. prefix) and pasted junk (whitespace,
+                    # shell commands). Trying them just burns the latency budget.
+                    if key.startswith("AQ.") or any(ch.isspace() for ch in key) or '"' in key or "'" in key:
+                        log.info("[AI POLISH - %s] Key '%s' skipped: not a valid API key for polish.", provider.capitalize(), cname)
+                        continue
+
+                    # Skip rate-limited or dead keys during cooldown
+                    if self._key_in_cooldown(key, time.time()):
                         log.info("[AI POLISH - %s] Key '%s' in cooldown, bypassing...", provider.capitalize(), cname)
                         continue
-                    else:
-                        del self._rate_limited_keys[key]
 
-                result = self._try_provider_call(provider, key, POLISHER_SYSTEM_PROMPT, user_content)
-                if result:
-                    log.info("[AI POLISH - %s] Polished successfully using Connection '%s' (#%s)!", provider.capitalize(), cname, cid)
-                    if cid > 0:
-                        try:
-                            storage.update_connection_status(cid, "Connected (200 OK)")
-                        except Exception:
-                            pass
-                    return result
-                else:
-                    log.warning("[AI POLISH - %s] Connection '%s' (#%s) failed or timed out. Failing over...", provider.capitalize(), cname, cid)
-                    self._rate_limited_keys[key] = now + 60.0
-                    if cid > 0:
-                        try:
-                            storage.update_connection_status(cid, "Error / Rate Limited")
-                        except Exception:
-                            pass
+                    # Honor the Exec Voice Flow Policy model as the first attempt for its provider
+                    model_override = preferred_model if provider == preferred_provider else None
+                    result = self._try_provider_call(provider, key, POLISHER_SYSTEM_PROMPT, user_content, model_override)
+                    if result:
+                        log.info("[AI POLISH - %s] Polished successfully using Connection '%s' (#%s)!", provider.capitalize(), cname, cid)
+                        if cid > 0:
+                            try:
+                                storage.update_connection_status(cid, "Connected (200 OK)")
+                            except Exception:
+                                pass
+                        return result
+                    else:
+                        log.warning("[AI POLISH - %s] Connection '%s' (#%s) failed or timed out. Failing over...", provider.capitalize(), cname, cid)
+                        if cid > 0:
+                            try:
+                                storage.update_connection_status(cid, "Error / Rate Limited")
+                            except Exception:
+                                pass
+        finally:
+            self._pool_deadline = None
 
         return None
 
@@ -316,6 +405,10 @@ class TextPolisher:
     def _deterministic_cleanup(raw_text: str, style_instruction: str, level: str) -> str:
         cleaned = cleanup_text(raw_text, level)
         cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+        if level == "cleanup_none":
+            # True verbatim: no capitalization, no trailing period ("ls -la"
+            # must stay "ls -la", "hey joey" must not become "Hey joey.").
+            return cleaned
         style = (style_instruction or "").lower()
         if "very_casual" in style or "lowercase" in style:
             return cleaned.lower().rstrip(".")
@@ -335,12 +428,21 @@ class TextPolisher:
                 cleaned = cleaned.rstrip(".!?") + terminal
         return cleaned
 
-    def _try_provider_call(self, provider: str, key: str, system_prompt: str, user_content: str) -> str | None:
-        """Execute HTTP request to target AI provider model endpoint with strict 2.0s timeout."""
+    def _try_provider_call(self, provider: str, key: str, system_prompt: str, user_content: str, model_override: str | None = None) -> str | None:
+        """Execute HTTP request to target AI provider model endpoint with a strict timeout.
+
+        Returns polished text on success, or None. Dead credentials (HTTP 401/403)
+        are flagged with a 15-minute cooldown so later dictations skip them instantly.
+        """
+        timeout_s = config.polish_api_timeout_s
         try:
             if provider == "gemini":
-                models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+                models = ["gemini-3.6-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
+                if model_override:
+                    models = [model_override] + [m for m in models if m != model_override]
                 for m in models:
+                    if self._past_pool_deadline():
+                        break
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
                         payload = json.dumps({
@@ -359,31 +461,43 @@ class TextPolisher:
                             "Content-Type": "application/json",
                             "User-Agent": "VoiceFlow/2.0"
                         })
-                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             try:
                                 text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                                 text = re.sub(r"</?input_transcript>", "", text).strip()
                                 if text:
                                     return text
+                                log.warning("[GEMINI %s] Response contained no text (finishReason=%s); treating as failure.", m, data["candidates"][0].get("finishReason"))
                             except (KeyError, IndexError):
-                                pass
+                                log.warning("[GEMINI %s] Malformed response shape; treating as failure.", m)
+                            # Empty/malformed responses are still attempts on this key; keep it
+                            # in short cooldown so it is not hammered on every dictation.
+                            self._mark_limited(key)
                     except urllib.error.HTTPError as e:
                         log.warning("[GEMINI %s FAILED] HTTP %d: %s", m, e.code, e.reason)
-                        if e.code in (429, 403):
+                        if e.code in (400, 401, 403):
+                            self._mark_dead(key)
+                            log.info("[AI POLISH - GEMINI] Key marked dead for 15 minutes (HTTP %d).", e.code)
+                            break
+                        if e.code == 429:
+                            self._mark_limited(key)
                             break
                     except Exception as e:
                         log.warning("[GEMINI %s FAILED/TIMEOUT] %s", m, e)
+                        self._mark_limited(key)
 
             elif provider in ("groq", "openai", "deepseek", "together"):
                 endpoints = {
-                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
-                    "openai": ("https://api.openai.com/v1/chat/completions", ["gpt-4o-mini", "gpt-4o"]),
+                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.3-70b-specdec", "meta-llama/llama-4-scout-17b-16e-instruct"]),
+                    "openai": ("https://api.openai.com/v1/chat/completions", ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o"]),
                     "together": ("https://api.together.xyz/v1/chat/completions", ["meta-llama/Llama-3.3-70B-Instruct-Turbo"]),
                     "deepseek": ("https://api.deepseek.com/v1/chat/completions", ["deepseek-chat"]),
                 }
                 ep_url, ep_models = endpoints[provider]
-                for m in ep_models:
+                for m in ([model_override] if model_override else []) + ep_models:
+                    if self._past_pool_deadline():
+                        break
                     try:
                         payload = json.dumps({
                             "model": m,
@@ -399,14 +513,27 @@ class TextPolisher:
                             "Authorization": f"Bearer {key}",
                             "User-Agent": "VoiceFlow/2.0"
                         })
-                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
                             text = data["choices"][0]["message"]["content"].strip()
                             text = re.sub(r"</?input_transcript>", "", text).strip()
                             if text:
                                 return text
+                            self._mark_limited(key)
+                    except urllib.error.HTTPError as e:
+                        log.warning("[%s %s FAILED] HTTP %d: %s", provider.upper(), m, e.code, e.reason)
+                        if e.code in (400, 401, 403):
+                            self._mark_dead(key)
+                            log.info("[AI POLISH - %s] Key marked dead for 15 minutes (HTTP %d).", provider.upper(), e.code)
+                            break
+                        if e.code == 429:
+                            self._mark_limited(key)
+                            break
+                        # Anything else (404 included) is a dead model name, not a
+                        # dead key: keep the key alive and try the next model.
                     except Exception as e:
                         log.warning("[%s %s FAILED/TIMEOUT] %s", provider.upper(), m, e)
+                        self._mark_limited(key)
 
         except Exception as e:
             log.warning("[%s API CALL FAILED] %s", provider.upper(), e)

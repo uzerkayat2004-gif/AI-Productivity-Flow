@@ -42,10 +42,38 @@ export enum PerformanceProfile {
 }
 
 /**
+ * Canonical 3D Representation Types for procedural spatial graphics.
+ * 9 Canonical 3D representations.
+ */
+export enum Semantic3DRepresentationType {
+  ASSEMBLY_3D = "ASSEMBLY_3D",
+  ASSEMBLY = "ASSEMBLY",
+  EXPLODED_3D = "EXPLODED_3D",
+  EXPLODED_ASSEMBLY = "EXPLODED_ASSEMBLY",
+  CUTAWAY_3D = "CUTAWAY_3D",
+  CUTAWAY = "CUTAWAY",
+  HOUSING_3D = "HOUSING_3D",
+  COMPONENT = "COMPONENT",
+  FLOW_PATH_3D = "FLOW_PATH_3D",
+  FLOW_PATH = "FLOW_PATH",
+  LAYER_STACK_3D = "LAYER_STACK_3D",
+  CROSS_SECTION_3D = "CROSS_SECTION_3D",
+  TERRAIN_SURFACE_3D = "TERRAIN_SURFACE_3D",
+  ORBIT_INSPECT_3D = "ORBIT_INSPECT_3D",
+  TRAJECTORY = "TRAJECTORY",
+  MECHANISM = "MECHANISM",
+  SPATIAL_SYSTEM = "SPATIAL_SYSTEM",
+}
+
+export const Canonical3DRepresentationType = Semantic3DRepresentationType;
+export type Canonical3DRepresentationType = Semantic3DRepresentationType;
+
+/**
  * Canonical 2D Semantic Representation Types.
- * Governs deterministic diagrammatic, schematic, and analytical scene compositing.
+ * All 20 canonical 2D compositors + aliases for deterministic compositing.
  */
 export enum SemanticRepresentationType {
+  // 20 Canonical 2D Representation Types
   PROCESS = "PROCESS",
   CAUSE_EFFECT = "CAUSE_EFFECT",
   COMPARISON = "COMPARISON",
@@ -55,7 +83,6 @@ export enum SemanticRepresentationType {
   NETWORK = "NETWORK",
   QUANTITATIVE_RELATIONSHIP = "QUANTITATIVE_RELATIONSHIP",
   CHART = "CHART",
-  QUANTITATIVE = "QUANTITATIVE",
   LAYER_STACK = "LAYER_STACK",
   SYSTEM_ARCHITECTURE = "SYSTEM_ARCHITECTURE",
   DOCUMENT_SOURCE = "DOCUMENT_SOURCE",
@@ -67,11 +94,116 @@ export enum SemanticRepresentationType {
   BEFORE_AFTER = "BEFORE_AFTER",
   FLOW = "FLOW",
   CONCEPTUAL_METAPHOR = "CONCEPTUAL_METAPHOR",
+  SUMMARY_RECAP = "SUMMARY_RECAP",
+
+  // 3D Canonical Types (Unified in enum for cross-language compatibility)
+  ASSEMBLY_3D = "ASSEMBLY_3D",
+  EXPLODED_ASSEMBLY_3D = "EXPLODED_ASSEMBLY_3D",
+  EXPLODED_3D = "EXPLODED_3D",
+  CUTAWAY_3D = "CUTAWAY_3D",
+  COMPONENT_3D = "COMPONENT_3D",
+  HOUSING_3D = "HOUSING_3D",
+  FLOW_PATH_3D = "FLOW_PATH_3D",
+  TRAJECTORY_3D = "TRAJECTORY_3D",
+  MECHANISM_3D = "MECHANISM_3D",
+  SPATIAL_SYSTEM_3D = "SPATIAL_SYSTEM_3D",
+  CROSS_SECTION_3D = "CROSS_SECTION_3D",
+  TERRAIN_SURFACE_3D = "TERRAIN_SURFACE_3D",
+  ORBIT_INSPECT_3D = "ORBIT_INSPECT_3D",
+
+  // Aliases & Extended Visual Styles
+  QUANTITATIVE = "QUANTITATIVE",
   LIST_BREAKDOWN = "LIST_BREAKDOWN",
   STAT_GRID = "STAT_GRID",
   QUOTE_CALLOUT = "QUOTE_CALLOUT",
-  SUMMARY_RECAP = "SUMMARY_RECAP",
 }
+
+/**
+ * Semantic Transition Types between scenes and beats.
+ */
+export enum SemanticTransitionType {
+  MATCH_TRANSITION = "MATCH_TRANSITION",
+  CARRY = "CARRY",
+  TRAVERSE = "TRAVERSE",
+  EXPAND = "EXPAND",
+  COLLAPSE = "COLLAPSE",
+  DISSOLVE = "DISSOLVE",
+  CUT = "CUT",
+  FADE = "FADE",
+  CROSS_FADE = "CROSS_FADE",
+  SLIDE = "SLIDE",
+  WIPE = "WIPE",
+  ZOOM = "ZOOM",
+  MORPH = "MORPH",
+  PUSH = "PUSH",
+  MATCH_CUT = "MATCH_CUT",
+  NONE = "NONE",
+}
+
+/**
+ * Semantic Motion Types (motion verbs) governing beat-level animation.
+ */
+export enum SemanticMotionType {
+  GROW = "GROW",
+  SHRINK = "SHRINK",
+  FLOW = "FLOW",
+  CONNECT = "CONNECT",
+  MORPH = "MORPH",
+  ISOLATE = "ISOLATE",
+  PROGRESS = "PROGRESS",
+  REVEAL_LEVELS = "REVEAL_LEVELS",
+  MERGE = "MERGE",
+  SPLIT = "SPLIT",
+  EXPLODE = "EXPLODE",
+  REVEAL = "REVEAL",
+  FOCUS = "FOCUS",
+  PULSE = "PULSE",
+  TRANSFORM = "TRANSFORM",
+  SWEEP = "SWEEP",
+}
+
+/**
+ * Disposition types for SourceUnits.
+ */
+export enum UnitDispositionType {
+  COVERED_NARRATION = "covered_narration",
+  COVERED_VISUAL = "covered_visual",
+  COVERED_BOTH = "covered_both",
+  MERGED = "merged",
+  DISPOSED = "disposed",
+  INCLUDED = "included",
+  COMPRESSED = "compressed",
+  SUPPORTING_ONLY = "supporting_only",
+  UNRESOLVED = "unresolved",
+}
+
+/**
+ * Internal Scene Beat for deterministic temporal pacing and semantic motion verbs.
+ */
+export interface SceneBeat {
+  beat_id: string;
+  start_sec?: number;
+  end_sec?: number;
+  duration_sec?: number;
+  time_offset_sec?: number;
+  action?: string;
+  motion_type?: SemanticMotionType | string;
+  transition_type?: SemanticTransitionType | string;
+  target_ids?: string[];
+  target_elements?: string[];
+  target_element_ids?: string[];
+  narration_cue?: string;
+  narration_subphrase?: string;
+  visual_action?: string;
+  description?: string;
+  label?: string;
+  emphasis?: number;
+  parameters?: Record<string, any>;
+  properties?: DictAny;
+  data?: DictAny;
+}
+
+type DictAny = Record<string, any>;
 
 export interface ArtDirectionPalette {
   background: string;
@@ -276,6 +408,8 @@ export interface ExecutableElement2D {
   style: Record<string, any>;
   animation_keyframes?: Array<Record<string, any>>;
   data?: Record<string, any>;
+  continuity_key?: string;
+  carry_over?: boolean;
 }
 
 export interface ExecutableNode3D {
@@ -289,15 +423,36 @@ export interface ExecutableNode3D {
   material_spec: Record<string, any>;
   camera_target?: Record<string, any>;
   animation_keyframes: Array<Record<string, any>>;
+  continuity_key?: string;
+  carry_over?: boolean;
 }
 
 export interface ExecutableSceneProgram {
   contract_version: string;
   scene_id: string;
+  chapter_id?: string;
   sequence: number;
   duration_sec: number;
-  representation_type?: SemanticRepresentationType | string;
+  suggested_duration_sec?: number;
+  representation_type?: SemanticRepresentationType | Semantic3DRepresentationType | string;
   title?: string;
+  narration_text?: string;
+  teaching_goal?: string;
+  viewer_question?: string;
+  intended_understanding?: string;
+  motion_purpose?: string;
+  shot_grammar?: string;
+  use_3d?: boolean;
+  fidelity_3d?: FidelityClass3D | string;
+  evidence_refs?: string[];
+  semantic_objects?: Array<Record<string, any>>;
+  semantic_relationships?: Array<Record<string, any>>;
+  beats?: SceneBeat[];
+  scene_beats?: Array<SceneBeat | Record<string, any>>;
+  transition_type?: SemanticTransitionType | string;
+  transition_in?: string;
+  transition_out?: string;
+  source_unit_dispositions?: Record<string, string>;
   elements_2d: ExecutableElement2D[];
   nodes_3d: ExecutableNode3D[];
   camera_path: Array<Record<string, any>>;

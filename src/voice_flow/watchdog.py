@@ -91,6 +91,7 @@ class WatchdogSupervisor:
         self.recent_crashes: collections.deque[float] = collections.deque()
         self.child_process: subprocess.Popen | None = None
         self.running = False
+        self._unhealthy_strikes = 0
         self._lock_file = data_dir() / "watchdog.lock"
         self._shutdown_flag = data_dir() / "watchdog_shutdown.flag"
 
@@ -187,13 +188,12 @@ class WatchdogSupervisor:
 
         log.info("Spawning Voice Flow engine silently: %s -m voice_flow.main (cwd=%s)", pythonw, src_dir)
         try:
-            devnull = open(os.devnull, "w")
             self.child_process = subprocess.Popen(
                 [pythonw, "-m", "voice_flow.main"],
                 cwd=src_dir,
                 creationflags=creation_flags,
-                stdout=devnull,
-                stderr=devnull,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
                 close_fds=True,
             )
@@ -232,6 +232,21 @@ class WatchdogSupervisor:
                 log.warning("Supervised Voice Flow process (PID %d) terminated with code %s.", self.child_process.pid, ret)
                 self.child_process = None
                 return False
+            # The process is alive, but a main thread deadlock (Tk/COM) would
+            # leave it hung forever. Require the REST API to answer; two
+            # consecutive probe failures count as unhealthy.
+            if runtime_is_compatible(port=8991, timeout=0.5):
+                self._unhealthy_strikes = 0
+                return True
+            self._unhealthy_strikes += 1
+            if self._unhealthy_strikes >= 2:
+                log.warning("Supervised Voice Flow process (PID %d) is alive but not responding on port 8991; killing it.", self.child_process.pid)
+                try:
+                    self.child_process.kill()
+                except Exception:
+                    pass
+                self.child_process = None
+                return False
             return True
 
         # If child_process is not directly tracked, check if a compatible Voice Flow runtime is responding on port 8991
@@ -267,6 +282,24 @@ class WatchdogSupervisor:
                         break
 
                     backoff = self.record_crash()
+                    crash_count = len(self.recent_crashes)
+                    if crash_count >= self.max_rapid_crashes * 2:
+                        # Circuit breaker: an engine that dies at startup (broken
+                        # DB, import error, port conflict) would otherwise be
+                        # respawned forever. Stop permanently and flag it.
+                        log.critical(
+                            "Giving up: %d crashes within %.0fs. Voice Flow is not restartable right now; "
+                            "a manual start (desktop shortcut) will spawn a fresh watchdog.",
+                            crash_count, self.crash_window_seconds,
+                        )
+                        try:
+                            (data_dir() / "watchdog_gave_up.flag").write_text(
+                                f"gave up at {time.time()} after {crash_count} crashes", encoding="utf-8"
+                            )
+                        except Exception:
+                            pass
+                        break
+
                     if backoff > 0:
                         time.sleep(backoff)
 

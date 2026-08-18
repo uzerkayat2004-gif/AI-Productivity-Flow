@@ -34,6 +34,7 @@ from voice_flow.video_flow_v3.quality.constitution import quality_constitution_v
 from voice_flow.video_flow_v3.scheduler.job import JobV3
 from voice_flow.video_flow_v3.storage.project_store import project_store_v3, cache_v3
 from voice_flow.tts_engine import tts_engine
+from voice_flow.video_flow_v3.manim_engine.renderer import ManimVideoRenderer
 
 log = logging.getLogger(__name__)
 
@@ -88,9 +89,14 @@ class VideoFlowV3Service:
             return
 
         try:
-            # Stage 1: Normalize Source & Segment Units
+            # Stage 1: Normalize Source & Segment Units (supports single & multi-doc bundles)
             job.update_status(GenerationStateV3.NORMALIZING_SOURCE, "Normalizing source...", 10)
-            bundle = SourceBundle(source_text=job.source_text, source_name=job.title)
+            doc_metadata = getattr(job, "metadata", {}) if hasattr(job, "metadata") and isinstance(job.metadata, dict) else {}
+            bundle = SourceBundle(
+                source_text=job.source_text,
+                source_name=job.title,
+                metadata=doc_metadata,
+            )
             units = SourceNormalizer.segment_source_units(bundle)
             project_store_v3.save_json_artifact(job_id, "source_bundle.json", bundle)
             project_store_v3.save_json_artifact(job_id, "source_units.json", [u.__dict__ for u in units])
@@ -108,21 +114,45 @@ class VideoFlowV3Service:
             if job.is_cancelled():
                 return
 
-            # Stage 3: Creative Director & Art Direction Genome
+            # Stage 3: Creative Director & Art Direction Genome (with mode, visual_direction & multi-doc routing)
             job.update_status(GenerationStateV3.DIRECTING, "Directing visual explanation...", 40)
             resolver = ArtDirectionResolverV3()
-            genome = resolver.resolve(source_text=bundle.source_text, source_hash=bundle.source_hash, family_override=visual_style)
+            genome = resolver.resolve(
+                source_text=bundle.source_text,
+                topic_hint=bundle.source_name,
+                source_hash=bundle.source_hash,
+                family_override=visual_style,
+                mode=job.mode,
+                visual_direction=getattr(job, "visual_direction", ""),
+            )
             program = self.director.build_program(
-                bundle, units, evidence, ledger, genome,
-                mode=job.mode, title=job.title,
+                bundle=bundle,
+                units=units,
+                evidence=evidence,
+                ledger=ledger,
+                genome=genome,
+                mode=job.mode,
+                title=job.title,
                 model_ref=getattr(job, "model_ref", "local/deterministic"),
                 visual_direction=getattr(job, "visual_direction", ""),
                 allow_external_ai=getattr(job, "allow_external_ai", False),
             )
             project_store_v3.save_json_artifact(job_id, "art_genome.json", genome)
+            project_store_v3.save_json_artifact(job_id, "coverage_ledger.json", ledger)
             project_store_v3.save_json_artifact(job_id, "video_program.json", program)
 
+            job.program = program
             job.planned_scenes = len(program.scenes)
+
+            job_output_dir = str(project_store_v3.get_project_dir(job_id))
+            def _render_mp4_bg():
+                try:
+                    ManimVideoRenderer().render_video(program, genome, output_dir=job_output_dir)
+                    job.update_status(GenerationStateV3.COMPLETE, "Ready to watch", 100)
+                except Exception as e:
+                    log.error(f"Render failed: {e}")
+                    
+            threading.Thread(target=_render_mp4_bg, daemon=True).start()
 
             if job.is_cancelled():
                 return
@@ -135,18 +165,21 @@ class VideoFlowV3Service:
                 if job.is_cancelled():
                     return
 
-                # Deterministic Visual Compiler (Python side)
+                # Deterministic Visual Compiler (Python side) with adaptive budgeting
                 executable_scene = self._compile_scene_deterministically(scene_semantic, genome)
                 executable_scene = repair_ladder_v3.simplify_scene_for_performance(executable_scene)
                 project_store_v3.save_compiled_scene(job_id, executable_scene.scene_id, executable_scene)
 
                 # Segmented TTS Audio Synthesis for Scene
                 audio_path = project_store_v3.get_audio_segment_path(job_id, executable_scene.scene_id)
-                if not audio_path.exists() or audio_path.stat().st_size == 0:
-                    audio_bytes = tts_engine._synthesize(scene_semantic.narration_text, "deepgram/aura-zeus-en")
-                    if audio_bytes:
-                        with open(audio_path, "wb") as af:
-                            af.write(audio_bytes)
+                try:
+                    if not audio_path.exists() or audio_path.stat().st_size == 0:
+                        audio_bytes = tts_engine._synthesize(scene_semantic.narration_text, "deepgram/aura-zeus-en")
+                        if audio_bytes:
+                            with open(audio_path, "wb") as af:
+                                af.write(audio_bytes)
+                except Exception as tts_err:
+                    log.debug("TTS synthesis skipped/failed: %s", tts_err)
 
                 # Probe REAL audio duration and update scene timeline for live segmented playback
                 from voice_flow.video_flow_v3.audio.narration import probe_audio_duration_sec, concatenate_narration_audio
@@ -182,6 +215,36 @@ class VideoFlowV3Service:
             job.update_status(GenerationStateV3.COMPLETE, "Complete", 100)
             log.info(f"Job {job_id} V3 generation complete with {len(compiled_scenes)} scenes.")
 
+            # Automatically render 1080p MP4 export in background daemon thread (when not in pytest)
+            def _bg_export():
+                try:
+                    export_file = project_store_v3.get_export_path(job_id)
+                    if export_file.exists() and export_file.stat().st_size > 0:
+                        job.update_export_status(ExportStateV3.EXPORTED, 100)
+                    else:
+                        from voice_flow.video_flow_v3.manim_engine.renderer import ManimVideoRenderer
+                        renderer = ManimVideoRenderer()
+                        master_audio = str(project_store_v3.get_project_dir(job_id) / "master_narration.mp3")
+                        renderer.render_video(
+                            program=program,
+                            genome=genome,
+                            output_path=str(export_file),
+                            audio_path=master_audio if os.path.exists(master_audio) else None,
+                            fps=30,
+                        )
+                        job.update_export_status(ExportStateV3.EXPORTED, 100)
+                except Exception as exp_err:
+                    log.warning(f"Auto-export for job {job_id} failed, falling back to frame renderer: {exp_err}")
+                    try:
+                        from voice_flow.video_flow_v3.export.renderer import video_renderer_v3
+                        video_renderer_v3.export_job_mp4(job_id=job_id, fps=30)
+                        job.update_export_status(ExportStateV3.EXPORTED, 100)
+                    except Exception as fallback_err:
+                        log.error(f"Fallback export failed for {job_id}: {fallback_err}")
+
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                threading.Thread(target=_bg_export, daemon=True).start()
+
         except Exception as exc:
             log.error(f"Job {job_id} failed: {exc}", exc_info=True)
             job.error = str(exc)
@@ -192,15 +255,27 @@ class VideoFlowV3Service:
         semantic: Any,
         genome: Any,
     ) -> ExecutableSceneProgram:
-        """Deterministic Compiler Layer: converts semantic intent to layout bounds & transforms."""
+        """Deterministic Compiler Layer: converts semantic intent to layout bounds & transforms with adaptive budgeting."""
         elements_2d: List[ExecutableElement2D] = []
         nodes_3d: List[ExecutableNode3D] = []
         rep_type = getattr(semantic, "representation_type", SemanticRepresentationType.PROCESS.value)
-        num_objects = max(1, len(semantic.semantic_objects))
+
+        # Adaptive density budgeting based on genome rules
+        density_rules = getattr(genome, "density_rules", {}) or {}
+        max_elems = density_rules.get("max_simultaneous_elements", 16)
+        raw_objects = getattr(semantic, "semantic_objects", []) or []
+        semantic_objects = raw_objects[:max_elems]
+        num_objects = max(1, len(semantic_objects))
+
+        palette = getattr(genome, "palette", {}) or {}
+        env_color = palette.get("environment", "#0f172a")
+        struct_color = palette.get("structural_neutral", "#1e293b")
+        primary_color = palette.get("primary_info", "#f8fafc")
+        accent_color = palette.get("accent", "#0ea5e9")
+        highlight_color = palette.get("highlight", "#f59e0b")
 
         # 2D Elements layout calculation based on representation_type
-        for i, obj in enumerate(semantic.semantic_objects):
-            # Deterministic responsive bounds calculation per representation family
+        for i, obj in enumerate(semantic_objects):
             if rep_type in ("COMPARISON", "BEFORE_AFTER"):
                 col_w = 480.0
                 x = 100.0 if i % 2 == 0 else 660.0
@@ -240,27 +315,43 @@ class VideoFlowV3Service:
                     y = 160.0 + (i // 2) * 140.0
                     w, h = 240.0, 110.0
             else:
-                # Default PROCESS / FLOW / LIST_BREAKDOWN
                 spacing = 1120.0 / max(1, num_objects)
                 x = 80.0 + i * spacing
                 y = 180.0
                 w, h = min(280.0, spacing - 24.0), 220.0
 
+            elem_fill = accent_color if obj.role == "primary" else struct_color
             elements_2d.append(ExecutableElement2D(
                 element_id=obj.object_id,
                 layer="node" if obj.role == "primary" else "text",
                 compositor=rep_type,
                 layout_bounds={"x": float(x), "y": float(y), "width": float(w), "height": float(h)},
-                style={"fill": genome.palette.get("surface", "#1e293b"), "accent": genome.palette.get("accent", "#ff6b00"), "label": obj.label},
+                style={
+                    "fill": elem_fill,
+                    "accent": accent_color,
+                    "highlight": highlight_color,
+                    "text_color": primary_color,
+                    "label": obj.label,
+                },
             ))
 
-            if semantic.use_3d:
+            if getattr(semantic, "use_3d", False):
                 nodes_3d.append(ExecutableNode3D(
                     node_id=f"node_3d_{obj.object_id}",
                     procedural_type=obj.semantic_type,
                     transform={"position": [float(i * 2.5), 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]},
-                    material_spec={"color": genome.palette.get("accent", "#ff6b00"), "roughness": 0.3},
+                    material_spec={"color": accent_color, "roughness": 0.35},
                 ))
+
+        # Convert SceneBeats to serializable dictionaries for canvas player
+        raw_beats = getattr(semantic, "scene_beats", []) or []
+        compiled_beats = [
+            (b.__dict__ if hasattr(b, "__dict__") else b)
+            for b in raw_beats
+        ]
+
+        trans_in = getattr(semantic, "transition_in", "MATCH_TRANSITION")
+        trans_out = getattr(semantic, "transition_out", "CARRY")
 
         return ExecutableSceneProgram(
             scene_id=semantic.scene_id,
@@ -270,6 +361,9 @@ class VideoFlowV3Service:
             elements_2d=elements_2d,
             nodes_3d=nodes_3d,
             camera_path=[{"time": 0.0, "type": semantic.shot_grammar}],
+            scene_beats=compiled_beats,
+            transition_in=trans_in,
+            transition_out=trans_out,
         )
 
     def export_job(self, job_id: str, fps: int = 30) -> Dict[str, Any]:

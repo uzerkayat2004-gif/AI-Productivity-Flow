@@ -228,7 +228,7 @@ class BenchmarkRunner:
                     orig_call = self.polisher._try_provider_call
 
                     def create_mock_call(prov_name: str):
-                        def mock_call(provider: str, key: str, sys_prompt: str, user_payload: str):
+                        def mock_call(provider: str, key: str, sys_prompt: str, user_payload: str, model_override: str | None = None):
                             if provider != prov_name:
                                 return None
 

@@ -37,6 +37,7 @@ export {
   compositorRegistry,
   createSceneContainer,
   updateSceneAt,
+  extractDynamicLabels,
 } from "./composers";
 
 export class VisualCompiler2D {

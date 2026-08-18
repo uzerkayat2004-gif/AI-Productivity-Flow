@@ -94,6 +94,20 @@ class StorageEngine:
                 )
             """)
 
+            # Vocabulary learning candidates (suggestions only, never auto-rewrites)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dictionary_learning_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_text TEXT NOT NULL,
+                    corrected_text TEXT,
+                    occurrences INTEGER DEFAULT 1,
+                    confidence REAL DEFAULT 0.5,
+                    status TEXT DEFAULT 'pending',
+                    first_seen_at TEXT,
+                    last_seen_at TEXT
+                )
+            """)
+
             # Table 3: System API Keys (legacy single key compatibility)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -164,13 +178,15 @@ class StorageEngine:
             history_migrations = [
                 ("is_pinned", "INTEGER DEFAULT 0"),
                 ("is_favorite", "INTEGER DEFAULT 0"),
+                ("stt_ms", "INTEGER DEFAULT 0"),
+                ("polish_ms", "INTEGER DEFAULT 0"),
             ]
             for col_name, col_def in history_migrations:
                 if col_name not in existing_history_cols:
                     try:
                         conn.execute(f"ALTER TABLE history ADD COLUMN {col_name} {col_def}")
-                    except sqlite3.OperationalError:
-                        pass
+                    except sqlite3.OperationalError as mig_err:
+                        log.warning("[STORAGE] Migration failed adding history column %s: %s", col_name, mig_err)
 
             # Performance indices
             conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history (timestamp)")
@@ -197,8 +213,8 @@ class StorageEngine:
                 if col_name not in existing_cols:
                     try:
                         conn.execute(f"ALTER TABLE provider_connections ADD COLUMN {col_name} {col_def}")
-                    except sqlite3.OperationalError:
-                        pass
+                    except sqlite3.OperationalError as mig_err:
+                        log.warning("[STORAGE] Migration failed adding provider_connections column %s: %s", col_name, mig_err)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tts_models (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,15 +257,15 @@ class StorageEngine:
                 if col_name not in audio_cols:
                     try:
                         conn.execute(f"ALTER TABLE audio_provider_connections ADD COLUMN {col_name} {col_def}")
-                    except sqlite3.OperationalError:
-                        pass
+                    except sqlite3.OperationalError as mig_err:
+                        log.warning("[STORAGE] Migration failed adding audio_provider_connections column %s: %s", col_name, mig_err)
 
             conn.commit()
 
         self._seed_default_models()
         self._seed_tts_models()
 
-    _SEED_VERSION = "2"  # Bump to re-seed after adding new default models
+    _SEED_VERSION = "3"  # Bump to re-seed after adding new default models
 
     def _seed_tts_models(self) -> None:
         """Seed standard TTS models for Audio Flow."""
@@ -345,14 +361,13 @@ class StorageEngine:
                 return  # Already seeded this version
         seeds = {
             "gemini": [
-                ("gemini-2.5-flash", "Gemini 2.5 Flash (Next-Gen Flagship)"),
-                ("gemini-2.5-pro", "Gemini 2.5 Pro (Deep Reasoning)"),
-                ("gemini-2.0-flash", "Gemini 2.0 Flash"),
-                ("gemini-2.0-flash-lite", "Gemini 2.0 Flash-Lite (Sub-50ms)"),
+                ("gemini-3.6-flash", "Gemini 3.6 Flash (Fastest Flagship)"),
+                ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"),
+                ("gemini-2.5-flash", "Gemini 2.5 Flash"),
             ],
             "groq": [
-                ("llama-3.3-70b-versatile", "Llama 3.3 70B Versatile"),
-                ("llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
+                ("llama-3.3-70b-specdec", "Llama 3.3 70B SpecDec"),
+                ("meta-llama/llama-4-scout-17b-16e-instruct", "Llama 4 Scout 17B"),
                 ("whisper-large-v3-turbo", "Whisper Large v3 Turbo"),
             ],
             "elevenlabs": [
@@ -417,6 +432,8 @@ class StorageEngine:
         app_name: str = "General App",
         duration_sec: float = 2.0,
         style_mode: str = "smart_clean",
+        stt_ms: int = 0,
+        polish_ms: int = 0,
     ) -> DictationRecord:
         words_list = polished_text.split()
         words = len(words_list)
@@ -427,10 +444,10 @@ class StorageEngine:
         with self._get_conn() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode, stt_ms, polish_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode),
+                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode, int(stt_ms), int(polish_ms)),
             )
             conn.commit()
             record_id = cursor.lastrowid
@@ -507,6 +524,75 @@ class StorageEngine:
                     self.add_dictionary_word(clean, category="Auto-Captured")
             except Exception:
                 log.exception("Could not evaluate auto-captured dictionary term %r", clean)
+
+    def add_learning_candidates(self, words: list[str]) -> None:
+        """Record potential vocabulary for future review in the candidates table.
+
+        These rows are suggestions only — never used to rewrite dictation. A
+        future GUI review flow promotes them to real dictionary entries.
+        """
+        stopwords = {
+            "the", "a", "an", "and", "or", "but", "if", "so", "to", "of", "for",
+            "in", "on", "at", "with", "that", "this", "it", "we", "you", "i",
+            "he", "she", "they", "them", "what", "when", "where", "who", "why",
+            "how", "not", "no", "yes", "just", "can", "will", "would", "could",
+            "should", "have", "has", "had", "was", "were", "are", "is", "be",
+            "been", "being", "do", "does", "did", "then", "than", "there",
+            "their", "our", "your", "my", "me", "him", "her", "his", "its",
+            "now", "today", "tomorrow", "yesterday", "please", "thanks", "thank",
+            "hello", "hey", "hi", "ok", "okay", "also", "well", "really", "very",
+        }
+
+        def is_candidate(clean: str) -> bool:
+            if len(clean) < 4 or clean.casefold() in stopwords:
+                return False
+            return (
+                clean.isupper() and len(clean) >= 3
+            ) or (
+                any(c.isupper() for c in clean[1:]) and any(c.islower() for c in clean)
+            ) or (
+                clean[0].isupper() and clean[1:].islower() and len(clean) >= 4
+            )
+
+        candidates: dict[str, int] = {}
+        for word in words or []:
+            clean = re.sub(r"[^\w\-]", "", word, flags=re.UNICODE)
+            if not is_candidate(clean):
+                continue
+            candidates[clean] = candidates.get(clean, 0) + 1
+
+        if not candidates:
+            return
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_conn() as conn:
+            try:
+                for clean, count in candidates.items():
+                    row = conn.execute(
+                        "SELECT id, occurrences FROM dictionary_learning_candidates WHERE original_text = ?",
+                        (clean,),
+                    ).fetchone()
+                    if row:
+                        conn.execute(
+                            """
+                            UPDATE dictionary_learning_candidates
+                            SET occurrences = occurrences + ?, last_seen_at = ?
+                            WHERE id = ?
+                            """,
+                            (count, now_str, row["id"]),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO dictionary_learning_candidates
+                            (original_text, corrected_text, occurrences, confidence, status, first_seen_at, last_seen_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (clean, clean, count, 0.5, "pending", now_str, now_str),
+                        )
+                conn.commit()
+            except sqlite3.Error:
+                conn.rollback()
+                log.exception("Could not record dictionary learning candidates")
 
     def get_recent_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
@@ -723,7 +809,24 @@ class StorageEngine:
                 elif d_obj < check_date - datetime.timedelta(days=1):
                     break
 
-            # Hourly Time-of-Day Velocity Buckets
+            # Longest streak ever achieved (walk the unique dictation days ascending;
+                # any gap breaks the chain).
+                longest_streak = 0
+                run = 0
+                prev_date = None
+                for d_str in sorted(dates):
+                    try:
+                        d_obj = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+                    except Exception:
+                        continue
+                    if prev_date is None or d_obj == prev_date + datetime.timedelta(days=1):
+                        run += 1
+                    else:
+                        run = 1
+                    longest_streak = max(longest_streak, run)
+                    prev_date = d_obj
+
+                # Hourly Time-of-Day Velocity Buckets
             cursor = conn.execute(
                 f"""
                 SELECT
@@ -820,7 +923,7 @@ class StorageEngine:
                 "dictionary_fixes": dictionary_fixes_count,
                 "total_dictionary_terms": total_dict_words,
                 "streak": max(streak, 1 if total_words > 0 else 0),
-                "longest_streak": max(streak, 1 if total_words > 0 else 0),
+                "longest_streak": max(longest_streak, 1 if total_words > 0 else 0),
                 "app_breakdown": app_breakdown,
                 "daily_activity": daily_activity,
                 "time_of_day": time_of_day,
@@ -1200,7 +1303,7 @@ class StorageEngine:
                     }
                 grouped_models[p]["models"].append(item)
 
-            active_model = self.get_setting("exec_policy_model", "gemini/gemini-2.5-flash")
+            active_model = self.get_setting("exec_policy_model", "gemini/gemini-3.6-flash")
             polishing_enabled = self.get_setting("polishing_enabled", True)
 
             return {
@@ -1315,33 +1418,39 @@ class StorageEngine:
             return cursor.rowcount > 0
 
     def get_audio_provider_connections(self, provider: str) -> list[dict[str, Any]]:
-        with self._get_conn() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM audio_provider_connections WHERE provider = ? ORDER BY priority ASC, id ASC",
-                (provider.lower(),)
-            )
-            rows = [dict(row) for row in cursor.fetchall()]
-            has_key = any(r.get("api_key", "").strip() for r in rows)
-            if not has_key:
-                alt_cursor = conn.execute(
-                    "SELECT * FROM provider_connections WHERE provider = ? ORDER BY priority ASC, id ASC",
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM audio_provider_connections WHERE provider = ? ORDER BY priority ASC, id ASC",
                     (provider.lower(),)
                 )
-                alt_rows = [dict(row) for row in alt_cursor.fetchall()]
-                if alt_rows:
-                    return alt_rows
-            return rows
+                rows = [dict(row) for row in cursor.fetchall()]
+                has_key = any(r.get("api_key", "").strip() for r in rows)
+                if not has_key:
+                    alt_cursor = conn.execute(
+                        "SELECT * FROM provider_connections WHERE provider = ? ORDER BY priority ASC, id ASC",
+                        (provider.lower(),)
+                    )
+                    alt_rows = [dict(row) for row in alt_cursor.fetchall()]
+                    if alt_rows:
+                        return alt_rows
+                return rows
+        except Exception:
+            return []
 
     def get_all_audio_provider_connections(self) -> dict[str, list[dict[str, Any]]]:
-        with self._get_conn() as conn:
-            cursor = conn.execute("SELECT * FROM audio_provider_connections ORDER BY provider ASC, priority ASC, id ASC")
-            result: dict[str, list[dict[str, Any]]] = {}
-            for row in cursor.fetchall():
-                p = row["provider"]
-                if p not in result:
-                    result[p] = []
-                result[p].append(dict(row))
-            return result
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute("SELECT * FROM audio_provider_connections ORDER BY provider ASC, priority ASC, id ASC")
+                result: dict[str, list[dict[str, Any]]] = {}
+                for row in cursor.fetchall():
+                    p = row["provider"]
+                    if p not in result:
+                        result[p] = []
+                    result[p].append(dict(row))
+                return result
+        except Exception:
+            return {}
 
     def add_audio_provider_connection(
         self,

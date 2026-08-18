@@ -16,6 +16,7 @@ class CursorContext:
 
 _state_lock = threading.Lock()
 _busy = False
+_generation = 0
 
 
 def _owned_by_hwnd(uia, element, hwnd: int) -> bool:
@@ -108,21 +109,24 @@ def _com_initialize():
 
 
 def _reset_for_tests() -> None:
-    global _busy
-    with _state_lock: _busy = False
+    global _busy, _generation
+    with _state_lock:
+        _busy = False
+        _generation += 1
 
 
 def capture_cursor_context(hwnd: int | None, timeout_seconds: float = .08, adapter=None) -> CursorContext:
     """Run at most one read-only UIA call; timed out workers are never reused."""
-    global _busy
+    global _busy, _generation
     if not hwnd: return CursorContext()
     reader = adapter or _uia_adapter
     with _state_lock:
         if _busy: return CursorContext()
         _busy = True
+        generation = _generation
     done, result = threading.Event(), []
     def run():
-        global _busy
+        global _busy, _generation
         com = _com_initialize()
         try:
             value = reader(hwnd)
@@ -132,8 +136,20 @@ def capture_cursor_context(hwnd: int | None, timeout_seconds: float = .08, adapt
             if com is not None:
                 try: com.CoUninitialize()
                 except Exception: pass
-            with _state_lock: _busy = False
+            with _state_lock:
+                # A stale worker (one that overran its timeout) must never
+                # clear a newer capture's busy flag.
+                if generation == _generation:
+                    _busy = False
+                    _generation += 1
             done.set()
     threading.Thread(target=run, daemon=True, name="voice-flow-uia-context").start()
-    if not done.wait(max(0, timeout_seconds)): return CursorContext()
+    if not done.wait(max(0, timeout_seconds)):
+        # The worker is still stuck in a hung UIA call: unblock the module now
+        # instead of poisoning every later capture for the rest of the session.
+        with _state_lock:
+            if generation == _generation:
+                _busy = False
+                _generation += 1
+        return CursorContext()
     return result[0] if result else CursorContext()

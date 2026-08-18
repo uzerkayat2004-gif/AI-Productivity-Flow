@@ -26,6 +26,7 @@ class AudioRecorder:
         self._buffer: list[NDArray[np.float32]] = []
         self._stream: sd.InputStream | None = None
         self._recording = False
+        self._start_generation = 0
         self._lock = threading.Lock()
         self._level: float = 0.0  # 0.0–1.0 normalized RMS
         self._native_sr: int = 44100
@@ -49,6 +50,13 @@ class AudioRecorder:
         with self._lock:
             if self._recording:
                 return True
+            # Claim recording up-front and take a generation token: a stop()
+            # that lands while the stream is still opening (quick hotkey tap)
+            # bumps the generation and makes this start abandon its stream
+            # instead of leaving a silent live recording behind.
+            self._start_generation += 1
+            generation = self._start_generation
+            self._recording = True
 
         target_device = device if device is not None else config.selected_mic_device
 
@@ -86,6 +94,16 @@ class AudioRecorder:
             new_stream.start()
 
             with self._lock:
+                if generation != self._start_generation:
+                    # A stop() landed while we were opening the stream: adopt
+                    # nothing, discard this stream, and report failure so the
+                    # caller does not show a "recording" state.
+                    try:
+                        new_stream.stop()
+                        new_stream.close()
+                    except Exception:
+                        pass
+                    return False
                 if self._stream is not None:
                     try:
                         self._stream.stop()
@@ -113,6 +131,13 @@ class AudioRecorder:
                 new_stream = sd.InputStream(**kwargs)
                 new_stream.start()
                 with self._lock:
+                    if generation != self._start_generation:
+                        try:
+                            new_stream.stop()
+                            new_stream.close()
+                        except Exception:
+                            pass
+                        return False
                     if self._stream is not None:
                         try:
                             self._stream.stop()
@@ -135,6 +160,9 @@ class AudioRecorder:
         """Stop recording and return the resampled 16kHz 1-D float32 audio array."""
         with self._lock:
             self._recording = False
+            # Invalidate any start() that is still opening its stream so it
+            # discards the stream instead of resuming recording after stop.
+            self._start_generation += 1
             self._level = 0.0
             stream_to_close = self._stream
             self._stream = None

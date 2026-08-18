@@ -58,6 +58,7 @@ class JobV3:
         self.current_scene = 0
         self.available_scenes = 0
         self.planned_scenes = 0
+        self.program: Optional[VideoProgramV3] = None
         self.program_complete = False
         self.export_progress = 0
         self.error: Optional[str] = None
