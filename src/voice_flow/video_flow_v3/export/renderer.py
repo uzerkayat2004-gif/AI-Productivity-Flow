@@ -637,6 +637,7 @@ class V3FrameRenderer:
         ffmpeg_bin = shutil.which("ffmpeg")
 
         if ffmpeg_bin:
+            temp_video = out_mp4_path.with_suffix(".temp.mp4") if has_audio else out_mp4_path
             # Use FFmpeg subprocess streaming rawvideo
             cmd = [
                 ffmpeg_bin,
@@ -647,20 +648,13 @@ class V3FrameRenderer:
                 "-pix_fmt", "rgb24",
                 "-r", str(fps),
                 "-i", "-",
-            ]
-            if has_audio:
-                cmd.extend(["-i", str(master_audio_path), "-c:a", "aac", "-b:a", "192k", "-shortest"])
-            else:
-                cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-c:a", "aac", "-shortest"])
-
-            cmd.extend([
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-preset", "ultrafast",
-                str(out_mp4_path),
-            ])
+                str(temp_video),
+            ]
 
-            log.info("Running FFmpeg export for job %s to %s", job_id, out_mp4_path)
+            log.info("Running FFmpeg export for job %s to %s", job_id, temp_video)
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             try:
@@ -702,6 +696,26 @@ class V3FrameRenderer:
                 if proc.returncode != 0:
                     log.error("FFmpeg export failed with code %d", proc.returncode)
                     self._write_valid_synthetic_mp4(out_mp4_path)
+                elif has_audio and temp_video.exists() and temp_video.stat().st_size > 0:
+                    mux_cmd = [
+                        ffmpeg_bin, "-y",
+                        "-i", str(temp_video),
+                        "-i", str(master_audio_path),
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        "-b:a", "192k",
+                        "-shortest",
+                        str(out_mp4_path),
+                    ]
+                    mux_proc = subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if mux_proc.returncode == 0 and out_mp4_path.exists() and out_mp4_path.stat().st_size > 0:
+                        try: temp_video.unlink()
+                        except Exception: pass
+                    else:
+                        log.warning("Mux step failed, renaming temp video to output.")
+                        if temp_video.exists():
+                            if out_mp4_path.exists(): out_mp4_path.unlink()
+                            temp_video.rename(out_mp4_path)
             except Exception as e:
                 log.error("Error during FFmpeg frame streaming: %s", e)
                 try:

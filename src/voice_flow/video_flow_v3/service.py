@@ -20,6 +20,7 @@ from voice_flow.video_flow_v3.contracts import (
     GenerationStateV3,
     ExportStateV3,
     VideoProgramV3,
+    ArtDirectionGenome,
     ExecutableSceneProgram,
     ExecutableElement2D,
     ExecutableNode3D,
@@ -367,7 +368,7 @@ class VideoFlowV3Service:
         )
 
     def export_job(self, job_id: str, fps: int = 30) -> Dict[str, Any]:
-        """Trigger deterministic frame rendering & MP4 video generation."""
+        """Trigger deterministic frame rendering & MP4 video generation with synchronized audio narration."""
         with self._lock:
             job = self.jobs.get(job_id)
 
@@ -375,8 +376,38 @@ class VideoFlowV3Service:
             job.update_export_status(ExportStateV3.EXPORTING, 10)
 
         try:
-            from voice_flow.video_flow_v3.export.renderer import video_renderer_v3
-            mp4_path = video_renderer_v3.export_job_mp4(job_id=job_id, fps=fps)
+            program_data = project_store_v3.load_json_artifact(job_id, "video_program.json")
+            genome_data = project_store_v3.load_json_artifact(job_id, "art_genome.json")
+            program = job.program if (job and job.program) else None
+            genome = getattr(job, "genome", None) if job else None
+
+            if not program and program_data:
+                program = VideoProgramV3(**program_data) if isinstance(program_data, dict) else program_data
+            if not genome and genome_data:
+                genome = ArtDirectionGenome(**genome_data) if isinstance(genome_data, dict) else genome_data
+
+            export_file = project_store_v3.get_export_path(job_id)
+            master_audio = project_store_v3.get_project_dir(job_id) / "master_narration.mp3"
+
+            from voice_flow.video_flow_v3.manim_engine.renderer import ManimVideoRenderer
+            renderer = ManimVideoRenderer()
+            out_path = renderer.render_video(
+                program=program,
+                genome=genome,
+                output_path=str(export_file),
+                audio_path=str(master_audio) if master_audio.exists() else None,
+                fps=fps,
+            )
+
+            # Also ensure export/video.mp4 has the exact same content for fallback links
+            try:
+                import shutil
+                alt_export = project_store_v3.get_project_dir(job_id) / "export" / "video.mp4"
+                if str(alt_export) != str(export_file) and os.path.exists(out_path):
+                    alt_export.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(out_path, str(alt_export))
+            except Exception:
+                pass
 
             if job:
                 job.update_export_status(ExportStateV3.EXPORTED, 100)
@@ -386,14 +417,28 @@ class VideoFlowV3Service:
                 "success": True,
                 "job_id": job_id,
                 "export_status": ExportStateV3.EXPORTED.value,
-                "file_path": str(mp4_path),
+                "file_path": str(out_path),
                 "download_url": download_url,
             }
         except Exception as exc:
-            log.error("Export for job %s failed: %s", job_id, exc, exc_info=True)
-            if job:
-                job.update_export_status(ExportStateV3.FAILED)
-            raise
+            log.warning(f"ManimVideoRenderer export for {job_id} failed ({exc}), trying fallback renderer...")
+            try:
+                from voice_flow.video_flow_v3.export.renderer import video_renderer_v3
+                mp4_path = video_renderer_v3.export_job_mp4(job_id=job_id, fps=fps)
+                if job:
+                    job.update_export_status(ExportStateV3.EXPORTED, 100)
+                return {
+                    "success": True,
+                    "job_id": job_id,
+                    "export_status": ExportStateV3.EXPORTED.value,
+                    "file_path": str(mp4_path),
+                    "download_url": f"/api/video-flow/v3/video?id={job_id}&download=1",
+                }
+            except Exception as fallback_err:
+                log.error("Export for job %s failed: %s", job_id, fallback_err, exc_info=True)
+                if job:
+                    job.update_export_status(ExportStateV3.FAILED)
+                raise
 
 
 video_flow_v3_service = VideoFlowV3Service()

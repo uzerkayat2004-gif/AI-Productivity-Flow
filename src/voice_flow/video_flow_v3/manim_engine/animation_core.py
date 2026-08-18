@@ -747,13 +747,22 @@ class SceneComposer:
                 "-i", audio_path,
                 "-c:v", "copy",
                 "-c:a", "aac",
+                "-b:a", "192k",
                 "-shortest",
                 output_path
             ]
-            subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if os.path.exists(temp_video):
-                try: os.remove(temp_video)
-                except Exception: pass
+            mux_res = subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if mux_res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                if os.path.exists(temp_video):
+                    try: os.remove(temp_video)
+                    except Exception: pass
+            else:
+                log.warning("Audio muxing failed for %s, falling back to temp video.", output_path)
+                if os.path.exists(temp_video):
+                    if os.path.exists(output_path):
+                        try: os.remove(output_path)
+                        except Exception: pass
+                    os.rename(temp_video, output_path)
 
         log.info(f"Video Flow V3 encoded {len(scenes)} scenes to {output_path}")
         return output_path
