@@ -9,6 +9,7 @@ import json
 import math
 import mimetypes
 import os
+import shutil
 import sqlite3
 import sys
 import threading
@@ -242,7 +243,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             job_id = (params.get("id", [""])[0] or "").strip()
             if not job_id and path.startswith("/api/video-flow/v3/video/"):
                 parts = [p for p in path.split("/") if p]
-                if len(parts) >= 4:
+                if len(parts) >= 5:
+                    job_id = parts[4].replace("video.mp4", "").replace(".mp4", "").strip()
+                elif len(parts) >= 4:
                     job_id = parts[3].replace("video.mp4", "").replace(".mp4", "").strip()
 
             from voice_flow.video_flow_v3.storage.project_store import project_store_v3

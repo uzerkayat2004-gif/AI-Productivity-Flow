@@ -755,5 +755,5 @@ class SceneComposer:
                 try: os.remove(temp_video)
                 except Exception: pass
 
-        log.info(f"Video Flow V3 encoded {len(all_frames)} frames to {output_path}")
+        log.info(f"Video Flow V3 encoded {len(scenes)} scenes to {output_path}")
         return output_path
