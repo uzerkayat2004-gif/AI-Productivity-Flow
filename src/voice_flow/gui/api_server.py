@@ -428,9 +428,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     video = {
                         "id": job.job_id,
                         "title": job.title,
-                        "status": job.status.value,
-                        "stage": job.stage,
-                        "progress": job.progress,
+                        "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+                        "stage": getattr(job, "stage_message", getattr(job, "stage", "working")),
+                        "progress": getattr(job, "progress", 0),
                         "playable": job.playable,
                         "view_url": f"/api/video-flow/v3/video?id={job.job_id}",
                         "export_status": getattr(job, "export_status", "not_requested").value if hasattr(getattr(job, "export_status", None), "value") else str(getattr(job, "export_status", "not_requested")),
