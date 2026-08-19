@@ -57,11 +57,11 @@ def test_audio_and_video_active_states_use_product_labels() -> None:
     assert any("Video Flow" in text for text in canvas.texts)
 
 
-def test_working_state_does_not_expose_error_copy_or_decorative_lines() -> None:
+def test_error_state_renders_message_without_decorative_lines() -> None:
     bar, canvas = _bar_with_canvas()
     bar.error_message = "Dangerous provider failure"
     bar._draw_error(180, 32)
-    assert canvas.texts == ["Working"]
+    assert canvas.texts == ["Dangerous provider failure"]
     assert canvas.lines == []
 
 

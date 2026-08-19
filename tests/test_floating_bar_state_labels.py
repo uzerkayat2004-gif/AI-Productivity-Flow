@@ -81,7 +81,7 @@ def test_active_flow_states_use_the_requested_labels() -> None:
         assert expected_label in labels
 
 
-def test_error_bar_uses_neutral_working_copy_without_decorative_lines() -> None:
+def test_error_bar_renders_message_without_decorative_lines() -> None:
     bar = FloatingOverlayBar()
     bar.state = "ERROR"
     bar.error_message = "Danger: microphone hardware failed to open"
@@ -89,6 +89,6 @@ def test_error_bar_uses_neutral_working_copy_without_decorative_lines() -> None:
     canvas = _render(bar)
 
     text_calls = _text_calls(canvas)
-    assert [call["text"] for call in text_calls] == ["Working"]
+    assert [call["text"] for call in text_calls] == ["Danger: microphone hardware failed to open"]
     assert text_calls[0]["fill"] == bar.TEXT_WHITE
     assert not any(name == "create_line" for name, _args, _kwargs in canvas.calls)
