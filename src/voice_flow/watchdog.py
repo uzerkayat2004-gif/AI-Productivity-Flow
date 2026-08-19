@@ -84,14 +84,17 @@ class WatchdogSupervisor:
         poll_interval: float = 3.0,
         max_rapid_crashes: int = 5,
         crash_window_seconds: float = 60.0,
+        startup_grace_seconds: float = 60.0,
     ) -> None:
         self.poll_interval = poll_interval
         self.max_rapid_crashes = max_rapid_crashes
         self.crash_window_seconds = crash_window_seconds
+        self.startup_grace_seconds = startup_grace_seconds
         self.recent_crashes: collections.deque[float] = collections.deque()
         self.child_process: subprocess.Popen | None = None
         self.running = False
         self._unhealthy_strikes = 0
+        self._child_started_at: float | None = None
         self._lock_file = data_dir() / "watchdog.lock"
         self._shutdown_flag = data_dir() / "watchdog_shutdown.flag"
 
@@ -198,6 +201,11 @@ class WatchdogSupervisor:
                 close_fds=True,
             )
             log.info("Voice Flow started with PID %d", self.child_process.pid)
+            # A fresh process needs cold-start time (imports alone take ~10s)
+            # before the API port can bind; also clear strikes left over from a
+            # previous process so it is never killed on its first probe.
+            self._child_started_at = time.time()
+            self._unhealthy_strikes = 0
             return True
         except Exception as e:
             log.error("Failed to spawn Voice Flow: %s", e, exc_info=True)
@@ -235,6 +243,8 @@ class WatchdogSupervisor:
             # The process is alive, but a main thread deadlock (Tk/COM) would
             # leave it hung forever. Require the REST API to answer; two
             # consecutive probe failures count as unhealthy.
+            if self._child_started_at is not None and time.time() - self._child_started_at < self.startup_grace_seconds:
+                return True
             if runtime_is_compatible(port=8991, timeout=0.5):
                 self._unhealthy_strikes = 0
                 return True
