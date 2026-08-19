@@ -162,7 +162,8 @@ class AudioRecorder:
             self._recording = False
             # Invalidate any start() that is still opening its stream so it
             # discards the stream instead of resuming recording after stop.
-            self._start_generation += 1
+            # getattr guard: stop() must also work on bare instances.
+            self._start_generation = getattr(self, "_start_generation", 0) + 1
             self._level = 0.0
             stream_to_close = self._stream
             self._stream = None
