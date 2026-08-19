@@ -251,6 +251,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.video_flow_v3.storage.project_store import project_store_v3
             mp4_candidates = [
                 project_store_v3.get_export_path(job_id),
+                project_store_v3.get_project_dir(job_id) / "export" / f"export_{job_id}.mp4",
                 project_store_v3.get_project_dir(job_id) / "export" / "video.mp4",
                 project_store_v3.get_project_dir(job_id) / "video.mp4",
             ]
@@ -258,20 +259,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if not video_file:
                 self.send_error(404, "Rendered video file not found")
                 return
-            size = video_file.stat().st_size
             download_mode = (params.get("download", ["0"])[0] == "1")
-            self.send_response(200)
-            self.send_header("Content-Type", "video/mp4")
-            self.send_header("Content-Length", str(size))
-            self.send_header("Accept-Ranges", "bytes")
-            if download_mode:
-                self.send_header("Content-Disposition", f'attachment; filename="video_{job_id}.mp4"')
-            else:
-                self.send_header("Content-Disposition", f'inline; filename="video_{job_id}.mp4"')
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            with open(video_file, "rb") as vf:
-                shutil.copyfileobj(vf, self.wfile)
+            self.send_video_file(job_id, download=download_mode)
         elif path == "/api/video-flow/v3/export":
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
@@ -401,7 +390,68 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             else:
                 self.send_json_response({"error": "Missing provider"}, status=400)
         elif path == "/api/video-flow/history":
-            self.send_json_response({"videos": video_flow_service.store.list_videos()})
+            try:
+                all_videos = list(video_flow_service.store.list_videos())
+            except Exception as e:
+                print(f"[API SERVER] store.list_videos error: {e}")
+                all_videos = []
+
+            try:
+                from voice_flow.video_flow_v3.storage.project_store import project_store_v3, V3_PROJECTS_ROOT
+                if V3_PROJECTS_ROOT.exists():
+                    v3_dirs = [d for d in V3_PROJECTS_ROOT.iterdir() if d.is_dir() and d.name.startswith("v3_")]
+                    v3_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+                    for proj_dir in v3_dirs[:40]:
+                        job_id = proj_dir.name
+                        if any(isinstance(v, dict) and v.get("id") == job_id for v in all_videos):
+                            continue
+                        job_data = project_store_v3.load_json_artifact(job_id, "job_status.json") or {}
+                        prog_data = project_store_v3.load_json_artifact(job_id, "video_program.json") or {}
+                        export_path = project_store_v3.get_export_path(job_id)
+                        alt_export = proj_dir / "export" / f"export_{job_id}.mp4"
+                        alt_export2 = proj_dir / "export" / "video.mp4"
+                        root_video = proj_dir / "video.mp4"
+                        has_video = (export_path.exists() and export_path.stat().st_size > 0) or \
+                                    (alt_export.exists() and alt_export.stat().st_size > 0) or \
+                                    (alt_export2.exists() and alt_export2.stat().st_size > 0) or \
+                                    (root_video.exists() and root_video.stat().st_size > 0)
+
+                        if job_data or prog_data or has_video:
+                            created_ts = job_data.get("created_at") or proj_dir.stat().st_mtime
+                            if isinstance(created_ts, (int, float)):
+                                import datetime
+                                try:
+                                    created_str = datetime.datetime.fromtimestamp(created_ts, tz=datetime.timezone.utc).isoformat()
+                                except Exception:
+                                    created_str = str(created_ts)
+                            else:
+                                created_str = str(created_ts)
+
+                            all_videos.append({
+                                "id": job_id,
+                                "title": str(job_data.get("title") or prog_data.get("title") or f"Video {job_id[:8]}"),
+                                "status": str(job_data.get("status", "complete")),
+                                "stage": str(job_data.get("stage", "Complete")),
+                                "progress": int(job_data.get("progress", 100)),
+                                "playable": bool(job_data.get("playable", True) or has_video),
+                                "view_url": f"/api/video-flow/v3/video?id={job_id}",
+                                "export_status": "exported" if has_video else str(job_data.get("export_status", "not_requested")),
+                                "download_url": f"/api/video-flow/v3/video?id={job_id}&download=1",
+                                "created_at": created_str,
+                            })
+            except Exception as hist_err:
+                print(f"[API SERVER] History aggregation error: {hist_err}")
+
+            def _video_sort_key(x):
+                if not isinstance(x, dict):
+                    return ""
+                return str(x.get("created_at") or "")
+
+            try:
+                all_videos.sort(key=_video_sort_key, reverse=True)
+            except Exception:
+                pass
+            self.send_json_response({"videos": all_videos})
         elif path == "/api/video-flow/catalog":
             self.send_json_response(video_flow_service.catalog())
         elif path == "/api/video-flow/providers":
@@ -436,12 +486,49 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         "export_status": getattr(job, "export_status", "not_requested").value if hasattr(getattr(job, "export_status", None), "value") else str(getattr(job, "export_status", "not_requested")),
                         "download_url": f"/api/video-flow/v3/video?id={job.job_id}&download=1",
                     }
+                else:
+                    # Check persistent V3 disk store
+                    from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+                    job_data = project_store_v3.load_json_artifact(video_id, "job_status.json") or {}
+                    prog_data = project_store_v3.load_json_artifact(video_id, "video_program.json") or {}
+                    export_path = project_store_v3.get_export_path(video_id)
+                    alt_export = project_store_v3.get_project_dir(video_id) / "export" / f"export_{video_id}.mp4"
+                    alt_export2 = project_store_v3.get_project_dir(video_id) / "export" / "video.mp4"
+                    root_video = project_store_v3.get_project_dir(video_id) / "video.mp4"
+                    has_video = (export_path.exists() and export_path.stat().st_size > 0) or \
+                                (alt_export.exists() and alt_export.stat().st_size > 0) or \
+                                (alt_export2.exists() and alt_export2.stat().st_size > 0) or \
+                                (root_video.exists() and root_video.stat().st_size > 0)
+
+                    if job_data or prog_data or has_video:
+                        video = {
+                            "id": job_data.get("id", video_id),
+                            "title": job_data.get("title") or prog_data.get("title", "Video Flow"),
+                            "status": job_data.get("status", "complete"),
+                            "stage": job_data.get("stage", "Complete"),
+                            "progress": job_data.get("progress", 100),
+                            "playable": bool(job_data.get("playable", True) or has_video),
+                            "view_url": f"/api/video-flow/v3/video?id={video_id}",
+                            "export_status": "exported" if has_video else job_data.get("export_status", "not_requested"),
+                            "download_url": f"/api/video-flow/v3/video?id={video_id}&download=1",
+                        }
             self.send_json_response({"video": video}, status=200 if video else 404)
         elif path.startswith("/api/video-flow/videos/file"):
             params = urllib.parse.parse_qs(parsed.query)
             video_id = params.get("id", [""])[0]
             download = params.get("download", ["0"])[0] == "1"
-            self.send_video_file(video_id, download=download)
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            mp4_candidates = [
+                project_store_v3.get_export_path(video_id),
+                project_store_v3.get_project_dir(video_id) / "export" / f"export_{video_id}.mp4",
+                project_store_v3.get_project_dir(video_id) / "export" / "video.mp4",
+                project_store_v3.get_project_dir(video_id) / "video.mp4",
+            ]
+            video_file = next((p for p in mp4_candidates if p.exists() and p.stat().st_size > 0), None)
+            if video_file:
+                self._stream_file_with_range(video_file, "video/mp4", f"video_{video_id}.mp4", download=download)
+            else:
+                self.send_error(404, "Video file not found")
         elif path == "/api/styles/get":
             personal = storage.get_setting("style_personal", "casual")
             work = storage.get_setting("style_work", "casual")
@@ -1488,6 +1575,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
     def send_video_file(self, video_id: str, *, download: bool = False) -> None:
         path = video_flow_service.file_for(video_id)
+        if not path:
+            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            mp4_candidates = [
+                project_store_v3.get_export_path(video_id),
+                project_store_v3.get_project_dir(video_id) / "export" / f"export_{video_id}.mp4",
+                project_store_v3.get_project_dir(video_id) / "export" / "video.mp4",
+                project_store_v3.get_project_dir(video_id) / "video.mp4",
+            ]
+            path = next((p for p in mp4_candidates if p.exists() and p.stat().st_size > 0), None)
         if not path:
             self.send_error(404, "Video not found")
             return

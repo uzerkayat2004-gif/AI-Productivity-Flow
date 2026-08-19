@@ -51,68 +51,99 @@
     const player = document.getElementById("player");
     const container = document.getElementById("player-container");
     let timer = null;
-    let v3PlayerMounted = false;
+    let fallbackAttempted = false;
+
+    // Immediately set video source if ID is present so video can buffer while polling status
+    if (videoId) {
+      const directUrl = `/api/video-flow/v3/video/${encodeURIComponent(videoId)}/video.mp4`;
+      player.src = directUrl;
+      player.load();
+    }
+
+    player.addEventListener("loadeddata", () => {
+      document.getElementById("status").classList.add("hidden");
+    });
+
+    player.addEventListener("play", () => {
+      document.getElementById("status").classList.add("hidden");
+    });
 
     async function refresh() {
+      if (!videoId) {
+        document.getElementById("stage").textContent = "No video ID provided in URL.";
+        return;
+      }
+
       try {
         const response = await fetch("/api/video-flow/jobs/status?id=" + encodeURIComponent(videoId));
         const data = await response.json();
-        if (!response.ok || !data.video) throw new Error("Video not found.");
-        const video = data.video;
-        document.getElementById("title").textContent = video.title || "Video Flow";
-        document.getElementById("stage").textContent = video.stage || video.status;
-        document.getElementById("footer-stage").textContent = video.stage || video.status;
-        document.getElementById("percent").textContent = (video.progress || 0) + "%";
-        document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
+        
+        if (response.ok && data.video) {
+          const video = data.video;
+          document.getElementById("title").textContent = video.title || "Video Flow";
+          document.getElementById("stage").textContent = video.stage || video.status;
+          document.getElementById("footer-stage").textContent = video.stage || video.status;
+          document.getElementById("percent").textContent = (video.progress || 0) + "%";
+          document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
 
-        const isReady = Boolean(
-          video.playable ||
-          video.status === "ready" ||
-          video.status === "complete" ||
-          video.status === "completed" ||
-          Number(video.progress || 0) >= 100 ||
-          (video.stage && String(video.stage).toLowerCase().includes("complete"))
-        );
+          const isReady = Boolean(
+            video.playable ||
+            video.status === "ready" ||
+            video.status === "complete" ||
+            video.status === "completed" ||
+            Number(video.progress || 0) >= 100 ||
+            (video.stage && String(video.stage).toLowerCase().includes("complete"))
+          );
 
-        if (isReady) {
-          document.getElementById("status").classList.add("hidden");
+          if (isReady) {
+            document.getElementById("status").classList.add("hidden");
 
-          const targetUrl = `/api/video-flow/v3/video/${encodeURIComponent(videoId)}/video.mp4`;
-          if (!player.src.endsWith(targetUrl)) {
-            player.src = targetUrl;
-            player.play().catch(() => {});
-          }
+            const targetUrl = `/api/video-flow/v3/video/${encodeURIComponent(videoId)}/video.mp4`;
+            if (!player.src.endsWith(targetUrl) && !player.src.includes(encodeURIComponent(videoId))) {
+              player.src = targetUrl;
+            }
+            if (player.paused && player.currentTime === 0) {
+              player.play().catch(() => {});
+            }
 
-          if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
-              (video.export_status === "exported" || video.export_status === "not_requested")) {
+            if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
+                (video.export_status === "exported" || video.export_status === "not_requested")) {
+              clearInterval(timer);
+            }
+
+            const dl = document.getElementById("download");
+            if (video.download_url) {
+              dl.textContent = "↓ Download MP4";
+              dl.href = video.download_url;
+            }
+          } else if (video.status === "failed") {
             clearInterval(timer);
+            document.querySelector(".spinner").style.display = "none";
+            document.getElementById("status-title").textContent = "Generation failed";
+            document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
           }
-          const dl = document.getElementById("download");
-          if (video.export_status === "exported" && video.download_url) {
-            dl.textContent = "↓ Download MP4";
-            dl.href = video.download_url;
-          } else if (video.export_status === "exporting") {
-            dl.textContent = `Exporting ${video.export_progress || 0}%`;
-          } else {
-            dl.textContent = "Export MP4";
-            dl.href = "#";
-            dl.onclick = (e) => {
-              e.preventDefault();
-              fetch("/api/video-flow/v3/export", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: videoId }),
-              }).catch(() => {});
-            };
+        } else {
+          // If status endpoint returned 404, check if the video file itself is playable directly
+          if (!fallbackAttempted) {
+            fallbackAttempted = true;
+            const targetUrl = `/api/video-flow/v3/video?id=${encodeURIComponent(videoId)}`;
+            player.src = targetUrl;
+            player.play().then(() => {
+              document.getElementById("status").classList.add("hidden");
+              clearInterval(timer);
+            }).catch(() => {});
           }
-        } else if (video.status === "failed") {
-          clearInterval(timer);
-          document.querySelector(".spinner").style.display = "none";
-          document.getElementById("status-title").textContent = "Generation failed";
-          document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
         }
       } catch (error) {
-        document.getElementById("stage").textContent = error.message || "Waiting for Voice Flow…";
+        if (!fallbackAttempted) {
+          fallbackAttempted = true;
+          const targetUrl = `/api/video-flow/v3/video?id=${encodeURIComponent(videoId)}`;
+          player.src = targetUrl;
+          player.play().then(() => {
+            document.getElementById("status").classList.add("hidden");
+            clearInterval(timer);
+          }).catch(() => {});
+        }
       }
     }
 
@@ -123,7 +154,7 @@
     }
 
     refresh();
-    timer = setInterval(refresh, 1200);
+    timer = setInterval(refresh, 1500);
   </script>
 </body>
 </html>
