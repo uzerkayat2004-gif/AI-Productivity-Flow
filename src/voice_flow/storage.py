@@ -810,23 +810,23 @@ class StorageEngine:
                     break
 
             # Longest streak ever achieved (walk the unique dictation days ascending;
-                # any gap breaks the chain).
-                longest_streak = 0
-                run = 0
-                prev_date = None
-                for d_str in sorted(dates):
-                    try:
-                        d_obj = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
-                    except Exception:
-                        continue
-                    if prev_date is None or d_obj == prev_date + datetime.timedelta(days=1):
-                        run += 1
-                    else:
-                        run = 1
-                    longest_streak = max(longest_streak, run)
-                    prev_date = d_obj
+            # any gap breaks the chain).
+            longest_streak = 0
+            run = 0
+            prev_date = None
+            for d_str in sorted(dates):
+                try:
+                    d_obj = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+                except Exception:
+                    continue
+                if prev_date is None or d_obj == prev_date + datetime.timedelta(days=1):
+                    run += 1
+                else:
+                    run = 1
+                longest_streak = max(longest_streak, run)
+                prev_date = d_obj
 
-                # Hourly Time-of-Day Velocity Buckets
+            # Hourly Time-of-Day Velocity Buckets
             cursor = conn.execute(
                 f"""
                 SELECT
