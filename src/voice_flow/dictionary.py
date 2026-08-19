@@ -205,7 +205,8 @@ class DictionaryEngine:
         self._prompt_revision: object = None
         # The dictation thread and the API-server thread can reload concurrently;
         # guard the rebuild so readers never observe a half-rebuilt state.
-        self._reload_lock = threading.Lock()
+        # RLock: get_initial_prompt() re-enters _ensure_loaded() while holding it.
+        self._reload_lock = threading.RLock()
         self._ensure_loaded()
 
     def mark_dirty(self) -> None:
