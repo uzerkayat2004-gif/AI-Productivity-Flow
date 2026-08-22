@@ -1,4 +1,5 @@
 # FILES_CHANGED — every file touched for this upgrade
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 Root: `C:\Users\Asus\.gemini\antigravity\scratch\voice-flow` (the running
 install). Recovery point: `video-flow-visual-upgrade/engine-pre-upgrade-backup/`

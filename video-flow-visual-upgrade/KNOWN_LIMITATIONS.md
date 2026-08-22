@@ -1,4 +1,5 @@
 # KNOWN_LIMITATIONS — remaining weaknesses
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 1. **Treatment coverage vs. concept fit** — the director picks from 15
    treatments, but 3D usage depends on the LLM's choice; two identical topics

@@ -13,5 +13,4 @@ The replacement engine lives in `src/voice_flow/video_flow_engine/`
 `test_video_flow_bridge*.py`, `test_code2video_runner.py`,
 `test_narova_runner.py`, and `test_video_flow_process_manager.py`.
 
-Reference copies of the v5 modules remain in the pristine GitHub clone:
-`C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow`.
+The v5 modules were removed when the Code2Video-to-Narova engine replaced them; git history retains them.

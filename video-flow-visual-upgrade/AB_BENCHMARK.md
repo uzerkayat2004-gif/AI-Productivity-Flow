@@ -1,4 +1,5 @@
 # AB_BENCHMARK — same topic, three systems (mission §39/§40)
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 Topic for A/B/C: **"Why is the sky blue?"**
 

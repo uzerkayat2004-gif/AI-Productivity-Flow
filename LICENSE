@@ -202,13 +202,11 @@
 
 ---
 
-### Third-Party Licenses & Dependencies Notice
+### Third-Party Components
 
-This repository links to and utilizes open-source and third-party libraries that remain subject to their respective licenses:
-
-- **Remotion** (`video_flow_renderer`): Distributed under the Remotion Company License (free for individuals and companies with under $500K annual revenue; see https://remotion.dev/license for commercial licensing terms).
-- **Faster-Whisper / CTranslate2**: MIT License / Apache License 2.0.
-- **SoundDevice / PortAudio**: MIT License.
-- **PyWebView**: BSD 3-Clause License.
-- **PyAutoGUI / PyPerperclip / Pynput**: BSD / MIT / LGPL Licenses.
-- **React / React-DOM / TypeScript**: MIT / Apache 2.0 Licenses.
+AI Productivity Flow and its Windows installer distribute third-party
+components (including MIT, Apache-2.0, BSD, LGPL-3.0, GPL-3.0, OFL and
+Microsoft-licensed items). The authoritative, version-pinned inventory and the
+required license texts and notices ship in `THIRD_PARTY_NOTICES.txt` (and, in
+installed builds, in `runtime/THIRD_PARTY_NOTICES.txt` alongside each
+component's license text). Nothing in this file limits those licenses.

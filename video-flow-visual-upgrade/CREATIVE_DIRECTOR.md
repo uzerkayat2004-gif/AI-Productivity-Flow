@@ -1,4 +1,5 @@
 # CREATIVE_DIRECTOR — architecture and contracts
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 `src/voice_flow/video_flow_engine/creative_director.py` (new)
 

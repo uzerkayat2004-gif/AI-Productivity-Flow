@@ -1,4 +1,5 @@
 # PERFORMANCE — resource measurements (ordinary Windows desktop)
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 ## End-to-end generation (through the real backend, 127.0.0.1:8991)
 

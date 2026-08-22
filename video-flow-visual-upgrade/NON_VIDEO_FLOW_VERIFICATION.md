@@ -1,4 +1,5 @@
 # NON_VIDEO_FLOW_VERIFICATION — proof unrelated features were not modified
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 ## Method
 

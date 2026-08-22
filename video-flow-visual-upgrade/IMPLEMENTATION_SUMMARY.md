@@ -1,4 +1,5 @@
 # IMPLEMENTATION_SUMMARY — Video Flow Visual Upgrade
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 Date: 2026-08-22 · Scope: Video Flow visual-generation layer only (mission §1).
 

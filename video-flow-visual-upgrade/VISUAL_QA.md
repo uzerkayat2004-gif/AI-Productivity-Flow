@@ -1,4 +1,5 @@
 # VISUAL_QA — quality checks
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 Tool: `visual_qa.py` (this directory). Deterministic, ffmpeg/PIL-based.
 

@@ -1,4 +1,5 @@
 # NAROVA_FULL_FIDELITY_AUDIT — what our old integration was missing
+> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 Internal report required by mission §8, based on inspecting the vendored
 Narova source (`third_party/narova/tool/src/*`), its showcase/examples, and the

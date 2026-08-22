@@ -1,210 +1,184 @@
-# 🌊 Flow — Open-Source Multimodal Information Transformation
+<p align="center">
+  <img src="docs/assets/ai-productivity-flow-hero.png"
+       alt="AI Productivity Flow — Voice Flow, Audio Flow and Video Flow"
+       width="100%">
+</p>
 
-> **Zero-friction information transformation across Speech, Audio, and Video directly from your desktop workflow.**
+# AI Productivity Flow
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows_10_%2F_11-blue.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-47%20Passed%20(100%25)-success.svg)]()
+**Speak. Listen. Visualize. Without leaving your workflow.**
 
----
+> **Windows Beta — ready to use and actively improving.**
+>
+> Speech recognition runs locally; AI features and online voices use internet
+> services you enable — see [Privacy & BYOK](#privacy--byok).
 
-## 💡 What is Flow?
+AI Productivity Flow is a Windows desktop AI productivity app that turns speech into polished text, selected content into natural audio, and text or documents into educational visual explainer videos — all triggered from wherever you're already working.
 
-**Flow** is a native desktop productivity platform engineered around a simple, powerful philosophy:
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D4" alt="Windows 10/11 x64">
+  <img src="https://img.shields.io/badge/status-Windows%20Beta-orange" alt="Windows Beta">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0">
+</p>
 
-> **You should never need to open the main application to receive value.**
+```
+                          AI PRODUCTIVITY FLOW
 
-Whether you are writing code in VS Code, researching papers in Chrome, analyzing data in Excel, or chatting in Slack, Flow sits silently in the background. With a single gesture (middle mouse click, hotkey, or text highlight), Flow transforms information instantly:
+        ┌────────────────────┬────────────────────┬────────────────────┐
+        │                    │                    │                    │
+   🎙 Voice Flow        🔊 Audio Flow        🎬 Video Flow
+        │                    │                    │
+  Speech → Text          Text → Audio        Text → Visual Video
+        │                    │                    │
+   Polished text        Spoken content      Visual explanation
+        │                    │                    │
+        └──────────────── system-wide, across your apps ───────────────┘
 
-```text
-User selects text anywhere (Browser / IDE / Document)
-                        ↓
-                 Invoke Flow
-         _______________|_______________
-        |               |               |
-   Voice Flow      Audio Flow      Video Flow
- (Speech → Text) (Text → Audio)  (Text → Video)
-        ↓               ↓               ↓
-  Direct Paste    Spoken Audio   Visual Explainer
+     Browser · IDE · documents · email · chat · research · any app
 ```
 
----
+## Download for Windows
 
-## 🌟 The Three Pillars of Flow
+> **Beta:** AI Productivity Flow is currently available for **Windows 10/11 x64**.
+> The app is usable now and actively improving — expect continued fixes and refinement.
 
-### 1. 🎙️ Voice Flow (Speech → Text & Intelligent Dictation)
-* **Zero-Latency Triggers:** Middle Mouse Button (scroll wheel click) or `Ctrl + Win` / `Win + Ctrl` hotkey.
-* **Push-to-Talk & Toggle Tap:** Hold (>0.30s) to speak and release to paste, or quick-tap (<0.30s) to toggle continuous dictation.
-* **Active Window Style Engine:** Automatically senses the foreground application window and adapts formatting (e.g., Markdown/snake_case in VS Code, professional tone in Slack/Email, natural phrasing in browsers).
-* **Local Faster-Whisper Engine:** Local offline transcription with dictionary prompt-biasing and dual-pass VAD fallback.
-* **Intelligent Auto-Refinement:** AI-powered grammar and disfluency cleanup with strict code-symbol and keyword preservation.
-* **Active Window Text Injection:** Direct Win32 clipboard injection with automatic modifier key state clearing and terminal (`Shift+Insert`) support.
+Get the latest Windows Beta from **[GitHub Releases](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases)**:
 
-### 2. 🎧 Audio Flow (Selected Text → Spoken Speech & Screen Reader)
-* **Screen Highlight Reading:** Highlight text anywhere to immediately hear it read aloud with synchronized yellow tracking.
-* **Interactive Floating Player:** Waveform scrub bar, speed adjustment (0.8x–2.0x), play/pause, and quick stop.
-* **Multi-Provider TTS:** Free Microsoft Edge Neural voices, Google Cloud TTS, Gemini AI Audio, Azure Speech, ElevenLabs, Deepgram Aura, and offline Windows SAPI5.
+1. Download `AI-Productivity-Flow-Setup-x64.exe`
+2. Run the installer
+3. Launch AI Productivity Flow
+4. Complete the built-in onboarding
 
-### 3. 🎬 Video Flow (Selected Text → Source-Grounded Visual Explanation)
-* **Source-Grounded Explanation:** Converts dense text, code, or documents into structured, animated 16:9 explainer videos.
-* **Video Flow Brain:** Analyzes evidence claims, extracts key entities, designs pedagogical scene structures, and generates synchronized narration scripts.
-* **Hybrid Rendering Engine:** Combines deterministic 2D motion graphics, 3D WebGL scenes, Remotion animations, and generative video clips with guaranteed zero-cost fallbacks.
+No manual Python, Node.js, FFmpeg, npm, Git, or Whisper setup is required — required
+runtime and rendering components are bundled or prepared automatically during
+installation.
 
----
+### What works without an AI provider
 
-## 🚦 Project Status
+- ✅ **Voice Flow dictation** with local transcription and deterministic cleanup
+- ✅ **Audio Flow** full reading with the free Edge neural voices
+- ✅ History, insights, dictionary, and settings
 
-| Subsystem | Component | Status | Description |
-| :--- | :--- | :---: | :--- |
-| **Voice Flow** | Core Speech-to-Text | ✅ Implemented | 64-bit Win32 hook, Faster-Whisper, local prompt-biasing |
-| **Voice Flow** | Active Window Style Engine | ✅ Implemented | Title/class detection, category presets (Formal/Casual/Code) |
-| **Voice Flow** | Auto-Startup & Watchdog | ✅ Implemented | Silent Windows startup, process health supervisor |
-| **Audio Flow** | Text-to-Speech Engine | ✅ Implemented | Edge Neural, Google, ElevenLabs, Deepgram, SAPI5 |
-| **Audio Flow** | Highlight Tracker Widget | ✅ Implemented | Synchronized text highlight & floating audio controls |
-| **Video Flow** | Video Flow Brain | ✅ Implemented | Evidence grounding, scene planning, diversity validation |
-| **Video Flow** | Deterministic 2D/3D Renderer | ✅ Implemented | React/Remotion motion scenes, Canvas/SVG animations |
-| **Video Flow** | Hybrid Render Router | ✅ Implemented | Provider-neutral generative video routing & fallback contracts |
-| **Video Flow** | Benchmark Suite | ✅ Implemented | 12 domain benchmark fixtures, multi-metric scoring harness |
-| **Video Flow** | Generative Video Provider | 🚧 In Progress | Integration seams ready; testing with mock provider |
-| **Platform** | Insights Telemetry | ✅ Implemented | 28-day activity heatmap, speedometer gauge, app breakdown |
-| **Platform** | Custom Dictionary & Snippets | ✅ Implemented | Trigger expansion (`myemail -> me@company.com`), tag filtering |
-| **Platform** | Multi-Key Connection Hub | ✅ Implemented | BYOK multi-provider manager with load balancing |
+Connecting your own AI provider adds AI polishing, spoken summaries, premium
+voices, and **Video Flow generation** (educational planning requires a connected
+model).
 
----
+### System requirements
 
-## 🏗️ Architectural Philosophy: Hybrid Rendering
+- Windows 10 / 11 x64
+- Internet connection (for AI providers, online voices, and first-run setup)
+- A microphone for Voice Flow
+- Optional: your own AI provider API key for AI polishing and Video Flow planning
 
-Video Flow is architected as a **hybrid rendering pipeline**. It avoids black-box text-to-video APIs in favor of structured comprehension:
+## What AI Productivity Flow Does
 
-```text
-Selected Content / Source Text
-              ↓
-   Evidence & Source Grounding (Claims, Entities, Spans)
-              ↓
-       Video Flow Brain (Pedagogical Scene Planning)
-              ↓
-  Scene Programs & Visual Direction (Motion, Layout, Timing)
-              ↓
-      Hybrid Render Router
-   ↙           ↓            ↘
-Procedural   WebGL/3D   Generative Video (Veo / Future)
- Remotion                 [Optional Enhancement]
-    ↓          ↓             ↓
-   ───────────────────────────
-              ↓
-    Narration & Audio Sync
-              ↓
-      Automated QA & Repair
-              ↓
-     Final Explainer Video
-```
+### 🎙 Voice Flow — speech → polished text
 
-### 🆓 Free-First Guarantee
-Flow is built so that **no user is ever blocked by a paywall**.
-- When generative video APIs are unavailable or unconfigured, the **Hybrid Render Router** automatically falls back to deterministic procedural Remotion and 2D/3D Canvas rendering.
-- You never need a paid API key or cloud billing to generate high-quality explanation videos.
+Hold the **middle mouse button** (or **Ctrl + Win**) anywhere in Windows, speak, and
+release. Your words become clean, polished text and are inserted directly into the
+app you were using.
 
----
+- **Local speech recognition** — transcription runs on your machine with the bundled
+  Whisper speech model; dictation works without sending audio anywhere.
+- **Optional AI polishing** — connect your own AI provider and dictations are
+  polished for grammar and clarity, with style awareness per application. Without a
+  provider, a deterministic cleanup keeps text tidy.
+- **Personal dictionary & corrections** — teach it the names, jargon, and expansions
+  you use; longer triggers win and code spans are never rewritten.
+- **History & insights** — words, WPM, time saved, streaks, and per-app breakdowns.
 
-## 📦 Installation & Setup
+### 🔊 Audio Flow — selected content → natural audio
 
-### Prerequisites
-* **Operating System:** Windows 10 or 11 (64-bit)
-* **Python:** Version 3.10+ (tested on Python 3.14)
-* **Node.js:** Version 18+ (for Remotion video renderer)
+Select text in any application and a small player appears at your cursor. Listen to
+the full content, or a spoken **summary** (quick / standard / detailed depth) while
+you keep working.
 
-### Quick Setup
+- **Free Edge neural voices by default**, plus premium voices from providers you
+  connect (ElevenLabs, OpenAI, Gemini, Google, Deepgram, NVIDIA).
+- Play / pause / stop, adjustable reading speed.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/uzerkayat2004-gif/Voice-Flow.git
-   cd Voice-Flow
-   ```
+### 🎬 Video Flow — text or documents → visual explainer videos
 
-2. **Install Python dependencies:**
-   ```bash
-   pip install -e .
-   ```
+Select text, paste content, or drop in a document (TXT, Markdown, PDF, DOCX, HTML
+and more). Video Flow plans an educational breakdown, designs a varied visual
+sequence, narrates it, and renders a finished **1080p MP4** with captions —
+playable in the built-in player.
 
-3. **Install Video Flow Renderer dependencies:**
-   ```bash
-   cd video_flow_renderer
-   npm install
-   cd ..
-   ```
+- **Educational planning** through a model you connect (explicit consent before
+  anything leaves your machine).
+- **Creative direction with visual variety** — titles, animated diagrams, flows,
+  timelines, counters, wave demos, spatial 3D scenes, recap grids; no two-scene
+  monotony.
+- **Selectable narration voice** — same voice catalog as Audio Flow, chosen
+  independently for videos (clear neural voice by default).
+- Progress tracking, one-click cancellation, and full history.
 
-4. **One-Click Desktop & Auto-Startup Installation:**
-   ```bat
-   setup_desktop_app.bat
-   ```
-   *Registers Flow in Windows Startup and creates Desktop shortcuts for silent background startup on boot.*
+## How It Works Across Your Desktop
 
----
+AI Productivity Flow lives beside your workflow rather than inside a dashboard: a
+small always-on-top Flow Bar, global triggers, and selection awareness mean you
+speak, select, listen, or generate a video without switching applications.
 
-## 🚀 Running Flow
+## Privacy & BYOK
 
-* **Silent Background Mode (Recommended):**
-  Double-click `VoiceFlowLauncher.vbs` or run:
-  ```bat
-  run_voice_flow.bat
-  ```
-* **Interactive Console Mode:**
-  ```bat
-  run_voice_flow.bat --console
-  ```
-* **Check Background Watchdog Status:**
-  ```bash
-  python -m voice_flow.watchdog --status
-  ```
-* **Open Web Dashboard:**
-  Navigate to `http://127.0.0.1:8991` in your browser.
+- **Local by default for speech**: Voice Flow transcription uses the bundled local
+  model. Your dictation audio does not require an internet service.
+- **You choose the cloud**: AI polishing, Audio Flow summaries, Video Flow
+  planning, premium voices, and the default neural voices use internet services —
+  advanced AI features use **your own API key** (BYOK) connected through the app's
+  provider settings. AI Productivity Flow ships without any developer credentials.
+- **Your data stays in your user profile** (`~/.voice_flow`): history, settings,
+  and generated videos are stored locally. API keys are stored locally on your
+  machine and are **not** encrypted at rest (only OAuth tokens are encrypted) —
+  see [SECURITY.md](SECURITY.md).
 
----
+## What's Included in the Installer
 
-## 🧪 Testing & Verification
+A single per-user installer (no admin required) that bundles everything the app
+needs: a private Python runtime, Node.js, FFmpeg, the Whisper speech model, the
+deterministic video renderer, and automatic setup of the remaining rendering
+components. An internet connection is used for online AI/TTS services you enable
+and for one-time component preparation.
 
-Run the comprehensive automated test suite (all tests execute offline with zero paid API calls):
+## Current Architecture
 
-```bash
-# Run all core tests
-python -m pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py tests/test_style_system.py tests/test_provider_management.py tests/test_watchdog_and_startup.py tests/test_hybrid_render_routing.py tests/test_video_flow_benchmarks.py -s
+- **Voice Flow**: local `faster-whisper` transcription (bundled model) → optional
+  provider-based polishing (failover pool + deterministic fallback) → dictionary
+  post-processing → direct insertion into the target window.
+- **Audio Flow**: selection capture → optional LLM summary (consent-gated) →
+  multi-provider TTS engine (Edge default).
+- **Video Flow**: source extraction → educational planning (connected model,
+  consent-gated) → Creative Director (15 visual treatments, diversity limits) →
+  scene authoring with a per-video design system → browser-based deterministic
+  rendering → narration + captions → FFmpeg normalization → 1080p MP4.
+- **Shell**: pywebview dashboard on a loopback-only local API, always-on-top Flow
+  Bar, Win32 global hooks with self-healing watchdogs, per-user data under
+  `~/.voice_flow`.
 
-# Run Video Flow engine tests
-python -m pytest tests/test_video_flow.py tests/test_video_flow_models.py tests/test_video_flow_motion.py tests/test_video_flow_providers.py tests/test_video_flow_themes.py -s
+Details: [VIDEO_FLOW_ARCHITECTURE.md](VIDEO_FLOW_ARCHITECTURE.md) ·
+[docs/CURRENT_PRODUCT_MAP.md](docs/CURRENT_PRODUCT_MAP.md)
 
-# Run Video Flow Renderer TypeScript Typecheck
-cd video_flow_renderer && npm run typecheck
-```
+## Project Status
 
----
+Functional across Voice Flow, Audio Flow, and Video Flow, with a self-contained
+Windows installer that has been built and validated locally (install, uninstall,
+packaged pipeline, bundled speech model, test suite). A completely fresh external
+Windows-machine acceptance run is still pending, which is why the current download
+is published as a **Beta pre-release**. Feedback from different Windows systems is
+especially valuable.
 
-## 🔒 Privacy & Local-First Design
+## Development / Contributing
 
-* **Local Speech-to-Text:** Whisper runs locally on your CPU/GPU. No audio leaves your machine unless you configure an external speech provider.
-* **BYOK (Bring Your Own Key):** All AI credentials are encrypted and stored locally in `~/.voice_flow/voice_flow.db`. Keys are never transmitted to third-party telemetry servers.
-* **Consent-Gated Processing:** Source text is only sent to external LLMs if you explicitly select that model and authorize the request.
+The repository runs from source for development — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the developer environment, test suite, and
+contribution rules. Normal users should use the installer above, not a source
+checkout.
 
----
+## Security
 
-## 🤝 Sponsors & Compute Partners
+See [SECURITY.md](SECURITY.md).
 
-Flow is designed so its core functionality remains 100% free and useful without paid inference. We are actively interested in compute, API-credit, infrastructure, and research partnerships to accelerate open multimodal AI accessibility:
+## License
 
-* 🎥 **Video Inference Partnerships:** Integrating next-generation generative video models into our hybrid router.
-* ⚡ **GPU & Cloud Compute:** Distributed rendering clusters and open-weights model hosting.
-* 🧠 **LLM & Speech Inference:** API credit support for open-source research and educational explanation generation.
-* 🎓 **Accessibility & Education:** Partnering with academic institutions to make research papers and dense educational material accessible in multimodal formats.
-
-*If your organization is interested in supporting open-source multimodal accessibility, please open an issue or contact the maintainers.*
-
----
-
-## 📄 License
-
-This project is licensed under the **Apache License 2.0**. See the [`LICENSE`](LICENSE) file for details.
-
-### Third-Party Licenses
-Third-party libraries used in Flow remain subject to their respective licenses:
-* Remotion (`video_flow_renderer`) is distributed under the Remotion Company License.
-* Faster-Whisper, SoundDevice, PyWebView, React, and other dependencies remain under their respective MIT / Apache / BSD licenses.
+Apache-2.0 — see [LICENSE](LICENSE). Third-party components distributed with the
+installer are attributed in [release/THIRD_PARTY_NOTICES.txt](release/THIRD_PARTY_NOTICES.txt).

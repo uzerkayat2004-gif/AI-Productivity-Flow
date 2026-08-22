@@ -1,32 +1,51 @@
-# 🔒 Security Policy
+# Security Policy
 
-Flow takes the security and privacy of user data and credentials seriously.
+## Supported versions
 
----
+| Version | Supported |
+| ------- | --------- |
+| 1.x (Windows Beta releases) | ✅ |
+| older pre-release builds | ❌ |
 
-## 🛡️ Supported Versions
+## How AI credentials are handled
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.x / 2.x | :white_check_mark: |
-| < 1.0   | :x:                |
+- AI provider **API keys** are entered by the user in the app's provider
+  settings and are **stored locally in the user's SQLite database under
+  `~/.voice_flow`**. They are stored locally, but **not encrypted at rest** —
+  any process running as your user can read them. Treat the database file as
+  sensitive.
+- **OAuth tokens** (where a provider uses OAuth) are encrypted at rest with a
+  locally generated key.
+- Credential use is consent-gated: summaries and Video Flow planning only run
+  when you explicitly enable them (off by default); AI polishing runs once you
+  connect a provider key and can be disabled in Settings. Planning
+  workers receive keys over stdin with a scrubbed environment — keys are never
+  placed in command lines or logs.
 
----
+## Network behavior
 
-## 🔐 Local-First Security Principles
+- The app serves its dashboard and local API on **loopback only**
+  (127.0.0.1:8991); it is not reachable from other machines.
+- Local speech recognition (Voice Flow) does not send audio anywhere.
+- Internet is used for: AI providers you connect, Audio/Video Flow voices
+  (default Edge neural voices are an online service), Audio Flow summaries,
+  Video Flow planning, and one-time setup of the remaining render components (downloaded through their official channels).
 
-* **BYOK (Bring Your Own Key):** All API keys entered by the user are stored locally in the user's SQLite database (`~/.voice_flow/voice_flow.db`).
-* **Zero Telemetry Leaks:** Flow does not send user transcripts, audio recordings, or API keys to external telemetry servers.
-* **Loopback Isolation:** The internal desktop API server binds exclusively to `127.0.0.1` and does not accept remote network connections.
+## Data
 
----
+- Dictation history, settings, API keys, generated videos, and logs live under
+  `~/.voice_flow` in your user profile. Dictation audio archives expire after
+  14 days. Uninstalling the app preserves this folder unless you delete it.
 
-## 🚨 Reporting a Vulnerability
+## Video Flow sandboxing
 
-If you discover a potential security vulnerability in Flow, please disclose it responsibly:
+- Every video job runs in a per-job sandbox (`~/.voice_flow/v3_projects/<id>/`).
+- All AI-authored content passes `validate_no_executable_code` — the model can
+  never emit scripts, and rendered scenes are compiled from whitelisted
+  primitives.
 
-1. **Do not create a public GitHub issue.**
-2. Send a detailed report to the maintainers via GitHub Private Vulnerability Reporting or email the repository owner.
-3. Include reproducible steps and details on the affected components.
+## Reporting a vulnerability
 
-We will acknowledge receipt within 48 hours and work with you to resolve the issue before public disclosure.
+Please open a private security advisory on GitHub (Security → Report a
+vulnerability) rather than a public issue. Include steps to reproduce and the
+app version. Reports are acknowledged promptly.
