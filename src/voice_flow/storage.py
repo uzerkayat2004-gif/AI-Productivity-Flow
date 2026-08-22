@@ -11,10 +11,13 @@ import os
 import re
 import sqlite3
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-DB_PATH = os.path.join(os.path.expanduser("~"), ".voice_flow", "voice_flow.db")
+from voice_flow.paths import data_dir
+
+DB_PATH = str(data_dir() / "voice_flow.db")
 log = logging.getLogger(__name__)
 
 def _raw_token_occurrences(rows: list[sqlite3.Row], term: str) -> int:
@@ -52,6 +55,12 @@ class DictationRecord:
     word_count: int
     wpm_speed: int
     style_mode: str
+    status: str = "success"
+    error_message: str | None = None
+    audio_path: str | None = None
+    insertion_status: str = "pasted"
+    updated_at: str | None = None
+    retry_count: int = 0
 
 
 class StorageEngine:
@@ -60,7 +69,23 @@ class StorageEngine:
     def __init__(self, db_path: str = DB_PATH) -> None:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
+        self._lexicon_revision = 0
+        self._lexicon_lock = threading.RLock()
         self._init_db()
+
+    def _touch_lexicon(self) -> None:
+        """Notify in-process dictionary/snippet engines about persisted edits."""
+        self._lexicon_revision += 1
+
+    @contextmanager
+    def _get_conn_ctx(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -91,6 +116,12 @@ class StorageEngine:
                     word TEXT UNIQUE NOT NULL,
                     category TEXT DEFAULT 'Personal',
                     created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dictionary_keys (
+                    normalized TEXT PRIMARY KEY NOT NULL,
+                    dictionary_id INTEGER UNIQUE NOT NULL
                 )
             """)
 
@@ -164,6 +195,12 @@ class StorageEngine:
             history_migrations = [
                 ("is_pinned", "INTEGER DEFAULT 0"),
                 ("is_favorite", "INTEGER DEFAULT 0"),
+                ("status", "TEXT NOT NULL DEFAULT 'success'"),
+                ("error_message", "TEXT"),
+                ("audio_path", "TEXT"),
+                ("insertion_status", "TEXT NOT NULL DEFAULT 'pasted'"),
+                ("updated_at", "TEXT"),
+                ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
             ]
             for col_name, col_def in history_migrations:
                 if col_name not in existing_history_cols:
@@ -171,6 +208,7 @@ class StorageEngine:
                         conn.execute(f"ALTER TABLE history ADD COLUMN {col_name} {col_def}")
                     except sqlite3.OperationalError:
                         pass
+            conn.execute("UPDATE history SET status = COALESCE(NULLIF(status, ''), 'success'), insertion_status = COALESCE(NULLIF(insertion_status, ''), 'pasted'), updated_at = COALESCE(updated_at, timestamp), retry_count = COALESCE(retry_count, 0)")
 
             # Performance indices
             conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history (timestamp)")
@@ -244,8 +282,57 @@ class StorageEngine:
                     except sqlite3.OperationalError:
                         pass
 
+            # Lexicon tables: explicit corrections, snippets, and normalized keys.
+            # Corrections only run on an exact, user-declared phrase; snippets are
+            # kept out of the dictionary so they never leak into Whisper's prompt.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dictionary_corrections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    wrong_text TEXT COLLATE NOCASE UNIQUE NOT NULL,
+                    correct_text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS snippets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trigger TEXT COLLATE NOCASE UNIQUE NOT NULL,
+                    expansion TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS snippet_keys (
+                    normalized TEXT PRIMARY KEY NOT NULL,
+                    snippet_id INTEGER UNIQUE NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS correction_keys (
+                    normalized TEXT PRIMARY KEY NOT NULL,
+                    correction_id INTEGER UNIQUE NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS migration_conflicts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_type TEXT NOT NULL,
+                    normalized_key TEXT NOT NULL,
+                    current_record_id INTEGER NOT NULL,
+                    legacy_key TEXT NOT NULL,
+                    legacy_value TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
+        self._migrate_snippet_case_variants()
+        self._migrate_correction_case_variants()
+        self._migrate_legacy_dictionary_snippets()
+        self._migrate_dictionary_case_variants()
         self._seed_default_models()
         self._seed_tts_models()
 
@@ -417,6 +504,10 @@ class StorageEngine:
         app_name: str = "General App",
         duration_sec: float = 2.0,
         style_mode: str = "smart_clean",
+        status: str = "success",
+        error_message: str | None = None,
+        audio_path: str | None = None,
+        insertion_status: str = "pasted",
     ) -> DictationRecord:
         words_list = polished_text.split()
         words = len(words_list)
@@ -427,10 +518,10 @@ class StorageEngine:
         with self._get_conn() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode, status, error_message, audio_path, insertion_status, updated_at, retry_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
-                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode),
+                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode, status, error_message, audio_path, insertion_status, now_str),
             )
             conn.commit()
             record_id = cursor.lastrowid
@@ -451,6 +542,8 @@ class StorageEngine:
             word_count=words,
             wpm_speed=wpm,
             style_mode=style_mode,
+            status=status, error_message=error_message, audio_path=audio_path,
+            insertion_status=insertion_status, updated_at=now_str,
         )
 
     def _auto_extract_dictionary_words(self, words: list[str]) -> None:
@@ -723,6 +816,23 @@ class StorageEngine:
                 elif d_obj < check_date - datetime.timedelta(days=1):
                     break
 
+            # Longest streak: walk the full historical activity-day list so a
+            # record set broken weeks ago still reports its best run.
+            longest_streak = 0
+            run = 0
+            previous: datetime.date | None = None
+            for d_str in reversed(dates):
+                try:
+                    d_obj = datetime.datetime.strptime(d_str, "%Y-%m-%d").date()
+                except Exception:
+                    continue
+                if previous is not None and (d_obj - previous).days == 1:
+                    run += 1
+                else:
+                    run = 1
+                longest_streak = max(longest_streak, run)
+                previous = d_obj
+
             # Hourly Time-of-Day Velocity Buckets
             cursor = conn.execute(
                 f"""
@@ -820,7 +930,7 @@ class StorageEngine:
                 "dictionary_fixes": dictionary_fixes_count,
                 "total_dictionary_terms": total_dict_words,
                 "streak": max(streak, 1 if total_words > 0 else 0),
-                "longest_streak": max(streak, 1 if total_words > 0 else 0),
+                "longest_streak": longest_streak,
                 "app_breakdown": app_breakdown,
                 "daily_activity": daily_activity,
                 "time_of_day": time_of_day,
@@ -891,10 +1001,14 @@ class StorageEngine:
         return value, None
 
     def add_dictionary_word(self, word: str, category: str = "Personal") -> bool:
+        if not isinstance(word, str):
+            return False
+        word_clean = word.strip()
+        if "->" in word_clean or "=>" in word_clean:
+            return False
         parsed = self._parse_dictionary_value(word)
         if parsed is None:
             return False
-        word_clean = str(word).strip()
         category_clean = str(category).strip() or "Personal"
         now = datetime.datetime.now().isoformat()
         try:
@@ -1570,7 +1684,7 @@ class StorageEngine:
             return dict(row) if row else None
 
     def update_dictation(self, record_id: int, **fields: Any) -> bool:
-        allowed = {"raw_text", "polished_text", "word_count", "wpm_speed"}
+        allowed = {"raw_text", "polished_text", "status", "error_message", "audio_path", "insertion_status", "retry_count", "word_count", "wpm_speed"}
         values = {key: value for key, value in fields.items() if key in allowed}
         if not values:
             return False
@@ -1580,6 +1694,7 @@ class StorageEngine:
             with self._get_conn() as conn:
                 duration = float((conn.execute("SELECT duration_sec FROM history WHERE id = ?", (record_id,)).fetchone() or [0])[0] or 0)
             values["wpm_speed"] = int(words / max(0.05, duration / 60.0)) if words else 0
+        values["updated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         assignments = ", ".join(f"{key} = ?" for key in values)
         with self._get_conn() as conn:
             cursor = conn.execute(f"UPDATE history SET {assignments} WHERE id = ?", (*values.values(), record_id))
@@ -1595,6 +1710,346 @@ class StorageEngine:
             conn.commit()
         self._remove_stale_auto_captured_words()
         return dict(row)
+
+    # --- Explicit Dictionary Corrections (CURRENT-only feature) ---
+
+    @staticmethod
+    def _validated_text(value: Any, field: str, minimum: int, maximum: int) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be text")
+        clean = value.strip()
+        if not minimum <= len(clean) <= maximum:
+            raise ValueError(f"{field} must be {minimum}–{maximum} characters")
+        return clean
+
+    @staticmethod
+    def _legacy_snippet_parts(value: str) -> tuple[str, str] | None:
+        """Return a valid legacy shortcut pair, without guessing at normal words."""
+        # Historical entries used `->`; when both appear, it owns the split and
+        # the later arrow is ordinary expansion text.
+        delimiter = "->" if "->" in value else "=>" if "=>" in value else None
+        if not delimiter or value.count(delimiter) != 1:
+            return None
+        trigger, expansion = (part.strip() for part in value.split(delimiter, 1))
+        try:
+            return (
+                StorageEngine._validated_text(trigger, "trigger", 1, 60),
+                StorageEngine._validated_text(expansion, "expansion", 1, 4000),
+            )
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _add_migration_conflict(conn, entity_type: str, normalized: str, current_id: int, legacy_key: str, legacy_value: str) -> None:
+        conn.execute(
+            "INSERT INTO migration_conflicts (entity_type, normalized_key, current_record_id, legacy_key, legacy_value, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (entity_type, normalized, current_id, legacy_key, legacy_value, datetime.datetime.now().isoformat()),
+        )
+
+    def _migrate_snippet_case_variants(self) -> None:
+        changed = False
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                keepers: dict[str, sqlite3.Row] = {}
+                for row in conn.execute("SELECT id, trigger, expansion FROM snippets ORDER BY id ASC"):
+                    normalized = row["trigger"].strip().casefold()
+                    keeper = keepers.get(normalized)
+                    if keeper is None:
+                        keepers[normalized] = row
+                        continue
+                    if row["expansion"] != keeper["expansion"]:
+                        self._add_migration_conflict(conn, "snippet", normalized, keeper["id"], row["trigger"], row["expansion"])
+                    conn.execute("DELETE FROM snippets WHERE id = ?", (row["id"],)); changed = True
+                for normalized, row in keepers.items():
+                    existing = conn.execute("SELECT snippet_id FROM snippet_keys WHERE normalized = ?", (normalized,)).fetchone()
+                    if existing is None:
+                        conn.execute("INSERT INTO snippet_keys (normalized, snippet_id) VALUES (?, ?)", (normalized, row["id"]))
+                    elif existing["snippet_id"] != row["id"]:
+                        # Existing persisted key is authoritative; the record's
+                        # payload stays recoverable through a visible conflict.
+                        self._add_migration_conflict(conn, "snippet", normalized, existing["snippet_id"], row["trigger"], row["expansion"])
+                        conn.execute("DELETE FROM snippets WHERE id = ?", (row["id"],)); changed = True
+            if changed:
+                self._touch_lexicon()
+
+    def _migrate_correction_case_variants(self) -> None:
+        changed = False
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                keepers: dict[str, sqlite3.Row] = {}
+                for row in conn.execute("SELECT id, wrong_text, correct_text FROM dictionary_corrections ORDER BY id ASC"):
+                    normalized = row["wrong_text"].strip().casefold()
+                    keeper = keepers.get(normalized)
+                    if keeper is None:
+                        keepers[normalized] = row
+                        continue
+                    if row["correct_text"] != keeper["correct_text"]:
+                        self._add_migration_conflict(conn, "correction", normalized, keeper["id"], row["wrong_text"], row["correct_text"])
+                    conn.execute("DELETE FROM dictionary_corrections WHERE id = ?", (row["id"],)); changed = True
+                for normalized, row in keepers.items():
+                    existing = conn.execute("SELECT correction_id FROM correction_keys WHERE normalized = ?", (normalized,)).fetchone()
+                    if existing is None:
+                        conn.execute("INSERT INTO correction_keys (normalized, correction_id) VALUES (?, ?)", (normalized, row["id"]))
+                    elif existing["correction_id"] != row["id"]:
+                        self._add_migration_conflict(conn, "correction", normalized, existing["correction_id"], row["wrong_text"], row["correct_text"])
+                        conn.execute("DELETE FROM dictionary_corrections WHERE id = ?", (row["id"],)); changed = True
+            if changed:
+                self._touch_lexicon()
+
+    def _migrate_legacy_dictionary_snippets(self) -> None:
+        """Migrate old `shortcut -> expansion` dictionary rows once and safely."""
+        changed = False
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT id, word, created_at FROM dictionary").fetchall()
+                now = datetime.datetime.now().isoformat()
+                for row in rows:
+                    pair = self._legacy_snippet_parts(row["word"])
+                    if not pair:
+                        continue
+                    trigger, expansion = pair
+                    normalized = trigger.casefold()
+                    current = conn.execute(
+                        "SELECT s.id, s.expansion FROM snippet_keys k JOIN snippets s ON s.id = k.snippet_id WHERE k.normalized = ?",
+                        (normalized,),
+                    ).fetchone()
+                    if current is not None:
+                        if current["expansion"] != expansion:
+                            self._add_migration_conflict(conn, "snippet", normalized, current["id"], trigger, expansion)
+                        conn.execute("DELETE FROM dictionary WHERE id = ?", (row["id"],))
+                        changed = True
+                        continue
+                    cursor = conn.execute(
+                        "INSERT INTO snippets (trigger, expansion, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                        (trigger, expansion, row["created_at"] or now, now),
+                    )
+                    conn.execute("INSERT INTO snippet_keys (normalized, snippet_id) VALUES (?, ?)", (normalized, cursor.lastrowid))
+                    conn.execute("DELETE FROM dictionary WHERE id = ?", (row["id"],))
+                    changed = True
+            if changed:
+                self._touch_lexicon()
+
+    def _migrate_dictionary_case_variants(self) -> None:
+        """Normalize legacy case variants, retaining the earliest spelling."""
+        changed = False
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT id, word FROM dictionary ORDER BY id ASC").fetchall()
+                keepers: dict[str, int] = {}
+                for row in rows:
+                    normalized = row["word"].strip().casefold()
+                    if not normalized or "->" in row["word"] or "=>" in row["word"]:
+                        continue
+                    existing = keepers.get(normalized)
+                    if existing is None:
+                        keepers[normalized] = row["id"]
+                    else:
+                        conn.execute("DELETE FROM dictionary WHERE id = ?", (row["id"],))
+                        changed = True
+                for normalized, dictionary_id in keepers.items():
+                    key = conn.execute("SELECT dictionary_id FROM dictionary_keys WHERE normalized = ?", (normalized,)).fetchone()
+                    if key is None:
+                        conn.execute("INSERT INTO dictionary_keys (normalized, dictionary_id) VALUES (?, ?)", (normalized, dictionary_id))
+                    elif key["dictionary_id"] != dictionary_id:
+                        # The existing key wins, so preserve its row and remove
+                        # the duplicate found during deterministic migration.
+                        conn.execute("DELETE FROM dictionary WHERE id = ?", (dictionary_id,))
+                        changed = True
+            if changed:
+                self._touch_lexicon()
+
+    def get_dictionary_snapshot(self) -> tuple[int, list[str], list[dict[str, Any]]]:
+        """Read a dictionary/correction snapshot matching one revision."""
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                words = [row["word"] for row in conn.execute("SELECT word FROM dictionary ORDER BY word ASC")
+                         if "->" not in row["word"] and "=>" not in row["word"]]
+                corrections = [dict(row) for row in conn.execute(
+                    "SELECT id, wrong_text, correct_text, created_at, updated_at FROM dictionary_corrections "
+                    "ORDER BY wrong_text COLLATE NOCASE"
+                )]
+                return self._lexicon_revision, words, corrections
+
+    def get_snippet_snapshot(self) -> tuple[int, list[dict[str, Any]]]:
+        with self._lexicon_lock:
+            with self._get_conn() as conn:
+                snippets = [dict(row) for row in conn.execute(
+                    "SELECT id, trigger, expansion, created_at, updated_at FROM snippets ORDER BY trigger COLLATE NOCASE"
+                )]
+                return self._lexicon_revision, snippets
+
+    def get_dictionary_corrections(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, wrong_text, correct_text, created_at, updated_at "
+                "FROM dictionary_corrections ORDER BY wrong_text COLLATE NOCASE"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def add_dictionary_correction(self, wrong_text: str, correct_text: str) -> dict[str, Any]:
+        wrong = self._validated_text(wrong_text, "heard phrase", 1, 240)
+        correct = self._validated_text(correct_text, "desired spelling", 1, 240)
+        now = datetime.datetime.now().isoformat()
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                normalized = wrong.casefold()
+                if conn.execute("SELECT 1 FROM correction_keys WHERE normalized = ?", (normalized,)).fetchone():
+                    raise sqlite3.IntegrityError("duplicate correction")
+                cursor = conn.execute(
+                    "INSERT INTO dictionary_corrections (wrong_text, correct_text, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?)", (wrong, correct, now, now)
+                )
+                conn.execute("INSERT INTO correction_keys (normalized, correction_id) VALUES (?, ?)", (normalized, cursor.lastrowid))
+                row = conn.execute("SELECT * FROM dictionary_corrections WHERE id = ?", (cursor.lastrowid,)).fetchone()
+            self._touch_lexicon()
+            return dict(row)
+
+    def update_dictionary_correction(self, correction_id: int, wrong_text: str, correct_text: str) -> dict[str, Any] | None:
+        wrong = self._validated_text(wrong_text, "heard phrase", 1, 240)
+        correct = self._validated_text(correct_text, "desired spelling", 1, 240)
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                existing = conn.execute("SELECT correction_id FROM correction_keys WHERE normalized = ?", (wrong.casefold(),)).fetchone()
+                if existing is not None and existing["correction_id"] != correction_id:
+                    raise sqlite3.IntegrityError("duplicate correction")
+                cursor = conn.execute(
+                    "UPDATE dictionary_corrections SET wrong_text = ?, correct_text = ?, updated_at = ? WHERE id = ?",
+                    (wrong, correct, datetime.datetime.now().isoformat(), correction_id),
+                )
+                if not cursor.rowcount:
+                    return None
+                conn.execute("DELETE FROM correction_keys WHERE correction_id = ?", (correction_id,))
+                conn.execute("INSERT INTO correction_keys (normalized, correction_id) VALUES (?, ?)", (wrong.casefold(), correction_id))
+                row = conn.execute("SELECT * FROM dictionary_corrections WHERE id = ?", (correction_id,)).fetchone()
+            self._touch_lexicon()
+            return dict(row)
+
+    def remove_dictionary_correction(self, correction_id: int) -> bool:
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                deleted = bool(conn.execute("DELETE FROM dictionary_corrections WHERE id = ?", (correction_id,)).rowcount)
+                conn.execute("DELETE FROM correction_keys WHERE correction_id = ?", (correction_id,))
+            if deleted:
+                self._touch_lexicon()
+            return deleted
+
+    # --- Snippets (CURRENT-only feature) ---
+
+    def get_snippets(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, trigger, expansion, created_at, updated_at FROM snippets "
+                "ORDER BY trigger COLLATE NOCASE"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_migration_conflicts(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            conflicts = []
+            for row in conn.execute("SELECT * FROM migration_conflicts ORDER BY id ASC"):
+                item = dict(row)
+                if item["entity_type"] == "snippet":
+                    current = conn.execute("SELECT trigger, expansion FROM snippets WHERE id = ?", (item["current_record_id"],)).fetchone()
+                    current_key, current_value = (current["trigger"], current["expansion"]) if current else (None, None)
+                else:
+                    current = conn.execute("SELECT wrong_text, correct_text FROM dictionary_corrections WHERE id = ?", (item["current_record_id"],)).fetchone()
+                    current_key, current_value = (current["wrong_text"], current["correct_text"]) if current else (None, None)
+                item["current_key"] = current_key
+                item["current_value"] = current_value
+                conflicts.append(item)
+            return conflicts
+
+    def resolve_migration_conflict(self, conflict_id: int, action: str) -> bool:
+        if action not in {"keep_current", "use_legacy"}:
+            raise ValueError("action must be keep_current or use_legacy")
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                conflict = conn.execute("SELECT * FROM migration_conflicts WHERE id = ?", (conflict_id,)).fetchone()
+                if conflict is None:
+                    return False
+                if action == "use_legacy":
+                    now = datetime.datetime.now().isoformat()
+                    if conflict["entity_type"] == "snippet":
+                        current = conn.execute("SELECT trigger FROM snippets WHERE id = ?", (conflict["current_record_id"],)).fetchone()
+                        if current is not None and current["trigger"].casefold() == conflict["normalized_key"]:
+                            conn.execute("UPDATE snippets SET trigger = ?, expansion = ?, updated_at = ? WHERE id = ?", (conflict["legacy_key"], conflict["legacy_value"], now, conflict["current_record_id"]))
+                        elif current is None:
+                            mapped = conn.execute("SELECT snippet_id FROM snippet_keys WHERE normalized = ?", (conflict["normalized_key"],)).fetchone()
+                            if mapped is not None:
+                                active = conn.execute("SELECT 1 FROM snippets WHERE id = ?", (mapped["snippet_id"],)).fetchone()
+                                if active:
+                                    raise RuntimeError("Conflict changed; legacy data is retained")
+                                conn.execute("DELETE FROM snippet_keys WHERE normalized = ?", (conflict["normalized_key"],))
+                            cursor = conn.execute("INSERT INTO snippets (trigger, expansion, created_at, updated_at) VALUES (?, ?, ?, ?)", (conflict["legacy_key"], conflict["legacy_value"], now, now))
+                            conn.execute("INSERT INTO snippet_keys (normalized, snippet_id) VALUES (?, ?)", (conflict["normalized_key"], cursor.lastrowid))
+                        else:
+                            raise RuntimeError("Conflict changed; legacy data is retained")
+                    else:
+                        current = conn.execute("SELECT wrong_text FROM dictionary_corrections WHERE id = ?", (conflict["current_record_id"],)).fetchone()
+                        if current is not None and current["wrong_text"].casefold() == conflict["normalized_key"]:
+                            conn.execute("UPDATE dictionary_corrections SET wrong_text = ?, correct_text = ?, updated_at = ? WHERE id = ?", (conflict["legacy_key"], conflict["legacy_value"], now, conflict["current_record_id"]))
+                        elif current is None:
+                            mapped = conn.execute("SELECT correction_id FROM correction_keys WHERE normalized = ?", (conflict["normalized_key"],)).fetchone()
+                            if mapped is not None:
+                                active = conn.execute("SELECT 1 FROM dictionary_corrections WHERE id = ?", (mapped["correction_id"],)).fetchone()
+                                if active:
+                                    raise RuntimeError("Conflict changed; legacy data is retained")
+                                conn.execute("DELETE FROM correction_keys WHERE normalized = ?", (conflict["normalized_key"],))
+                            cursor = conn.execute("INSERT INTO dictionary_corrections (wrong_text, correct_text, created_at, updated_at) VALUES (?, ?, ?, ?)", (conflict["legacy_key"], conflict["legacy_value"], now, now))
+                            conn.execute("INSERT INTO correction_keys (normalized, correction_id) VALUES (?, ?)", (conflict["normalized_key"], cursor.lastrowid))
+                        else:
+                            raise RuntimeError("Conflict changed; legacy data is retained")
+                conn.execute("DELETE FROM migration_conflicts WHERE id = ?", (conflict_id,))
+            self._touch_lexicon()
+            return True
+
+    def add_snippet(self, trigger: str, expansion: str) -> dict[str, Any]:
+        key = self._validated_text(trigger, "trigger", 1, 60)
+        value = self._validated_text(expansion, "expansion", 1, 4000)
+        now = datetime.datetime.now().isoformat()
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                normalized = key.casefold()
+                if conn.execute("SELECT 1 FROM snippet_keys WHERE normalized = ?", (normalized,)).fetchone():
+                    raise sqlite3.IntegrityError("duplicate snippet")
+                cursor = conn.execute(
+                    "INSERT INTO snippets (trigger, expansion, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (key, value, now, now),
+                )
+                conn.execute("INSERT INTO snippet_keys (normalized, snippet_id) VALUES (?, ?)", (normalized, cursor.lastrowid))
+                row = conn.execute("SELECT * FROM snippets WHERE id = ?", (cursor.lastrowid,)).fetchone()
+            self._touch_lexicon()
+            return dict(row)
+
+    def update_snippet(self, snippet_id: int, trigger: str, expansion: str) -> dict[str, Any] | None:
+        key = self._validated_text(trigger, "trigger", 1, 60)
+        value = self._validated_text(expansion, "expansion", 1, 4000)
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                existing = conn.execute("SELECT snippet_id FROM snippet_keys WHERE normalized = ?", (key.casefold(),)).fetchone()
+                if existing is not None and existing["snippet_id"] != snippet_id:
+                    raise sqlite3.IntegrityError("duplicate snippet")
+                cursor = conn.execute(
+                    "UPDATE snippets SET trigger = ?, expansion = ?, updated_at = ? WHERE id = ?",
+                    (key, value, datetime.datetime.now().isoformat(), snippet_id),
+                )
+                if not cursor.rowcount:
+                    return None
+                conn.execute("DELETE FROM snippet_keys WHERE snippet_id = ?", (snippet_id,))
+                conn.execute("INSERT INTO snippet_keys (normalized, snippet_id) VALUES (?, ?)", (key.casefold(), snippet_id))
+                row = conn.execute("SELECT * FROM snippets WHERE id = ?", (snippet_id,)).fetchone()
+            self._touch_lexicon()
+            return dict(row)
+
+    def remove_snippet(self, snippet_id: int) -> bool:
+        with self._lexicon_lock:
+            with self._get_conn_ctx() as conn:
+                deleted = bool(conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,)).rowcount)
+                conn.execute("DELETE FROM snippet_keys WHERE snippet_id = ?", (snippet_id,))
+            if deleted:
+                self._touch_lexicon()
+            return deleted
 
 
 # Singleton Storage Instance. Constructed lazily so importing this module

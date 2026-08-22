@@ -245,7 +245,7 @@ class TextPolisher:
         )
 
         # Check Exec Voice Flow Policy active model preference (ignoring audio STT models for text polish)
-        exec_policy_model = storage.get_setting("exec_policy_model", "gemini/gemini-2.0-flash")
+        exec_policy_model = storage.get_setting("exec_policy_model", "gemini/gemini-flash-latest")
         preferred_provider = None
         preferred_model = None
         if "/" in exec_policy_model:
@@ -339,7 +339,9 @@ class TextPolisher:
         """Execute HTTP request to target AI provider model endpoint with strict 2.0s timeout."""
         try:
             if provider == "gemini":
-                models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+                # gemini-1.x/2.0 models are retired (HTTP 404); flash-latest
+                # tracks Google's current fast model.
+                models = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash"]
                 for m in models:
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
@@ -377,7 +379,8 @@ class TextPolisher:
 
             elif provider in ("groq", "openai", "deepseek", "together"):
                 endpoints = {
-                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+                    # Groq retired the llama-3.x chat models; gpt-oss / qwen are current.
+                    "groq": ("https://api.groq.com/openai/v1/chat/completions", ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"]),
                     "openai": ("https://api.openai.com/v1/chat/completions", ["gpt-4o-mini", "gpt-4o"]),
                     "together": ("https://api.together.xyz/v1/chat/completions", ["meta-llama/Llama-3.3-70B-Instruct-Turbo"]),
                     "deepseek": ("https://api.deepseek.com/v1/chat/completions", ["deepseek-chat"]),

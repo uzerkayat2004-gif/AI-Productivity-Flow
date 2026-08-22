@@ -8,6 +8,7 @@ without opening the main Voice Flow application.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import subprocess
 import sys
@@ -349,9 +350,13 @@ class VideoFlowScreenWidget:
         tk.Label(parent, text=text, bg=COMPOSER_COLORS["background"], fg=COMPOSER_COLORS["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
 
     def _refresh_models(self) -> None:
+        catalog: dict[str, Any] = {}
         try:
-            from voice_flow.video_flow import video_flow_service
-            catalog = video_flow_service.catalog()
+            import urllib.request
+            with urllib.request.urlopen("http://127.0.0.1:8991/api/video-flow/catalog", timeout=3) as response:
+                loaded = json.loads(response.read().decode("utf-8"))
+            if isinstance(loaded, dict):
+                catalog = loaded
         except Exception:
             catalog = {}
         self._apply_catalog(catalog if isinstance(catalog, dict) else {})

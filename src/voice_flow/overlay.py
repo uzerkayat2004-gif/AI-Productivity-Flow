@@ -96,6 +96,33 @@ class FloatingOverlayBar:
         self.width = self.idle_width
         self.height = self.idle_height
         self.padding = 8
+        self.visible = True
+        self.dock = "bottom"
+
+    def set_visible(self, visible: bool) -> bool:
+        """Runtime hook for the Hub; hiding the bar deliberately leaves hotkeys live."""
+        self.visible = bool(visible)
+
+        def _do():
+            if not self.win:
+                return
+            if self.visible:
+                if self.state != "HIDDEN":
+                    self.win.deiconify()
+            else:
+                self._animation_generation += 1
+                self.win.withdraw()
+        self._run_on_ui(_do)
+        return True
+
+    def set_dock(self, dock) -> bool:
+        """Runtime hook for the Hub's persisted Flow Bar location."""
+        value = str(dock or "bottom").strip().lower()
+        if value not in ("bottom", "left", "right"):
+            return False
+        self.dock = value
+        self._run_on_ui(self._position_window)
+        return True
 
     def _set_bar_size(self, new_width: int, new_height: int) -> None:
         if self.width != new_width or self.height != new_height:
@@ -166,8 +193,13 @@ class FloatingOverlayBar:
     def _position_window(self) -> None:
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
-        x = (screen_w - self.width) // 2
-        y = screen_h - self.height - config.bar_bottom_margin
+        if getattr(self, "dock", "bottom") == "left":
+            x, y = 8, (screen_h - self.height) // 2
+        elif getattr(self, "dock", "bottom") == "right":
+            x, y = screen_w - self.width - 8, (screen_h - self.height) // 2
+        else:
+            x = (screen_w - self.width) // 2
+            y = screen_h - self.height - config.bar_bottom_margin
         self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
 
     def _apply_win32_styles(self) -> None:

@@ -109,7 +109,7 @@ def validate_provider_key(
 
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         log.warning("[VALIDATION PROBE TIMEOUT/NETWORK - %s] %s", provider_id, e)
-        return (True, "Network timeout or connection error - Retaining state")
+        return (False, f"Network unreachable - key not verified ({e})")
     except Exception as e:
         log.error("[VALIDATION PROBE ERROR - %s] %s", provider_id, e)
         return (False, str(e))

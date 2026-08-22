@@ -56,6 +56,25 @@ def is_api_server_ready(timeout: float = 0.2) -> bool:
     return runtime_is_compatible(port=PORT, timeout=timeout)
 
 
+def _apply_taskbar_visibility(window, visible: bool) -> None:
+    """Set the native window's taskbar style after pywebview creates it."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, "Voice Flow - AI Speech Desktop App")
+        if not hwnd:
+            return
+        GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x80, 0x40000
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if visible else (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0001 | 0x0002 | 0x0004)
+    except Exception as exc:
+        print(f"[SYSTEM WARNING] Could not apply taskbar preference: {exc}")
+
+
 def launch_desktop_gui(on_quit_callback=None) -> None:
     """Launch API server, system auto-startup configuration, and native desktop window."""
     # Ensure Windows startup registry entry exists
@@ -76,6 +95,12 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
         raise RuntimeError(
             "Voice Flow could not start its current backend. Port 8991 is still owned by an incompatible process."
         )
+
+    try:
+        from voice_flow.storage import storage
+        show_in_taskbar = bool(storage.get_setting("show_in_taskbar", True))
+    except Exception:
+        show_in_taskbar = True
 
     url = f"http://127.0.0.1:{PORT}/index.html"
     print(f"[GUI] Opening Voice Flow Desktop App window at {url}...")
@@ -104,6 +129,14 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
 
     window = webview.create_window(**create_kwargs)
 
+    def on_shown():
+        _apply_taskbar_visibility(window, show_in_taskbar)
+
+    try:
+        window.events.shown += on_shown
+    except Exception:
+        pass
+
     def on_closed():
         if on_quit_callback:
             on_quit_callback()
@@ -113,5 +146,30 @@ def launch_desktop_gui(on_quit_callback=None) -> None:
     # Start pywebview loop with custom icon
     webview.start(icon=ico_path)
 
+def _focus_existing_window() -> bool:
+    """Focus an already-running Desktop App window instead of opening a duplicate.
+
+    The engine spawns this launcher on every boot (including watchdog
+    auto-recovery); without this guard each restart stacks another window.
+    """
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, "Voice Flow - AI Speech Desktop App")
+        if not hwnd:
+            return False
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
+    if _focus_existing_window():
+        print("[GUI] Desktop App window already open — focusing it instead of launching a duplicate.")
+        sys.exit(0)
     launch_desktop_gui()

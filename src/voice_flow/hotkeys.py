@@ -26,6 +26,10 @@ VK_LWIN = 0x5B
 VK_RWIN = 0x5C
 VK_SHIFT = 0x10
 
+# Win32 Mouse Messages
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
+
 # Win32 Virtual Key 0xE8 (unassigned dummy key) to suppress Start Menu on Win key release
 VK_NONAME = 0xE8
 

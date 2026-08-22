@@ -1,9 +1,17 @@
-"""Conservative custom vocabulary and text-expansion engine."""
+"""Vocabulary biasing and explicit correction rules for dictation.
+
+The dictionary is deliberately conservative: users' saved terms get their exact
+casing when actually spoken, and corrections run only for phrases the user
+explicitly configured.  Snippets live in :mod:`voice_flow.snippets`.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
 import re
+import threading
+
 from voice_flow.storage import storage
 
 log = logging.getLogger(__name__)
@@ -71,72 +79,122 @@ def _combined_pattern(rules: tuple[_Rule, ...]) -> tuple[re.Pattern[str], tuple[
 
 
 class DictionaryEngine:
-    """Apply explicit dictionary terms exactly once and never guess by default."""
+    """Apply explicit dictionary terms and corrections exactly once."""
 
-    def __init__(self) -> None:
+    def __init__(self, store=storage) -> None:
+        self.store = store
         self.words: list[str] = []
+        self.corrections: list[dict] = []
         self._rules: tuple[_Rule, ...] = ()
+        self._correction_rules: tuple[_Rule, ...] = ()
         self._dirty = True
         self._revision: object = None
+        self._lock = threading.RLock()
         self._ensure_loaded()
 
     def mark_dirty(self) -> None:
         """Signal that the database changed and the next call must reload."""
-        self._dirty = True
+        with self._lock:
+            self._dirty = True
 
     def _get_revision(self) -> object:
-        getter = getattr(storage, "get_dictionary_revision", None)
-        if getter is None:
-            return None
-        try:
-            return getter()
-        except Exception:
-            return None
+        getter = getattr(self.store, "get_lexicon_revision", None)
+        if getter is not None:
+            try:
+                return getter()
+            except Exception:
+                pass
+        legacy = getattr(self.store, "get_dictionary_revision", None)
+        if legacy is not None:
+            try:
+                return legacy()
+            except Exception:
+                return None
+        return None
 
     def _load_source_words(self) -> list[str]:
         # Auto-captured entries are intentionally excluded from the active
         # vocabulary. They were learned from polished text and are not user
         # authorization to rewrite future dictation.
-        getter = getattr(storage, "get_dictionary_entries", None)
+        getter = getattr(self.store, "get_dictionary_entries", None)
         if getter is not None:
             try:
                 return [str(row["word"]) for row in getter(include_auto=False)]
             except Exception:
                 log.exception("Could not load dictionary entries")
-        return [str(word) for word in storage.get_dictionary_words()]
+        snapshot = getattr(self.store, "get_dictionary_snapshot", None)
+        if snapshot is not None:
+            try:
+                _, words, _ = snapshot()
+                return [str(word) for word in words]
+            except Exception:
+                log.exception("Could not load dictionary snapshot")
+        return [str(word) for word in self.store.get_dictionary_words()]
+
+    def _load_corrections(self) -> list[dict]:
+        snapshot = getattr(self.store, "get_dictionary_snapshot", None)
+        if snapshot is not None:
+            try:
+                _, _, corrections = snapshot()
+                return list(corrections)
+            except Exception:
+                log.exception("Could not load corrections snapshot")
+        getter = getattr(self.store, "get_dictionary_corrections", None)
+        if getter is not None:
+            try:
+                return list(getter())
+            except Exception:
+                log.exception("Could not load corrections")
+        return []
 
     def _ensure_loaded(self) -> None:
-        revision = self._get_revision()
-        if not self._dirty and revision == self._revision:
-            return
+        with self._lock:
+            revision = self._get_revision()
+            if not self._dirty and revision == self._revision:
+                return
 
-        words = self._load_source_words()
-        rules: list[_Rule] = []
-        seen: set[str] = set()
-        for raw in words:
-            trigger, expansion = _split_entry(raw.strip())
-            if not trigger or (expansion is not None and not expansion):
-                # Empty snippet expansions are malformed and must never erase
-                # the trigger from dictated text.
-                continue
-            key = trigger.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            rules.append(_Rule(trigger, expansion if expansion is not None else trigger, expansion is not None))
+            words = self._load_source_words()
+            corrections = self._load_corrections()
 
-        # Longer triggers win. Casefold tie-breaking keeps behavior stable even
-        # if SQLite returns rows in a different order.
-        rules.sort(key=lambda rule: (-len(rule.trigger), rule.trigger.casefold(), rule.trigger))
-        self.words = words
-        self._rules = tuple(rules)
-        self._revision = revision
-        self._dirty = False
+            rules: list[_Rule] = []
+            seen: set[str] = set()
+            for raw in words:
+                trigger, expansion = _split_entry(raw.strip())
+                if not trigger or (expansion is not None and not expansion):
+                    # Empty snippet expansions are malformed and must never erase
+                    # the trigger from dictated text.
+                    continue
+                key = trigger.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                rules.append(_Rule(trigger, expansion if expansion is not None else trigger, expansion is not None))
+
+            # Longer triggers win. Casefold tie-breaking keeps behavior stable even
+            # if SQLite returns rows in a different order.
+            rules.sort(key=lambda rule: (-len(rule.trigger), rule.trigger.casefold(), rule.trigger))
+
+            correction_rules: list[_Rule] = []
+            for item in corrections:
+                wrong = str(item.get("wrong_text") or "").strip()
+                correct = str(item.get("correct_text") or "").strip()
+                if not wrong or not correct:
+                    continue
+                correction_rules.append(_Rule(wrong, correct))
+
+            self.words = words
+            self.corrections = corrections
+            self._rules = tuple(rules)
+            self._correction_rules = tuple(sorted(
+                correction_rules, key=lambda rule: (-len(rule.trigger), rule.trigger.casefold())
+            ))
+            self._revision = revision
+            self._dirty = False
 
     def refresh_words(self) -> list[str]:
-        self._dirty = True
+        self.mark_dirty()
         self._ensure_loaded()
-        return self.words
+        return list(self.words)
 
     def get_initial_prompt(self) -> str:
         """Build a deterministic, bounded Whisper bias prompt from explicit terms."""
@@ -150,6 +208,12 @@ class DictionaryEngine:
             if key not in seen:
                 terms.append(rule.trigger)
                 seen.add(key)
+        for rule in self._correction_rules:
+            key = rule.replacement.casefold()
+            if key in seen:
+                continue
+            terms.append(rule.replacement)
+            seen.add(key)
         # Prefer longer technical phrases over arbitrary alphabetical rows.
         terms = sorted(terms, key=lambda term: (-len(term), term.casefold()))[:40]
         if not terms:
@@ -173,25 +237,26 @@ class DictionaryEngine:
 
         return combined.sub(replace, segment)
 
-
     def apply_dictionary_post_processing(self, text: str) -> str:
-        """Apply explicit literal terms/snippets once; fuzzy matching is opt-in."""
+        """Apply explicit literal terms/corrections once; fuzzy matching is opt-in."""
         if not text:
             return text
         self._ensure_loaded()
-        if not self._rules:
+        if not self._rules and not self._correction_rules:
             return text
 
         # Split protected spans out so a term such as ``app`` cannot mutate a
-        # URL or email address. The replacement callback keeps each expansion
-        # literal, including backslashes and group-looking sequences.
+        # URL or email address. Corrections run before vocabulary so a declared
+        # wrong-phrase fix wins over plain casing restoration; each pass keeps
+        # expansions literal, including backslashes and group-looking sequences.
+        combined_rules = self._correction_rules + self._rules
         output: list[str] = []
         cursor = 0
         for protected in _PROTECTED_RE.finditer(text):
-            output.append(self._apply_segment(text[cursor:protected.start()], self._rules))
+            output.append(self._apply_segment(text[cursor:protected.start()], combined_rules))
             output.append(protected.group(0))
             cursor = protected.end()
-        output.append(self._apply_segment(text[cursor:], self._rules))
+        output.append(self._apply_segment(text[cursor:], combined_rules))
         result = "".join(output)
         if result != text:
             log.info("Applied explicit dictionary rules to dictated text")

@@ -4,6 +4,7 @@ SQLite Storage, Multi-API Key Polishing, Clipboard Injection, and Desktop GUI.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 import re
 import string
 
@@ -35,9 +36,10 @@ from voice_flow.injector import ClipboardInjector, get_active_window_title
 from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher
 from voice_flow.storage import storage
-from voice_flow.style_engine import style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, split_press_enter
+from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, smart_format, split_press_enter
 from voice_flow.transcriber import Transcriber
+from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
 # Hide console window on Windows immediately so the application runs silently in the background
 if sys.platform == "win32":
@@ -49,12 +51,17 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Fix UTF-8 encoding on Windows console (only if stdout has a buffer)
+# Fix UTF-8 encoding on Windows console. Only rewrap streams that are real
+# non-UTF-8 consoles: wrapping a redirected stream (pytest capture, pipes)
+# takes ownership of its buffer and closes it on GC, poisoning the host.
 if sys.platform == "win32":
     try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="backslashreplace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="backslashreplace")
-    except AttributeError:
+        for _name in ("stdout", "stderr"):
+            _stream = getattr(sys, _name)
+            _encoding = (_stream.encoding or "").lower().replace("-", "") if getattr(_stream, "encoding", None) else ""
+            if hasattr(_stream, "buffer") and _encoding not in ("utf-8", "utf8"):
+                setattr(sys, _name, io.TextIOWrapper(_stream.buffer, encoding="utf-8", errors="backslashreplace"))
+    except Exception:
         pass
 
 log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "voice_flow_debug.log"))
@@ -78,8 +85,21 @@ class DictationState(str, Enum):
     ERROR = "error"
 
 
+@dataclass(frozen=True)
+class DictationSession:
+    """Immutable target and style snapshot for one dictation session."""
+
+    target_hwnd: int | None
+    app_title: str
+    app_category: str
+    style_id: str
+    started_at: float
+    cleanup_level: str = "cleanup_light"
+    cursor_context: Any = None
+    press_enter_enabled: bool = False
+
+
 from voice_flow.tts_engine import tts_engine
-from voice_flow.video_flow import video_flow_service
 from voice_flow.audio_flow_widget import audio_flow_widget
 from voice_flow.video_flow_widget import video_flow_widget
 
@@ -88,13 +108,15 @@ class VoiceFlowApp:
     """Core Coordinator for Voice Flow Dictation System."""
 
     def __init__(self) -> None:
-        log.info("Starting AI Productivity Flow System Engine...")
+        log.info("Starting Voice Flow System Engine...")
         self._state_lock = threading.RLock()
         self.state = DictationState.IDLE
         self.last_successful_transcript: str | None = None
         self.recent_dictations: set[str] = set()
         self._record_watchdog: threading.Timer | None = None
         self._selection_generation = 0
+        self.archive = AudioArchive()
+        self.archive.purge_expired()
 
         # Load SQLite dictation history into recent_dictations to prevent Audio Flow from ever reading dictations
         try:
@@ -152,6 +174,38 @@ class VoiceFlowApp:
         with self._state_lock:
             return self.state == DictationState.RECORDING
 
+    def set_flow_bar_visible(self, visible: bool) -> bool:
+        """Runtime hook for the Hub; hiding the bar deliberately leaves hotkeys live."""
+        return self.overlay.set_visible(visible)
+
+    def set_flow_bar_dock(self, dock: str) -> bool:
+        """Runtime hook for the Hub's persisted Flow Bar location."""
+        return self.overlay.set_dock(dock)
+
+    def _capture_session(self) -> DictationSession | None:
+        """Read foreground app context once, before recording changes the UI."""
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            hwnd = None
+        if not hwnd:
+            return None
+        title = get_window_title_for_hwnd(hwnd) or get_active_window_title()
+        if "voice flow" in title.lower() or "tk" in title.lower():
+            return None
+        resolved = style_engine.resolve_for_target(hwnd)
+        press_enter_enabled = storage.get_setting("press_enter_enabled", False)
+        cleanup_level = str(storage.get_setting("style_autocleanup", "cleanup_light"))
+        return DictationSession(
+            target_hwnd=hwnd,
+            app_title=resolved.app_name,
+            app_category=resolved.category,
+            style_id=resolved.style_id,
+            started_at=time.time(),
+            cleanup_level=cleanup_level if cleanup_level.startswith("cleanup_") else "cleanup_light",
+            press_enter_enabled=bool(press_enter_enabled),
+        )
+
     def _on_dictation_start(self, mode: str = "ptt") -> bool:
         if not storage.get_setting("voice_flow_enabled", True):
             log.info("Voice Flow dictation is disabled via the feature toggle.")
@@ -160,33 +214,42 @@ class VoiceFlowApp:
             if self.state != DictationState.IDLE:
                 log.info("Refusing start dictation while in state %s", self.state)
                 return False
+            session = self._capture_session()
+            if session is None:
+                self.state = DictationState.ERROR
+                self.last_error = "Focus a text field first"
+                self.hotkeys.set_recording_state(False)
+                self.overlay.show_error(self.last_error)
+                return False
+            self.session = session
             self.state = DictationState.RECORDING
 
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if hwnd:
-            title = get_active_window_title()
-            if "voice flow" not in title.lower() and "tk" not in title.lower():
-                self.target_hwnd = hwnd
-
-        log.info("[RECORDING] Dictation triggered for target hwnd %s!", getattr(self, "target_hwnd", None))
+        hwnd = getattr(session, "target_hwnd", None) or (session.get("hwnd") if isinstance(session, dict) else None)
+        app_title = getattr(session, "app_title", "General App") or (session.get("app_title") if isinstance(session, dict) else "General App")
+        log.info("[RECORDING] Dictation triggered for target hwnd %s (%s)", hwnd, app_title)
         self.hotkeys.set_recording_state(True)
 
-        if self._record_watchdog:
-            self._record_watchdog.cancel()
+        watchdog = getattr(self, "_record_watchdog", None)
+        if watchdog:
+            watchdog.cancel()
             self._record_watchdog = None
 
-        self._record_watchdog = threading.Timer(20 * 60, self._on_dictation_finish)
+        # The timer carries this immutable session so a later recording cannot
+        # be finished by a stale twenty-minute watchdog.
+        self._record_watchdog = threading.Timer(20 * 60, self._finish_if_current, args=(self.session,))
         self._record_watchdog.daemon = True
         self._record_watchdog.start()
 
         # Start audio capture stream
         started = self.audio.start()
         if not started:
-            if self._record_watchdog:
-                self._record_watchdog.cancel()
+            watchdog = getattr(self, "_record_watchdog", None)
+            if watchdog:
+                watchdog.cancel()
                 self._record_watchdog = None
             with self._state_lock:
                 self.state = DictationState.IDLE
+                self.session = None
             self.hotkeys.set_recording_state(False)
             self.overlay.show_error("Microphone hardware failed to open")
             return False
@@ -195,39 +258,51 @@ class VoiceFlowApp:
         self.overlay.show_recording(level_provider=lambda: self.audio.level)
         return True
 
-    def _on_dictation_finish(self) -> bool:
+    def _finish_if_current(self, session) -> None:
         with self._state_lock:
-            if self.state != DictationState.RECORDING:
-                return False
-            self.state = DictationState.PROCESSING
+            if session is None or getattr(self, "session", None) is not session or self.state != DictationState.RECORDING:
+                return
+        self._on_dictation_finish()
 
-        if self._record_watchdog:
-            self._record_watchdog.cancel()
-            self._record_watchdog = None
-
+    def _on_dictation_finish(self) -> bool:
         try:
+            with self._state_lock:
+                if self.state != DictationState.RECORDING:
+                    return False
+                session = getattr(self, "session", None)
+                self.state = DictationState.PROCESSING
+            watchdog = getattr(self, "_record_watchdog", None)
+            if watchdog:
+                watchdog.cancel()
+                self._record_watchdog = None
             self.hotkeys.set_recording_state(False)
-            log.info("[PROCESSING] Dictation finished, stopping recording stream...")
 
-            # Stop audio recording stream & fetch float32 numpy audio buffer
             audio_buffer = self.audio.stop()
             duration = len(audio_buffer) / config.sample_rate if audio_buffer.size > 0 else 0.0
-            log.info("[AUDIO] Got %d samples (%.2fs), peak=%.4f", audio_buffer.size, duration, float(max(abs(audio_buffer))) if audio_buffer.size > 0 else 0.0)
-
+            app_title = getattr(session, "app_title", "General App") or (session.get("app_title") if isinstance(session, dict) else "General App")
+            category = getattr(session, "app_category", "smart_clean") or (session.get("category") if isinstance(session, dict) else "smart_clean")
             if duration < 0.3 or audio_buffer.size == 0:
-                log.info("Recording too short (%.2fs), ignoring.", duration)
+                storage.add_dictation("", "", app_title, duration, category, status="transcription_failed", error_message="No usable audio was captured", insertion_status="not_attempted")
                 with self._state_lock:
                     self.state = DictationState.IDLE
-                self.overlay.show_ready()
-                return True
-
-            # Show Processing state on floating bar
+                    self.session = None
+                self.overlay.show_error("No usable audio was captured")
+                return False
+            try:
+                audio_path = self.archive.save(audio_buffer)
+            except Exception as exc:
+                storage.add_dictation("", "", app_title, duration, category, status="transcription_failed", error_message=f"Could not archive recording: {exc}", insertion_status="not_attempted")
+                with self._state_lock:
+                    self.state = DictationState.IDLE
+                    self.session = None
+                self.overlay.show_error(f"Could not archive recording: {exc}")
+                return False
+            record = storage.add_dictation("", "", app_title, duration, category,
+                status="processing", audio_path=audio_path, insertion_status="not_attempted")
             self.overlay.show_processing()
-
-            # Dispatch speech transcription & AI polish asynchronously
             threading.Thread(
                 target=self._process_dictation_pipeline,
-                args=(audio_buffer, duration),
+                args=(session, audio_buffer, duration, record.id),
                 daemon=True,
             ).start()
             return True
@@ -236,18 +311,21 @@ class VoiceFlowApp:
             log.error("[FINISH ERROR] %s", e, exc_info=True)
             with self._state_lock:
                 self.state = DictationState.IDLE
+                self.session = None
             self.overlay.show_ready()
             return False
 
     def _on_dictation_cancel(self) -> bool:
-        if self._record_watchdog:
-            self._record_watchdog.cancel()
+        watchdog = getattr(self, "_record_watchdog", None)
+        if watchdog:
+            watchdog.cancel()
             self._record_watchdog = None
 
         with self._state_lock:
             if self.state != DictationState.RECORDING:
                 return False
             self.state = DictationState.IDLE
+            self.session = None
 
         log.info("[CANCELLED] Dictation cancelled by user.")
         self.hotkeys.set_recording_state(False)
@@ -281,71 +359,112 @@ class VoiceFlowApp:
             log.error("Could not paste last transcript; it remains on the clipboard.")
         return success
 
-    def _process_dictation_pipeline(self, audio_buffer, duration: float) -> None:
-        with self.processing_lock:
-            try:
-                target_h = getattr(self, "target_hwnd", None)
+    def _history_update(self, record_id: int | None, **fields) -> None:
+        updater = getattr(storage, "update_dictation", None)
+        if record_id is not None and callable(updater):
+            updater(record_id, **fields)
 
-                # Step 1: Detect active foreground app window & resolve style
-                resolved_style = style_engine.resolve_for_target(target_h)
+    def _finalize_text(self, raw_action_text: str, session: Any, resolved_style: Any = None) -> str:
+        """Fidelity-first order: polish (AI pool or deterministic) -> style."""
+        level = getattr(session, "cleanup_level", None) or (session.get("cleanup_level") if isinstance(session, dict) else "cleanup_light")
+        style = getattr(session, "style_id", None) or (session.get("style_id") if isinstance(session, dict) else "smart_clean")
+        context = getattr(session, "cursor_context", None) or (session.get("cursor_context") if isinstance(session, dict) else None)
+        # The polisher owns the AI pass, deterministic cleanup, and the
+        # dictionary vocabulary pass; smart formatting runs once afterwards.
+        polished = polisher.polish(raw_action_text, style_instruction=resolved_style or style, cleanup_level=level)
+        return smart_format(polished, style, context)
+
+    def _process_dictation_pipeline(self, session: Any, audio_buffer: Any, duration: float, record_id: int | None = None) -> None:
+        lock = getattr(self, "processing_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+        with lock:
+            try:
+                # App/style context belongs to the session, never current foreground.
+                with self._state_lock:
+                    if getattr(self, "session", None) is not session or self.state != DictationState.PROCESSING:
+                        log.info("Ignoring stale dictation processing session.")
+                        return
+
+                target_h = getattr(session, "target_hwnd", None) or (session.get("hwnd") if isinstance(session, dict) else None)
+                resolved_style = getattr(session, "style", None) or (session.get("style") if isinstance(session, dict) else None) or style_engine.resolve_for_target(target_h)
                 log.info("Detected active app: '%s' (%s style - %s)", resolved_style.app_name, resolved_style.category, resolved_style.style_id)
 
-                # Step 2: Transcribe speech with dictionary prompt biasing
-                t0 = time.time()
-                raw_transcript = self.transcriber.transcribe(audio_buffer)
-                t_stt = time.time() - t0
-                raw_words = len(raw_transcript.split()) if raw_transcript else 0
-                log.info("STT completed in %.3fs (%d words): '%s'", t_stt, raw_words, raw_transcript)
-
+                # Transcribe speech with dictionary prompt biasing; one bounded retry.
+                raw_transcript = ""
+                failure: Exception | None = None
+                for attempt in range(2):
+                    try:
+                        raw_transcript = self.transcriber.transcribe(audio_buffer) or ""
+                        if raw_transcript.strip():
+                            break
+                        failure = RuntimeError("No text was transcribed")
+                    except Exception as exc:
+                        failure = exc
+                    if attempt == 0:
+                        self._history_update(record_id, retry_count=1, status="processing", error_message="Automatic transcription retry")
                 if not raw_transcript.strip():
-                    log.info("No text transcribed.")
+                    reason = str(failure or "No text was transcribed")
+                    self._history_update(record_id, status="transcription_failed", error_message=reason, insertion_status="not_attempted")
                     with self._state_lock:
                         self.state = DictationState.IDLE
-                    self.overlay.show_ready()
+                        self.session = None
+                    self.overlay.show_error(reason[:90])
                     return
 
-                # Step 3: Check opt-in Press Enter action
-                press_enter_enabled = storage.get_setting("press_enter_enabled", False)
-                split_res = split_press_enter(raw_transcript, press_enter_enabled)
+                # Check opt-in Press Enter action, then polish.
+                press_enter_enabled = getattr(session, "press_enter_enabled", False) or (session.get("press_enter_enabled", False) if isinstance(session, dict) else False)
+                split_res = split_press_enter(raw_transcript, bool(press_enter_enabled))
                 text_to_polish = apply_spoken_punctuation(split_res.text)
                 should_press_enter = split_res.press_enter
 
-                # Step 4: The polisher owns the single deterministic vocabulary pass.
-                polished_text = polisher.polish(text_to_polish, resolved_style)
+                # The polisher owns the deterministic vocabulary pass; smart
+                # formatting runs once afterwards.
+                polished_text = self._finalize_text(text_to_polish, session, resolved_style)
                 polished_words = len(polished_text.split()) if polished_text else 0
-                log.info("Pipeline complete (%d words -> %d words): '%s'", raw_words, polished_words, polished_text)
+                log.info("Pipeline complete (%d words -> %d words): '%s'", len(raw_transcript.split()), polished_words, polished_text)
 
-                # Step 6: Inject polished text into target application active input field
+                if not polished_text and not should_press_enter:
+                    self._history_update(record_id, raw_text=raw_transcript, status="transcription_failed", error_message="Text cleanup returned no usable transcript", insertion_status="not_attempted")
+                    with self._state_lock:
+                        self.state = DictationState.IDLE
+                        self.session = None
+                    self.overlay.show_error("Text cleanup returned no usable transcript")
+                    return
+
+                with self._state_lock:
+                    if getattr(self, "session", None) is not session or self.state != DictationState.PROCESSING:
+                        log.info("Discarding stale transcript before persistence/paste.")
+                        return
+
+                if record_id is None:
+                    # Compatibility for callers/tests that process supplied audio
+                    # rather than a completed recorder session.
+                    legacy = storage.add_dictation(raw_text=raw_transcript, polished_text=polished_text, app_name=resolved_style.app_name, duration_sec=duration, style_mode=resolved_style.category)
+                    record_id = legacy.id
+                self._history_update(record_id, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=None, insertion_status="not_attempted")
+
+                # Inject polished text into the captured target window only.
                 success = self.injector.paste_text(polished_text, target_h, press_enter=should_press_enter)
 
                 # Accepted transcript state is updated only after a successful paste.
                 # An action-only Enter must not erase the prior copy-last transcript.
                 if success and polished_text.strip():
                     self.last_successful_transcript = polished_text
-                    self.recent_dictations.add(polished_text.strip())
-                    if raw_transcript and raw_transcript.strip():
-                        self.recent_dictations.add(raw_transcript.strip())
-                    if len(self.recent_dictations) > 100:
-                        self.recent_dictations = set(list(self.recent_dictations)[-50:])
-
-                # Step 7: Record Insights ONLY after successful paste into active window input field!
-                if success:
-                    try:
-                        record = storage.add_dictation(
-                            raw_text=raw_transcript,
-                            polished_text=polished_text,
-                            app_name=resolved_style.app_name,
-                            duration_sec=duration,
-                            style_mode=resolved_style.style_id,
-                        )
-                        log.info("Saved dictation record #%d into SQLite history database", record.id)
-                    except Exception as db_err:
-                        log.warning("[STORAGE] Could not persist dictation history: %s", db_err)
-                else:
-                    log.warning("[INSIGHTS SKIPPED] Text paste failed; app not logged in Insights.")
+                    recent = getattr(self, "recent_dictations", None)
+                    if recent is not None:
+                        recent.add(polished_text.strip())
+                        if raw_transcript and raw_transcript.strip():
+                            recent.add(raw_transcript.strip())
+                        if len(recent) > 100:
+                            self.recent_dictations = set(list(recent)[-50:])
+                    self._history_update(record_id, insertion_status="pasted")
+                elif not success:
+                    self._history_update(record_id, status="paste_failed", error_message="Could not paste transcript into the original target; it remains on the clipboard.", insertion_status="failed")
 
                 with self._state_lock:
                     self.state = DictationState.IDLE
+                    self.session = None
 
                 if success:
                     self.overlay.show_done(polished_text)
@@ -354,9 +473,52 @@ class VoiceFlowApp:
 
             except Exception as e:
                 log.error("Error processing dictation: %s", e, exc_info=True)
+                self._history_update(record_id, status="transcription_failed", error_message=str(e), insertion_status="not_attempted")
                 with self._state_lock:
                     self.state = DictationState.IDLE
+                    self.session = None
                 self.overlay.show_ready()
+
+    def retry_history(self, record_id: int) -> tuple[bool, str]:
+        """Retry archived audio without injecting into whichever app is focused now."""
+        row = storage.get_history_record(record_id)
+        if not row:
+            return False, "History item not found"
+        if float(row.get("duration_sec") or 0) < MIN_RETRY_SECONDS:
+            return False, "Only recordings of at least 5 seconds can be retried"
+        path = self.archive.resolve(row.get("audio_path"))
+        if not path or not self.archive.available(row.get("audio_path")):
+            return False, "Audio is no longer available"
+        with self._state_lock:
+            if self.state != DictationState.IDLE:
+                return False, "Finish the current dictation before retrying"
+            self.state = DictationState.PROCESSING
+        storage.update_dictation(record_id, status="processing", error_message=None, retry_count=int(row.get("retry_count") or 0) + 1)
+        self.overlay.show_processing()
+        threading.Thread(target=self._retry_history_worker, args=(record_id, str(path)), daemon=True).start()
+        return True, "Retry started"
+
+    def _retry_history_worker(self, record_id: int, path: str) -> None:
+        try:
+            import wave, numpy as np
+            with wave.open(path, "rb") as wf:
+                audio = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16).astype(np.float32) / 32767.0
+            raw = self.transcriber.transcribe(audio) or ""
+            if not raw.strip():
+                raise RuntimeError("No text was transcribed")
+            # Retried history deliberately uses the stored style-independent
+            # recovery path: it never focuses or pastes into the current app.
+            text = smart_format(dictionary_engine.apply_dictionary_post_processing(cleanup_text(raw, "cleanup_light")), "smart_clean")
+            storage.update_dictation(record_id, raw_text=raw, polished_text=text, status="success", error_message=None, insertion_status="not_attempted")
+            self.last_successful_transcript = text
+            self.overlay.show_done(text)
+            with self._state_lock:
+                self.state = DictationState.IDLE
+        except Exception as exc:
+            storage.update_dictation(record_id, status="transcription_failed", error_message=str(exc), insertion_status="not_attempted")
+            with self._state_lock:
+                self.state = DictationState.IDLE
+            self.overlay.show_error(f"History retry failed: {exc}"[:90])
 
     def _on_mouse_release(self, x: int, y: int, drag_distance: float = 0.0, start_x: int = 0, start_y: int = 0) -> None:
         """Capture selected text and expose its actions on the persistent bar."""
@@ -575,24 +737,75 @@ class VoiceFlowApp:
             self.overlay.show_error("Video Flow is disabled")
             return
         text = (text_override or "").strip()
+        if not text:
+            text = self._capture_selected_text_for_video()
+        if not text:
+            self.overlay.show_error("Select text to make a video")
+            return
         if mode == "full":
             video_flow_widget.show_composer(text, "full")
         else:
             video_flow_widget.show_composer(text, "summary")
 
+    def _capture_selected_text_for_video(self) -> str:
+        """Copy foreground selection without injecting text or retaining clipboard changes.
+
+        The previous clipboard content is restored only when it is plain text so
+        image/file clipboards are never destroyed by a stray restore.
+        """
+        try:
+            import pyperclip
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return ""
+            try:
+                from voice_flow.injector import focus_target_window
+                focus_target_window(hwnd)
+            except Exception:
+                pass
+            try:
+                previous = pyperclip.paste()
+            except Exception:
+                previous = None
+            marker = f"__voice_flow_selection_{time.time_ns()}__"
+            try:
+                pyperclip.copy(marker)
+                user32.keybd_event(0x11, 0, 0, 0); user32.keybd_event(0x43, 0, 0, 0)
+                user32.keybd_event(0x43, 0, 0x0002, 0); user32.keybd_event(0x11, 0, 0x0002, 0)
+                deadline = time.monotonic() + 0.5
+                while time.monotonic() < deadline:
+                    copied = pyperclip.paste()
+                    if copied != marker:
+                        return str(copied or "").strip()
+                    time.sleep(0.02)
+                return ""
+            finally:
+                # Only restore text clipboards; pyperclip.copy(None) raises and
+                # non-text (image/file) clipboards cannot be restored via text.
+                if isinstance(previous, str):
+                    try:
+                        pyperclip.copy(previous)
+                    except Exception:
+                        pass
+        except Exception:
+            log.warning("Could not capture selected text for Video Flow", exc_info=True)
+            return ""
+
     def _queue_video_from_screen(self, payload: dict) -> dict:
         """Queue a system-wide composer request and mirror progress on the bar."""
-        video = video_flow_service.queue(
+        from voice_flow.video_flow_service import get_video_flow_service
+
+        job = get_video_flow_service().queue(
             source_text=str(payload.get("source_text", "")),
             mode=str(payload.get("mode", "summary")),
             title=str(payload.get("title", "")),
-            source_name=str(payload.get("source_name", "")),
-            model_ref=str(payload.get("model_ref", "")),
-            theme=str(payload.get("theme", "auto")),
+            model_ref=str(payload.get("model_ref", "") or "") or None,
+            theme=payload.get("theme", "auto"),
             visual_direction=str(payload.get("visual_direction", "")),
             allow_external_ai=bool(payload.get("allow_external_ai", False)),
         )
-        video_id = str(video.get("id", ""))
+        video_id = job.job_id
         self.overlay.show_video_progress(video_id, 0, "Queued")
         threading.Thread(
             target=self._monitor_video_flow_job,
@@ -601,35 +814,41 @@ class VoiceFlowApp:
             name=f"video-flow-monitor-{video_id[:8]}",
         ).start()
         log.info("[VIDEO FLOW] Queued screen video %s.", video_id)
-        return video
+        return {"id": video_id}
 
     def _cancel_video_from_screen(self, video_id: str) -> None:
         """Stop a Video Flow job without interrupting Voice or Audio Flow."""
-        if video_flow_service.cancel(video_id):
+        from voice_flow.video_flow_service import get_video_flow_service
+
+        if get_video_flow_service().cancel(video_id):
             log.info("[VIDEO FLOW] Cancelled screen video %s.", video_id)
         self.overlay.clear_video_status()
 
     def _monitor_video_flow_job(self, video_id: str) -> None:
         """Keep the bar sidecar synchronized until the player is ready."""
+        from voice_flow.video_flow_service import get_video_flow_service
+
+        service = get_video_flow_service()
         while video_id:
-            video = video_flow_service.store.get_video(video_id)
-            if not video:
+            job = service.get(video_id)
+            if job is None:
                 self.overlay.show_video_failed(video_id, "Video job disappeared")
                 return
-            status = str(video.get("status", ""))
-            if status in ("completed", "ready", "complete") or bool(video.get("playable")):
+            state = str(job.state)
+            if state == "complete" or job.progress >= 100.0:
                 self.overlay.show_video_ready(video_id)
                 return
-            if status == "failed":
-                self.overlay.show_video_failed(video_id, str(video.get("error") or "Video generation failed"))
+            if state == "failed":
+                reason = str(job.meta.get("error_message") or job.message or job.meta.get("error_code") or "Video generation failed")
+                self.overlay.show_video_failed(video_id, reason)
                 return
-            if status == "cancelled":
+            if state == "cancelled":
                 self.overlay.clear_video_status()
                 return
             self.overlay.show_video_progress(
                 video_id,
-                int(video.get("progress", 0) or 0),
-                str(video.get("stage") or status or "Creating video"),
+                int(job.progress),
+                str(job.message or state or "Creating video"),
             )
             time.sleep(1.1)
     def _stop_audio_flow_pipeline(self) -> None:
@@ -650,7 +869,8 @@ class VoiceFlowApp:
         """Monitor ~/.voice_flow/recording_state.json for recording toggle events from GUI."""
         import json
         import os
-        state_file = os.path.join(os.path.expanduser("~"), ".voice_flow", "recording_state.json")
+        from voice_flow.paths import data_dir
+        state_file = str(data_dir() / "recording_state.json")
 
         try:
             os.makedirs(os.path.dirname(state_file), exist_ok=True)

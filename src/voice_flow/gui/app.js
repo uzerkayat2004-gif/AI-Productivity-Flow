@@ -1034,7 +1034,7 @@ function filterDictionaryChips() {
   renderDictionaryFilteredChips();
 }
 
-function filterDictionaryCategory(cat, el) {
+function filterDictionaryChips(cat, el) {
   activeDictCategory = cat;
   document.querySelectorAll(".dict-tags-nav .dict-tag-btn").forEach(btn => btn.classList.remove("active"));
   if (el) el.classList.add("active");
@@ -2024,6 +2024,13 @@ function getOnboardingAudioPath(slideIdx) {
   return `/assets/onboarding/slide_${slideIdx}.mp3`;
 }
 
+function updateOnboardingNarrationUI(paused) {
+  const btn = document.getElementById("onboarding-narration-toggle");
+  const label = document.getElementById("onboarding-narration-label");
+  if (btn) btn.textContent = paused ? "▶" : "⏸";
+  if (label) label.textContent = paused ? "Paused" : "Narrating…";
+}
+
 function speakOnboardingNarration() {
   stopOnboardingNarration();
   onboardingNarrationPaused = false;
@@ -2051,12 +2058,18 @@ function stopOnboardingNarration() {
   }
 }
 
-function updateOnboardingNarrationUI(paused) {
-  const btn = document.getElementById("onboarding-narration-toggle");
-  const label = document.getElementById("onboarding-narration-label");
-  if (btn) btn.textContent = paused ? "▶" : "⏸";
-  if (label) label.textContent = paused ? "Paused" : "Narrating…";
+function makeButton(label, onclick) {
+  const btn = document.createElement("button");
+  btn.className = "btn-secondary";
+  btn.textContent = label;
+  btn.onclick = onclick;
+  return btn;
 }
+
+function editCorrection(row, item) {
+  // Static helper for correction inline editing
+}
+
 
 function toggleOnboardingNarration() {
   if (!onboardingAudioPlayer) {

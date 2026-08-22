@@ -54,34 +54,33 @@ class PerformanceProfile(str, Enum):
     COMPATIBILITY = "COMPATIBILITY"
 
 
-class SemanticRepresentationType(str, Enum):
+class RepresentationType(str, Enum):
     PROCESS = "PROCESS"
-    CAUSE_EFFECT = "CAUSE_EFFECT"
     COMPARISON = "COMPARISON"
     TIMELINE = "TIMELINE"
-    TRANSFORMATION = "TRANSFORMATION"
     HIERARCHY = "HIERARCHY"
     NETWORK = "NETWORK"
     QUANTITATIVE = "QUANTITATIVE"
-    QUANTITATIVE_RELATIONSHIP = "QUANTITATIVE_RELATIONSHIP"
     CHART = "CHART"
-    LAYER_STACK = "LAYER_STACK"
     SYSTEM_ARCHITECTURE = "SYSTEM_ARCHITECTURE"
-    DOCUMENT_SOURCE = "DOCUMENT_SOURCE"
-    CODE_EXPLANATION = "CODE_EXPLANATION"
-    EQUATION_EXPLANATION = "EQUATION_EXPLANATION"
-    MAP_GEOGRAPHY = "MAP_GEOGRAPHY"
-    SEQUENCE = "SEQUENCE"
     OBJECT_FOCUS = "OBJECT_FOCUS"
-    BEFORE_AFTER = "BEFORE_AFTER"
+    TRANSFORMATION = "TRANSFORMATION"
     FLOW = "FLOW"
-    CONCEPTUAL_METAPHOR = "CONCEPTUAL_METAPHOR"
+    BEFORE_AFTER = "BEFORE_AFTER"
     ASSEMBLY_3D = "ASSEMBLY_3D"
     CUTAWAY_3D = "CUTAWAY_3D"
-    LIST_BREAKDOWN = "LIST_BREAKDOWN"
-    STAT_GRID = "STAT_GRID"
-    QUOTE_CALLOUT = "QUOTE_CALLOUT"
-    SUMMARY_RECAP = "SUMMARY_RECAP"
+    ANATOMY_EXPLODED = "ANATOMY_EXPLODED"
+    SPATIAL_LAYOUT = "SPATIAL_LAYOUT"
+    METRIC_CALLOUT = "METRIC_CALLOUT"
+    MATRIX_GRID = "MATRIX_GRID"
+    VENN_DIAGRAM = "VENN_DIAGRAM"
+    CYCLIC_LOOP = "CYCLIC_LOOP"
+    FUNNEL = "FUNNEL"
+    PYRAMID = "PYRAMID"
+    DECISION_TREE = "DECISION_TREE"
+    STATE_MACHINE = "STATE_MACHINE"
+    GEOGRAPHIC_MAP = "GEOGRAPHIC_MAP"
+    CONCEPT_MAP = "CONCEPT_MAP"
 
 
 @dataclass
@@ -92,7 +91,7 @@ class SourceBundle:
     source_url: Optional[str] = None
     app_name: Optional[str] = None
     source_hash: str = ""
-    privacy_consent: bool = False
+    privacy_consent: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -178,13 +177,12 @@ class SceneSemanticV3:
     viewer_question: str
     intended_understanding: str
     narration_text: str
-    representation_type: str = SemanticRepresentationType.PROCESS.value
+    representation_type: RepresentationType = RepresentationType.OBJECT_FOCUS
     semantic_objects: List[SemanticObject] = field(default_factory=list)
     semantic_relationships: List[Dict[str, Any]] = field(default_factory=list)
     motion_purpose: str = "reveal"  # reveal, compare, flow, explode, transform, focus
     shot_grammar: str = "HeroFocus"
     suggested_duration_sec: float = 5.0
-    duration_sec: float = 5.0
     use_3d: bool = False
     fidelity_3d: FidelityClass3D = FidelityClass3D.F4_INSUFFICIENT
     evidence_refs: List[str] = field(default_factory=list)
@@ -198,6 +196,7 @@ class VideoProgramV3:
     title: str = ""
     source_hash: str = ""
     art_genome: Optional[ArtDirectionGenome] = None
+    representation_type: RepresentationType = RepresentationType.OBJECT_FOCUS
     chapters: List[Dict[str, Any]] = field(default_factory=list)
     scenes: List[SceneSemanticV3] = field(default_factory=list)
     coverage_summary: Dict[str, Any] = field(default_factory=dict)
@@ -229,7 +228,6 @@ class ExecutableSceneProgram:
     scene_id: str = ""
     sequence: int = 0
     duration_sec: float = 0.0
-    representation_type: str = SemanticRepresentationType.PROCESS.value
     elements_2d: List[ExecutableElement2D] = field(default_factory=list)
     nodes_3d: List[ExecutableNode3D] = field(default_factory=list)
     camera_path: List[Dict[str, Any]] = field(default_factory=list)
@@ -242,25 +240,13 @@ def validate_no_executable_code(payload: Any) -> None:
     """Security Boundary Validator: Rejects any LLM-authored executable code strings."""
     if hasattr(payload, "__dataclass_fields__"):
         raw = json.dumps(asdict(payload))
-    elif isinstance(payload, (dict, list)):
+    elif isinstance(payload, (dict, list, str, int, float, bool, type(None))):
         raw = json.dumps(payload)
     else:
         raw = str(payload)
     forbidden_tokens = [
-        "eval(",
-        "<script",
-        "import ",
-        "Function(",
-        "process.",
-        "exec(",
-        "child_process",
-        "os.system",
-        "subprocess",
-        "__import__",
-        "require(",
-        "javascript:",
-        "onload=",
-        "onerror=",
+        "eval(", "<script", "import ", "Function(", "process.", "exec(", "child_process",
+        "os.system", "subprocess", "__import__", "require(", "javascript:", "onload=", "onerror=",
     ]
     for token in forbidden_tokens:
         if token in raw:
@@ -275,5 +261,5 @@ def export_contract_schema() -> Dict[str, Any]:
         "export_states": [s.value for s in ExportStateV3],
         "fidelities": [f.value for f in FidelityClass3D],
         "performance_profiles": [p.value for p in PerformanceProfile],
-        "semantic_representation_types": [s.value for s in SemanticRepresentationType],
+        "representation_types": [r.value for r in RepresentationType],
     }

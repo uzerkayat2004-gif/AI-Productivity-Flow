@@ -258,6 +258,9 @@ function vfPickerActiveRef() {
   if (vfModelPickerContext === "audio_voice") {
     if (typeof audioVoicePolicyModelRef === "string" && audioVoicePolicyModelRef) return audioVoicePolicyModelRef;
   }
+  if (vfModelPickerContext === "video_flow_voice") {
+    return videoFlowVoiceModelRef || "edge/en-US-AvaNeural";
+  }
   return vfCatalog.active_model || "local/deterministic";
 }
 
@@ -286,7 +289,9 @@ function renderVideoModelPicker() {
     // hosting) are injected so they remain selectable.
     const extras = vfModelPickerContext === "audio_voice"
       ? (typeof audioVoicePolicyModels !== "undefined" ? audioVoicePolicyModels : [])
-      : (typeof voiceFlowPolicyModels !== "undefined" ? voiceFlowPolicyModels : []);
+      : vfModelPickerContext === "video_flow_voice"
+        ? videoFlowVoiceModels
+        : (typeof voiceFlowPolicyModels !== "undefined" ? voiceFlowPolicyModels : []);
     for (const pm of extras) {
       const matchesQuery = !query || [pm.provider_name, pm.display_name, pm.full_id, ...(pm.capabilities || [])].join(" ").toLowerCase().includes(query);
       if (matchesQuery && vfPickerAllowedRefs.has(pm.full_id) && !models.some(m => m.full_id === pm.full_id)) {
@@ -335,6 +340,10 @@ function vfUpdateModelPickerChrome() {
     if (kicker) kicker.textContent = "AUDIO FLOW VOICE";
     if (title) title.textContent = "Select the TTS voice";
     if (note) note.textContent = "Neural voices from connected TTS providers plus the free Edge engine. The selected voice reads your highlighted text aloud.";
+  } else if (vfModelPickerContext === "video_flow_voice") {
+    if (kicker) kicker.textContent = "VIDEO FLOW VOICE";
+    if (title) title.textContent = "Select the narration voice";
+    if (note) note.textContent = "Same voice catalog as Audio Flow. The selected voice narrates Video Flow videos only — Audio Flow keeps its own voice.";
   } else if (vfModelPickerContext === "voice_flow") {
     if (kicker) kicker.textContent = "VOICE FLOW MODEL";
     if (title) title.textContent = "Select the polishing model";
@@ -353,6 +362,21 @@ function openVideoModelPicker(context = "video_flow") {
     vfPickerAllowedRefs = voiceFlowPolicyModelSet;
   } else if (context === "audio_voice" && typeof audioVoicePolicySet !== "undefined" && audioVoicePolicySet) {
     vfPickerAllowedRefs = audioVoicePolicySet;
+  } else if (context === "video_flow_voice") {
+    // Only voices from the shared TTS catalog are offered; if the catalog
+    // has not loaded yet the picker falls back to the Edge default only.
+    vfPickerAllowedRefs = videoFlowVoiceSet || new Set(["edge/en-US-AvaNeural"]);
+  } else if (context === "audio_summary") {
+    // Audio Summary executes its own provider set (audio_summary.py); the
+    // shared picker must only offer models from those providers.
+    const AUDIO_SUMMARY_PROVIDERS = new Set([
+      "gemini", "openai", "groq", "together", "openrouter",
+      "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic",
+    ]);
+    const candidates = (typeof vfCatalog !== "undefined" && vfCatalog && Array.isArray(vfCatalog.models)) ? vfCatalog.models : [];
+    const allowed = candidates.filter(m =>
+      m.available !== false && AUDIO_SUMMARY_PROVIDERS.has(String(m.provider || "").toLowerCase()));
+    vfPickerAllowedRefs = allowed.length ? new Set(allowed.map(m => m.full_id)) : null;
   } else {
     vfPickerAllowedRefs = null;
   }
@@ -385,6 +409,8 @@ function chooseVideoModel(modelRef) {
     if (typeof updateExecAudioFlowPolicy === "function") {
       updateExecAudioFlowPolicy(modelRef);
     }
+  } else if (vfModelPickerContext === "video_flow_voice") {
+    saveVideoFlowVoice(modelRef);
   } else if (vfModelPickerContext === "voice_flow") {
     if (typeof updateExecVoiceFlowPolicy === "function") {
       updateExecVoiceFlowPolicy(modelRef);
@@ -576,6 +602,71 @@ async function saveVideoModel(modelRef) {
   } catch (error) {
     vfToast(error.message, true);
   }
+}
+
+// Narration voice for Video Flow: shared Audio Flow TTS catalog, independent
+// selection (Audio Flow keeps its own voice under exec_audio_policy_model).
+let videoFlowVoiceModels = [];
+let videoFlowVoiceSet = null;
+let videoFlowVoiceModelRef = "edge/en-US-AvaNeural";
+
+async function loadVideoFlowVoice() {
+  try {
+    const res = await fetch("/api/video-flow/voice");
+    const data = await res.json();
+    if (!data.success) return;
+    videoFlowVoiceModelRef = data.active_voice || "edge/en-US-AvaNeural";
+    videoFlowVoiceModels = (data.models || []).map(m => ({
+      full_id: m.full_id,
+      display_name: m.display_name || m.label || m.full_id,
+      provider: String(m.full_id || "").split("/", 1)[0],
+      provider_name: m.provider_name || String(m.full_id || "").split("/", 1)[0],
+      capabilities: [],
+    }));
+    videoFlowVoiceSet = videoFlowVoiceModels.length
+      ? new Set(videoFlowVoiceModels.map(m => m.full_id))
+      : null;
+    if (!videoFlowVoiceSet || !videoFlowVoiceSet.has(videoFlowVoiceModelRef)) {
+      videoFlowVoiceModelRef = "edge/en-US-AvaNeural";
+    }
+    updateVideoFlowVoiceLabels();
+  } catch {
+    // Voice loading is non-critical; the picker shows the Edge default.
+  }
+}
+
+function updateVideoFlowVoiceLabels() {
+  const active = videoFlowVoiceModels.find(m => m.full_id === videoFlowVoiceModelRef);
+  const labelEl = document.getElementById("vf-active-voice-label");
+  const detailEl = document.getElementById("vf-active-voice-detail");
+  const engineEl = document.getElementById("vf-active-voice-engine-label");
+  const provider = String(videoFlowVoiceModelRef).split("/", 1)[0];
+  if (labelEl) labelEl.textContent = active ? `${active.provider_name} — ${active.display_name}` : videoFlowVoiceModelRef;
+  if (detailEl) detailEl.textContent = videoFlowVoiceModelRef;
+  if (engineEl) engineEl.textContent = provider === "edge" ? "Edge TTS (free)" : (active ? active.provider_name : provider);
+}
+
+async function saveVideoFlowVoice(voiceRef) {
+  if (!voiceRef) return;
+  try {
+    const response = await fetch("/api/video-flow/voice", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({voice: voiceRef}),
+    });
+    if (!response.ok) throw new Error("Could not save the Video Flow voice.");
+    videoFlowVoiceModelRef = voiceRef;
+    updateVideoFlowVoiceLabels();
+    vfToast("Narration voice selected for Video Flow.");
+  } catch (error) {
+    vfToast(error.message, true);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => loadVideoFlowVoice());
+} else {
+  loadVideoFlowVoice();
 }
 
 function isVideoModelExternal(modelRef) {

@@ -1,0 +1,72 @@
+{
+  "topic": "End-to-end autonomous driving",
+  "target_audience": "general learners",
+  "sections": [
+    {
+      "id": "context",
+      "title": "What does end-to-end mean?",
+      "lecture_lines": [
+        "End-to-end describes how information moves through a driving system.",
+        "First, compare it with the traditional modular approach."
+      ],
+      "animations": [
+        "Set up a comparison between explicit modules and one learned system."
+      ]
+    },
+    {
+      "id": "traditional_pipeline",
+      "title": "Traditional modular pipeline",
+      "lecture_lines": [
+        "Cameras feed a perception module.",
+        "Planning chooses a route, then control steers and brakes."
+      ],
+      "animations": [
+        "Connect camera, perception, planning, and control with arrows."
+      ]
+    },
+    {
+      "id": "module_roles",
+      "title": "Each module has one job",
+      "lecture_lines": [
+        "Perception labels lanes, cars, and pedestrians.",
+        "Planning converts those labels into a safe path."
+      ],
+      "animations": [
+        "Reveal labeled road objects, then transform them into a route."
+      ]
+    },
+    {
+      "id": "end_to_end",
+      "title": "The end-to-end alternative",
+      "lecture_lines": [
+        "One neural network learns camera pixels to driving actions.",
+        "Hand-designed boundaries become learned internal representations."
+      ],
+      "animations": [
+        "Collapse the separate modules into one neural-network block."
+      ]
+    },
+    {
+      "id": "training",
+      "title": "How the network learns",
+      "lecture_lines": [
+        "Training examples pair road scenes with expert steering and braking.",
+        "The network adjusts until its actions match those demonstrations."
+      ],
+      "animations": [
+        "Flow from demonstrations through training into a learned model."
+      ]
+    },
+    {
+      "id": "summary",
+      "title": "The essential contrast",
+      "lecture_lines": [
+        "Traditional systems connect explicit modules.",
+        "End-to-end systems learn the full camera-to-control relationship."
+      ],
+      "animations": [
+        "Finish with a side-by-side comparison and highlight the learned path."
+      ]
+    }
+  ]
+}

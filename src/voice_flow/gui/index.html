@@ -491,13 +491,13 @@
 
             <span style="opacity: 0.5;">🔍</span>
 
-            <input type="text" id="dictionary-search-input" placeholder="Search terms or snippets..." oninput="filterDictionaryChips()" style="background: none; border: none; color: #fff; width: 100%; font-size: 13px; outline: none;">
+            <input type="text" id="dictionary-search-input" placeholder="Search dictionary terms..." oninput="filterDictionaryChips()" style="background: none; border: none; color: #fff; width: 100%; font-size: 13px; outline: none;">
 
           </div>
 
           <div style="display: flex; gap: 8px; align-items: center;">
 
-            <input type="text" id="dictionary-add-input" placeholder="e.g. VoiceFlow, or shortcut -> text..." style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 14px; color: #fff; font-size: 13px; outline: none; width: 280px;" onkeydown="if(event.key==='Enter') addDictionaryWordFromInput()">
+            <input type="text" id="dictionary-add-input" placeholder="e.g. VoiceFlow..." style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 14px; color: #fff; font-size: 13px; outline: none; width: 280px;" onkeydown="if(event.key==='Enter') addDictionaryWordFromInput()">
 
             <button class="btn-primary" style="padding: 8px 16px; font-size: 13px;" onclick="addDictionaryWordFromInput()">+ Add Word</button>
 
@@ -511,17 +511,15 @@
 
         <div class="dict-tags-nav" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
 
-          <button class="dict-tag-btn active" onclick="filterDictionaryCategory('all', this)">All Terms</button>
+          <button class="dict-tag-btn active" onclick="filterDictionaryChips('all', this)">All Terms</button>
 
-          <button class="dict-tag-btn" onclick="filterDictionaryCategory('snippets', this)">🚀 Snippets & Text Expansions</button>
+          <button class="dict-tag-btn" onclick="filterDictionaryChips('technical', this)">💻 Technical Jargon</button>
 
-          <button class="dict-tag-btn" onclick="filterDictionaryCategory('technical', this)">💻 Technical Jargon</button>
+          <button class="dict-tag-btn" onclick="filterDictionaryChips('names', this)">👤 Proper Names</button>
 
-          <button class="dict-tag-btn" onclick="filterDictionaryCategory('names', this)">👤 Proper Names</button>
+          <button class="dict-tag-btn" onclick="filterDictionaryChips('brands', this)">🏢 Brands & Products</button>
 
-          <button class="dict-tag-btn" onclick="filterDictionaryCategory('brands', this)">🏢 Brands & Products</button>
-
-          <button class="dict-tag-btn" onclick="filterDictionaryCategory('acronyms', this)">⚡ Acronyms</button>
+          <button class="dict-tag-btn" onclick="filterDictionaryChips('acronyms', this)">⚡ Acronyms</button>
 
         </div>
 
@@ -536,6 +534,7 @@
         </div>
 
       </section>
+
 
 
 
@@ -1185,6 +1184,23 @@
                 <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Planner Engine:</span>
                 <strong style="color: var(--accent-text); font-weight: 700;" id="vf-active-engine-label">Local Deterministic</strong>
               </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr minmax(260px, auto); gap: 16px; background: rgba(0, 0, 0, 0.4); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; margin-bottom: 16px;" class="af-inner-box">
+            <div>
+              <label for="vf-voice-picker-button" style="font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; display: block; margin-bottom: 8px; letter-spacing: 0.6px;">Voice Provider for Video Flow</label>
+              <button id="vf-voice-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker('video_flow_voice')" aria-haspopup="dialog" style="width: 100%; font-size: 13px; font-weight: 600; padding: 11px 16px; background: #0b0f19; border: 1px solid var(--accent-glow); border-radius: 10px; color: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                <span class="vf-model-picker-copy"><strong id="vf-active-voice-label">Microsoft Edge Neural — Ava</strong> <small id="vf-active-voice-detail" style="color: var(--text-muted); margin-left: 6px;">edge/en-US-AvaNeural</small></span>
+                <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>⌄</b></span>
+              </button>
+            </div>
+            <div style="font-size: 13px; color: var(--text-muted); border-left: 1px dashed rgba(255,255,255,0.15); padding-left: 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Narration Voice:</span>
+                <strong style="color: var(--accent-text); font-weight: 700;" id="vf-active-voice-engine-label">Edge TTS (free)</strong>
+              </div>
+              <small style="font-size: 11px; line-height: 1.5;">Same catalog as Audio Flow — this choice only narrates videos. Audio Flow keeps its own voice.</small>
             </div>
           </div>
 

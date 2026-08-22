@@ -4,17 +4,19 @@ to the Voice Flow Desktop GUI.
 
 from __future__ import annotations
 
-import html
 import json
 import math
 import mimetypes
 import os
+import re
 import sqlite3
 import sys
 import threading
 import urllib.request
 import urllib.error
 import urllib.parse
+from dataclasses import asdict
+from pathlib import Path
 if sys.stdout is None:
     class DummyWriter:
         encoding = "utf-8"
@@ -40,19 +42,24 @@ from voice_flow.style_engine import (
     STYLE_PRESETS_BY_CATEGORY,
     style_engine,
 )
-from voice_flow.video_flow import PERMANENT_DELETE_CONFIRMATION, video_flow_service
-from voice_flow.video_flow_documents import extract_document_text
+from voice_flow.native_settings import get_launch_at_login, set_launch_at_login
+from voice_flow.storage import DB_PATH
+from voice_flow.video_flow_oauth import OAuthError
 from voice_flow.video_flow_providers import video_flow_provider_service
-from voice_flow.video_flow_oauth import OAuthError, start_refresh_scheduler
+from voice_flow.paths import data_dir
+from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
+from voice_flow.video_flow_documents import extract_document_text
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION, RUNTIME_FEATURES
 from voice_flow.runtime_guard import runtime_is_compatible
+from voice_flow.video_flow_service import get_video_flow_service
 
 GUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8991
-MAX_JSON_BODY_BYTES = 12 * 1024 * 1024
-ALLOWED_ORIGINS = None  # None = allow all origins (local loopback, LAN IP, desktop webview, custom client origins)
+MAX_JSON_BODY_BYTES = 64 * 1024
+ALLOWED_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+archive = AudioArchive()
 
-OAUTH_CALLBACK_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Voice Flow — OAuth</title>
+OAUTH_CALLBACK_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Video Flow — OAuth</title>
 <style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100vh;margin:0}
 div.card{text-align:center;padding:32px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:460px}
 h1{font-size:18px;margin:0 0 8px}p{color:#8b949e;font-size:14px;margin:0 0 16px}
@@ -108,6 +115,102 @@ button:hover{background:#2ea043}.hidden{display:none}</style></head>
 
 runtime_controller = None
 
+OAUTH_CALLBACK_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Voice Flow — OAuth</title>
+<style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:grid;place-items:center;min-height:100vh;margin:0}
+div.card{text-align:center;padding:32px;border:1px solid #30363d;border-radius:12px;background:#161b22;max-width:460px}
+h1{font-size:18px;margin:0 0 8px}p{color:#8b949e;font-size:14px;margin:0 0 16px}
+code{display:block;font-family:ui-monospace,Consolas,monospace;font-size:13px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:14px;word-break:break-all}
+button{background:#238636;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}
+button:hover{background:#2ea043}.hidden{display:none}</style></head>
+<body><div class="card">
+<h1 id="vf-heading">Finishing sign-in…</h1>
+<p id="vf-detail">Your account is being connected to Voice Flow.</p>
+<div id="vf-code-card" class="hidden">
+<p>This window opened outside Voice Flow, so copy the code below, paste it into the sign-in box in the app, and press <b>Complete sign-in</b>.</p>
+<code id="vf-code-value"></code>
+<button id="vf-copy">Copy code</button>
+</div>
+</div>
+<script>
+(function () {
+  var code = __OAUTH_CODE__;
+  var state = __OAUTH_STATE__;
+  var error = __OAUTH_ERROR__;
+  var heading = document.getElementById("vf-heading");
+  var detail = document.getElementById("vf-detail");
+  var card = document.getElementById("vf-code-card");
+  var value = document.getElementById("vf-code-value");
+  if (error) {
+    heading.textContent = "Sign-in was not completed.";
+    detail.textContent = error;
+  } else if (code && window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({type: "OAUTH_CALLBACK_SUCCESS", code: code, state: state}, window.location.origin);
+      window.close();
+    } catch (err) {
+      card.classList.remove("hidden");
+      value.textContent = code;
+    }
+  } else if (code) {
+    card.classList.remove("hidden");
+    value.textContent = code;
+    heading.textContent = "Copy the code, then close this tab";
+  } else {
+    heading.textContent = "No authorization code received.";
+    detail.textContent = "Close this window and press Add account again in Voice Flow.";
+  }
+  var copy = document.getElementById("vf-copy");
+  if (copy) copy.addEventListener("click", function () {
+    navigator.clipboard.writeText(value.textContent).then(function () {
+      copy.textContent = "Copied ✓";
+      window.setTimeout(function () { copy.textContent = "Copy code"; }, 2000);
+    });
+  });
+})();
+</script></body></html>"""
+
+PERMANENT_DELETE_CONFIRMATION = "DELETE"
+
+
+def _create_video_flow_combo(name: str, models: list, strategy: str) -> dict:
+    """Create a model combo in the shared provider tables (name + ordered members)."""
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Combo name is required.")
+    members = [str(m).strip() for m in models or [] if str(m).strip()]
+    if not members:
+        raise ValueError("A combo needs at least one model.")
+    if strategy not in ("fallback", "round_robin"):
+        strategy = "fallback"
+    selectable = video_flow_provider_service.selectable_model_refs()
+    unknown = [m for m in members if m not in selectable]
+    if unknown:
+        raise ValueError("Not selectable: " + ", ".join(unknown))
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        existing = conn.execute("SELECT id FROM video_flow_combos WHERE name = ?", (clean_name,)).fetchone()
+        if existing:
+            raise ValueError(f"Combo '{clean_name}' already exists.")
+        created_at = conn.execute("SELECT datetime('now')").fetchone()[0]
+        cursor = conn.execute(
+            "INSERT INTO video_flow_combos (name, strategy, created_at) VALUES (?, ?, ?)",
+            (clean_name, strategy, created_at),
+        )
+        combo_id = int(cursor.lastrowid)
+        conn.executemany(
+            "INSERT INTO video_flow_combo_models (combo_id, model_ref, position) VALUES (?, ?, ?)",
+            [(combo_id, m, i) for i, m in enumerate(members)],
+        )
+    return {"id": combo_id, "name": clean_name, "models": members, "strategy": strategy}
+
+
+def _delete_video_flow_combo(combo_id: int) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM video_flow_combo_models WHERE combo_id = ?", (int(combo_id),))
+        cursor = conn.execute("DELETE FROM video_flow_combos WHERE id = ?", (int(combo_id),))
+        return cursor.rowcount > 0
+
+
 def register_runtime_controller(controller) -> None:
     """Register the running engine without making the standalone API import it."""
     global runtime_controller
@@ -157,13 +260,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/reload-tts":
             try:
-                import importlib
-                import voice_flow.tts_engine as _tts_mod
-                importlib.reload(_tts_mod)
-                # Re-bind the global tts_engine singleton used by main.py
-                from voice_flow import tts_engine as _tts_pkg
-                importlib.reload(_tts_pkg)
-                self.send_json_response({"ok": True, "msg": "tts_engine reloaded"})
+                # Reset the live singleton in place. importlib.reload would
+                # mint a second TTSEngine while every `from ... import
+                # tts_engine` snapshot (main.py, this server) keeps the old
+                # instance — a split-brain where stop/pause miss live speech.
+                # Provider settings are read from storage per synthesis, so
+                # the reset engine picks up changes on the next speak().
+                from voice_flow.tts_engine import tts_engine as _engine
+                _engine.stop()
+                self.send_json_response({"ok": True, "msg": "tts_engine reset (in place)"})
             except Exception as e:
                 self.send_json_response({"ok": False, "error": str(e)})
         elif path == "/api/runtime":
@@ -186,47 +291,52 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "key": key, "value": bool(storage.get_setting(key, default_val))})
         elif path == "/api/history":
             self.send_json_response(storage.get_recent_history())
+        elif path == "/api/history/audio":
+            try:
+                record_id = int(urllib.parse.parse_qs(parsed.query).get("id", [""])[0])
+            except (TypeError, ValueError):
+                self.send_json_response({"success": False, "error": "Valid history id required"}, 400); return
+            row = storage.get_history_record(record_id)
+            path_ = archive.resolve(row.get("audio_path") if row else None)
+            if not row or not path_ or not archive.available(row.get("audio_path"), _timestamp_epoch(row.get("timestamp"))):
+                self.send_json_response({"success": False, "error": "Audio is unavailable"}, 404); return
+            try:
+                body = path_.read_bytes()
+                self.send_response(200); self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Disposition", f'attachment; filename="voice-flow-{record_id}.wav"')
+                self.send_header("Content-Length", str(len(body))); self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers(); self.wfile.write(body)
+            except OSError:
+                self.send_json_response({"success": False, "error": "Audio is unavailable"}, 404)
+        elif path == "/api/dictionary/corrections":
+            self.send_json_response(storage.get_dictionary_corrections())
         elif path == "/api/insights":
             params = urllib.parse.parse_qs(parsed.query)
             range_val = params.get("range", ["all"])[0]
             self.send_json_response(storage.get_insights(range_filter=range_val))
         elif path == "/api/dictionary":
             self.send_json_response(storage.get_dictionary_words())
+        # ---- Video Flow shim (new engine; original public shape) ----
         elif path == "/api/video-flow/v3/program":
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
-            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
-            program = project_store_v3.load_json_artifact(job_id, "video_program.json")
-            genome = project_store_v3.load_json_artifact(job_id, "art_genome.json")
-            scenes = []
-            scenes_dir = project_store_v3.get_project_dir(job_id) / "scenes"
-            if scenes_dir.exists():
-                for sf in sorted(scenes_dir.glob("*.json")):
-                    try:
-                        with open(sf, "r", encoding="utf-8") as f:
-                            scenes.append(json.load(f))
-                    except Exception:
-                        pass
-            if not scenes and program and "scenes" in program:
-                scenes = program["scenes"]
-            master_audio_url = f"/api/video-flow/v3/audio?id={job_id}"
-            self.send_json_response({
-                "success": True,
-                "program": program,
-                "art_genome": genome,
-                "scenes": scenes,
-                "master_audio_url": master_audio_url,
-            })
+            # The Code2Video→Narova engine bakes narration/captions into a flat
+            # MP4; there is no layered V3 program. The player's guard treats a
+            # failed fetch as "play the MP4 directly".
+            self.send_json_response({"success": False, "error": "Program data is not available for engine-rendered videos."}, 404)
         elif path == "/api/video-flow/v3/audio":
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
             scene_id = (params.get("scene", [""])[0] or "").strip()
-            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
+            if not re.fullmatch(r"[A-Za-z0-9_\-]+", job_id) or (scene_id and not re.fullmatch(r"[A-Za-z0-9_\-]+", scene_id)):
+                self.send_error(404, "Audio file not found")
+                return
+            audio_dir = data_dir() / "v3_projects" / job_id / "audio"
             if scene_id:
-                audio_path = project_store_v3.get_audio_segment_path(job_id, scene_id)
+                audio_path = audio_dir / f"{scene_id}.mp3"
             else:
-                audio_path = project_store_v3.get_project_dir(job_id) / "master_narration.mp3"
-            if not audio_path.exists():
+                audio_path = next(iter(sorted(audio_dir.glob("*.mp3"))), None)
+            if not audio_path or not audio_path.exists():
                 self.send_error(404, "Audio file not found")
                 return
             with open(audio_path, "rb") as af:
@@ -240,32 +350,19 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif path in ("/api/video-flow/v3/video", "/api/video-flow/v3/export/download"):
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
-            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
-            mp4_candidates = [
-                project_store_v3.get_project_dir(job_id) / "export" / "video.mp4",
-                project_store_v3.get_export_path(job_id),
-                project_store_v3.get_project_dir(job_id) / "video.mp4",
-            ]
-            video_file = next((p for p in mp4_candidates if p.exists() and p.stat().st_size > 0), None)
-            if not video_file:
-                self.send_error(404, "Rendered video file not found")
-                return
-            size = video_file.stat().st_size
-            self.send_response(200)
-            self.send_header("Content-Type", "video/mp4")
-            self.send_header("Content-Length", str(size))
-            self.send_header("Content-Disposition", f'attachment; filename="video_{job_id}.mp4"')
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            with open(video_file, "rb") as vf:
-                shutil.copyfileobj(vf, self.wfile)
+            # The new engine's flat MP4 is both the render and the export.
+            self._stream_shim_video(job_id, download=True)
         elif path == "/api/video-flow/v3/export":
             params = urllib.parse.parse_qs(parsed.query)
             job_id = (params.get("id", [""])[0] or "").strip()
-            from voice_flow.video_flow_v3.storage.project_store import project_store_v3
-            req = project_store_v3.load_json_artifact(job_id, "export_request.json")
-            if req:
-                self.send_json_response({"success": True, "job_id": job_id, "export_status": req.get("status", "exported"), "download_url": f"/api/video-flow/v3/video?id={job_id}&download=1"})
+            video_file = data_dir() / "v3_projects" / job_id / "video.mp4"
+            if re.fullmatch(r"[A-Za-z0-9_\-]+", job_id) and video_file.exists() and video_file.stat().st_size > 0:
+                self.send_json_response({
+                    "success": True,
+                    "job_id": job_id,
+                    "export_status": "exported",
+                    "download_url": f"/api/video-flow/v3/export/download?id={job_id}",
+                })
             else:
                 self.send_json_response({"success": False, "job_id": job_id, "export_status": "not_requested"}, 404)
         elif path == "/api/video-flow/v3/runtime-bundle.js":
@@ -285,6 +382,51 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(content)
             else:
                 self.send_error(404, "V3 runtime bundle not found")
+        elif path == "/api/video-flow/jobs/status" or path.startswith("/api/video-flow/v3/status"):
+            params = urllib.parse.parse_qs(parsed.query)
+            video_id = (params.get("id", [""])[0] or "").strip()
+            job = None
+            try:
+                job = get_video_flow_service().get(video_id)
+            except Exception:
+                job = None
+            if job is None:
+                self.send_json_response({"success": False, "error": "Video not found"}, 404)
+            else:
+                self.send_json_response({"success": True, "video": _shim_video(job)})
+        elif path.startswith("/api/video-flow/videos/file"):
+            params = urllib.parse.parse_qs(parsed.query)
+            video_id = (params.get("id", [""])[0] or "").strip()
+            download = params.get("download", ["0"])[0] == "1"
+            self._stream_shim_video(video_id, download=download)
+        elif path == "/api/video-flow/catalog":
+            self.send_json_response(_video_flow_catalog())
+        elif path == "/api/video-flow/voice":
+            # Narration voice for Video Flow only: same TTS catalog Audio
+            # Flow uses, independent selection (Audio Flow keeps its own).
+            try:
+                policy = storage.get_exec_audio_policy_options()
+                self.send_json_response({
+                    "success": True,
+                    "active_voice": storage.get_setting("video_flow_voice_model", "edge/en-US-AvaNeural"),
+                    "models": policy.get("models", []),
+                    "grouped_models": policy.get("grouped_models", []),
+                })
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
+        elif path == "/api/video-flow/history":
+            self.send_json_response({"videos": [_shim_video(job) for job in get_video_flow_service().list()]})
+        elif path == "/api/video-flow/providers":
+            self.send_json_response(video_flow_provider_service.catalog())
+        elif path == "/api/video-flow/providers/details":
+            params = urllib.parse.parse_qs(parsed.query)
+            provider_id = params.get("provider", [""])[0]
+            try:
+                self.send_json_response(video_flow_provider_service.provider_details(provider_id))
+            except ValueError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+        elif path == "/api/video-flow/providers/oauth/callback":
+            self._serve_oauth_callback()
         elif path == "/api/providers/catalog":
             specs = [s.to_dict() for s in get_all_provider_specs()]
             self.send_json_response({"providers": specs})
@@ -313,10 +455,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"app_name": None, "category": None, "style_id": None, "style_label": None})
 
 
-        elif path == "/api/video-flow/providers/oauth/callback":
-            self._serve_oauth_callback()
-
-
         elif path == "/api/apikeys/list":
             self.send_json_response(storage.get_all_api_keys())
         elif path == "/api/providers/details":
@@ -325,6 +463,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             conns = storage.get_provider_connections(provider)
             mode = storage.get_provider_load_balance_mode(provider)
             models = storage.get_provider_models(provider)
+            # Mask stored secrets; the loopback page never needs the raw key.
+            for item in conns:
+                if isinstance(item, dict) and item.get("api_key"):
+                    item["api_key"] = _mask_secret(str(item["api_key"]))
             self.send_json_response({
                 "provider": provider,
                 "connections": conns,
@@ -387,48 +529,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     self.send_json_response({"success": False, "error": str(exc)}, 500)
             else:
                 self.send_json_response({"error": "Missing provider"}, status=400)
-        elif path == "/api/video-flow/history":
-            self.send_json_response({"videos": video_flow_service.store.list_videos()})
-        elif path == "/api/video-flow/catalog":
-            self.send_json_response(video_flow_service.catalog())
-        elif path == "/api/video-flow/providers":
-            self.send_json_response(video_flow_provider_service.catalog())
-        elif path == "/api/video-flow/providers/details":
-            params = urllib.parse.parse_qs(parsed.query)
-            provider_id = params.get("provider", [""])[0]
-            try:
-                self.send_json_response(video_flow_provider_service.provider_details(provider_id))
-            except ValueError as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 400)
-        elif path.startswith("/api/video-flow/jobs/status") or path.startswith("/api/video-flow/v3/status"):
-            params = urllib.parse.parse_qs(parsed.query)
-            video_id = params.get("id", [""])[0]
-            video = None
-            try:
-                video = video_flow_service.store.get_video(video_id)
-            except Exception:
-                video = None
-            if not video:
-                from voice_flow.video_flow_v3.service import video_flow_v3_service
-                job = video_flow_v3_service.jobs.get(video_id)
-                if job:
-                    video = {
-                        "id": job.job_id,
-                        "title": job.title,
-                        "status": job.status.value,
-                        "stage": job.stage,
-                        "progress": job.progress,
-                        "playable": job.playable,
-                        "view_url": f"/api/video-flow/v3/audio?id={job.job_id}",
-                        "export_status": getattr(job, "export_status", "not_requested").value if hasattr(getattr(job, "export_status", None), "value") else str(getattr(job, "export_status", "not_requested")),
-                        "download_url": f"/api/video-flow/v3/video?id={job.job_id}&download=1",
-                    }
-            self.send_json_response({"video": video}, status=200 if video else 404)
-        elif path.startswith("/api/video-flow/videos/file"):
-            params = urllib.parse.parse_qs(parsed.query)
-            video_id = params.get("id", [""])[0]
-            download = params.get("download", ["0"])[0] == "1"
-            self.send_video_file(video_id, download=download)
         elif path == "/api/styles/get":
             personal = storage.get_setting("style_personal", "casual")
             work = storage.get_setting("style_work", "casual")
@@ -530,16 +630,21 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 config.add_api_key(key)
             self.send_json_response(result)
 
-        elif path == "/api/dictionary/add":
-            word = data.get("word")
-            if not isinstance(word, str) or not word.strip():
-                self.send_json_response({"success": False, "error": "Dictionary word must be a non-empty string."}, 400)
-                return
+        elif self.path == "/api/dictionary/add":
+            word_value = data.get("word", "")
+            if not isinstance(word_value, str):
+                self.send_json_response({"success": False, "error": "word must be text"}, 400); return
+            word = word_value.strip()
+            if "->" in word or "=>" in word:
+                self.send_json_response({"success": False, "error": "Snippet arrows have moved to Snippets. Add a trigger and expansion there."}, 400); return
+            try:
+                storage._validated_text(word, "word", 1, 120)
+            except ValueError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400); return
             success = storage.add_dictionary_word(word)
-            if not success:
-                self.send_json_response({"success": False, "error": "Dictionary entry was rejected."}, 409)
-                return
             dictionary_engine.mark_dirty()
+            if not success:
+                self.send_json_response({"success": False, "error": "That dictionary term already exists"}, 409); return
             self.send_json_response({"success": True, "words": storage.get_dictionary_words()})
 
         elif path == "/api/dictionary/remove":
@@ -664,6 +769,36 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             storage.delete_provider_connection(cid)
             self.send_json_response({"success": True, "id": cid})
 
+        elif path == "/api/dictionary/corrections/add":
+            try:
+                correction = storage.add_dictionary_correction(data.get("wrong_text", ""), data.get("correct_text", ""))
+            except sqlite3.IntegrityError:
+                self.send_json_response({"success": False, "error": "That heard phrase already exists"}, 409); return
+            except ValueError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400); return
+            dictionary_engine.mark_dirty()
+            self.send_json_response({"success": True, "correction": correction}, 201)
+
+        elif path == "/api/dictionary/corrections/update":
+            try:
+                correction = storage.update_dictionary_correction(int(data.get("id")), data.get("wrong_text", ""), data.get("correct_text", ""))
+            except sqlite3.IntegrityError:
+                self.send_json_response({"success": False, "error": "That heard phrase already exists"}, 409); return
+            except (TypeError, ValueError) as exc:
+                self.send_json_response({"success": False, "error": str(exc) or "Invalid correction"}, 400); return
+            if correction is None:
+                self.send_json_response({"success": False, "error": "Correction not found"}, 404); return
+            dictionary_engine.mark_dirty()
+            self.send_json_response({"success": True, "correction": correction})
+
+        elif path == "/api/dictionary/corrections/remove":
+            try:
+                success = storage.remove_dictionary_correction(int(data.get("id")))
+            except (TypeError, ValueError):
+                self.send_json_response({"success": False, "error": "A valid correction id is required"}, 400); return
+            dictionary_engine.mark_dirty()
+            self.send_json_response({"success": success}, 200 if success else 404)
+
         elif path == "/api/record/toggle":
             recording = data.get("recording", False)
             state_file = os.path.join(os.path.expanduser("~"), ".voice_flow", "recording_state.json")
@@ -779,9 +914,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         elif path == "/api/audio-summary/settings/model":
             model_ref = str(data.get("model_ref", "") or data.get("model", "")).strip()
-            if model_ref and not video_flow_provider_service.is_selectable_model_ref(model_ref):
-                self.send_json_response({"success": False, "error": "Select a valid, enabled LLM model or combo."}, 400)
-                return
+            # The new-engine planning gateway is Groq-only; accept any ref here
+            # and let the engine surface a precise error at generation time.
             if not storage.save_setting("exec_audio_summary_model", model_ref):
                 self.send_json_response({"success": False, "error": "Could not persist Audio Flow Summary model"}, 500)
                 return
@@ -902,34 +1036,116 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 })
             except (ValueError, RuntimeError) as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
-        elif path == "/api/video-flow/generate":
-            source_text = str(data.get("source_text", ""))
-            mode = str(data.get("mode", "summary"))
+
+        elif path in ("/api/video-flow/generate", "/api/video-flow/v3/generate"):
             try:
-                video = video_flow_service.queue(
-                    source_text=source_text,
-                    mode=mode,
-                    title=str(data.get("title", "")),
-                    source_name=str(data.get("source_name", "")),
-                    model_ref=str(data.get("model_ref", "")),
-                    theme=str(data.get("theme", "auto")),
-                    visual_direction=str(data.get("visual_direction", "")),
+                job = get_video_flow_service().queue(
+                    source_text=data.get("source_text"),
+                    mode=data.get("mode"),
+                    title=data.get("title"),
+                    source_name=str(data.get("source_name", "") or ""),
+                    model_ref=data.get("model_ref"),
+                    theme=data.get("theme"),
+                    visual_direction=data.get("visual_direction"),
                     allow_external_ai=bool(data.get("allow_external_ai", False)),
+                    voice=data.get("voice"),
                 )
-                self.send_json_response({"success": True, "video": video}, 202)
+                self.send_json_response({"success": True, "video": _shim_video(job), "job_id": job.job_id, "status": _shim_video(job)["status"]}, 202)
             except ValueError as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/voice":
+            voice = str(data.get("voice", "")).strip()
+            if not voice or "/" not in voice:
+                self.send_json_response({"success": False, "error": "Select a voice."}, 400)
+            else:
+                storage.save_setting("video_flow_voice_model", voice)
+                self.send_json_response({"success": True, "active_voice": voice})
 
         elif path == "/api/video-flow/settings/model":
             model_ref = str(data.get("model_ref", "")).strip()
             if not model_ref:
                 self.send_json_response({"success": False, "error": "Select a model or combo."}, 400)
             else:
-                try:
-                    video_flow_provider_service.set_active_model(model_ref)
-                    self.send_json_response({"success": True, "active_model": model_ref})
-                except ValueError as exc:
-                    self.send_json_response({"success": False, "error": str(exc)}, 400)
+                storage.save_setting("exec_policy_model", model_ref)
+                self.send_json_response({"success": True, "active_model": model_ref})
+
+        elif path == "/api/video-flow/v3/export":
+            # The new engine renders the final MP4 directly — an export
+            # request is satisfied by the existing file.
+            export_id = str(data.get("id", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_\-]+", export_id):
+                self.send_json_response({"success": False, "error": "Invalid video id"}, 400)
+                return
+            video_file = data_dir() / "v3_projects" / export_id / "video.mp4"
+            if video_file.exists() and video_file.stat().st_size > 0:
+                self.send_json_response({
+                    "success": True,
+                    "job_id": export_id,
+                    "export_status": "exported",
+                    "download_url": f"/api/video-flow/v3/export/download?id={export_id}",
+                })
+            else:
+                job = get_video_flow_service().get(export_id)
+                if job is None:
+                    self.send_json_response({"success": False, "error": "Video not found"}, 404)
+                else:
+                    self.send_json_response({"success": False, "job_id": export_id, "export_status": "processing"}, 202)
+
+        elif path == "/api/video-flow/combos/create":
+            try:
+                combo = _create_video_flow_combo(
+                    str(data.get("name", "")),
+                    list(data.get("models", [])),
+                    str(data.get("strategy", "fallback")),
+                )
+                self.send_json_response({"success": True, "combo": combo})
+            except (ValueError, sqlite3.IntegrityError) as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path == "/api/video-flow/combos/delete":
+            deleted = _delete_video_flow_combo(int(data.get("id", 0)))
+            self.send_json_response({"success": deleted}, 200 if deleted else 404)
+
+        elif path == "/api/video-flow/videos/delete":
+            video_id = str(data.get("id", ""))
+            service = get_video_flow_service()
+            job = service.get(video_id)
+            if not job:
+                self.send_json_response({"success": False, "error": "Video not found."}, 404)
+                return
+            completed = str(job.state or "").lower() in ("complete", "completed", "ready") or job.progress >= 100.0
+            if completed and str(data.get("confirmation", "")) != PERMANENT_DELETE_CONFIRMATION:
+                self.send_json_response(
+                    {"success": False, "error": "Type DELETE to permanently remove this video and its file.", "required_confirmation": PERMANENT_DELETE_CONFIRMATION},
+                    403,
+                )
+                return
+            service.delete(job.job_id)
+            self.send_json_response({"success": True})
+
+        elif path == "/api/video-flow/videos/retry":
+            video_id = str(data.get("id", ""))
+            service = get_video_flow_service()
+            job = service.get(video_id)
+            if not job:
+                self.send_json_response({"success": False, "error": "Video not found."}, 404)
+                return
+            meta = job.meta or {}
+            source_text = meta.get("source_text", "")
+            if not source_text:
+                self.send_json_response({"success": False, "error": "The original request for this video is no longer available; generate again."}, 409)
+                return
+            new_job = service.queue(
+                source_text,
+                mode=meta.get("mode", "summary"),
+                title=meta.get("title", ""),
+                model_ref=meta.get("model_ref"),
+                theme=meta.get("theme"),
+                visual_direction=meta.get("visual_direction", ""),
+                allow_external_ai=bool(meta.get("allow_external_ai", False)),
+            )
+            self.send_json_response({"success": True, "video": _shim_video(new_job), "job_id": new_job.job_id}, 202)
 
         elif path == "/api/video-flow/providers/connections/add":
             try:
@@ -1025,7 +1241,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         elif path == "/api/video-flow/providers/models/delete":
             deleted = video_flow_provider_service.delete_model(int(data.get("id", 0)))
-            self.send_json_response({"success": deleted}, 200 if deleted else 400)
+            self.send_json_response({"success": deleted}, 200 if deleted else 404)
 
         elif path == "/api/video-flow/providers/oauth/start":
             try:
@@ -1074,69 +1290,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": True, "connection": connection})
             except (OAuthError, RuntimeError, ValueError) as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
-
-        elif path == "/api/video-flow/combos/create":
-            try:
-                combo = video_flow_service.store.create_combo(
-                    str(data.get("name", "")),
-                    list(data.get("models", [])),
-                    str(data.get("strategy", "fallback")),
-                )
-                self.send_json_response({"success": True, "combo": combo})
-            except (ValueError, sqlite3.IntegrityError) as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 400)
-
-        elif path == "/api/video-flow/v3/generate":
-            try:
-                from voice_flow.video_flow_v3.service import video_flow_v3_service
-                source_text = str(data.get("source_text", ""))
-                mode = str(data.get("mode", "summary"))
-                title = str(data.get("title", ""))
-                style = str(data.get("visual_style", "Auto"))
-                job = video_flow_v3_service.create_job(source_text, mode, title, style)
-                threading.Thread(target=video_flow_v3_service.run_job, args=(job.job_id, style), daemon=True).start()
-                self.send_json_response({"success": True, "job_id": job.job_id, "status": job.status.value})
-            except Exception as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 500)
-
-        elif path == "/api/video-flow/v3/export":
-            try:
-                job_id = str(data.get("id") or data.get("job_id") or "")
-                from voice_flow.video_flow_v3.service import video_flow_v3_service
-                result = video_flow_v3_service.export_job(job_id)
-                self.send_json_response(result)
-            except Exception as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 500)
-
-        elif path == "/api/video-flow/combos/delete":
-            deleted = video_flow_service.store.delete_combo(int(data.get("id", 0)))
-            self.send_json_response({"success": deleted})
-
-        elif path == "/api/video-flow/videos/delete":
-            try:
-                deleted = video_flow_service.store.delete_video(
-                    str(data.get("id", "")),
-                    confirmation=str(data.get("confirmation", "")),
-                )
-                self.send_json_response({"success": deleted})
-            except PermissionError as exc:
-                self.send_json_response(
-                    {
-                        "success": False,
-                        "error": str(exc),
-                        "required_confirmation": PERMANENT_DELETE_CONFIRMATION,
-                    },
-                    403,
-                )
-
-        elif path == "/api/video-flow/videos/retry":
-            video_id = str(data.get("id", ""))
-            video = video_flow_service.store.get_video(video_id)
-            if not video:
-                self.send_json_response({"success": False, "error": "Video not found."}, 404)
-            else:
-                threading.Thread(target=video_flow_service.run, args=(video_id,), daemon=True).start()
-                self.send_json_response({"success": True, "video": video}, 202)
 
         elif path == "/api/settings/update":
             key = data.get("key")
@@ -1257,6 +1410,66 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _stream_shim_video(self, video_id: str, *, download: bool = False) -> None:
+        job = get_video_flow_service().get(video_id)
+        if job is None:
+            self.send_json_response({"success": False, "error": "Video job not found"}, 404); return
+        path_str = (job.meta or {}).get("output_path") or str(data_dir() / "v3_projects" / video_id / "video.mp4")
+        path = Path(path_str)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            self.send_json_response({"success": False, "error": "Video is not ready"}, 404); return
+        if size <= 0:
+            self.send_json_response({"success": False, "error": "Video is not ready"}, 404); return
+        start, end, status = 0, size - 1, 200
+        requested_range = self.headers.get("Range")
+        if requested_range:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", requested_range.strip())
+            if not match or not (match.group(1) or match.group(2)):
+                self._send_range_not_satisfiable(size); return
+            try:
+                if not match.group(1):
+                    suffix = int(match.group(2))
+                    if suffix <= 0: raise ValueError
+                    start = max(0, size - suffix)
+                else:
+                    start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else size - 1
+            except ValueError:
+                self._send_range_not_satisfiable(size); return
+            if start >= size or start > end:
+                self._send_range_not_satisfiable(size); return
+            end = min(end, size - 1); status = 206
+        self.send_response(status)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if download:
+            self.send_header("Content-Disposition", f'attachment; filename="video_{video_id}.mp4"')
+        else:
+            self.send_header("Content-Disposition", f'inline; filename="video_{video_id}.mp4"')
+        if status == 206: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        origin = self.headers.get("Origin")
+        if ALLOWED_ORIGINS is not None and origin in ALLOWED_ORIGINS: self.send_header("Access-Control-Allow-Origin", origin)
+        self.end_headers()
+        try:
+            with path.open("rb") as handle:
+                handle.seek(start); remaining = end - start + 1
+                while remaining:
+                    chunk = handle.read(min(64 * 1024, remaining))
+                    if not chunk: break
+                    self.wfile.write(chunk); remaining -= len(chunk)
+        except OSError:
+            return
+
+    def _send_range_not_satisfiable(self, size: int) -> None:
+        self.send_response(416)
+        self.send_header("Content-Range", f"bytes */{size}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def verify_api_key(self, provider: str, key: str) -> dict:
         """Perform live test against AI & Voice Provider API endpoints."""
         if not key:
@@ -1328,9 +1541,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         return {"success": True, "message": "OpenAI API Verified! gpt-4o-mini model ready."}
 
             else:
-                if len(key) >= 12:
-                    return {"success": True, "message": f"{provider.capitalize()} API Key Verified! Voice model active."}
-                return {"success": False, "error": f"Invalid key length for {provider}"}
+                is_valid, last_error = validate_provider_key(provider, key)
+                if is_valid:
+                    return {"success": True, "message": f"{provider.capitalize()} API Key Verified!"}
+                return {"success": False, "error": last_error or f"Could not verify {provider} API key."}
 
         except urllib.error.HTTPError as e:
             error_body = ""
@@ -1552,10 +1766,172 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def start_api_server(host: str = "0.0.0.0") -> None:
+def _mask_secret(secret: str) -> str:
+    if not secret or len(secret) < 8:
+        return "********"
+    return secret[:3] + "..." + secret[-4:]
+
+
+def _shim_video(job) -> dict:
+    """Map internal JobV3 record to the original public shape expected by the frontend."""
+    meta = job.meta or {}
+    state_str = str(job.state or "processing").lower()
+    if state_str in ("complete", "completed", "ready"):
+        public_status = "completed"
+    elif state_str == "failed":
+        public_status = "failed"
+    elif state_str == "cancelled":
+        public_status = "cancelled"
+    else:
+        public_status = "processing"
+    playable = public_status == "completed" or job.progress >= 100.0
+    return {
+        "id": job.job_id,
+        "title": meta.get("title") or job.job_id,
+        "status": public_status,
+        "stage": job.message or public_status,
+        "progress": int(job.progress),
+        "playable": playable,
+        "mode": meta.get("mode", "summary"),
+        "engine_version": "v3-code2video",
+        "created_at": getattr(job, "created_at", None) or 0.0,
+        "duration_sec": meta.get("duration_sec", 0.0),
+        "view_url": f"/api/video-flow/videos/file?id={job.job_id}",
+        "download_url": f"/api/video-flow/videos/file?id={job.job_id}&download=1",
+        "export_status": "exported" if playable else "not_requested",
+        "error": meta.get("error_code", "") if public_status == "failed" else "",
+    }
+
+
+def _video_flow_catalog() -> dict:
+    """Build the Video Flow model/theme catalog.
+
+    Provider groups come from the isolated Video Flow provider registry
+    (full provider list with real connection statuses, as on GitHub); the
+    Groq entry is overlaid with the planning-gateway truth because the new
+    engine's gateway reads main-storage connections. Models list the
+    planner models the gateway can actually execute.
+    """
+    active = storage.get_setting("exec_policy_model", "openai/gpt-oss-120b")
+
+    try:
+        service_catalog = video_flow_provider_service.catalog()
+    except Exception:
+        service_catalog = {}
+
+    groq_connections = [c for c in storage.get_provider_connections("groq") if c.get("is_active")]
+    groq_connected = any(str(c.get("api_key") or "").strip() for c in groq_connections)
+
+    def _overlay_groq(entry: dict) -> dict:
+        merged = dict(entry)
+        merged.update(
+            {
+                "name": "Groq Planning Gateway",
+                "status": "connected" if groq_connected else "disconnected",
+                "active_count": len(groq_connections),
+            }
+        )
+        return merged
+
+    api_key_group = [
+        _overlay_groq(item) if item.get("id") == "groq" else item
+        for item in service_catalog.get("api_key", [])
+    ]
+    if not any(item.get("id") == "groq" for item in api_key_group):
+        api_key_group.insert(0, _overlay_groq({"id": "groq", "category": "api_key"}))
+
+    local_group = list(service_catalog.get("local", []))
+    if not any(item.get("id") == "local" for item in local_group):
+        local_group.append(
+            {"id": "local", "name": "Local Code2Video Generator", "category": "local", "status": "connected"}
+        )
+
+    oauth_group = list(service_catalog.get("oauth", []))
+
+    # The picker is fed from the Video Flow provider page's own model catalog
+    # (connected providers' models), plus the Groq planning gateway models
+    # (which read the main-storage Groq connection) and the local generator.
+    try:
+        service_models = [
+            {
+                "full_id": m["full_id"],
+                "provider": m.get("provider"),
+                "provider_name": m.get("provider_name") or m.get("provider"),
+                "display_name": m.get("display_name") or m["full_id"],
+                "available": bool(m.get("available")),
+                "is_active": m.get("is_active", True),
+                "capabilities": m.get("capabilities") or [],
+            }
+            for m in video_flow_provider_service.list_models()
+        ]
+    except Exception:
+        service_models = []
+
+    models = service_models
+    service_refs = {m["full_id"] for m in models}
+
+    # Groq planning models run via the main-storage Groq connection even when
+    # the isolated provider store has no Groq connection of its own.
+    for full_id, display in [
+        ("groq/openai/gpt-oss-120b", "Groq — gpt-oss-120b (Code2Video Planner)"),
+        ("groq/openai/gpt-oss-20b", "Groq — gpt-oss-20b (fast planner)"),
+        ("groq/qwen/qwen3.6-27b", "Groq — qwen3.6-27b (planner)"),
+    ]:
+        if full_id not in service_refs:
+            models.append(
+                {
+                    "full_id": full_id,
+                    "provider": "groq",
+                    "provider_name": "Groq",
+                    "display_name": display,
+                    "available": bool(groq_connected),
+                    "is_active": True,
+                    "capabilities": ["code2video_planning"],
+                }
+            )
+    models.append(
+        {
+            "full_id": "local/deterministic",
+            "provider": "local",
+            "provider_name": "Local",
+            "display_name": "Local Code2Video Generator (offline)",
+            "available": True,
+            "is_active": True,
+            "capabilities": ["offline"],
+        }
+    )
+
+    try:
+        combos = [
+            {
+                "ref": f"combo:{combo['name']}",
+                "id": combo["id"],
+                "name": combo["name"],
+                "models": combo["models"],
+                "strategy": combo["strategy"],
+            }
+            for combo in video_flow_provider_service.list_combos()
+        ]
+    except Exception:
+        combos = []
+
+    return {
+        "providers": api_key_group + local_group + oauth_group,
+        "provider_groups": {
+            "oauth": oauth_group,
+            "api_key": api_key_group,
+            "local": local_group,
+        },
+        "models": models,
+        "combos": combos,
+        "active_model": active,
+        "themes": ["auto", "voice-flow", "midnight", "paper", "neon", "ocean", "forest", "sunset", "mono"],
+    }
+
+
+def start_api_server(host: str = "127.0.0.1") -> None:
     try:
         ThreadingHTTPServer.allow_reuse_address = True
-        start_refresh_scheduler(video_flow_provider_service)
         httpd = ThreadingHTTPServer((host, PORT), VoiceFlowApiHandler)
         print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://{host}:{PORT}")
         httpd.serve_forever()

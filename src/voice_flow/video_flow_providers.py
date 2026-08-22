@@ -772,6 +772,54 @@ class VideoFlowProviderService:
             return False
         return bool(members) and all(member in selectable for member in members)
 
+    def list_combos(self) -> list[dict[str, Any]]:
+        """Return model combos as UI records (id, name, models, strategy).
+
+        Handles both schema generations: legacy ``models_json`` column on
+        ``video_flow_combos`` and the normalized ``video_flow_combo_models``
+        membership table.
+        """
+        try:
+            with self._connection() as conn:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(video_flow_combos)").fetchall()]
+                if not cols:
+                    return []
+                order_col = "id" if "id" in cols else "rowid"
+                strategy_expr = "strategy" if "strategy" in cols else "NULL AS strategy"
+                if "models_json" in cols:
+                    rows = conn.execute(
+                        f"SELECT {order_col} AS id, name, {strategy_expr}, models_json FROM video_flow_combos ORDER BY {order_col}"
+                    ).fetchall()
+                    return [
+                        {
+                            "id": int(row["id"]),
+                            "name": row["name"],
+                            "strategy": row["strategy"] or "priority",
+                            "models": list(json.loads(row["models_json"] or "[]")),
+                        }
+                        for row in rows
+                    ]
+                rows = conn.execute(
+                    f"SELECT {order_col} AS id, name, {strategy_expr} FROM video_flow_combos ORDER BY {order_col}"
+                ).fetchall()
+                combos: list[dict[str, Any]] = []
+                for row in rows:
+                    member_rows = conn.execute(
+                        "SELECT model_ref FROM video_flow_combo_models WHERE combo_id = ? ORDER BY position",
+                        (int(row["id"]),),
+                    ).fetchall()
+                    combos.append(
+                        {
+                            "id": int(row["id"]),
+                            "name": row["name"],
+                            "strategy": row["strategy"] or "priority",
+                            "models": [member["model_ref"] for member in member_rows],
+                        }
+                    )
+                return combos
+        except (sqlite3.OperationalError, json.JSONDecodeError):
+            return []
+
     def oauth_status(self, provider_id: str, *, refresh: bool = True) -> dict[str, Any]:
         provider = self.provider(provider_id)
         if provider["category"] != "oauth":

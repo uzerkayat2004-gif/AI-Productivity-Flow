@@ -84,13 +84,18 @@ class WatchdogSupervisor:
         poll_interval: float = 3.0,
         max_rapid_crashes: int = 5,
         crash_window_seconds: float = 60.0,
+        startup_grace_seconds: float = 60.0,
     ) -> None:
         self.poll_interval = poll_interval
         self.max_rapid_crashes = max_rapid_crashes
         self.crash_window_seconds = crash_window_seconds
+        # faster-whisper cold imports can take ~10s; probing REST health before
+        # the engine finishes booting caused a permanent probe-kill crash-loop.
+        self.startup_grace_seconds = startup_grace_seconds
         self.recent_crashes: collections.deque[float] = collections.deque()
         self.child_process: subprocess.Popen | None = None
         self.running = False
+        self._grace_until = 0.0
         self._lock_file = data_dir() / "watchdog.lock"
         self._shutdown_flag = data_dir() / "watchdog_shutdown.flag"
 
@@ -198,6 +203,11 @@ class WatchdogSupervisor:
                 close_fds=True,
             )
             log.info("Voice Flow started with PID %d", self.child_process.pid)
+            # Grant a startup grace window before health probing resumes so a
+            # slow cold import is never mistaken for a dead engine, and clear
+            # any strikes recorded against the previous (replaced) process.
+            self._grace_until = time.time() + self.startup_grace_seconds
+            self.recent_crashes.clear()
             return True
         except Exception as e:
             log.error("Failed to spawn Voice Flow: %s", e, exc_info=True)
@@ -232,6 +242,11 @@ class WatchdogSupervisor:
                 log.warning("Supervised Voice Flow process (PID %d) terminated with code %s.", self.child_process.pid, ret)
                 self.child_process = None
                 return False
+            return True
+
+        # During the startup grace window a fresh spawn must never be probe-
+        # killed for a not-yet-responding REST port (cold imports take ~10s).
+        if time.time() < self._grace_until:
             return True
 
         # If child_process is not directly tracked, check if a compatible Voice Flow runtime is responding on port 8991

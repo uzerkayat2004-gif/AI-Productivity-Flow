@@ -401,6 +401,9 @@ def _window_title_for_hwnd(hwnd: int | None) -> str:
         return ""
 
 
+get_window_title_for_hwnd = _window_title_for_hwnd
+
+
 def _active_window_title() -> str:
     if sys.platform != "win32":
         return ""
@@ -497,6 +500,11 @@ class StyleEngine:
         instruction = STYLE_INSTRUCTIONS.get(style_id, STYLE_INSTRUCTIONS.get("cleanup_light", "Format text."))
         log.info("[STYLE ENGINE] App: '%s' | Category: '%s' | Selected Style ID: '%s'", app_title, category, style_id)
         return (app_title, category, instruction)
+
+    def get_session_style_for_hwnd(self, hwnd: int | None, site_host: str | None = None) -> tuple[str, str, str, str]:
+        resolved = self.resolve(hwnd, site_host=site_host)
+        cleanup_level = str(storage.get_setting("style_autocleanup", "cleanup_light"))
+        return (resolved.app_name, resolved.category, resolved.style_id, cleanup_level)
 
     def resolve_for_target(self, hwnd: int | None, consume_override: bool = True) -> ResolvedStyle:
         app_name, exe_name = get_app_info_for_hwnd(hwnd) if hwnd else get_active_app_info()

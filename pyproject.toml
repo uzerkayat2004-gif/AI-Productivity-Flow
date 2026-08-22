@@ -17,6 +17,8 @@ dependencies = [
     "pywebview>=4.4.1",
     "edge-tts>=7.0.0",
     "pypdf>=5.0.0",
+    "pywinauto>=0.6.9",
+    "comtypes>=1.4.0",
 ]
 
 [project.scripts]
@@ -30,6 +32,4 @@ build-backend = "hatchling.build"
 packages = ["src/voice_flow"]
 
 [tool.pytest.ini_options]
-addopts = "-s"
 testpaths = ["tests"]
-python_files = ["test_*.py"]
