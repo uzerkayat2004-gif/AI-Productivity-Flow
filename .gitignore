@@ -53,3 +53,6 @@ video_flow_renderer/.cache/
 
 # Test output directories
 scratch/
+.pytest_cache/
+# Repository-owned documentation images (hero) must survive the *.png rule
+!docs/assets/**

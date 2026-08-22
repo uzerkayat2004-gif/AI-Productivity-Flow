@@ -60,6 +60,14 @@ log = logging.getLogger("voice_flow.watchdog")
 
 def get_pythonw_executable() -> str:
     """Find the best silent pythonw.exe binary available on the system."""
+    try:
+        from voice_flow import runtime_env
+
+        installed_pyw = runtime_env.pythonw_executable()
+        if installed_pyw:
+            return installed_pyw
+    except Exception:
+        pass
     project_root = Path(__file__).resolve().parent.parent.parent
     venv_pyw = project_root / ".venv" / "Scripts" / "pythonw.exe"
     if venv_pyw.exists():

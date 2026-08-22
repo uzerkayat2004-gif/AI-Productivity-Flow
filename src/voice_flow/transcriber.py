@@ -53,8 +53,17 @@ class Transcriber:
 
         try:
             log.info("[MODEL] Loading speech model ('%s') with %d CPU threads in background...", config.model_size, config.cpu_threads)
+            model_ref: object = config.model_size
+            try:
+                from voice_flow import runtime_env
+
+                bundled = runtime_env.whisper_model_path()
+                if bundled is not None:
+                    model_ref = str(bundled)
+            except Exception:
+                pass
             model_inst = WhisperModel(
-                config.model_size,
+                model_ref,
                 device=config.device,
                 compute_type=config.compute_type,
                 cpu_threads=config.cpu_threads,

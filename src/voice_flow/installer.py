@@ -23,6 +23,20 @@ def get_project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _installed_watchdog_command() -> tuple[str, str, str] | None:
+    """(pythonw, arguments, working_dir) for the installed app, else None."""
+    try:
+        from voice_flow import runtime_env
+        from voice_flow.paths import data_dir
+
+        pyw = runtime_env.pythonw_executable()
+        if pyw:
+            return pyw, "-m voice_flow.watchdog", str(data_dir())
+    except Exception:
+        pass
+    return None
+
+
 def get_vbs_launcher_path() -> Path:
     return get_project_root() / "VoiceFlowLauncher.vbs"
 
@@ -123,12 +137,16 @@ Shortcut.Save
 
 def register_registry_autorun() -> bool:
     """Register Voice Flow in HKCU Run key for silent boot start."""
-    vbs_path = get_vbs_launcher_path()
-    if not vbs_path.exists():
-        print(f"[ERROR] Launcher not found at {vbs_path}")
-        return False
-
-    cmd = f'wscript.exe "{vbs_path}"'
+    installed = _installed_watchdog_command()
+    if installed is not None:
+        pyw, args, _ = installed
+        cmd = f'"{pyw}" {args}'
+    else:
+        vbs_path = get_vbs_launcher_path()
+        if not vbs_path.exists():
+            print(f"[ERROR] Launcher not found at {vbs_path}")
+            return False
+        cmd = f'wscript.exe "{vbs_path}"'
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE) as key:
@@ -164,8 +182,23 @@ def register_startup_folder() -> bool:
     startup_dir.mkdir(parents=True, exist_ok=True)
     shortcut_path = startup_dir / "Voice Flow.lnk"
 
-    vbs_path = get_vbs_launcher_path()
     icon_path = get_icon_path()
+    installed = _installed_watchdog_command()
+    if installed is not None:
+        pyw, args, working_dir = installed
+        success = create_windows_shortcut(
+            shortcut_path=shortcut_path,
+            target_path=pyw,
+            arguments=args,
+            working_dir=working_dir,
+            icon_path=str(icon_path),
+            description="AI Productivity Flow (Auto-Start)",
+        )
+        if success:
+            print(f"[OK] Startup shortcut created (installed app): {shortcut_path}")
+        return success
+
+    vbs_path = get_vbs_launcher_path()
     root = get_project_root()
     wscript_path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "wscript.exe")
 
@@ -175,7 +208,7 @@ def register_startup_folder() -> bool:
         arguments=f'"{vbs_path}"',
         working_dir=str(root),
         icon_path=str(icon_path),
-        description="AI Productivity Flow - AI Speech Desktop App (Auto-Start)",
+        description="AI Productivity Flow (Auto-Start)",
     )
     if success:
         print(f"[OK] Startup folder shortcut registered: {shortcut_path}")
@@ -215,7 +248,7 @@ def register_desktop_shortcuts() -> bool:
             arguments=f'"{vbs_path}"',
             working_dir=str(root),
             icon_path=str(icon_path),
-            description="AI Productivity Flow - AI Speech Desktop App",
+            description="AI Productivity Flow",
         )
         if ok:
             print(f"[OK] Desktop shortcut created: {dt_sc}")
@@ -231,7 +264,7 @@ def register_desktop_shortcuts() -> bool:
         arguments=f'"{vbs_path}"',
         working_dir=str(root),
         icon_path=str(icon_path),
-        description="AI Productivity Flow - AI Speech Desktop App",
+        description="AI Productivity Flow",
     )
     if ok_sm:
         print(f"[OK] Start Menu shortcut created: {sm_sc}")

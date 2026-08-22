@@ -10,6 +10,14 @@ from voice_flow.video_flow_engine.process_manager import ProcessManager
 from voice_flow.video_flow_engine.sandbox import EngineError
 
 
+import pytest
+
+from voice_flow import runtime_env as _runtime_env
+
+if not (_runtime_env.code2video_root() and (_runtime_env.code2video_root() / "prompts" / "stage1.py").is_file()):
+    pytest.skip("vendored Code2Video prompts not present (third_party/code2video)", allow_module_level=True)
+
+
 class _Planner:
     def __init__(self, storyboard: dict | None = None) -> None:
         self.called = False

@@ -51,7 +51,16 @@ def synthesize_to_wav(text: str, full_voice_id: str, output: Path) -> None:
     if not data:
         raise RuntimeError(f"TTS provider {provider!r} returned no audio")
 
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = None
+    try:
+        from voice_flow import runtime_env
+
+        bundled = runtime_env.ffmpeg_executable()
+        if bundled is not None:
+            ffmpeg = str(bundled)
+    except Exception:
+        pass
+    ffmpeg = ffmpeg or shutil.which("ffmpeg")
     if ffmpeg is None:
         raise RuntimeError("FFmpeg is required to normalize narration audio")
     output.parent.mkdir(parents=True, exist_ok=True)

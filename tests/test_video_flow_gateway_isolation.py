@@ -8,6 +8,14 @@ from voice_flow.video_flow_engine.code2video_runner import Code2VideoRunner
 from voice_flow.video_flow_engine.sandbox import EngineError
 
 
+import pytest
+
+from voice_flow import runtime_env as _runtime_env
+
+if not (_runtime_env.code2video_root() and (_runtime_env.code2video_root() / "prompts" / "stage1.py").is_file()):
+    pytest.skip("vendored Code2Video prompts not present (third_party/code2video)", allow_module_level=True)
+
+
 def test_nonlocal_injected_gateway_requires_isolated_interface(tmp_path: Path) -> None:
     calls: list[str] = []
 

@@ -28,7 +28,10 @@ class Code2VideoRunner:
         timeout_seconds: float = 300.0,
     ) -> None:
         self.gateway = gateway
-        self.vendor_root = Path(vendor_root or Path(__file__).resolve().parents[3] / "third_party" / "code2video")
+        from .. import runtime_env as _runtime_env
+
+        self.vendor_root = Path(vendor_root or _runtime_env.code2video_root()
+                                or Path(__file__).resolve().parents[3] / "third_party" / "code2video")
         self.timeout_seconds = timeout_seconds
         self._outline_prompt = _load_function(self.vendor_root / "prompts" / "stage1.py", "get_prompt1_outline")
         self._storyboard_prompt = _load_function(self.vendor_root / "prompts" / "stage2.py", "get_prompt2_storyboard")

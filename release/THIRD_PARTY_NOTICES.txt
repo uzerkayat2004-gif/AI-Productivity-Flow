@@ -1,0 +1,103 @@
+THIRD-PARTY NOTICES — AI Productivity Flow
+============================================
+
+This product includes software and models developed by third parties.
+The following components are distributed inside the AI Productivity Flow
+installer. Exact versions and checksums are recorded in runtime-manifest.json
+next to these notices.
+
+1. Narova — Copyright (c) 2026 Ammar Hasan — MIT License
+   https://github.com/ammar-hasan/narova
+   The vendored video production tool (tool/ JS CLI, py/narova_tts, vendored
+   libraries) is included with local patches documented in runtime-manifest.json.
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions: The above copyright
+   notice and this permission notice shall be included in all copies or
+   substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS",
+   WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+   TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+2. Code2Video — Copyright (c) 2025 Anno Yanzhe Chen — MIT License
+   https://github.com/showlab/Code2Video
+   (MIT license text as above applies.)
+
+3. three.js r185 — Copyright 2010-2026 Three.js Authors — MIT License
+   https://threejs.org (MIT license text as above applies.)
+
+4. GSAP 3.14.2 — Copyright 2025, GreenSock. All rights reserved.
+   Subject to the terms at https://gsap.com/standard-license — this notice may
+   not be removed or altered.
+
+5. HyperFrames 0.7.96 — Apache License 2.0 — https://github.com/heygen-com/hyperframes
+   Licensed under the Apache License, Version 2.0 (the "License"); you may not
+   use this file except in compliance with the License. You may obtain a copy
+   of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required
+   by applicable law or agreed to in writing, software distributed under the
+   License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+   OF ANY KIND, either express or implied. See the License for the specific
+   language governing permissions and limitations under the License.
+
+6. Node.js runtime 20.18.1 — Copyright Node.js contributors — MIT License
+   Includes V8 (BSD-3), OpenSSL (Apache-2.0), ICU (Unicode License), zlib,
+   libuv, undici and other components as listed in the official Node.js
+   LICENSE file (https://github.com/nodejs/node/blob/main/LICENSE).
+
+7. FFmpeg / FFprobe (gyan.dev GPL build, libx264 enabled)
+   Licensed under the GNU General Public License version 3.0 or later.
+   Source availability: the complete corresponding sources for FFmpeg and the
+   libraries enabled in this build are available from https://ffmpeg.org and
+   https://www.gyan.dev/ffmpeg/builds/ (source packages are published beside
+   each binary build; the exact build version and configuration line shipped
+   here are recorded in runtime-manifest.json). The GPL-3.0 text is included
+   as runtime\ffmpeg\license-LICENSE in the installed runtime.
+
+8. edge-tts 7.2.8 — GNU LGPL v3 — https://github.com/rany2/edge-tts
+9. pynput 1.8.2 — GNU LGPL v3 — https://github.com/moses-palmer/pynput
+10. pystray 0.19.5 — GNU LGPL v3 — https://github.com/moses-palmer/pystray
+    These three libraries are licensed under the GNU Lesser General Public
+    License v3.0 and are distributed unmodified. The LGPL v3 text is included
+    as license-lgpl-3.0.txt in the runtime directory. The complete
+    corresponding source for each library, at the exact version shipped, is
+    publicly available at the URLs above (written offer: source for these
+    LGPL components will remain available at these canonical repositories for
+    at least three years from the release date of this installer).
+
+11. Python 3.12.10 — Python Software Foundation License
+    https://docs.python.org/3/license.html
+
+12. Python packages (permissive licenses unless noted; full SPDX text in each package; certifi is MPL-2.0):
+    faster-whisper 1.2.1, ctranslate2 4.x (MIT); pywebview (BSD-3-Clause);
+    sounddevice (MIT); Pillow (MIT-CMU); numpy (BSD-3 & MIT & Zlib);
+    scipy (BSD-3-Clause); pyperclip (BSD); pypdf (BSD-3-Clause);
+    pywinauto (BSD-3-Clause); comtypes (MIT); PyAutoGUI (BSD);
+    httpx (BSD-3-Clause); cryptography (Apache-2.0 OR BSD-3-Clause);
+    psutil (BSD-3-Clause); pywin32 (PSF license); and their transitive
+    dependencies as pinned in runtime-manifest.json.
+
+13. Fonts: @fontsource/noto-sans-arabic (SIL Open Font License 1.1) via
+    Narova's node_modules (OFL header retained in package).
+
+14. Microsoft Edge WebView2 Runtime (Evergreen) — Microsoft Software License
+    Terms — installed by the official Microsoft bootstrapper included in
+    runtime\webview2 when the runtime is missing on the machine.
+
+15. Microsoft Visual C++ 2015-2022 Redistributable (x64) — Microsoft Software
+    License Terms — installed by the official Microsoft redistributable in
+    runtime\vcredist when required.
+
+16. Whisper speech model: faster-whisper-base.en conversion by Systran (MIT);
+    base weights from openai/whisper-base.en (Apache-2.0).
+    https://huggingface.co/Systran/faster-whisper-base.en
+
+17. Chrome for Testing / chrome-headless-shell (rendering browser) is NOT
+    redistributed in this installer. When needed, it is downloaded through
+    HyperFrames' official provisioning command from Google's Chrome for
+    Testing endpoints and governed by Google's terms.

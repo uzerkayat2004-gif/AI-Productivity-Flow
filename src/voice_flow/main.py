@@ -65,6 +65,17 @@ if sys.platform == "win32":
         pass
 
 log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "voice_flow_debug.log"))
+try:
+    from voice_flow import runtime_env as _runtime_env
+
+    if _runtime_env.is_installed():
+        from voice_flow.paths import data_dir as _data_dir
+
+        _log_dir = _data_dir() / "logs"
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = str(_log_dir / "voice_flow_debug.log")
+except Exception:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,

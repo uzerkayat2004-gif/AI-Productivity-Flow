@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from .. import runtime_env
 from .process_manager import ProcessManager
 from .sandbox import EngineError
 
@@ -23,10 +24,14 @@ class NarovaRunner:
         ffmpeg_path: str | None = None,
         timeout_seconds: float = 900.0,
     ) -> None:
-        self.vendor_root = Path(vendor_root or Path(__file__).resolve().parents[3] / "third_party" / "narova")
+        # Installed app: vendored tool + private node/ffmpeg under runtime/.
+        # Development: repository third_party + system PATH (unchanged).
+        self.vendor_root = Path(vendor_root or runtime_env.narova_tool_root()
+                                or Path(__file__).resolve().parents[3] / "third_party" / "narova")
         self.cli_path = self.vendor_root / "tool" / "bin" / "narova.js"
-        self.node_path = node_path or shutil.which("node")
-        self.ffmpeg_path = ffmpeg_path or shutil.which("ffmpeg")
+        self.node_path = node_path or (str(runtime_env.node_executable()) if runtime_env.node_executable() else None) or shutil.which("node")
+        bundled_ffmpeg = runtime_env.ffmpeg_executable()
+        self.ffmpeg_path = ffmpeg_path or (str(bundled_ffmpeg) if bundled_ffmpeg else None) or shutil.which("ffmpeg")
         self.timeout_seconds = timeout_seconds
 
     def check(self, production: dict[str, Any], project_dir: Path, *, job_id: str, process_manager: ProcessManager | None = None) -> Path:
@@ -78,6 +83,10 @@ class NarovaRunner:
             error_code="render_failed",
         )
         _report(progress_callback, 80, "Rendering", "buffering")
+        if renderer == "hyperframes" and runtime_env.is_installed():
+            # Packaged app: the render browser is per-user provisioned; make
+            # sure it exists before the browser render (no-op when cached).
+            runtime_env.ensure_render_browser()
         self._run(
             [str(self.node_path), str(self.cli_path), "build", *common, "--reuse", "--fps", "30", "--quality", "standard", "--verify-motion"],
             cwd=narova_dir,
@@ -191,6 +200,16 @@ def _safe_environment() -> dict[str, str]:
     managed_python = Path.home() / ".narova" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     environment["NAROVA_PYTHON"] = str(managed_python if managed_python.is_file() else Path(sys.executable))
     environment["PYTHONIOENCODING"] = "utf-8"
+    # Installed app: the private python hosts narova_tts (no managed venv is
+    # created) and the bundled hyperframes tree replaces npx resolution.
+    # narova_tts and the narova CLI resolve ffmpeg via PATH, so the private
+    # ffmpeg directory leads the subprocess PATH (never the system PATH).
+    if runtime_env.is_installed():
+        runtime = runtime_env.runtime_root()
+        environment["NAROVA_PYTHON"] = runtime_env.python_executable()
+        environment["NAROVA_HF_MODULES"] = str(runtime / "hyperframes")
+        ff_dir = runtime / "ffmpeg"
+        environment["PATH"] = str(ff_dir) + os.pathsep + environment.get("PATH", "")
     return environment
 
 
