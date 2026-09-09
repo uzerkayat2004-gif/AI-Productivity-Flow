@@ -1,0 +1,65 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "individual",
+    "role": "maintainer",
+    "name": "Uzer Kayat",
+    "email": "uzer.kayat2004@gmail.com",
+    "description": "I am an independent developer from India and the creator and solo maintainer of Productivity Flow. I started building the project to solve a problem I personally had with consuming long text and information, and it has grown into an open-source Windows productivity application combining voice dictation, audio summaries, and visual video explanations. I have built the project independently from scratch and am currently preparing it for its first major public release.",
+    "webpageUrl": {
+      "url": "https://uzerkayat.vercel.app/"
+    }
+  },
+  "projects": [
+    {
+      "guid": "productivity-flow",
+      "name": "AI Productivity Flow",
+      "description": "Productivity Flow is a free and open-source Windows productivity application designed to let users transform information without leaving the application they are already working in. It combines three system-wide workflows: Voice Flow for speech-to-text dictation, Audio Flow for reading or summarising selected text, and Video Flow for turning text, articles, documents, and code into narrated visual explanations.\n\nThe application is designed around user control and local-first operation. It supports local speech recognition, offline summarisation, and local text-to-speech, while optional cloud AI features use a Bring-Your-Own-Key model rather than a developer-controlled AI service. The project is currently in active pre-release development, with a working Windows application and public release planned after final development and hardening.",
+      "webpageUrl": {
+        "url": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow"
+      },
+      "licenses": [
+        "spdx:Apache-2.0"
+      ],
+      "tags": [
+        "productivity",
+        "windows",
+        "desktop",
+        "local-first",
+        "privacy",
+        "speech-to-text",
+        "text-to-speech",
+        "video-generation",
+        "developer-tools",
+        "artificial-intelligence"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "india-bank",
+        "type": "bank",
+        "description": "Indian bank transfer. Bank details can be provided privately if the grant is approved."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "productivity-flow-3m",
+        "status": "active",
+        "name": "Productivity Flow — 3-Month Open-Source Development Grant",
+        "description": "Seeking INR 60,000 for 3 months of focused open-source development of Productivity Flow. Month 1: release hardening, security, Windows testing, installer validation, docs, and critical fixes. Month 2: improve Video, Audio, and Voice Flow using early user feedback and fix compatibility/reliability issues. Month 3: expand testing, stabilize the release, improve contributor docs, and publish a public progress update.",
+        "amount": 60000,
+        "currency": "INR",
+        "frequency": "one-time",
+        "channels": [
+          "india-bank"
+        ]
+      }
+    ]
+  }
+}
