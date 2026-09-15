@@ -226,7 +226,7 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ),
         models=[
             ProviderModel("gemini-2.5-flash", "Gemini 2.5 Flash"),
-            ProviderModel("gemini-2.0-flash-exp", "Gemini 2.0 Flash Exp"),
+            ProviderModel("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite (Fast Polish)"),
         ],
         passthrough_models=True,
     ),
@@ -360,6 +360,42 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ],
         models_fetcher=ProviderModelsFetcher(
             url="https://api.mistral.ai/v1/models", type="openai"
+        ),
+        passthrough_models=True,
+    ),
+    "nvidia_nim": ProviderSpec(
+        id="nvidia_nim",
+        alias="nvidia",
+        ui_alias="nvidia_nim",
+        display=ProviderDisplay(
+            name="NVIDIA NIM",
+            icon="cpu",
+            color="#76B900",
+            website="https://build.nvidia.com",
+            notice=ProviderNotice(
+                text="NVIDIA-accelerated inference for frontier speech & LLM models.",
+                api_key_url="https://build.nvidia.com/settings/api-keys",
+            ),
+        ),
+        category="apikey",
+        thinking_config=ProviderThinkingConfig(
+            options=["low", "medium", "high"], default_mode="medium"
+        ),
+        transport=ProviderTransport(
+            format="openai",
+            base_url="https://integrate.api.nvidia.com/v1/chat/completions",
+            validate_url="https://integrate.api.nvidia.com/v1/models",
+            auth_header="bearer",
+        ),
+        models=[
+            ProviderModel("nvidia/parakeet-ctc-1.1b", "Parakeet CTC 1.1B (English)", kind="stt"),
+            ProviderModel("nvidia/parakeet-tdt-0.6b-v3", "Parakeet TDT 0.6B v3 (Multilingual)", kind="stt"),
+            ProviderModel("nvidia/canary-1b-v2", "Canary 1B v2 (Multi-task ASR)", kind="stt"),
+            ProviderModel("meta/llama-3.3-70b-instruct", "Llama 3.3 70B Instruct"),
+            ProviderModel("meta/llama-3.1-8b-instruct", "Llama 3.1 8B Instruct"),
+        ],
+        models_fetcher=ProviderModelsFetcher(
+            url="https://integrate.api.nvidia.com/v1/models", type="openai"
         ),
         passthrough_models=True,
     ),

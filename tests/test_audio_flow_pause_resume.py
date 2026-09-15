@@ -122,7 +122,7 @@ def test_widget_playing_click_expands_to_playback_controls() -> None:
     widget._on_click(SimpleNamespace(x=17))
 
     assert widget._stage == AudioFlowFloatingWidget.STAGE_PLAYBACK_CONTROL
-    assert widget._get_current_dimensions() == (90, 34)
+    assert widget._get_current_dimensions() == (145, 32)
     assert events.geometry == 1
     assert events.stops == []  # clicking no longer stops instantly
 
@@ -131,20 +131,44 @@ def test_widget_pause_toggle_and_stop_regions() -> None:
     widget, events = _controlled_widget()
     widget._stage = AudioFlowFloatingWidget.STAGE_PLAYBACK_CONTROL
 
-    # Left region: pause, then resume.
-    widget._on_click(SimpleNamespace(x=20))
-    assert events.toggles == [True]
-    assert widget._is_paused is True
-    widget._on_click(SimpleNamespace(x=20))
-    assert events.toggles == [True, True]
-    assert widget._is_paused is False
-
-    # Right region: stop and hide.
+    # Left region (x <= 44): Read mode pause = stop (no resume).
+    # Clicking fires on_pause_toggle and hides the widget.
     hidden: list[bool] = []
     widget.hide = lambda: hidden.append(True)
-    widget._on_click(SimpleNamespace(x=70))
-    assert events.stops == [True]
+    widget._on_click(SimpleNamespace(x=20))
+    assert events.toggles == [True]
+    assert widget._is_paused is False  # Read mode: pause means stop
     assert hidden == [True]
+
+    # Middle region (44 < x <= 84): stop and hide.
+    hidden.clear()
+    events.stops.clear()
+    widget._stage = AudioFlowFloatingWidget.STAGE_PLAYBACK_CONTROL
+    widget._on_click(SimpleNamespace(x=60))
+    assert events.stops == [True]
+    assert len(hidden) == 1
+
+
+def test_widget_realtime_speed_cycling() -> None:
+    widget, events = _controlled_widget()
+    widget._stage = AudioFlowFloatingWidget.STAGE_PLAYBACK_CONTROL
+    speeds_dispatched = []
+    widget.on_speed_change = lambda s: speeds_dispatched.append(s)
+
+    # Right region (x > 84): speed cycle
+    # Speeds: 0.75, 1.0, 1.25, 1.5, 1.75, 2.0
+    widget._set_speed(1.0)
+    assert widget._get_display_speed() == "1.0"
+
+    widget._on_click(SimpleNamespace(x=110))
+    assert widget._get_current_speed() == 1.25
+    assert widget._get_display_speed() == "1.25"
+    assert 1.25 in speeds_dispatched
+
+    widget._on_click(SimpleNamespace(x=110))
+    assert widget._get_current_speed() == 1.5
+    assert widget._get_display_speed() == "1.5"
+    assert 1.5 in speeds_dispatched
 
 
 def test_widget_set_paused_syncs_only_while_playing() -> None:
@@ -177,6 +201,7 @@ def test_widget_set_paused_syncs_only_while_playing() -> None:
 def _pause_app(monkeypatch, speaking: bool, paused: bool) -> VoiceFlowApp:
     app = VoiceFlowApp.__new__(VoiceFlowApp)
     calls: SimpleNamespace = SimpleNamespace(paused=0, resumed=0, widget_states=[])
+    app.overlay = SimpleNamespace(show_ready=lambda: None, state="READING", refresh=lambda: None)
 
     class TTS:
         """Stateful double: is_paused() reflects pause()/resume() like the engine."""
@@ -198,6 +223,9 @@ def _pause_app(monkeypatch, speaking: bool, paused: bool) -> VoiceFlowApp:
             calls.resumed += 1
             self._paused = False
 
+        def stop(self) -> None:
+            calls.paused += 1
+
     monkeypatch.setattr(main_module, "tts_engine", TTS())
     monkeypatch.setattr(
         main_module.audio_flow_widget,
@@ -209,19 +237,23 @@ def _pause_app(monkeypatch, speaking: bool, paused: bool) -> VoiceFlowApp:
 
 
 def test_main_toggle_pauses_while_speaking(monkeypatch) -> None:
+    """_toggle_audio_flow_pause now stops Read playback entirely (no resume)."""
     app = _pause_app(monkeypatch, speaking=True, paused=False)
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: app._calls.widget_states.append(p))
+
     app._toggle_audio_flow_pause()
-    assert app._calls.paused == 1
-    assert app._calls.resumed == 0
-    assert app._calls.widget_states == [True]
+    assert app._calls.paused == 1  # stop() was called, not pause()
+    assert False in app._calls.widget_states  # set_playing(False) was called
 
 
 def test_main_toggle_resumes_while_paused(monkeypatch) -> None:
+    """Read mode has no resume; _toggle_audio_flow_pause always stops."""
     app = _pause_app(monkeypatch, speaking=True, paused=True)
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: app._calls.widget_states.append(p))
+
     app._toggle_audio_flow_pause()
-    assert app._calls.resumed == 1
-    assert app._calls.paused == 0
-    assert app._calls.widget_states == [False]
+    assert app._calls.paused == 1  # stop() was called
+    assert False in app._calls.widget_states
 
 
 def test_main_toggle_is_noop_when_not_speaking(monkeypatch) -> None:

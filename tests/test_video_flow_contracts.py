@@ -6,7 +6,7 @@ import pytest
 
 from voice_flow.video_flow_engine import VideoFlowEngine
 from voice_flow.video_flow_engine.bridge import build_narova_production
-from voice_flow.video_flow_v3.scheduler.job import JobV3
+from voice_flow.video_flow_contracts import JobV3
 
 
 class _Planner:
@@ -67,3 +67,45 @@ def test_bridge_rejects_model_authored_executable_payload() -> None:
 
 
 
+
+
+def test_validator_is_case_insensitive() -> None:
+    from voice_flow.video_flow_contracts import validate_no_executable_code
+
+    for payload in (
+        "<ScRiPt>alert(1)</ScRiPt>",
+        "please EVAL(1) now",
+        "run SUBPROCESS now",
+        {"scene": "call Child_Process today"},
+    ):
+        with pytest.raises(ValueError, match="Security Boundary Violation"):
+            validate_no_executable_code(payload)
+    # Ordinary narration still passes.
+    validate_no_executable_code({"line": "Import grows as we process results."})
+
+
+def test_validator_rejects_new_token_classes() -> None:
+    from voice_flow.video_flow_contracts import validate_no_executable_code
+
+    for payload in (
+        "<iframe src='x'></iframe>",
+        "steal document.cookie now",
+        "eval via new Function('x')",
+        "spawn('calc')",
+    ):
+        with pytest.raises(ValueError, match="Security Boundary Violation"):
+            validate_no_executable_code(payload)
+
+
+def test_validator_handles_unserializable_and_circular_payloads() -> None:
+    from voice_flow.video_flow_contracts import validate_no_executable_code
+
+    validate_no_executable_code({"tags": {"a", "b"}, "pair": (1, 2)})
+    circular: dict = {}
+    circular["self"] = circular
+    validate_no_executable_code(circular)
+    evil: dict = {}
+    evil["self"] = evil
+    evil["code"] = "<script>alert(1)</script>"
+    with pytest.raises(ValueError, match="Security Boundary Violation"):
+        validate_no_executable_code(evil)

@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Narova changelog — prompt-to-video CLI and agent skill releases</title>
+<meta name="description" content="Follow Narova's prompt-to-video CLI and agent skill releases, fixes, and verified improvements.">
+<link rel="canonical" href="https://ammar-hasan.github.io/narova/changelog/">
+<meta name="theme-color" content="#12061d">
+<meta property="og:title" content="Narova changelog — releases and improvements">
+<meta property="og:description" content="Narova releases: verified creative assets, real product walkthroughs, external TTS providers, release gates, and deterministic scene-scripted video.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://ammar-hasan.github.io/narova/changelog/">
+<meta property="og:image" content="https://ammar-hasan.github.io/narova/assets/poster.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta property="og:image:alt" content="Narova prompt-to-video workflow preview">
+<meta property="og:site_name" content="Narova">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Narova changelog — releases and improvements">
+<meta name="twitter:description" content="Follow Narova's prompt-to-video CLI and agent skill releases, fixes, and verified improvements.">
+<meta name="twitter:image" content="https://ammar-hasan.github.io/narova/assets/poster.jpg">
+<meta name="twitter:image:alt" content="Narova prompt-to-video workflow preview">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="changelog.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="cursor-dot" aria-hidden="true"></div>
+<div class="cursor-ring" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="nav-logo" href="../" data-hover>
+    <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><rect width="64" height="64" rx="14" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 18l22 14-22 14z" fill="#d6f94c"/></svg>
+    narova
+  </a>
+  <nav class="nav-links" aria-label="Primary navigation">
+    <a href="../#demo" data-hover>Demo</a>
+    <a href="../#features" data-hover>Features</a>
+    <a href="../#how" data-hover>How it works</a>
+    <a href="./" data-hover aria-current="page">Changelog</a>
+  </nav>
+  <a class="nav-gh magnetic" href="https://github.com/ammar-hasan/narova" data-hover>
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    GitHub
+  </a>
+</header>
+
+<main id="main">
+
+  <section class="cl-hero">
+    <p class="kicker sr-title">Every move, logged</p>
+    <h1 class="sec-title sr-title">Change<em>log.</em></h1>
+    <p class="cl-sub sr-title">Follows <a href="https://keepachangelog.com/en/1.1.0/" data-hover>Keep a Changelog</a> and
+      <a href="https://semver.org/" data-hover>SemVer</a>. The raw file lives in
+      <a href="https://github.com/ammar-hasan/narova/blob/main/CHANGELOG.md" data-hover>CHANGELOG.md</a>.</p>
+  </section>
+
+  <section class="cl-list">
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version" data-narova-version>0.31.14</span>
+        <span class="rel-date">2026-08-19</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Evidence-graded project provenance.</strong> <code>narova provenance</code> composes existing claims, media, AI-generation, and reproducibility evidence into prose or JSON. Every fact remains visibly verified, declared, or unknown; missing and tampered evidence stays explicit, rights buckets remain display-only, and exact used-asset closure is never implied.</li>
+          <li><strong>Portable credits and toolchain evidence.</strong> <code>narova assets credits --format text|youtube|web|json</code> renders one stable attribution set for each destination. Manifests now record locally available renderer and speech-backend versions without executing providers or using the network, and optional authored provenance declarations remain advisory.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.11</span>
+        <span class="rel-date">2026-08-19</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Revision impact and history.</strong> Every successful base build now records a revision to the append-only <code>out/revisions.jsonl</code> when — and only when — the effective resolved project state changed; an unchanged rebuild records nothing and says so. Each record carries the audio/timing fingerprints, per-scene identity digests, measured stage durations, and a <em>measured reuse report</em>: per-scene audio byte-identity by content digest, render-span reuse vs identity re-render vs fallback, sentence-cache hit/fresh counts, and shared artifacts rebuilt by design. Ratios state their basis and unit; missing evidence is "not applicable", never invented; fallback re-renders never count as reuse.</li>
+          <li><strong><code>narova diff</code> and <code>narova history</code>.</strong> <code>diff</code> predicts the revision impact of your current edits per scene (script / visual / timing / structural; narration-only edits keep other scenes' audio and visuals), with a predicted reuse summary that states its basis and unit, and an estimated render time scaled from previously measured stage durations — omitted, with a plain statement, before any measurement exists. <code>history</code> lists recorded revisions with one-line change summaries and measured reuse, annotates a free-text label (metadata only), and compares two revisions <code>a..b</code> producing the same report from the records alone. Verified end to end on a real narrated build: editing one spoken turn left every other scene's audio byte-identical (digest-verified) while prediction matched measurement exactly.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.10</span>
+        <span class="rel-date">2026-08-19</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Creative-identity contract.</strong> <code>narova check</code> gains advisory-only surfaces that counter unattended-mode visual convergence — agents reaching near-identical looks across unrelated briefs. A project with an authored <code>creative.md</code> rationale gets citation resolvability (unresolvable cites warn), a deterministic multi-dimensional identity fingerprint computed from the config alone, an isolation-safe self-check that verifies the written claims against the measured identity and flags contradicted or under-authored identity (works with zero sibling history, i.e. sandboxed runs), and a sibling advisory against a local fingerprint-only ledger. <code>narova check --creative-identity</code> emits <code>out/creative-identity.json</code>. None of these surfaces can fail any check level. Validated by a preregistered controlled comparison: palette diversity ratios 4.24×/2.18×, two fixation events fired, owner blind review confirmed improvement.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.9</span>
+        <span class="rel-date">2026-08-18</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>ElevenLabs voice design.</strong> The optional companion ships an explicitly invoked helper (<code>tool/design.py</code>) that turns a text voice description into preview audio plus an audition index — a human picks, a separate step creates the permanent voice, and the resulting voice ID drops into the ordinary <code>reel.config.mjs</code> voice block. Seed makes the request reproducible; remix derives a new voice from an existing one. Companion skill 1.1.0; no core or provider-protocol change.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.8</span>
+        <span class="rel-date">2026-08-18</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>Fresh-directory release builds pass.</strong> Captions (or their recorded intentional omission) publish before the post-synth release gate in <code>build --release</code>, so a first-ever release build satisfies the caption presence rule like every later one — no undocumented plain-build-first workaround. Gate conditions and plain-build behavior are unchanged.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.7</span>
+        <span class="rel-date">2026-08-18</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Claim coverage reporting.</strong> Every <code>check</code> level prints <code>claims: N of M vo turns look factual (heuristic)</code> — informational, never a warning. A gate that sees little is a visible number instead of silence.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Spoken-style figures are claims.</strong> The grounding heuristic classifies number-word quantities ("eighty percent", "eight percentage points", "three times") and ratios ("fifteen of fifteen") — the natural authoring style for local TTS, previously invisible to the digits-only gate.</li>
+          <li><strong>Human claims ledgers match.</strong> Bullets count anywhere in <code>claims.md</code>, and detected claims match ledger quantity content across digit↔number-word spelling ("94%" ↔ "ninety-four percent"). Digit-boundary anchored: "8%" never lands inside "48%".</li>
+          <li><strong>Honest narration estimates.</strong> The estimate accounts for per-sentence gaps exactly as assembly does; the tempo-correlated under-report is structurally removed (measured: −17.0% at tempo 1.0 vs −17.1% at 1.3, uniform calibration).</li>
+          <li><strong>Local-first default fonts.</strong> Generic-only default <code>--sans</code>/<code>--mono</code>: naming no font means zero network font resolution. Token overrides now genuinely replace the chain.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><code>branch save</code> diagnostic names <code>narova shots --motion --proof</code>, the only command that writes the required receipt.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>Spelled-narration release builds refuse without a ledger and pass with a topic-organized digit-only one (stock 0.31.6 passed silently); default projects build complete videos with zero font-fetch lines.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.6</span>
+        <span class="rel-date">2026-08-16</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Optional compressed companion.</strong> <code>narova build --companion [size]</code> writes a compressed copy beside the untouched primary — an agent-owned iteration lever for quick review cuts while the final stays full quality. Deterministic derived encoding, quick-review defaults without an aim, and an honest aim/achieved/bitrate line. Nothing is enforced; no preset commits to a size.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>The seven-minute production that motivated the change produced a 58.1MB companion from a 60MB aim with a single flag, replacing a hand-rolled two-pass ffmpeg escape.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.5</span>
+        <span class="rel-date">2026-08-16</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Agent observability surfaces.</strong> Multi-clip render failures name the stage, the candidate clips, and retries; cache downgrades are announced at check time instead of degrading silently.</li>
+          <li><strong>Advisory review evidence.</strong> <code>narova review</code> gains <code>--coverage</code> (clip reuse), <code>--contact-sheet</code> (labeled stills), <code>--excerpt</code> (word-timed pronunciation cuts), <code>--silences</code> (pause report), and <code>--takes</code> (sentence/identity index). Advisory only — nothing gates a build.</li>
+          <li><strong>Deterministic narration takes.</strong> Unchanged sentences reproduce their takes through identity-derived seeds, verified byte-identical for every bundled backend. Authored variation stays first-class: <code>vary</code>, per-sentence take nonces, and a project off-switch.</li>
+          <li><strong>Capability disclosure.</strong> <code>narova providers list</code> shows which pronunciation and delivery mechanisms each backend honors; check warns before markup is silently ignored.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>No silent empty captions.</strong> A build with narration audio never publishes an empty caption sidecar; release check fails one without a recorded reason.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>Review surfaces run against a real seven-minute production: the silence report found the exact owner-reported pause plus ten more; the take index exposed the voice split behind perceived narrator drift; double-generation under pinned seeds reproduced qwen and chatterbox takes byte-identically.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.4</span>
+        <span class="rel-date">2026-08-15</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Optional 3D-production companion.</strong> Install a focused direction layer for authored 3D subject and world representation, capability routing, scene direction, and honest inspection without adding another renderer or core dependency.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>3D guidance leaves the core skill.</strong> Core Narova keeps its complete 3D surface while specialist production judgment moves into the independently installed companion.</li>
+          <li><strong>Proof before scale.</strong> Risky 3D work establishes an intentional visual target and, when needed, a short movement premise before full production.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>An owner-reviewed 94-second procedural film passed release, encoded-motion, and black-frame checks; the evidence is intentionally bounded to that model and run.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.3</span>
+        <span class="rel-date">2026-08-12</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Clear product category.</strong> npm, GitHub, the READMEs, and the website now consistently describe Narova as a local-first prompt-to-video CLI and agent skill.</li>
+          <li><strong>Search and sharing foundations.</strong> The website adds canonical URLs, complete social cards, structured data, a crawlable favicon, and a sitemap.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>Automated checks protect package keywords, canonical metadata, structured data, and sitemap integrity.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.2</span>
+        <span class="rel-date">2026-08-12</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Lockstep compatibility.</strong> The skill checks <code>narova --version</code>, reuses only its exact compatible release, and installs the pinned npm package when the CLI is missing, older, or newer.</li>
+          <li><strong>One compatibility pin.</strong> Expected runtime version is derived from the skill's single exact npm spec.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>Tests cover exact reuse, stale upgrades, PATH conflicts, npm failures, and unresolved post-install mismatches.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.1</span>
+        <span class="rel-date">2026-08-11</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>npm-only lifecycle.</strong> The superseded GitHub installer and unscoped migration path are gone; install, update, and removal target <code>@narova/narova</code>.</li>
+          <li><strong>Reliable version sync.</strong> Release automation updates both skill metadata and its exact npm bootstrap pin.</li>
+        </ul>
+        <h4><span class="tag verified">Security</span></h4>
+        <ul>
+          <li>Publishing uses npm Trusted Publishing without a token fallback and rejects tags whose commit is not on <code>main</code>.</li>
+          <li>Node 18 and Node 24 run the same package, install, and release gates.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.31.0</span>
+        <span class="rel-date">2026-08-11</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Public npm bootstrap.</strong> The standalone CLI became available as public <code>@narova/narova</code>. This initial release was published manually and has no provenance attestation.</li>
+          <li><strong>Packed-artifact gate.</strong> CI installs the exact tarball into a fresh prefix, exercises all commands, scaffolds a project, and requires a clean check.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Verifiable bootstrap.</strong> The skill pins its matching npm release instead of executing a mutable remote shell installer.</li>
+          <li><strong>Lean artifact.</strong> Runtime code and docs ship; legacy installation and development files do not.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.30.0</span>
+        <span class="rel-date">2026-08-11</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Verified creative-asset lifecycle.</strong> Import, download, search, acquisition, verification, provenance, rights, and credits now share one provider-neutral registry.</li>
+          <li><strong>Core stock adapters.</strong> Twelve deterministic adapters share one CLI: nine need no key, while Pexels, Pixabay, and Freesound remain independently optional.</li>
+          <li><strong>LLM sourcing companion.</strong> The separate skill installs no CLI and guides flexible discovery across 101 photo, video, audio, font, 2D/3D, culture, map, and science sources.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Honest readiness.</strong> All repeatable adapters live in core; changing web sources remain LLM-led, and absent optional keys never block the rest.</li>
+          <li><strong>Clear ownership.</strong> Code handles mechanical provider work while the agent keeps creative queries, selection, and item-level license judgment.</li>
+        </ul>
+        <h4><span class="tag verified">Verified</span></h4>
+        <ul>
+          <li>Real API search/download/registry tests passed for every no-key adapter, and a live agent-browser Mixkit flow preserved a Restricted License through download, import, verification, and credits.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.29.0</span>
+        <span class="rel-date">2026-08-10</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>CLI installer and uninstaller.</strong> <code>tool/install.sh</code> installs <code>narova</code>, <code>narova-setup</code>, and <code>narova-uninstall</code> from a selected GitHub ref. Run it again to update. Uninstall keeps projects, models, caches, and skills.</li>
+          <li><strong>Install lifecycle tests.</strong> Tests cover installation, update, repeated uninstall, package contents, and skill-to-CLI use from temporary directories.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Repository layout.</strong> CLI code now lives in <code>tool/</code>; <code>skills/narova/</code> contains only instructions and references.</li>
+          <li><strong>Skill setup.</strong> The skill finds <code>narova</code> on <code>PATH</code> or installs it when needed.</li>
+          <li><strong>Development commands.</strong> Tests, packaging, versioning, docs, and companion providers now use <code>tool/</code>.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.28.0</span>
+        <span class="rel-date">2026-08-08</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Proof branches by default.</strong> <code>branch save --rationale</code> snapshots a small candidate with a durable, project-bound, byte-verified proof bundle; ambitious release requires 2–3 content-distinct proofs, exact expansion lineage, and only one approved winner. Concurrent same-name publication is compare-and-swap safe, and restores retain proof-time CLI overrides.</li>
+          <li><strong>Pilot visibility gate.</strong> <code>shots --motion --proof</code> fails when sampled evidence is predominantly near-black or absent.</li>
+          <li><strong>Real creativity A/B.</strong> Eight same-model pilots compare with/without Narova guidance; the documented result is honest about conceptual convergence.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Genuinely raw canvas.</strong> Both bundled renderers no longer reserve or constrain the zero-style frame; <code>safeLayout</code> restores guardrails explicitly, and restored pre-0.28 projects retain historical geometry.</li>
+          <li><strong>Medium-neutral intent.</strong> The creative brief leads with intended effect, representation, temporal behavior, evidence, and rejection criteria. Camera/depth/light are conditional.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.27.0</span>
+        <span class="rel-date">2026-08-08</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Creative confidence loop.</strong> New projects scaffold competing directions, a visual contract, beat map, three-shot pilot gate, and rejection criteria in <code>creative-brief.md</code>.</li>
+          <li><strong>Beat-level visual review.</strong> <code>narova shots --beats</code> samples the arrival and resolved state of narration groups, both sides of markers, and useful coverage for silent scenes.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Fail-before-render release gate.</strong> <code>build --release</code> preflights before synthesis, then rechecks measured timing before compose/render, and requires an approved brief for non-trivial productions.</li>
+          <li><strong>Camera-aware cinematic critique.</strong> Persistent raw Three.js worlds are assessed by their internal directed camera cuts and moves, not just their top-level scene count.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>Duration provenance.</strong> Creative gating distinguishes fallback and authored runtime, then trusts measurements only with a scene-topology-aware timing fingerprint.</li>
+          <li><strong>Complete variant preflight.</strong> Base and selected/all variants are checked before any release write begins.</li>
+          <li><strong>Raw 3D shot accounting.</strong> Helper, direct timeline, inline callback, and named callback cuts combine without double counting implementations.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.26.1</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>HF selective-render timing (pixel-verified).</strong> Isolated per-scene renders of a non-first scene now match a clean full render at the decoded-frame level (new equivalence test). The scene's Three.js canvas now animates, marker-triggered elements appear, karaoke overlays show, and turn cues fire on time — global-to-local rebasing was incomplete before.</li>
+          <li><strong>captions:false invalidation.</strong> Toggling the caption band now changes the render-cache key, so captioned pixels can no longer be served for a captions-off build.</li>
+          <li><strong>scene.cssFile now applies.</strong> It was accepted by the schema but silently ignored; now merged into the stylesheet and hashed.</li>
+          <li><strong>Branch restore round-trips.</strong> Scene file refs and imports restore at their original project-relative paths; the saver uses Narova's real ESM/CJS config loader, not a regex parser.</li>
+          <li><strong>LRU retention bounds the count.</strong> Cache pruning no longer leaves the cache over budget when kept spans are the oldest entries.</li>
+          <li><strong>Subtitle preset is genuinely neutral.</strong> No speaker colors, no glow, no equalizer/label by default; karaoke/slam/pop/rise keep the richer look.</li>
+          <li><strong>Manifest theme defaults agree with runtime.</strong> Legacy teal/navy defaults removed in favor of the v0.26 monochrome palette.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Selective-render safety gate.</strong> Projects with project-global behavior (choreography, <code>.js</code> imports) transparently take a whole-video render for HyperFrames, with a stated reason, instead of attempting an unsafe isolate. <code>no-browser</code> is unaffected.</li>
+          <li><strong>Docs.</strong> Product position is "deterministic scene-scripted video with exceptionally strong narration synchronization, but narration is optional"; the fixed male/female duet casting prescription was removed.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.26.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Chrome off by default.</strong> Topbar, counter, and progress bar are off unless explicitly enabled. The absence of chrome is now the baseline.</li>
+          <li><strong>Neutral default palette.</strong> Monochrome gray base replaces the navy/teal identity. Light mode is similarly neutral. Narova no longer has an accidental house style.</li>
+          <li><strong>Subtitles as default captions.</strong> Plain text timed to speech — no per-word color highlights or animation by default. Karaoke, slam, pop, rise remain available as explicit presets.</li>
+          <li><strong>Skill instructions de-anchored.</strong> Concept branching uses orthogonal creative dimensions instead of fixed archetypes. Craft rules ("hook in first 2s," "one idea per video," mandatory CTA) moved to optional <code>narova critique</code> profiles.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>HF selective-render equivalence.</strong> Transitions, markers, choreography, overlays, and chrome now render identically in per-scene and full renders.</li>
+          <li><strong>Cache dependency model.</strong> All global render inputs (markers, patterns, chrome, theme, captions, series) now correctly invalidate cached spans.</li>
+          <li><strong>Complete branch snapshots.</strong> Scene file references, imports, and generated-media specs preserved in releases.</li>
+          <li><strong>Bounded cache retention.</strong> LRU pruning keeps recent creative alternatives around instead of deleting them immediately.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.25.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Per-scene HyperFrames render cache.</strong> HyperFrames now renders each scene as its own independent project — same per-scene caching architecture no-browser has had. Only changed scenes re-render; the rest reuse cached spans via ffmpeg concat. "Try five versions of scene 4" is cheap on both renderers.</li>
+          <li><strong>Named time markers.</strong> <code>config.markers = { reveal: 2.5 }</code> creates author-defined time anchors. Use <code>data-cue="marker:reveal"</code> or <code>at: { marker: "reveal" }</code>. Decouples timing from narration turns.</li>
+          <li><strong>Creative branch system.</strong> <code>narova branch set|list|show</code> with rationale, status, and parentage metadata.</li>
+          <li><strong>LLM creativity benchmark framework.</strong> 10 adversarial briefs + diversity scorer. Fixture-based CI; LLM-adapter substitution for real evaluation.</li>
+          <li><strong><code>narova critique</code> command.</strong> Opt-in craft heuristics by profile: social-short, explainer, presentation, accessibility, or all.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Zero-style defaults.</strong> <code>patterns: false</code> by default. No decorative grid. Craft checks separated from correctness.</li>
+          <li><strong>Better error messages.</strong> No-browser and schema errors point to available escape hatches.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.24.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Scene-level render cache</strong> — <code>narova build</code> reuses previously rendered output instead of re-rendering the whole video every time. Each rendered span is keyed on a hash of its scene content, measured word/turn timings, and the shared render context (theme, format, fps, quality, voices, assets, choreography), so a span is reused only when reproducing it would yield perceptually-identical pixels. <em>no-browser</em> gets full per-scene caching (only changed scenes re-render, concatenated with the single full audio track); <em>hyperframes</em> gets whole-video caching (reuses the MP4 when nothing changed). Missing, empty, or wrong-duration spans are re-rendered; any cache failure falls back to a full render — caching can never fail a build. <code>--reuse</code> (TTS) is a separate, unaffected layer.</li>
+          <li><strong>Per-scene <code>sceneHash</code> covers author JS</strong> — the manifest's per-scene <code>hash</code> now includes <code>choreographyFile</code>, <code>scriptFile</code>, and <code>threeModule</code> contents (matching the <code>check</code> determinism scan), so editing one of those files invalidates only that scene's cached span.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>HyperFrames engine pinned to 0.7.96</strong> (was 0.7.64).</li>
+          <li><strong><code>build --plan</code> shows the cache reuse decision</strong> — the same per-scene plan the real build uses, so change scope is legible before any work runs.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.22.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong><code>scene.threeModule</code></strong> — the raw Three.js / WebGL escape hatch beneath declarative <code>scene.three</code>. A project-relative JS file inlined into the deterministic 3D bootstrap with <code>THREE</code>, <code>scene</code>, <code>camera</code>, <code>renderer</code>, <code>tl</code> (GSAP timeline), <code>seed</code>, <code>size</code>, <code>duration</code>, <code>assets()</code>, <code>onRender()</code>, and <code>narova</code> helpers in scope. Custom shaders, procedural geometry, post-processing, and particle systems now have a deterministic home — the largest creative-ceiling lift in the release.</li>
+          <li><strong>Generated-media provenance</strong> — <code>narova generate</code> writes a <code>.gen.json</code> spec sidecar next to every clip (provider, model, prompt, params, artifact hash). <code>--regenerate &lt;mp4&gt;</code> re-runs a shot from its spec; <code>--model</code> / <code>--size</code> / <code>--duration</code> capture or override. Generated clips are now editable creative source, not opaque output.</li>
+          <li><strong><code>build --plan</code></strong> — print what a revision will rebuild (per-scene scope) before doing the work. Advisory only; never changes behavior. Reduces fear of disturbing approved scenes.</li>
+          <li><strong>Determinism scan covers all author JS</strong> — per-scene <code>choreographyFile</code>, <code>scriptFile</code>, and <code>threeModule</code> are now linted for wall-clock / random / rAF / setTimeout / fetch hazards (previously only project <code>choreography</code> was scanned).</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Real correctness category in <code>check</code></strong> — the <code>correctness:</code> warning prefix is wired to genuine determinism / reproducibility issues (e.g. infinite CSS animation). Previously the helper existed but no rule used it, so correctness and quality were indistinguishable.</li>
+          <li><strong>Honest 3D escape-hatch docs</strong> — removed the false "component-custom escape hatch" claim (no such mechanism existed). The real hatch is <code>scene.threeModule</code>, documented in full.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.21.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong><code>captions: false</code></strong> — disable the visual caption band entirely. Caption DOM, CSS padding, and presets are cleanly omitted. SRT/VTT sidecars always export.</li>
+          <li><strong><code>config.patterns</code></strong> — control built-in layout classes. Defaults to <code>true</code> for backward compat. Set <code>patterns: false</code> to define your own visual language.</li>
+          <li><strong><code>scene.scriptFile</code></strong> — per-scene raw JavaScript escape hatch for Three.js/WebGL/canvas. Inlined into scene animation context with timeline, DOM, and Three.js globals in scope. Same determinism contract as project choreography.</li>
+          <li><strong>Per-scene content hashes</strong> — every scene carries a <code>hash</code> field in the manifest. <code>narova plan</code> shows per-scene hash diffs. Foundation for scene-level render caching.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Layout patterns separated from production CSS</strong> — 30+ built-in layout classes extracted to opt-in <code>patternsCss()</code>. Default CSS is now neutral infrastructure only: background, chrome, captions, walkthrough, marks, typography. A blank project is a canvas.</li>
+          <li><strong>Default background neutralized</strong> — removed accent/pink/gold radial gradient glow blobs. Default is flat <code>var(--stage)</code> with subtle grid.</li>
+          <li><strong>Default scaffold neutralized</strong> — <code>init</code> uses plain inline styles, not layout classes. Documents captions, chrome, and patterns options.</li>
+          <li><strong>Hook/CTA enforcement is context-aware</strong> — skipped for silent projects and <code>captions: false</code>. Warnings tagged <code>craft:</code> vs <code>correctness:</code>.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>Documentation honesty</strong> — <code>scene.three</code> documented as declarative (not "unlimited"). Creative-diversity eval reframed as schema conformance test.</li>
+          <li>Removed <code>.grad</code> / <code>.hairline</code> from default CSS.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.20.0</span>
+        <span class="rel-date">2026-08-07</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>Theme token preservation</strong> — custom theme tokens (stage, deep, halo, colw, user-defined) now survive the full manifest round-trip. Previously only accent and bg were preserved.</li>
+          <li><strong>Measured cue timing for 3D</strong> — <code>{ at: { cue: N } }</code> now resolves to actual measured turn start times from timings.json, not <code>cue * 2</code>.</li>
+          <li><strong>Semantic action validation</strong> — <code>draw</code>/<code>speak</code>/<code>react</code>/<code>follow</code>/<code>transform</code> now fail validation with clear errors. Supported: appear, disappear, move, rotate, scale, orbit, revolve.</li>
+          <li><strong>Deterministic particle randomness</strong> — mulberry32 seeded PRNG replaces <code>Math.random()</code> in particle generation. Same scene + object identity → identical layouts across builds.</li>
+          <li><strong>data-grow / data-mark highlight</strong> — transformOrigin is now pre-seeded via <code>tl.set()</code> before tween, avoiding the HyperFrames sub-composition timeline breakage.</li>
+          <li><strong>GSAP vendored locally</strong> — GSAP 3.14.2 ships in <code>vendor/gsap/</code>. Generated compositions have zero CDN dependencies at render time.</li>
+          <li><strong>Release restore + --reuse</strong> — releases now save fingerprint and timings so <code>--reuse</code> works after restore.</li>
+          <li><strong>Version consistency</strong> — all 7 version sources (root pkg, tool pkg, SKILL.md, README, SPEC.md, CLI, docs) now fail CI when they drift.</li>
+        </ul>
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Creative modularity</strong> — 6 file-reference types per scene (bodyFile, cssFile, choreographyFile, threeFile, elementsFile, visualFile). <code>config.imports</code> for reusable project-level modules. All file contents hashed for deterministic build invalidation.</li>
+          <li><strong>Expanded variant model</strong> — kind tags (hook, visual, narration, pacing, captions), sceneOverrides, theme/captions/timing overrides per variant. Backward-compatible.</li>
+          <li><strong>Concept branching</strong> — SKILL.md encourages sketching 2-3 distinct creative directions before committing to the final project.</li>
+          <li><strong>Creative-diversity eval suite</strong> — 10 radically different briefs, 11 convergence metrics, human review checklist. Run via <code>node tool/evals/creative-diversity-eval.js</code>.</li>
+          <li><strong>476 tests pass</strong> (470 unit + 6 eval) — revision guarantee tests, planner accuracy tests, version consistency CI test.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Skill restructured into hard invariants, optional craft heuristics, and creative mandate — encouraging custom HTML/CSS/SVG/Three.js over built-in templates.</li>
+          <li>Project scaffold is now neutral — one narrator, no default palette, replace-everything design.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.19.0</span>
+        <span class="rel-date">2026-08-06</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>3D visual system</strong> — declarative <code>scene.three</code> and <code>scene.elements</code> for cameras, lights, primitives, models, GSAP-driven animations, and tone-mapped output (ACES filmic default). Three.js upgraded from the deprecated r149 UMD to r185 ESM (esbuild-bundled global script with GLTFLoader included).</li>
+          <li><strong>Character abstraction</strong> — built-in presets (cat, mouse, robot) compile to <code>THREE.Group</code> assemblies of relative parts. One line per character; <code>config.characters</code> for custom ones. Group-level actions (move, rotate, appear) cascade to all descendants.</li>
+          <li><strong>InstancedMesh + geo/material cache</strong> — <code>instances: [...]</code> renders N copies in one draw call; identical primitives share buffers and programs.</li>
+          <li><strong>narova generate</strong> — AI clip generation via Sora/Runway APIs, downloaded to <code>assets/</code> for use as <code>scene.clip</code>.</li>
+          <li><strong><code>canvas3d</code>/<code>model3d</code></strong> node types in the portable visual tree.</li>
+          <li><strong>Choreography hook</strong> — optional project-level <code>choreography: "choreo.js"</code> file with custom GSAP timeline code inlined into the composition. <code>tl</code>, <code>DATA</code>, <code>gsap</code>, and <code>cueTime</code> in scope; turn-anchored tweens are exactly as seek-safe as the built-in vocabulary. <code>check</code> lints for determinism (warns on Date, Math.random, rAF, setTimeout, fetch).</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Current correction:</strong> the non-rendering <code>canvas3d</code>/<code>model3d</code> placeholders were retired; use the fully managed <code>scene.three</code> or raw <code>scene.threeModule</code> surfaces.</li>
+          <li>Three.js upgraded from r149 UMD to r185 ESM — the old UMD was deprecated after r149 and removed at r161. Shipped as a global script opaque to HyperFrames' compiler.</li>
+          <li>Tone mapping now configurable (aces, agx, neutral, linear) at <code>scene.three.toneMapping</code>; ACES filmic is the default for video.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Group/character <code>appear</code>/<code>disappear</code> no longer targets <code>.material</code> on a <code>THREE.Group</code> (the old code silently killed the scene).</li>
+          <li>Material-cache opacity bleed: tweening one mesh's opacity no longer fades every same-colored sibling.</li>
+          <li>Animation <code>from</code> values honored via <code>tl.fromTo</code> instead of dropped.</li>
+          <li>Boot poll bounded to 200 retries + error surface instead of polling forever.</li>
+          <li>GLTF models load deterministically via prefetch + parseAsync, gated before frame 0.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.17.0</span>
+        <span class="rel-date">2026-08-03</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Two free local renderers</strong> — HyperFrames keeps the complete browser/HTML/CSS surface; Narova No-Browser adds deterministic browserless Skia + FFmpeg rendering.</li>
+          <li><strong>Portable visual trees</strong> — stacks, groups, type, shapes, paths, raster/SVG assets, local fonts, RTL text, full-frame video, keyframes, transitions, captions, and snapshots work without a browser.</li>
+          <li><strong>Renderer CLI</strong> — choose with <code>--renderer hyperframes|no-browser</code>, then inspect capabilities and requirements with <code>narova renderers list|doctor</code>.</li>
+          <li><strong>Complex no-browser eval</strong> — a real four-scene production proof covers custom narration, audio processing/mixing, product playback, multilingual visuals, cartoon motion, captions, snapshots, and MP4 validation.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Renderer identity and <code>scene.visual</code> now survive config, manifests, variants, builds, deliverables, preview, checks, and QA. HTML-only scenes fail clearly under no-browser instead of degrading silently.</li>
+          <li>Custom narrator word timings now feed SRT/VTT and both renderers through one normalized timing contract.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Current FFmpeg voice compression parameters, raster/video RGBA transfer, mixed external narration selection, and long caption wrapping.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.16.0</span>
+        <span class="rel-date">2026-08-03</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Optional OpenAI companion</strong> — a dependency-free Speech API worker with environment-only authentication, direct validated WAV output, and the generic <code>narova-tts-provider/v1</code> protocol.</li>
+          <li><strong>Current speech controls</strong> — steerable <code>gpt-4o-mini-tts</code> by default, the latest fixed snapshot, legacy speed/quality models, 13 built-in voices, existing custom voice IDs, delivery instructions, speed, and multilingual guidance.</li>
+          <li><strong>Full provider tests</strong> — model and option validation, credentials, request mapping, voice listing, output safety, and no-retry billing behavior are part of <code>npm test</code>.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>README, specification, skill guidance, CLI reference, and landing page now present OpenAI and ElevenLabs as peer optional providers while Narova stays local-first.</li>
+        </ul>
+        <h4><span class="tag fixed">Security</span></h4>
+        <ul>
+          <li><code>.env.local</code> is ignored; credentials never enter project configuration, cache identity, protocol output, or generated artifacts.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.15.0</span>
+        <span class="rel-date">2026-08-01</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Skill context re-engineered</strong> — SKILL.md reduced from 339 to 127
+            lines (−62%) based on Anthropic's context engineering best practices for Claude 5
+            models. Overly prescriptive intake scripts, redundant hard rules, and example
+            dialogues replaced by progressive disclosure through the existing
+            <code>references/</code> files.</li>
+          <li><strong>Ten hard rules → four key gotchas</strong> — only genuinely non-inferrable
+            rendering details remain upfront (no looping CSS, SVG namespacing, output hygiene,
+            sourcing vs. balance). Discoverable rules (voice defaults, narrator counts, theme
+            mode conventions) now live in reference docs.</li>
+          <li><strong>Workflow compressed</strong> — eight detailed step sections condensed to a
+            numbered one-line-per-step list with file-pointer references.</li>
+        </ul>
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>AGENTS.md</strong> — lightweight repo-level project guidance (CLAUDE.md
+            symlinks to it). Six gotchas specific to the narova project.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.14.0</span>
+        <span class="rel-date">2026-08-01</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>External narration</strong> — <code>config.narration.file</code> lets you use pre-recorded audio instead of TTS. No voices or TTS backend needed.</li>
+          <li><strong>External karaoke captions</strong> — <code>narration.wordTimings</code> accepts a JSON file of word-timed cues. Narova injects word-level karaoke overlays into every scene at compose time — the spoken word highlights in gold with no caption HTML in your scene bodies.</li>
+          <li><strong>Auto bed/SFX mixing for external narration</strong> — when <code>bed</code> or <code>sfx</code> are configured alongside <code>narration.file</code>, narova mixes them with the external audio using ffmpeg. No TTS venv needed.</li>
+          <li><strong>Voice processing for external narration</strong> — <code>narration.process</code> with optional <code>highpass</code>, <code>lowpass</code>, <code>compressor</code>, and <code>loudness</code> settings.</li>
+          <li><strong><code>narova karaoke generate</code></strong> — transcribe an audio file to word-timed karaoke JSON + SRT using faster-whisper or whisper-cpp. <code>--transcript</code> maps a clean transcript onto Whisper timings.</li>
+          <li><strong><code>narova retime</code></strong> — auto-derive scene durations from word timing data. <code>--apply</code> rewrites the config in-place.</li>
+          <li><strong>WhatsApp export preset</strong> — <code>whatsapp-compressed</code>: 540×960, rate-controlled H.264 encode under 16 MB for messaging apps.</li>
+          <li><strong>Port auto-detection for preview</strong> — <code>narova preview</code> finds the next available port instead of silently failing on conflicts.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><code>narova check</code> now reports <code>"external"</code> backend (not <code>"silent"</code>) when <code>config.narration</code> is set, and estimates duration from explicit scene <code>dur</code> values.</li>
+          <li><code>narova check</code> detects HyperFrames-reserved class names used as CSS selectors in <code>theme.css</code> — previously only checked HTML class attributes.</li>
+          <li>Hook checks (lead-in silence, on-screen text warnings) are skipped when using external narration.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.13.0</span>
+        <span class="rel-date">2026-07-30</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Real product walkthroughs</strong> — narration-timed semantic clicks, typing, waits, scrolling, evidence screenshots, and agent-readable exploration through optional agent-browser sessions.</li>
+          <li>Generated browser-window and full-bleed layouts retain Narova voiceover, word-synced captions, overlays, and platform exports.</li>
+          <li>Content-addressed capture manifests track action drift, media metadata, and config/synthesis/timing/media/evidence hashes; incomplete or stale takes fail composition and release checks.</li>
+          <li>A real browser-to-MP4 eval validates interactive capture, 1280×720 output, retained audio, and black-frame safety.</li>
+          <li>An 83-second narrated showcase demonstrates project creation, configuration, search, task assignment, automation, and teammate invitation in one 24-operation browser take.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><code>narova plan</code> now models capture as its own stage, recapturing only when actions or narration timing change.</li>
+          <li>Walkthrough renders use lossless PNG frame extraction so product text stays sharp.</li>
+          <li>The isolated walkthrough cursor is reinstalled in agent-browser's fresh recording context, and semantic clicks emit a short expanding ripple that fades and is removed after each click.</li>
+        </ul>
+        <h4><span class="tag fixed">Security</span></h4>
+        <ul>
+          <li>Capture is always explicit; builds never replay browser actions. Typed values and URL queries are redacted, while embedded URL credentials are rejected and stripped defensively.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.12.0</span>
+        <span class="rel-date">2026-07-29</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>External TTS provider protocol</strong> — explicitly registered executable workers speak versioned <code>narova-tts-provider/v1</code> JSON Lines without placing provider code in Narova core.</li>
+          <li><code>narova providers add|list|doctor|remove</code> plus generic external voice listing through <code>narova voices list --backend &lt;provider&gt;</code>.</li>
+          <li><strong>Optional ElevenLabs companion skill</strong> — isolated HTTP worker, environment-only API key, voice IDs, provider options, WAV conversion, and mocked tests with no paid calls.</li>
+          <li>Provider protocol/version/options are included deterministically in audio fingerprints and sentence-cache identity.</li>
+          <li><strong>Urdu sentence punctuation</strong> — native full stops (<code>۔</code>) and question marks (<code>؟</code>) now split speech and timing groups consistently in Python synthesis and Node manifest processing.</li>
+          <li><strong>Urdu voice direction</strong> — Narova’s skill instructions now delegate meaningful Urdu dialogue polishing to the optional <code>urdu-voice-director</code> skill while keeping caption text free of provider-specific performance tags.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Narova remains local-first: Piper is still the default, and external workers run only after explicit registration.</li>
+          <li>The website now covers the current provider architecture, planning and release workflow, export profiles, Urdu-aware dialogue, and accessibility improvements.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.11.0</span>
+        <span class="rel-date">2026-07-29</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Clear URL-to-video boundary: agents interpret sources and write the story; <code>narova ingest</code> performs the mechanical HTML, image, and screenshot pass.</li>
+          <li>Complete CLI documentation for <code>--deliverables</code> and <code>--safe-area-guides</code>.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Export behavior now documents scale-and-pad limitations, canonical platform presets, and when HyperFrames receives an explicit resolution.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.10.0</span>
+        <span class="rel-date">2026-07-29</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><code>narova check --strict</code> verifies detected claims against <code>claims.md</code>; <code>check --release</code> fails builds with remote dependencies, missing evidence, unsupported markup, or empty frames.</li>
+          <li>Voice-less silent projects, claims-ledger table parsing, and YouTube as a first-class platform.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Release asset gating, visual-content detection, platform duration behavior, and Pexels authentication documentation.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.9.0</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Complete audio fingerprints for safe <code>--reuse</code>, asset-content hashing, and five-stage rebuild planning.</li>
+          <li>Manifest-first pipeline, canonical export preset registry, YouTube profiles, named project release snapshots, and exact preset dimensions.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Portable manifest paths and authoring-only safe-area guides keep projects reproducible without leaking machine-local paths.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.8.3</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Render-path CSS compatibility lint, automatic looping for short b-roll clips, and long-video wipe warnings.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Built-in b-roll styling and WebM looping now stay on HyperFrames’ fast, compatible render path.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.8.2</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><code>timeline.json</code> became the canonical <code>manifest.json</code>.</li>
+        </ul>
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Content hashes, <code>narova plan</code>, and named manifest releases under <code>~/.narova/releases/</code>.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.8.1</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Comprehensive YouTube, TikTok, Reels, Shorts, LinkedIn, X, and Narova-standard export profiles with ffmpeg encoding, loudness targets, safe-area metadata, and thumbnails.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.8.0</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Versioned timeline IR</strong> — <code>narova compile</code> produces <code>out/timeline.json</code> (schema v1.0), a self-contained JSON document with project metadata, format, voices, scenes, assets, deliverables, and variants. Auto-written by synth/compose/build and enriched with word timings post-synthesis.</li>
+          <li>Timeline validation: <code>narova</code> key required, schema version compatibility enforced, structural integrity checks.</li>
+          <li><code>mergeTimings</code> with correct sentence-to-turn distribution and no double-offset on turn start times.</li>
+          <li>Full asset tree walk for timeline inventory.</li>
+          <li>31 unit tests for compilation, validation, merge, and round-trip.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Variants now carry full scene definitions (body, VO, transition) in the timeline.</li>
+          <li>SPEC.md updated with timeline IR documentation section.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.7.11</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>XTTS language support</strong> — per-turn and per-voice <code>lang</code> now flows through to coqui-tts against 17 supported languages.</li>
+          <li>Release automation: <code>scripts/sync-version.js</code> keeps all version surfaces in sync.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Documentation remediation: narrowed "any URL", restructured frontmatter, qualified platform/offline claims, read-only update check.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Version drift across five surfaces.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.7.10</span>
+        <span class="rel-date">2026-07-28</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>npx retry with exponential backoff for DNS failures.</li>
+          <li>Stock assets reference documentation.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Doctor command now reports mismatched tool versions and venv health.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.7.0</span>
+        <span class="rel-date">2026-07-26</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><strong>Music bed + spot SFX</strong> — <code>music: {file, volume, fadeIn, fadeOut}</code> and
+            <code>sfx: [{file, scene, at, volume}]</code> mixed into narration via ffmpeg.
+            Music changes don't require re-synthesis.</li>
+          <li><strong>Caption style presets + keyword emphasis</strong> —
+            <code>captions: {preset: karaoke|slam|pop|rise, emphasis: [...]}</code>.</li>
+          <li><strong>Per-platform size presets + duration-band lint</strong> —
+            <code>platform: tiktok|reels|shorts|linkedin|x</code> picks frame size
+            and duration-band lint. SRT + WebVTT sidecars.</li>
+          <li><strong>Forced word alignment</strong> — <code>align: true | {engine}</code>.
+            Measured word timings replace estimates; per-scene graceful fallback.</li>
+          <li><strong>Chatterbox v3</strong> — multilingual voice cloning with per-voice <code>lang</code>, watermarked output.</li>
+          <li><strong>Scene transitions + hand-drawn annotations</strong> —
+            <code>transition: fade|wipe|slide|zoom</code>;
+            <code>data-mark="underline|circle|box|highlight"</code>.</li>
+          <li><strong>Hook-variant generation</strong> — <code>variants: [{id, scene}]</code>;
+            <code>narova build --variant &lt;id&gt;</code> renders A/B hook tests.</li>
+          <li><strong><code>narova ingest &lt;url&gt;</code></strong> — fetches page, downloads images,
+            takes headless screenshot, appends <code>sources.md</code>, seeds <code>claims.md</code>.</li>
+          <li><strong>Hook enforcement in <code>narova check</code></strong> — warns on
+            lead-in silence &gt;200ms, scene 1 missing visible text, missing saveable end-card.</li>
+          <li><strong>B‑roll per scene</strong> — <code>clip: "assets/bg.mp4"</code> on any scene
+            plays a looped video behind the HTML overlay.</li>
+          <li><strong>Series/multi‑part mode</strong> — <code>series: {part, total}</code> adds a
+            &ldquo;Part 2 / 5&rdquo; badge overlay for multi-episode scripts.</li>
+          <li><strong>Voice sample management</strong> —
+            <code>narova voice sample add/list/remove</code> for chatterbox clone samples.</li>
+          <li>Interactive landing page (this site) and changelog subpage.</li>
+          <li>Demo GIF, <code>CHANGELOG.md</code>, <code>references/audio.md</code>.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>README restructured around the demo: hook, GIF, why-bullets, install, quickstart.</li>
+          <li>SPEC updated to the 0.7.0 contract; stale <code>examples/</code> references repointed to <code>generated/</code>.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><strong>Slam caption overlap</strong> — <code>fromTo</code> scale tween parked
+            every upcoming word at the from-state; rewritten as <code>.to()</code> tweens only.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.6.0</span>
+        <span class="rel-date">2026-07-21</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Photo motion, scene transitions, XTTS voice cloning, and Qwen instruct control.</li>
+          <li>Chatterbox voice-cloning TTS backend.</li>
+          <li>narova skill showcase reel.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li>Session friction from the us-iran-standoff build: motion glitches, scene ids, QA workflow, CLI edges.</li>
+          <li>Loud clone-path errors, drift lint, chatterbox validation and cache identity.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.5.0</span>
+        <span class="rel-date">2026-07-21</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Example intro videos: Folio3, Careem, DeepLearning.AI, US–Iran standoff briefing.</li>
+          <li>Hardening against the failures found in the bazaartech retrospective.</li>
+          <li>Skill exposed to <code>.agents</code>-standard agents at project scope.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li>Aligned versions and hardened config/argument edges from the skill review.</li>
+        </ul>
+        <h4><span class="tag removed">Removed</span></h4>
+        <ul>
+          <li>Legacy examples superseded by the generated intro projects.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.4.0</span>
+        <span class="rel-date">2026-07-21</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Source-aware, asset-native pipeline: any URL becomes verified source material.</li>
+          <li>Iteration-consistent synthesis: unchanged turns keep byte-identical audio across revisions.</li>
+          <li>Prompt-to-video craft references and anti-template visual-variety rules.</li>
+          <li>Qwen3-TTS backend and theme-from-intent skill rules.</li>
+        </ul>
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Breaking:</strong> narova IS the skill — tool bundled under the standard <code>skills/</code> layout.</li>
+          <li>Docs rewritten in plain language; tests moved into the skill.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.3.0</span>
+        <span class="rel-date">2026-07-21</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag changed">Changed</span></h4>
+        <ul>
+          <li><strong>Breaking:</strong> <code>build</code>/<code>preview</code> run on the HyperFrames render engine; the old player/capture/assemble/serve pipeline is deleted.</li>
+        </ul>
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><code>narova compose</code> — HyperFrames composition generator.</li>
+          <li><code>audio/full.wav</code> — the concatenated narration track.</li>
+          <li>Zero-dependency test suite for schema, lints, compose, and timings.</li>
+          <li>Claude Code agent skill + installer.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.2.0</span>
+        <span class="rel-date">2026-07-20</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li><code>narova check</code> — fast config validation with no synth or capture.</li>
+          <li><code>vkf-upgrade</code> example: a 7-scene 1:1 social announcement.</li>
+        </ul>
+        <h4><span class="tag fixed">Fixed</span></h4>
+        <ul>
+          <li><code>py/</code> and <code>scripts/</code> now ship in the published package files.</li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="release sr-title" data-hover>
+      <div class="rel-rail">
+        <span class="rel-version">0.1.0</span>
+        <span class="rel-date">2026-07-15</span>
+      </div>
+      <div class="rel-body">
+        <h4><span class="tag added">Added</span></h4>
+        <ul>
+          <li>Initial release: a script-to-narrated-kinetic-video toolkit.</li>
+        </ul>
+      </div>
+    </article>
+
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>MIT · local-first · extensible by explicit registration</span>
+  <a href="https://github.com/ammar-hasan/narova" data-hover>github.com/ammar-hasan/narova</a>
+</footer>
+
+<script src="../vendor/gsap.min.js"></script>
+<script src="../vendor/ScrollTrigger.min.js"></script>
+<script src="../vendor/lenis.min.js"></script>
+<script src="../app.js"></script>
+</body>
+</html>

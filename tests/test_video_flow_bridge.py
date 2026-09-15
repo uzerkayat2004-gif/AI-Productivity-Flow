@@ -30,3 +30,34 @@ def test_bridge_turns_teaching_steps_into_portable_narova_flow() -> None:
 
 
 
+
+
+def test_bridge_rejects_unsafe_voice_id() -> None:
+    import pytest as _pytest
+
+    storyboard = {
+        "topic": "T",
+        "sections": [{"id": "s", "title": "S", "lecture_lines": ["Line."], "animations": []}],
+    }
+    with _pytest.raises(ValueError, match="voice"):
+        build_narova_production(storyboard, voice="edge/en-US-AvaNeural; rm -rf /")
+
+
+def test_bridge_validates_reassembled_scene_html() -> None:
+    import pytest as _pytest
+    from voice_flow.video_flow_engine import bridge as bridge_module
+
+    storyboard = {
+        "topic": "T",
+        "sections": [{"id": "s", "title": "S", "lecture_lines": ["Hello world."], "animations": []}],
+    }
+    original = bridge_module.scene_author.author_scene
+    try:
+        bridge_module.scene_author.author_scene = lambda *a, **k: {"body": "<scr" + "ipt>alert(1)</scr" + "ipt>"}
+        with _pytest.raises(ValueError, match="Security Boundary"):
+            bridge_module.build_directed_production(
+                storyboard,
+                {"brief": {}, "scenes": [{"index": 1, "treatment": "labeled-diagram", "title_label": "S", "labels": [], "transition": "fade"}]},
+            )
+    finally:
+        bridge_module.scene_author.author_scene = original

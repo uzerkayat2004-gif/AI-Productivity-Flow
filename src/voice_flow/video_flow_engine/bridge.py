@@ -6,7 +6,7 @@ from html import escape
 import re
 from typing import Any
 
-from voice_flow.video_flow_v3.contracts import validate_no_executable_code
+from voice_flow.video_flow_contracts import validate_no_executable_code
 
 from . import scene_author
 
@@ -20,6 +20,10 @@ DEFAULT_VOICE = "edge/en-US-AvaNeural"
 
 def _narrator_voice(voice: Any, color: str) -> dict[str, Any]:
     speaker = str(voice or DEFAULT_VOICE).strip() or DEFAULT_VOICE
+    # Voice ids land in the TTS worker command line; confine to the catalog
+    # id shape so a crafted voice string cannot smuggle shell metacharacters.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,127}", speaker):
+        raise ValueError("planning_failed: narration voice id contains unsafe characters")
     return {"backend": "voiceflow", "speaker": speaker, "color": color, "label": "Narrator"}
 
 
@@ -65,6 +69,9 @@ def build_directed_production(
             "transition": "fade",
         }
         scenes.append(scene_author.author_scene(section, entry, design, index))
+    # Scene bodies are AI-authored HTML: validate the final output too, since
+    # a payload can pass validation in parts (title in one field, "<script"
+    # split across fields) yet reassemble into executable markup here.
     validate_no_executable_code({"scenes": scenes})
 
     light = isinstance(theme, dict) and str(theme.get("mode", "")).lower() == "light"
@@ -149,6 +156,10 @@ def build_narova_production(
                 "visual": _visual_scene(section_title, lecture_lines, animations, index, accent, visual_direction),
             }
         )
+
+    # Same reassembled-output guarantee as the directed builder: a payload
+    # split across fields must not become executable markup in the body.
+    validate_no_executable_code({"scenes": scenes})
 
     return {
         "title": title or str(storyboard.get("topic") or "Video Flow Explanation"),

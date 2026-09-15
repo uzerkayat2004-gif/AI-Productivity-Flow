@@ -13,7 +13,7 @@ import re
 from html import escape
 from typing import Any, Callable
 
-from voice_flow.video_flow_v3.contracts import validate_no_executable_code
+from voice_flow.video_flow_contracts import validate_no_executable_code
 
 # Treatments the director may assign. Each maps to an authoring function below.
 TREATMENTS = (
@@ -49,6 +49,12 @@ class DirectorError(RuntimeError):
     """Raised when direction cannot be produced; callers fall back."""
 
 
+
+def _coerce_accent_shift(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 def direct(
     storyboard: dict[str, Any],
     gateway: Any,
@@ -61,6 +67,8 @@ def direct(
     Falls back to a deterministic assignment when no gateway is available or
     the LLM answer is unusable; Video Flow must never fail here.
     """
+    if not isinstance(storyboard, dict):
+        raise DirectorError("storyboard must be an object")
     sections = storyboard.get("sections") or []
     if not sections:
         raise DirectorError("storyboard has no sections")
@@ -183,7 +191,7 @@ def _direct_with_model(
     brief = {
         "motion": str(brief_raw.get("motion") or "crisp"),
         "background": str(brief_raw.get("background") or "gradient"),
-        "accent_shift": int(brief_raw.get("accent_shift") or 0),
+        "accent_shift": _coerce_accent_shift(brief_raw.get("accent_shift")),
     }
     return {"brief": brief, "scenes": scenes}
 

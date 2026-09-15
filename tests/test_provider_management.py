@@ -61,6 +61,30 @@ class TestProviderValidation(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIn("empty", err.lower())
 
+    @patch("urllib.request.urlopen")
+    def test_validate_http_400_invalid_key_rejected(self, mock_urlopen):
+        import urllib.error
+        import io
+        fp = io.BytesIO(b'{"error": {"message": "API_KEY_INVALID", "code": 400}}')
+        mock_urlopen.side_effect = urllib.error.HTTPError("https://...", 400, "Bad Request", {}, fp)
+
+        is_valid, err = validate_provider_key("gemini", "AIzaSyFakeInvalidKey")
+        self.assertFalse(is_valid)
+        self.assertIsNotNone(err)
+        self.assertIn("invalid", err.lower())
+
+    @patch("urllib.request.urlopen")
+    def test_validate_http_401_unauthorized_rejected(self, mock_urlopen):
+        import urllib.error
+        import io
+        fp = io.BytesIO(b'{"error": "Unauthorized"}')
+        mock_urlopen.side_effect = urllib.error.HTTPError("https://...", 401, "Unauthorized", {}, fp)
+
+        is_valid, err = validate_provider_key("openai", "sk-invalid-key")
+        self.assertFalse(is_valid)
+        self.assertIsNotNone(err)
+        self.assertIn("invalid", err.lower())
+
 
 class TestStorageConnections(unittest.TestCase):
     def setUp(self):
@@ -95,6 +119,63 @@ class TestStorageConnections(unittest.TestCase):
         self.assertIn("tokenrouter", all_conns)
         target_conn = next(c for c in all_conns["tokenrouter"] if c["id"] == conn["id"])
         self.assertEqual(target_conn["name"], "Primary TokenRouter Key")
+
+
+class TestOAuthWorkflow(unittest.TestCase):
+    def setUp(self):
+        self._tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self._tmp_db.close()
+        os.unlink(self._tmp_db.name)
+        self._engine = StorageEngine(db_path=self._tmp_db.name)
+        p = patch.object(storage_module, "storage", self._engine)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def tearDown(self):
+        try:
+            os.unlink(self._tmp_db.name)
+        except OSError:
+            pass
+
+    def test_start_pkce_flow_antigravity(self):
+        from voice_flow.video_flow_oauth import start_pkce_flow
+        res = start_pkce_flow(self._engine, "antigravity", port=8991)
+        self.assertIn("auth_url", res)
+        self.assertIn("accounts.google.com", res["auth_url"])
+        # Antigravity uses the reference client_secret flow: no PKCE challenge.
+        self.assertNotIn("code_challenge=", res["auth_url"])
+        self.assertIn("cloud-platform", res["auth_url"])
+        self.assertIn("state=", res["auth_url"])
+        self.assertEqual(res["provider"], "antigravity")
+
+    @patch("voice_flow.video_flow_oauth._http_json")
+    @patch("voice_flow.video_flow_oauth.load_code_assist_project", return_value="")
+    def test_complete_pkce_flow_registers_oauth_connection(self, _mock_project, mock_http_json):
+        from voice_flow.video_flow_oauth import start_pkce_flow, complete_pkce_flow
+        # 1. Start flow to set pending state
+        start_data = start_pkce_flow(self._engine, "antigravity", port=8991)
+        state = start_data["state"]
+
+        # 2. Mock token endpoint response
+        mock_http_json.return_value = {
+            "access_token": "ya29.mock_access_token_12345",
+            "refresh_token": "1//mock_refresh_token_67890",
+            "expires_in": 3600,
+            "id_token": "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Im5hZWVtLmtheWF0MjAwNEBnbWFpbC5jb20ifQ.signature",
+        }
+
+        # 3. Complete flow with authorization code
+        res = complete_pkce_flow(self._engine, "antigravity", code="4/mock_auth_code_abc", state=state)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["email"], "naeem.kayat2004@gmail.com")
+        self.assertEqual(res["provider"], "antigravity")
+
+        # 4. Verify stored in provider_connections
+        conns = self._engine.get_provider_connections("antigravity")
+        self.assertEqual(len(conns), 1)
+        self.assertEqual(conns[0]["auth_type"], "oauth")
+        self.assertEqual(conns[0]["email"], "naeem.kayat2004@gmail.com")
+        self.assertEqual(conns[0]["is_active"], 1)
 
 
 if __name__ == "__main__":

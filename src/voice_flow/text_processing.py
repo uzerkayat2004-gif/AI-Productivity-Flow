@@ -37,12 +37,29 @@ def apply_spoken_punctuation(text: str) -> str:
     return _spoken_punctuation(text)
 
 
+_FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
+
+
+def _strip_filler(match: "re.Match[str]") -> str:
+    """Drop a hesitation filler, but keep an ALL-CAPS acronym that spells one.
+
+    "The ER team approved it" must not lose "ER": it is content, not a
+    hesitation sound. An all-uppercase occurrence is treated as an acronym and
+    preserved; ordinary "er"/"um"/"uh" (including sentence-initial "Um,") is
+    removed.
+    """
+    word = match.group(1)
+    if word.isupper():
+        return match.group(0)
+    return ""
+
+
 def cleanup_text(text: str, level: str) -> str:
     """Independent Cleanup layer: handles spoken fillers and hesitation disfluencies."""
     text = text.strip()
     if level == "cleanup_none":
         return text
-    text = re.sub(r"\b(?:um|uh|er|ah|hmm)\b[ ,]*", "", text, flags=re.I)
+    text = _FILLER_RE.sub(_strip_filler, text)
     text = re.sub(r"(?:^|,)\s*you know\s*(?=,|$)", lambda m: "," if m.group(0).startswith(",") else "", text, flags=re.I)
     for pattern, replacement in (
         (r"\blet's meet at\s+([^,.]+?)\s+(?:actually|no wait|wait no)\s+([^,.]+)", r"let's meet at \2"),
@@ -50,9 +67,58 @@ def cleanup_text(text: str, level: str) -> str:
         (r"\bmy code is\s+([^,.]+?)\s+(?:no wait|wait no|actually)\s+([^,.]+)", r"my code is \2"),
     ):
         text = re.sub(pattern, replacement, text, flags=re.I)
+    text = collapse_echo_repeats(text)
     if level in ("cleanup_medium", "cleanup_high"):
         text = re.sub(r"\b(\w+(?:\s+\w+){0,5})\s+(?:I mean|rather),?\s+\1\b", r"\1", text, flags=re.I)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def collapse_echo_repeats(text: str) -> str:
+    """Collapse a phrase the speaker repeated immediately (dictation echo).
+
+    "hey fix this hey fix this" -> "hey fix this". Only BACK-TO-BACK
+    repetitions of a 2-6 word phrase count; the same phrase appearing twice
+    in different places of the dictation is intentional and is kept.
+
+    A repetition that crosses a sentence boundary ("Send the report today.
+    Send the report today.") is deliberate emphasis or quoted text, so the
+    two halves are never merged across a terminator.
+    """
+    if not text or " " not in text:
+        return text
+
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w']", "", word).lower()
+
+    for _ in range(4):  # chained echoes: "a b a b a b"
+        tokens = text.split(" ")
+        n = len(tokens)
+        replaced = False
+        for size in range(min(6, n // 2), 1, -1):
+            i = 0
+            while i + 2 * size <= n:
+                first = [_norm(w) for w in tokens[i:i + size]]
+                second = [_norm(w) for w in tokens[i + size:i + 2 * size]]
+                if first and first == second and all(first):
+                    # Do not merge across a sentence terminator: a complete
+                    # sentence repeated is intentional, not an echo.
+                    boundary = any(
+                        w.endswith((".", "!", "?"))
+                        for w in tokens[i:i + size - 1]
+                    ) or tokens[i + size - 1].endswith((".", "!", "?"))
+                    if boundary:
+                        i += 1
+                        continue
+                    tokens = tokens[:i] + tokens[i + size:]
+                    text = " ".join(tokens)
+                    replaced = True
+                    break
+                i += 1
+            if replaced:
+                break
+        if not replaced:
+            break
+    return text
 
 
 def _spoken_punctuation(text: str) -> str:

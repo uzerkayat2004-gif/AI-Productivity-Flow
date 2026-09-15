@@ -9,25 +9,38 @@ import voice_flow.video_flow_providers as providers_module
 from voice_flow.video_flow_providers import VideoFlowProviderService
 
 
-def test_antigravity_oauth_finds_standard_windows_user_install(tmp_path, monkeypatch):
-    local_app_data = tmp_path / "LocalAppData"
-    executable = local_app_data / "Programs" / "Antigravity" / "Antigravity.exe"
-    executable.parent.mkdir(parents=True)
-    executable.touch()
-    launches: list[list[str]] = []
+# REMOVED 2026-08-31: test_antigravity_oauth_uses_google_consent_popup —
+# the Video Flow start_oauth PKCE web branch was deleted; OAuth sign-in now
+# goes through /api/video-flow/oauth/authorize + /exchange (9Router design).
 
-    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
-    monkeypatch.setattr("voice_flow.video_flow_providers.shutil.which", lambda _name: None)
+
+def test_antigravity_oauth_connection_makes_models_available_without_desktop_app(tmp_path, monkeypatch):
+    monkeypatch.setattr(providers_module, "find_antigravity_executable", lambda: None)
     monkeypatch.setattr(
-        "voice_flow.video_flow_providers.subprocess.Popen",
-        lambda command, **_kwargs: launches.append(command),
+        providers_module,
+        "antigravity_state_path",
+        lambda: tmp_path / "missing" / "antigravity_state.pbtxt",
     )
-
     service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
-    result = service.start_oauth("antigravity")
 
-    assert result["success"] is True
-    assert launches == [[str(executable)]]
+    before = service.oauth_status("antigravity")
+    assert before["connected"] is False
+
+    connection = service.add_connection(
+        "antigravity",
+        name="Antigravity me@example.com",
+        secret="oauth-access-token",
+        account_id="me@example.com",
+    )
+    service.update_connection(int(connection["id"]), status="active")
+
+    status = service.oauth_status("antigravity", refresh=True)
+    assert status["connected"] is True
+    assert status["account_id"] == "me@example.com"
+
+    models = service.list_models("antigravity")
+    assert models
+    assert all(item["available"] for item in models)
 
 def test_video_flow_provider_policy_is_complete_and_isolated(tmp_path):
     db_path = tmp_path / "voice-flow.db"
@@ -38,9 +51,6 @@ def test_video_flow_provider_policy_is_complete_and_isolated(tmp_path):
         "claude_code",
         "antigravity",
         "openai_codex",
-        "cursor",
-        "kiro",
-        "copilot",
     ]
     assert len(catalog["api_key"]) >= 10
     assert {provider["id"] for provider in catalog["local"]} == {
@@ -117,7 +127,7 @@ def test_video_flow_selected_model_setting_is_dedicated(tmp_path):
     assert row == ('"gemini/gemini-3.5-flash"',)
 
 
-def test_active_model_requires_a_connected_enabled_model_or_existing_combo(tmp_path):
+def test_active_model_requires_a_connected_enabled_model(tmp_path):
     db_path = tmp_path / "voice-flow.db"
     service = VideoFlowProviderService(str(db_path))
 
@@ -131,19 +141,11 @@ def test_active_model_requires_a_connected_enabled_model_or_existing_combo(tmp_p
     )
     service.update_connection(connection["id"], status="connected")
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS video_flow_combos (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL)")
-        conn.execute("CREATE TABLE IF NOT EXISTS video_flow_combo_models (combo_id INTEGER NOT NULL, model_ref TEXT NOT NULL, position INTEGER NOT NULL)")
-        conn.execute("INSERT OR REPLACE INTO video_flow_combos (id, name) VALUES (1, 'remote')")
-        conn.execute("INSERT INTO video_flow_combo_models (combo_id, model_ref, position) VALUES (1, 'gemini/gemini-3.5-flash', 0)")
-        conn.commit()
-
-    service.set_active_model("combo:remote")
-    assert service.get_active_model() == "combo:remote"
+    service.set_active_model("gemini/gemini-3.5-flash")
+    assert service.get_active_model() == "gemini/gemini-3.5-flash"
 
     service.update_connection(connection["id"], is_active=False)
     assert service.get_active_model() == "local/deterministic"
-
 
 def test_removed_builtin_model_falls_back_to_local_planner(tmp_path):
     service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
@@ -204,29 +206,21 @@ def test_gemini_seed_catalog_only_advertises_the_verified_primary_route(tmp_path
     }
 
     assert gemini_defaults == {"gemini-3.5-flash"}
-def test_antigravity_status_uses_signed_in_cli_without_sidecar_tokens(tmp_path, monkeypatch) -> None:
-    state_file = tmp_path / "antigravity_state.pbtxt"
-    state_file.write_text("state", encoding="utf-8")
-    monkeypatch.setattr(providers_module, "find_antigravity_executable", lambda: tmp_path / "Antigravity.exe")
-    monkeypatch.setattr(providers_module, "antigravity_state_path", lambda: state_file)
-    monkeypatch.setattr(providers_module, "find_antigravity_cli", lambda: tmp_path / "agy.exe")
+# REMOVED 2026-08-31: test_antigravity_status_uses_signed_in_cli_without_sidecar_tokens —
+# the desktop-app bridge branch of oauth_status("antigravity") was deleted along
+# with the old Video Flow OAuth system; account state is now connection-based.
 
-    status = VideoFlowProviderService(str(tmp_path / "voice-flow.db")).oauth_status("antigravity")
-
-    assert status["connected"] is True
-    assert status["bridge_ready"] is True
-    assert status["bridge"]["source"] == "cli"
-    assert status["bridge"]["csrf_configured"] is False
-
-def test_antigravity_catalog_refreshes_stale_bridge_cache(tmp_path, monkeypatch) -> None:
-    state_file = tmp_path / "antigravity_state.pbtxt"
-    state_file.write_text("state", encoding="utf-8")
-    monkeypatch.setattr(providers_module, "find_antigravity_executable", lambda: tmp_path / "Antigravity.exe")
-    monkeypatch.setattr(providers_module, "antigravity_state_path", lambda: state_file)
-    monkeypatch.setattr(providers_module, "find_antigravity_cli", lambda: tmp_path / "agy.exe")
+def test_antigravity_catalog_refreshes_stale_cache(tmp_path, monkeypatch) -> None:
     service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
-    service.set_setting("oauth_status:antigravity", {"connected": True, "bridge_ready": False, "label": "stale"})
+    # A stale cached status must not hide a freshly-created active connection:
+    # oauth_status for antigravity always recomputes (refresh=True).
+    service.set_setting("oauth_status:antigravity", {"connected": False, "label": "stale"})
+    connection = service.add_connection(
+        "antigravity", name="Antigravity me@example.com", secret="token", account_id="me@example.com",
+    )
+    service.update_connection(int(connection["id"]), status="active")
 
     models = [item for item in service.list_models("antigravity") if item["available"]]
 
     assert len(models) == 6
+    assert service.oauth_status("antigravity", refresh=False)["connected"] is True

@@ -41,11 +41,18 @@ def main() -> int:
     provider = providers.get(args.model)
     if provider is None:
         raise ValueError(f"Unsupported Code2Video model: {args.model}")
-    response = provider(Path(args.prompt_file).read_text(encoding="utf-8"), max_tokens=args.max_tokens)
+    try:
+        prompt_text = Path(args.prompt_file).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"Cannot read Code2Video prompt file: {exc}") from exc
+    response = provider(prompt_text, max_tokens=args.max_tokens)
     if isinstance(response, tuple) and response:
         response = response[0]
     text = _response_text(response)
-    Path(args.response_file).write_text(text, encoding="utf-8")
+    try:
+        Path(args.response_file).write_text(text, encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"Cannot write Code2Video response file: {exc}") from exc
     return 0
 
 

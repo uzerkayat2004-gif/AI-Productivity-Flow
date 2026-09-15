@@ -69,13 +69,19 @@ class TestHistoryFeatures(unittest.TestCase):
         self.assertEqual(len(self.storage.get_recent_history()), 0)
 
     def test_insights_metrics_dynamic(self):
-        self.storage.add_dictation("one two three", "One two three.", "Visual Studio Code", 3.0)
-        self.storage.add_dictation("four five six seven", "Four five six seven.", "Google Chrome", 4.0)
+        self.storage.add_dictation("one two three four five six seven eight nine ten eleven twelve", "One two three four five six seven eight nine ten eleven twelve.", "Visual Studio Code", 3.0)
+        self.storage.add_dictation("four five six seven eight nine ten eleven twelve thirteen fourteen", "Four five six seven eight nine ten eleven twelve thirteen fourteen.", "Google Chrome", 4.0)
 
         insights = self.storage.get_insights()
-        self.assertEqual(insights["total_words"], 7)
+        self.assertEqual(insights["total_words"], 23)
         self.assertGreater(insights["avg_wpm"], 0)
         self.assertIn("app_breakdown", insights)
+        # Small samples remain counted, but current Insights waits for 25
+        # attributed words before presenting an app as a usage preference.
+        self.assertEqual(insights["app_breakdown"], [])
+        extra = "additional coding context with enough words to establish this application as a measured preference"
+        self.storage.add_dictation(extra, extra, "Visual Studio Code", 5.0)
+        insights = self.storage.get_insights()
         app_names = [a["app_name"] for a in insights["app_breakdown"]]
         self.assertTrue(any("Visual Studio Code" in name or "VS Code" in name for name in app_names))
 

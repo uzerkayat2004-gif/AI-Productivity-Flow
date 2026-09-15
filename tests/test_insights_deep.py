@@ -60,6 +60,13 @@ class TestInsightsDeep(unittest.TestCase):
         self.assertGreater(res["avg_wpm"], 0)
         self.assertGreater(res["time_saved_minutes"], 0)
         self.assertGreater(res["speed_multiplier"], 1.0)
+        # Every recording contributes to totals; app attribution has a
+        # minimum sample size, independent of those totals.
+        self.assertEqual(len(res["app_breakdown"]), 0)
+        for app in ("Visual Studio Code", "Slack"):
+            extra = f"More measured words for {app} " + " ".join(["context"] * 25)
+            self.storage.add_dictation(extra, extra, app, 12.0)
+        res = self.storage.get_insights(range_filter="all")
         self.assertEqual(len(res["app_breakdown"]), 2)
         
         apps = {a["app_name"]: a for a in res["app_breakdown"]}
@@ -105,8 +112,8 @@ class TestInsightsDeep(unittest.TestCase):
         res_all = self.storage.get_insights(range_filter="all")
         self.assertEqual(res_all["dictation_count"], 3)
 
-    def test_insights_voice_archetypes(self):
-        """Test voice archetype classification rules."""
+    def test_insights_profile_waits_for_measured_evidence(self):
+        """The current profile reports measured data, without personality labels."""
         self.storage.add_dictation(
             raw_text="def async function test connection with retry loop and timeout exception handling",
             polished_text="def async function test connection with retry loop and timeout exception handling",
@@ -114,8 +121,14 @@ class TestInsightsDeep(unittest.TestCase):
             duration_sec=5.0
         )
         res = self.storage.get_insights(range_filter="all")
-        self.assertEqual(res["voice_profile"]["archetype"], "The Code Architect")
-        self.assertEqual(res["voice_profile"]["archetype_tag"], "Engineering Flow")
+        self.assertEqual(res["voice_profile"]["archetype"], "Collecting Profile")
+        self.assertEqual(res["voice_profile"]["archetype_tag"], "Needs Data")
+        for index in range(4):
+            text = f"Measured coding session {index} with enough words for a reliable speed sample"
+            self.storage.add_dictation(text, text, "Cursor", 5.0)
+        res = self.storage.get_insights(range_filter="all")
+        self.assertEqual(res["voice_profile"]["archetype"], "Measured Dictation Profile")
+        self.assertEqual(res["voice_profile"]["archetype_tag"], "Verified Stats")
 
     def test_insights_daily_activity_levels(self):
         """Test 28-day matrix intensity levels."""

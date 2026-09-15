@@ -193,7 +193,6 @@ def test_device_flow_start_and_poll(tmp_path, monkeypatch):
         return {"access_token": "gh-token", "refresh_token": "gh-refresh", "expires_in": 28800}
 
     monkeypatch.setattr(oauth_module, "_http_json", fake_http_json)
-    monkeypatch.setattr(providers_module, "_http_json", fake_http_json)
     monkeypatch.setattr(oauth_module, "exchange_copilot_token", lambda _s, token: {
         "access_token": "copilot-jwt",
         "expires_at": str(int(time.time()) + 1800),
@@ -217,50 +216,73 @@ def test_device_flow_start_and_poll(tmp_path, monkeypatch):
 def test_device_flow_pending_polls_without_creating_connection(tmp_path, monkeypatch):
     service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
     monkeypatch.setattr(oauth_module, "_http_json", lambda *a, **k: {"error": "authorization_pending"})
-    monkeypatch.setattr(providers_module, "_http_json", lambda *a, **k: {"error": "authorization_pending"})
     service.set_setting("oauth_pending:copilot", {"flow": "device", "device_code": "dc-1", "interval": 5})
     assert service.oauth_poll("copilot")["status"] == "pending"
     assert service.list_connections("copilot") == []
 
 
-def test_pkce_exchange_creates_connection(tmp_path, monkeypatch):
+def test_oauth_config_antigravity_uses_reference_client_without_pkce(tmp_path, monkeypatch):
+    monkeypatch.delenv("OAUTH_CLIENT_ID_ANTIGRAVITY", raising=False)
+    monkeypatch.delenv("OAUTH_CLIENT_SECRET_ANTIGRAVITY", raising=False)
+    config = oauth_module.oauth_config("antigravity")
+    assert config.client_id == oauth_module.ANTIGRAVITY_CLIENT_ID
+    assert config.client_secret == oauth_module.ANTIGRAVITY_CLIENT_SECRET
+    assert config.pkce is False
+    assert config.auth_url == "https://accounts.google.com/o/oauth2/v2/auth"
+    assert config.token_url == "https://oauth2.googleapis.com/token"
+    for scope in (
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/cclog",
+        "https://www.googleapis.com/auth/experimentsandconfigs",
+    ):
+        assert scope in config.scopes
+    # Gemini keeps the public gcloud client and standard PKCE.
+    gemini = oauth_module.oauth_config("gemini")
+    assert gemini.client_id.startswith("764086051850-")
+    assert gemini.pkce is True
+    assert gemini.scopes == "openid email profile"
+
+
+# REMOVED 2026-08-31: test_pkce_exchange_creates_connection and
+# test_pkce_exchange_rejects_wrong_state — VideoFlowProviderService.oauth_exchange /
+# oauth_callback were deleted with the old Video Flow OAuth system; the rebuilt
+# 9Router-style exchange lives in the API server and is covered by
+# tests/test_video_flow_oauth_api.py.
+
+
+def test_complete_pkce_flow_resolves_email_via_userinfo_and_stores_connection(tmp_path, monkeypatch):
+    """The live /oauth/exchange path: no id_token (no openid scope), so the
+    email comes from the userinfo endpoint and the connection is stored active."""
     service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
-    verifier, _ = generate_pkce_pair()
-    state = "state-1"
+    state = "state-9"
     service.set_setting("oauth_pending:antigravity", {
-        "flow": "pkce", "state": state, "code_verifier": verifier,
+        "flow": "pkce", "state": state,
         "redirect_uri": "http://127.0.0.1:8991/",
     })
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode("ascii")
-    payload = base64.urlsafe_b64encode(json.dumps({"email": "me@example.com"}).encode()).rstrip(b"=").decode("ascii")
-    responses = [{
-        "access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600,
-        "id_token": f"{header}.{payload}.sig",
-    }]
 
     def fake_http_json(url, *, data=None, headers=None, timeout=15.0):
-        assert data["grant_type"] == "authorization_code"
-        assert data["code_verifier"] == verifier
-        assert data["client_secret"]
-        return responses.pop(0)
+        if url.startswith("https://oauth2.googleapis.com/token"):
+            assert data["client_id"].startswith("1071006060591-")
+            assert "code_verifier" not in data
+            return {"access_token": "at-9", "refresh_token": "rt-9", "expires_in": 3600}
+        assert url.startswith("https://www.googleapis.com/oauth2/v1/userinfo")
+        assert headers["Authorization"] == "Bearer at-9"
+        return {"email": "me@example.com"}
 
     monkeypatch.setattr(oauth_module, "_http_json", fake_http_json)
-    monkeypatch.setattr(providers_module, "_http_json", fake_http_json)
+    monkeypatch.setattr(oauth_module, "load_code_assist_project", lambda _token: "proj-77")
 
-    connection = service.oauth_exchange("antigravity", "code-1", state)
+    result = oauth_module.complete_pkce_flow(service, "antigravity", code="code-9", state=state)
+    assert result["success"] is True
+    assert result["provider"] == "antigravity"
+    assert result["email"] == "me@example.com"
+    assert result["account_id"] == "me@example.com"
+    assert result["project_id"] == "proj-77"
+    connection = service.get_connection(int(result["connection_id"]), public=False)
     assert connection["status"] == "active"
     assert connection["account_id"] == "me@example.com"
-    private = service.get_connection(int(connection["id"]), public=False)
-    assert decrypt_token(service, private["secret"]) == "at-1"
-    assert decrypt_token(service, private["refresh_token"]) == "rt-1"
-    assert service.get_setting("oauth_pending:antigravity", None) is None or "cleared" in service.get_setting("oauth_pending:antigravity")
-
-
-def test_pkce_exchange_rejects_wrong_state(tmp_path, monkeypatch):
-    service = VideoFlowProviderService(str(tmp_path / "voice-flow.db"))
-    service.set_setting("oauth_pending:antigravity", {
-        "flow": "pkce", "state": "expected", "code_verifier": "verifier",
-        "redirect_uri": "http://127.0.0.1:8991/",
-    })
-    with pytest.raises(OAuthError, match="state mismatch"):
-        service.oauth_exchange("antigravity", "code-1", "wrong")
+    assert connection["metadata"]["project_id"] == "proj-77"
+    assert decrypt_token(service, connection["secret"]) == "at-9"
+    assert decrypt_token(service, connection["refresh_token"]) == "rt-9"

@@ -11,10 +11,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from voice_flow.video_flow_v3.contracts import validate_no_executable_code
+from voice_flow.video_flow_contracts import validate_no_executable_code
 
-from .process_manager import ProcessManager
+from .process_manager import ProcessManager, hidden_window_kwargs
 from .sandbox import EngineError
+
+# Planning prompts ride a model gateway whose provider may enforce a tight
+# tokens-per-minute ceiling (groq free tier rejects ~8k-token requests with
+# HTTP 413). Cap the planning input independently of the full source text.
+_PLANNING_SOURCE_MAX_CHARS = 20_000
 
 
 class Code2VideoRunner:
@@ -38,33 +43,99 @@ class Code2VideoRunner:
 
     def plan(self, source_text: str, **options: Any) -> dict[str, Any]:
         project_dir = Path(options.get("project_dir") or Path.cwd())
-        duration_seconds = min(300.0, max(10.0, float(options.get("duration_seconds") or 45.0)))
-        outline_prompt = self._outline_prompt(
-            knowledge_point=source_text,
-            duration=round(duration_seconds / 60.0, 2),
-            reference_image_path=None,
-        )
-        outline_prompt += _request_context(options)
-        outline = self._request_json(outline_prompt, project_dir, options)
-        _validate_outline(outline)
-        _write_json(project_dir / "plan" / "outline.json", outline)
+        fmt = str(options.get("format") or "").strip().lower()
+        req_fmt = str(options.get("requested_format") or "").strip().lower()
+        if fmt in {"short", "brief", "explainer", "cinematic"}:
+            resolved_fmt = fmt
+        elif req_fmt in {"short", "brief", "explainer", "cinematic"}:
+            resolved_fmt = req_fmt
+        else:
+            from .notebooklm.document_profiler import analyze_document_source
+            task_context = str(options.get("task") or options.get("focus") or options.get("visual_direction") or "")
+            title_context = str(options.get("title") or "")
+            mode_context = str(options.get("mode") or "")
+            profile = analyze_document_source(
+                source_text,
+                requested_format="auto",
+                task=task_context,
+                title=title_context,
+                mode=mode_context,
+                focus=task_context,
+            )
+            resolved_fmt = profile.recommended_format
 
-        storyboard_prompt = self._storyboard_prompt(
-            outline=json.dumps(outline, ensure_ascii=False, indent=2),
-            reference_image_path=None,
-        )
-        storyboard_prompt += _request_context(options)
-        storyboard = self._request_json(storyboard_prompt, project_dir, options)
-        _validate_storyboard(storyboard)
-        result = {
-            "topic": str(outline.get("topic") or options.get("title") or "Video Flow Explanation"),
-            "target_audience": str(outline.get("target_audience") or "general learners"),
-            "learning_objectives": [
-                str(section.get("content") or section.get("title") or "")
-                for section in outline["sections"]
-            ],
-            "sections": storyboard["sections"],
-        }
+        options["format"] = resolved_fmt
+        default_dur = 45.0
+        if not options.get("duration_seconds"):
+            try:
+                from .notebooklm.document_profiler import analyze_document_source
+                prof = analyze_document_source(source_text, requested_format=resolved_fmt)
+                default_dur = float(prof.target_duration_seconds)
+            except Exception:
+                if resolved_fmt == "short":
+                    default_dur = 45.0
+                elif resolved_fmt == "brief":
+                    default_dur = 75.0
+                elif resolved_fmt == "explainer":
+                    default_dur = 150.0
+                elif resolved_fmt == "cinematic":
+                    default_dur = 240.0
+        else:
+            default_dur = float(options["duration_seconds"])
+        duration_seconds = min(300.0, max(10.0, default_dur))
+        planning_source = _cap_planning_source(source_text)
+        try:
+            outline_prompt = self._outline_prompt(
+                knowledge_point=planning_source,
+                duration=round(duration_seconds / 60.0, 2),
+                reference_image_path=None,
+            )
+            outline_prompt += _request_context(options)
+            outline = self._request_json(outline_prompt, project_dir, options)
+            _validate_outline(outline)
+            _write_json(project_dir / "plan" / "outline.json", outline)
+
+            storyboard_prompt = self._storyboard_prompt(
+                outline=_compact_outline_json(outline),
+                reference_image_path=None,
+            )
+            storyboard_prompt += _request_context(options)
+            storyboard = self._request_json(storyboard_prompt, project_dir, options)
+            _validate_storyboard(storyboard)
+            result = {
+                "topic": str(outline.get("topic") or options.get("title") or "Video Flow Explanation"),
+                "target_audience": str(outline.get("target_audience") or "general learners"),
+                "learning_objectives": [
+                    str(section.get("content") or section.get("title") or "")
+                    for section in outline["sections"]
+                ],
+                "sections": storyboard["sections"],
+            }
+        except EngineError:
+            if not bool(options.get("allow_fallback")):
+                raise
+            import logging
+            logging.getLogger(__name__).warning("Model planning failed; using deterministic storyboard")
+            result = _deterministic_storyboard(source_text, duration_seconds, options)
+            outline = {
+                "topic": result["topic"],
+                "target_audience": result["target_audience"],
+                "sections": [{"id": s["id"], "title": s["title"], "content": " ".join(s.get("lecture_lines", []))} for s in result["sections"]],
+            }
+            _write_json(project_dir / "plan" / "outline.json", outline)
+        except Exception as exc:
+            if not bool(options.get("allow_fallback")):
+                raise
+            import logging
+            logging.getLogger(__name__).warning("Model planning unavailable or failed (%s); using deterministic storyboard", exc)
+            result = _deterministic_storyboard(source_text, duration_seconds, options)
+            outline = {
+                "topic": result["topic"],
+                "target_audience": result["target_audience"],
+                "sections": [{"id": s["id"], "title": s["title"], "content": " ".join(s.get("lecture_lines", []))} for s in result["sections"]],
+            }
+            _write_json(project_dir / "plan" / "outline.json", outline)
+
         validate_no_executable_code(result)
         _write_json(project_dir / "storyboard" / "storyboard.json", result)
         return result
@@ -127,10 +198,15 @@ class Code2VideoRunner:
         temp_dir.mkdir(parents=True, exist_ok=True)
         prompt_path = temp_dir / f"code2video-{token}.prompt.txt"
         response_path = temp_dir / f"code2video-{token}.response.txt"
-        prompt_path.write_text(prompt, encoding="utf-8")
+        try:
+            prompt_path.write_text(prompt, encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise EngineError("planning_failed", "Code2Video could not stage its planning prompt") from exc
         process: subprocess.Popen[str] | None = None
         try:
             worker = Path(__file__).with_name("code2video_worker.py")
+            if not worker.is_file():
+                raise EngineError("dependency_missing", f"Code2Video worker is missing: {worker}")
             command = [
                 sys.executable,
                 str(worker),
@@ -154,21 +230,34 @@ class Code2VideoRunner:
                 encoding="utf-8",
                 errors="replace",
                 env=_safe_environment(),
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP | hidden_window_kwargs().get("creationflags", 0)
+                    if os.name == "nt"
+                    else 0
+                ),
+                startupinfo=hidden_window_kwargs().get("startupinfo"),
             )
             manager.register(job_id, process)
             try:
                 output, _ = process.communicate(timeout=self.timeout_seconds)
             except subprocess.TimeoutExpired as exc:
-                manager.cancel_job(job_id)
+                manager.terminate_job(job_id)
+                try:
+                    process.communicate(timeout=10)
+                except Exception:
+                    pass
                 raise EngineError("timeout", "Code2Video planning timed out") from exc
             log_path = project_dir / "logs" / "code2video.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(output)
+            manager.raise_if_cancelled(job_id)
             if process.returncode != 0 or not response_path.is_file():
                 raise EngineError("provider_error", "Code2Video model provider failed; see logs/code2video.log")
-            return response_path.read_text(encoding="utf-8")
+            try:
+                return response_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise EngineError("provider_error", "Code2Video model provider returned an unreadable response") from exc
         finally:
             if process is not None:
                 manager.unregister(job_id, process)
@@ -176,10 +265,58 @@ class Code2VideoRunner:
             response_path.unlink(missing_ok=True)
 
 
+def _cap_planning_source(source_text: str) -> str:
+    """Trim planning input so the prompt stays within budget while preserving all sections."""
+    text = str(source_text or "")
+    if len(text) <= _PLANNING_SOURCE_MAX_CHARS:
+        return text
+    import logging
+
+    logging.getLogger(__name__).info(
+        "Planning source capped from %d to %d chars to fit provider token budget",
+        len(text), _PLANNING_SOURCE_MAX_CHARS,
+    )
+    from .notebooklm.document_profiler import extract_document_sections
+    sections = extract_document_sections(text)
+    if sections and len(sections) > 1:
+        budget_per_sec = max(250, int((_PLANNING_SOURCE_MAX_CHARS - 1000) / len(sections)))
+        condensed_parts = []
+        for s in sections:
+            s_title = s.get("title", "")
+            s_content = s.get("content", "")
+            if len(s_content) > budget_per_sec:
+                s_content = s_content[:budget_per_sec].rsplit(" ", 1)[0] + "..."
+            condensed_parts.append(f"## {s_title}\n{s_content}")
+        return "\n\n".join(condensed_parts)
+    head_len = _PLANNING_SOURCE_MAX_CHARS // 2
+    tail_len = _PLANNING_SOURCE_MAX_CHARS - head_len
+    return f"{text[:head_len]}\n\n[... middle truncated for planning ...]\n\n{text[-tail_len:]}"
+
+
+def _compact_outline_json(outline: dict[str, Any]) -> str:
+    """Serialize the outline without indentation to keep stage-2 prompts small."""
+    return json.dumps(outline, ensure_ascii=False, separators=(",", ":"))
+
+
 def _request_context(options: dict[str, Any]) -> str:
     mode = str(options.get("mode") or "summary")
     visual_direction = str(options.get("visual_direction") or "").strip()
+    duration_seconds = options.get("duration_seconds")
     context = f"\n\nVoice Flow mode: {mode}."
+    dur = float(duration_seconds or 90.0)
+    if duration_seconds:
+        context += f"\nTarget duration: {dur:.1f} seconds. Adjust storyboard pacing and section counts proportionally."
+    fmt = str(options.get("format") or "").strip().lower()
+    target_scenes = max(2, min(24, int(round(dur / 20.0))))
+    if fmt == "short":
+        context += f"\nFormat: Short (vertical 9:16 aspect ratio, fast-paced high energy, covering all core points across {min(target_scenes, 6)} focused sections with substantive takeaways)."
+    elif fmt == "brief":
+        context += f"\nFormat: Brief (concise executive overview, covering key sections across {min(target_scenes, 8)} focused sections with critical takeaways)."
+    elif fmt == "explainer":
+        context += f"\nFormat: Explainer (structured visual explanation, balanced depth across {min(target_scenes, 16)} comprehensive sections explaining mechanisms and data)."
+    elif fmt == "cinematic":
+        context += f"\nFormat: Cinematic (documentary style, deep-dive narrative immersion across {min(target_scenes, 24)} cinematic sections exploring context and implications)."
+    context += "\nContent Requirement: Preserve substantive explanations, inner data, and key context from each section; do not merely list or display surface titles."
     if visual_direction:
         context += f"\nVisual direction: {visual_direction}."
     return context
@@ -318,6 +455,68 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _safe_environment() -> dict[str, str]:
     allowed = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA")
     return {name: os.environ[name] for name in allowed if name in os.environ}
+
+
+def _deterministic_storyboard(source_text: str, duration_seconds: float, options: dict[str, Any]) -> dict[str, Any]:
+    title = str(options.get("title") or "").strip()
+    raw_lines = [p.strip() for p in source_text.replace("\r\n", "\n").split("\n") if p.strip()]
+    if len(raw_lines) <= 1 and raw_lines:
+        import re
+        raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw_lines[0]) if s.strip()]
+        lines = raw_sentences if raw_sentences else raw_lines
+    else:
+        lines = raw_lines if raw_lines else ["Video Flow Explanation"]
+
+    topic = title or (lines[0][:60] if lines else "Video Flow Explanation")
+
+    fmt = str(options.get("format") or "").strip().lower()
+    if fmt == "short":
+        target_count = max(2, min(4, int(duration_seconds / 15.0) or 2))
+    elif fmt == "brief":
+        target_count = max(2, min(5, int(duration_seconds / 20.0) or 3))
+    elif fmt == "cinematic":
+        target_count = max(4, min(10, int(duration_seconds / 25.0) or 5))
+    elif fmt == "explainer":
+        target_count = max(3, min(8, int(duration_seconds / 25.0) or 4))
+    else:
+        target_count = max(2, min(12, int(duration_seconds / 15.0)))
+    target_count = min(target_count, max(2, len(lines)))
+    chunk_size = max(1, len(lines) // target_count)
+
+    sections: list[dict[str, Any]] = []
+    for i in range(0, len(lines), chunk_size):
+        chunk = lines[i:i + chunk_size]
+        if not chunk:
+            continue
+        sec_num = len(sections) + 1
+        sec_title = chunk[0][:50] if len(chunk[0]) <= 50 else f"Concept {sec_num}"
+        sections.append({
+            "id": f"section_{sec_num}",
+            "title": sec_title,
+            "lecture_lines": chunk,
+            "animations": [f"Illustrate {sec_title}"],
+        })
+        if len(sections) >= target_count:
+            remaining = lines[i + chunk_size:]
+            if remaining:
+                sections[-1]["lecture_lines"].extend(remaining)
+            break
+
+    if not sections:
+        sections = [{
+            "id": "section_1",
+            "title": topic,
+            "lecture_lines": [source_text],
+            "animations": ["Illustrate key concept"],
+        }]
+
+    return {
+        "topic": topic,
+        "target_audience": "general learners",
+        "learning_objectives": [str(s["title"]) for s in sections],
+        "sections": sections,
+    }
+
 
 
 

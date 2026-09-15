@@ -1,0 +1,50 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Local secrets
+.env.local
+
+# Python venv + caches
+.venv/
+__pycache__/
+*.pyc
+
+# TTS model + voice caches (downloaded on first use)
+models/
+voices/
+*.onnx
+*.onnx.json
+tts_models/
+.cache/
+.local/share/tts/
+
+# Build output (render, capture, assemble, serve all write here)
+out/
+renders/
+snapshots/
+
+# Captured frames + generated media
+frames/
+*.mp4
+*.wav
+*.mp3
+*.aiff
+*.png
+
+# README showcase video is a shipped repository asset, not build output.
+!assets/narova-skill-reel.mp4
+!assets/narova-product-walkthrough-demo.mp4
+!assets/narova-click-highlight-proof.mp4
+!docs/assets/narova-product-walkthrough-demo.mp4
+!docs/assets/narova-click-highlight-proof.mp4
+
+# Generated video projects (build output, not source) — never tracked.
+generated/
+
+# Local GitHub Pages/Jekyll dependency file (intentionally not shipped).
+docs/Gemfile
+
+# macOS
+.DS_Store

@@ -4,56 +4,318 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Video Flow Player</title>
-  <meta name="description" content="AI Productivity Flow — Video Flow player.">
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
+  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/icon-16.png">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
   <style>
-    :root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; }
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI Variable", "Segoe UI", Inter, sans-serif;
+      --orange: #FF6A00; --orange-deep: #E85D04; --orange-soft: #FFE3D0;
+      --orange-faint: #FFF3EA; --white: #FFFFFF; --offwhite: #FFF8F3;
+      --ink: #241708; --gray: #8A8A93; --border: #FFD0B0;
+      --green: #12B76A; --red: #F04438;
+    }
     * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #050a11; color: #f7fbff; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--white); color: var(--ink); }
     body { display: grid; grid-template-rows: auto 1fr auto; }
-    header, footer { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0d1826; }
-    header { border-bottom: 1px solid #203246; }
-    footer { border-top: 1px solid #203246; }
-    .brand { color: #06cfe5; font-size: 11px; font-weight: 900; letter-spacing: 1.5px; }
-    #title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-    button, a { border: 1px solid #2b4056; border-radius: 9px; padding: 7px 10px; color: #f7fbff; background: #142131; font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
-    button:hover, a:hover { border-color: #06cfe5; }
-    main { position: relative; width: 100%; height: 100%; min-height: 0; background: #02050a; overflow: hidden; }
-    video { width: 100%; height: 100%; object-fit: contain; background: #02050a; position: absolute; inset: 0; z-index: 1; }
-    #status { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #17283d, #050a11 70%); z-index: 50; }
+
+    header, footer { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--white); }
+    header { border-bottom: 1px solid var(--border); }
+    footer { border-top: 1px solid var(--border); }
+    .brand { color: var(--orange); font-size: 11px; font-weight: 900; letter-spacing: 1.6px; }
+    #title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+    button, a { border: 1px solid var(--border); border-radius: 9px; padding: 6px 11px; color: var(--ink);
+      background: var(--white); font: inherit; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease; }
+    button:hover, a:hover { border-color: var(--orange); background: var(--orange-faint); color: var(--orange-deep); }
+    button:active, a:active { transform: scale(0.98); }
+
+    main { position: relative; width: 100%; height: 100%; min-height: 0; background: #14100C; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #14100C; position: absolute; inset: 0; z-index: 1; }
+
+    #status { position: absolute; inset: 0; display: grid; place-items: center; z-index: 50;
+      background:
+        radial-gradient(1000px 500px at 70% 15%, var(--orange-faint), var(--white) 62%),
+        var(--white); }
     #status.hidden { display: none; }
-    .status-card { width: min(360px, 80%); text-align: center; }
-    .spinner { width: 46px; height: 46px; margin: 0 auto 16px; border: 4px solid #23374b; border-top-color: #06cfe5; border-radius: 50%; animation: spin .9s linear infinite; }
-    .progress { height: 6px; margin-top: 16px; overflow: hidden; border-radius: 99px; background: #203246; }
-    .progress span { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#ff6b19,#06cfe5); transition: width .35s ease; }
-    #stage { color: #9bb0c6; font-size: 12px; }
-    #percent { margin-left: auto; color: #9bb0c6; font-size: 11px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-card { width: min(360px, 80%); text-align: center; padding: 26px 24px; background: var(--white);
+      border: 1px solid var(--border); border-radius: 16px;
+      box-shadow: 0 18px 40px -18px rgba(232, 93, 4, .25); }
+
+    /* Sunrise grid indicator — 3x3 dots cascading while the video builds */
+    .grid-indicator { display: grid; grid-template-columns: repeat(3, 12px); gap: 9px; justify-content: center; margin: 0 auto 16px; }
+    .grid-indicator i { width: 10px; height: 10px; border-radius: 3px; background: var(--orange-soft); animation: gridPulse 1.26s ease-in-out infinite; }
+    .grid-indicator i:nth-child(1) { animation-delay: 0s; }
+    .grid-indicator i:nth-child(2) { animation-delay: .08s; }
+    .grid-indicator i:nth-child(3) { animation-delay: .16s; }
+    .grid-indicator i:nth-child(4) { animation-delay: .24s; }
+    .grid-indicator i:nth-child(5) { background: var(--orange); animation-delay: .32s; }
+    .grid-indicator i:nth-child(6) { animation-delay: .40s; }
+    @keyframes gridPulse { 0%, 100% { background: var(--orange-soft); transform: scale(.86); }
+      45% { background: var(--orange); transform: scale(1); } }
+
+    .progress { height: 6px; margin-top: 16px; overflow: hidden; border-radius: 99px; background: var(--orange-faint); }
+    .progress span { display: block; height: 100%; width: 0; border-radius: 99px;
+      background: linear-gradient(90deg, var(--orange), var(--orange-deep)); transition: width .35s ease; }
+    #stage { color: var(--gray); font-size: 12px; margin: 6px 0 0; }
+    #percent { margin-left: auto; color: var(--gray); font-size: 11px; font-weight: 600; }
+    #status-title { font-size: 14px; }
+
+    /* Shorts (9:16) Mobile Smartphone Presentation */
+    .shorts-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 20px; font-size: 10.5px; font-weight: 800;
+      background: linear-gradient(90deg, var(--orange), var(--orange-deep));
+      color: var(--white); letter-spacing: 0.4px;
+      box-shadow: 0 2px 8px rgba(255, 106, 0, 0.35);
+    }
+    .shorts-badge .shorts-sub {
+      opacity: 0.88; font-weight: 600; font-size: 9.5px; border-left: 1px solid rgba(255, 255, 255, 0.4); padding-left: 6px; margin-left: 2px;
+    }
+    .shorts-badge.hidden, .hidden { display: none !important; }
+
+    .shorts-platform-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700;
+      background: var(--orange-faint); color: var(--orange-deep);
+      border: 1px solid var(--border);
+    }
+
+    /* Player Stage & Phone Mockup */
+    .vf-player-stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Ambient Warm Glow behind phone */
+    .vf-ambient-glow {
+      display: none;
+      position: absolute;
+      width: 460px;
+      height: 760px;
+      background: radial-gradient(circle, rgba(255, 106, 0, 0.24) 0%, rgba(232, 93, 4, 0.08) 50%, transparent 72%);
+      filter: blur(52px);
+      pointer-events: none;
+      z-index: 1;
+      transform: scale(1.05);
+      animation: vfGlowPulse 4s ease-in-out infinite alternate;
+    }
+    @keyframes vfGlowPulse {
+      0% { opacity: 0.7; transform: scale(1.0); }
+      100% { opacity: 1.0; transform: scale(1.08); }
+    }
+
+    .vf-phone-mockup {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+
+    .vf-phone-island,
+    .vf-phone-bar {
+      display: none;
+    }
+
+    /* Shorts Mode Active */
+    .vf-player-container.shorts-mode {
+      background: radial-gradient(circle at center, #1f1712 0%, #0c0907 100%);
+    }
+
+    .vf-player-container.shorts-mode .vf-ambient-glow {
+      display: block;
+    }
+
+    .vf-player-container.shorts-mode .vf-phone-mockup {
+      position: relative;
+      inset: auto;
+      height: min(93vh, calc(100% - 20px));
+      width: auto;
+      max-width: min(100%, 460px);
+      aspect-ratio: 9 / 16;
+      border-radius: 46px;
+      background: #000000;
+      padding: 9px;
+      box-sizing: border-box;
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.12),
+        0 0 0 6px #1c1c1e,
+        0 0 0 7.5px rgba(255, 106, 0, 0.28),
+        0 28px 72px -12px rgba(0, 0, 0, 0.92),
+        0 0 45px rgba(255, 106, 0, 0.16);
+      transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .vf-player-container.shorts-mode .vf-phone-island {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      position: absolute;
+      top: 17px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 88px;
+      height: 22px;
+      background: #000000;
+      border-radius: 20px;
+      z-index: 10;
+      pointer-events: none;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 0 3px rgba(0, 0, 0, 0.9);
+      padding-right: 12px;
+      box-sizing: border-box;
+    }
+
+    .vf-player-container.shorts-mode .vf-island-lens {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #1a2a4f 0%, #060b17 100%);
+      border: 1px solid #233152;
+      box-shadow: inset 0 0 2px rgba(0, 120, 255, 0.7);
+      display: inline-block;
+    }
+
+    .vf-player-container.shorts-mode .vf-island-sensor {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #111113;
+      margin-left: 7px;
+      display: inline-block;
+    }
+
+    .vf-player-container.shorts-mode .vf-phone-bar {
+      display: block;
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 105px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 4px;
+      z-index: 10;
+      pointer-events: none;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    }
+
+    .vf-player-container.shorts-mode video {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 38px;
+      background: #000000;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    /* Raw frame fallback when user toggles frame off */
+    .vf-player-container.shorts-mode.raw-frame .vf-phone-mockup {
+      height: 96%;
+      border-radius: 0;
+      background: transparent;
+      padding: 0;
+      box-shadow: none;
+      border: none;
+      aspect-ratio: 9 / 16;
+    }
+    .vf-player-container.shorts-mode.raw-frame .vf-phone-island,
+    .vf-player-container.shorts-mode.raw-frame .vf-phone-bar,
+    .vf-player-container.shorts-mode.raw-frame .vf-ambient-glow {
+      display: none;
+    }
+    .vf-player-container.shorts-mode.raw-frame video {
+      border-radius: 8px;
+      object-fit: contain;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+    }
   </style>
 </head>
 <body>
-  <header><span class="brand">VIDEO FLOW</span><strong id="title">Preparing video…</strong><button onclick="toggleFullscreen()">⛶ Full screen</button></header>
+  <header>
+    <img src="assets/logo.png" alt="Voice Flow" class="brand-logo" style="width: 20px; height: 20px; object-fit: contain; filter: drop-shadow(0 1px 4px rgba(255, 106, 0, 0.35)); flex-shrink: 0; vertical-align: middle;">
+    <span class="brand">VIDEO FLOW</span>
+    <span id="shorts-badge" class="shorts-badge hidden">
+      <span>📱 9:16 Shorts</span>
+      <span class="shorts-sub">YouTube Shorts · Reels · TikTok</span>
+    </span>
+    <strong id="title">Preparing video…</strong>
+    <button id="btn-frame-toggle" class="hidden" onclick="toggleShortsFrame()" title="Toggle smartphone preview frame">📱 Phone Frame: ON</button>
+    <button onclick="toggleFullscreen()" title="Fullscreen">⛶ Fullscreen</button>
+  </header>
   <main id="player-container" class="vf-player-container">
-    <video id="player" controls preload="metadata"></video>
+    <div class="vf-player-stage">
+      <div class="vf-ambient-glow"></div>
+      <div id="phone-mockup" class="vf-phone-mockup">
+        <div class="vf-phone-island">
+          <span class="vf-island-lens"></span>
+          <span class="vf-island-sensor"></span>
+        </div>
+        <video id="player" controls preload="metadata"></video>
+        <div class="vf-phone-bar"></div>
+      </div>
+    </div>
     <div id="status">
       <div class="status-card">
-        <div class="spinner"></div>
+        <div class="grid-indicator"><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <strong id="status-title">Creating your video</strong>
         <p id="stage">Checking progress…</p>
         <div class="progress"><span id="progress-bar"></span></div>
       </div>
     </div>
   </main>
-  <footer><span id="footer-stage">Video Flow</span><span id="percent">0%</span><a id="download" href="#" download>↓ Download</a></footer>
+  <footer>
+    <span id="footer-stage">Video Flow</span>
+    <span id="shorts-platform-pill" class="shorts-platform-pill hidden">📱 9:16 Shorts Mode</span>
+    <span id="percent">0%</span>
+    <a id="download" href="#" download>↓ Download</a>
+  </footer>
 
-  <script src="v3-renderer.bundle.js?v=3.2.0"></script>
-  <script src="v3-canvas-player.js?v=3.2.0"></script>
   <script>
     const params = new URLSearchParams(location.search);
     const videoId = params.get("id") || "";
     const player = document.getElementById("player");
     const container = document.getElementById("player-container");
     let timer = null;
-    let v3PlayerMounted = false;
+    let phoneFrameActive = true;
+
+    function enableShortsMode() {
+      document.getElementById("shorts-badge")?.classList.remove("hidden");
+      document.getElementById("btn-frame-toggle")?.classList.remove("hidden");
+      document.getElementById("shorts-platform-pill")?.classList.remove("hidden");
+      container.classList.add("shorts-mode");
+    }
+
+    function toggleShortsFrame() {
+      phoneFrameActive = !phoneFrameActive;
+      const btn = document.getElementById("btn-frame-toggle");
+      if (phoneFrameActive) {
+        container.classList.remove("raw-frame");
+        if (btn) btn.textContent = "📱 Phone Frame: ON";
+      } else {
+        container.classList.add("raw-frame");
+        if (btn) btn.textContent = "📱 Phone Frame: OFF";
+      }
+    }
+
+    player.addEventListener("loadedmetadata", () => {
+      if (player.videoWidth > 0 && player.videoHeight > player.videoWidth) {
+        enableShortsMode();
+      }
+    });
 
     async function refresh() {
       try {
@@ -66,6 +328,10 @@
         document.getElementById("footer-stage").textContent = video.stage || video.status;
         document.getElementById("percent").textContent = (video.progress || 0) + "%";
         document.getElementById("progress-bar").style.width = Math.max(0, Math.min(100, Number(video.progress || 0))) + "%";
+
+        if (video.format === "short" || video.format === "vertical") {
+          enableShortsMode();
+        }
 
         const isReady = Boolean(
           video.playable ||
@@ -87,41 +353,23 @@
             }
           }
 
-          // Mount V3 Layered WebGL player if not yet mounted
-          if (!v3PlayerMounted && container && window.V3CanvasPlayer) {
-            v3PlayerMounted = true;
-            fetch("/api/video-flow/v3/program?id=" + encodeURIComponent(videoId))
-              .then(res => res.json())
-              .then(progData => {
-                if (progData && progData.success && (progData.program || progData.scenes)) {
-                  window.V3CanvasPlayer.mount(container, progData, {
-                    syncMediaElement: player,
-                    bottomPadding: 52,
-                    autoPlay: true,
-                  }).then(p => {
-                    window.__v3Player = p;
-                  }).catch(err => {
-                    console.warn("[Standalone Player] V3 mount warning:", err);
-                  });
-                }
-              })
-              .catch(err => {
-                console.warn("[Standalone Player] Could not load V3 program:", err);
-              });
-          }
-
           if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
               (video.export_status === "exported" || video.export_status === "not_requested")) {
             clearInterval(timer);
           }
           const dl = document.getElementById("download");
+          const isShorts = (video.format === "short" || video.format === "vertical");
           if (video.export_status === "exported" && video.download_url) {
-            dl.textContent = "↓ Download MP4";
+            dl.textContent = isShorts ? "↓ Download 9:16 MP4" : "↓ Download MP4";
             dl.href = video.download_url;
+            const safeTitle = (video.title || "video").replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim() || "video";
+            dl.download = safeTitle.toLowerCase().endsWith(".mp4") ? safeTitle : `${safeTitle}.mp4`;
+            dl.onclick = null;
           } else if (video.export_status === "exporting") {
             dl.textContent = `Exporting ${video.export_progress || 0}%`;
+            dl.onclick = null;
           } else {
-            dl.textContent = "Export MP4";
+            dl.textContent = isShorts ? "Export 9:16 MP4" : "Export MP4";
             dl.href = "#";
             dl.onclick = (e) => {
               e.preventDefault();
@@ -132,14 +380,19 @@
               }).catch(() => {});
             };
           }
-        } else if (video.status === "failed") {
+        } else if (video.status === "failed" || video.status === "cancelled") {
           clearInterval(timer);
-          document.querySelector(".spinner").style.display = "none";
-          document.getElementById("status-title").textContent = "Generation failed";
+          document.querySelector(".grid-indicator").style.display = "none";
+          document.getElementById("status-title").textContent = video.status === "cancelled" ? "Generation cancelled" : "Generation failed";
           document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
         }
       } catch (error) {
         document.getElementById("stage").textContent = error.message || "Waiting for Voice Flow…";
+        if (!videoId || /not found/i.test(String(error.message || ""))) {
+          clearInterval(timer);
+          document.querySelector(".grid-indicator").style.display = "none";
+          document.getElementById("status-title").textContent = "Video not found";
+        }
       }
     }
 

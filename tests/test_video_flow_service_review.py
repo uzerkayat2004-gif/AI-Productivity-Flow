@@ -60,3 +60,61 @@ def test_gateway_logs_sanitized_jsonl(monkeypatch, tmp_path: Path) -> None:
     ProviderModelGateway(api_key="secret", provider="groq", model_id="openai/gpt-oss-120b").request_isolated(prompt="secret prompt", model_ref=None, max_tokens=1, timeout_seconds=1, job_id="vf-log", process_manager=Manager())
     line = (tmp_path / "v3_projects" / "vf-log" / "logs" / "code2video.log").read_text()
     assert '"status": "success"' in line and "secret prompt" not in line and "secret\"" not in line
+
+def test_queue_accepts_and_threads_target_duration_seconds(tmp_path: Path) -> None:
+    captured: dict = {}
+
+    class _Engine:
+        def run(self, job_id: str, **kwargs: object) -> dict:
+            captured.update(kwargs)
+            output = Path(kwargs["project_dir"]) / "video.mp4"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"mp4")
+            return {"state": "complete", "video_path": str(output)}
+
+        def cancel(self, job_id: str) -> None:
+            pass
+
+    service = VideoFlowService(
+        store=VideoFlowStore(tmp_path / "jobs.db"),
+        projects_root=tmp_path / "projects",
+        engine_factory=lambda **_: _Engine(),
+    )
+    queued = service.queue("Some text", target_duration_seconds=150)
+    deadline = __import__("time").monotonic() + 3
+    while __import__("time").monotonic() < deadline and service.get(queued.job_id).state not in {"complete", "failed", "cancelled"}:
+        __import__("time").sleep(0.01)
+
+    assert queued.meta["target_duration_seconds"] == 150
+    assert captured["target_duration_seconds"] == 150
+
+
+def test_queue_rejects_out_of_range_target_duration(tmp_path: Path) -> None:
+    import pytest as _pytest
+
+    service = VideoFlowService(store=VideoFlowStore(tmp_path / "jobs.db"), projects_root=tmp_path / "projects")
+    with _pytest.raises(ValueError, match="between 10 and 300"):
+        service.queue("text", target_duration_seconds=999)
+
+
+def test_request_from_meta_preserves_document_profile(tmp_path: Path) -> None:
+    service = VideoFlowService(store=VideoFlowStore(tmp_path / "jobs.db"), projects_root=tmp_path / "projects", reconcile_orphans=False)
+    profile = {"target_duration_seconds": 120, "recommended_format": "brief"}
+    request = service._request_from_meta({"source_text": "hi", "title": "t", "document_profile": profile})
+    assert request["document_profile"] == profile
+
+
+def test_request_from_meta_includes_target_duration(tmp_path: Path) -> None:
+    service = VideoFlowService(store=VideoFlowStore(tmp_path / "jobs.db"), projects_root=tmp_path / "projects", reconcile_orphans=False)
+    request = service._request_from_meta({"source_text": "hi", "title": "t", "target_duration_seconds": 150})
+    assert request["target_duration_seconds"] == 150
+
+
+def test_cancel_also_cancels_pending_retry_timer(tmp_path: Path) -> None:
+    service = VideoFlowService(store=VideoFlowStore(tmp_path / "jobs.db"), projects_root=tmp_path / "projects", reconcile_orphans=False)
+    queued = service.queue("Some longer text for retry cancel")
+    service._schedule_rate_limit_retry(queued.job_id, {"source_text": "hi"}, __import__("datetime").datetime.now() + __import__("datetime").timedelta(seconds=3600))
+    assert queued.job_id in service._retry_timers
+    service.cancel(queued.job_id)
+    assert queued.job_id not in service._retry_timers
+    assert service.get(queued.job_id).state == "cancelled"

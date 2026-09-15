@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import sys
+import threading
 from dataclasses import dataclass, field
 from voice_flow.storage import storage
 from voice_flow.style_models import (
@@ -100,6 +102,15 @@ STYLE_INSTRUCTIONS = {
 
 STYLE_OPTIONS = STYLE_INSTRUCTIONS
 
+
+def _safe_storage_setting(key: str, default=None):
+    """Read a style setting without allowing SQLite failures to abort input."""
+    try:
+        return storage.get_setting(key, default)
+    except Exception as exc:
+        log.debug("[STYLE] setting %s unavailable: %s", key, exc)
+        return default
+
 # Category defaults
 CATEGORY_DEFAULTS = {
     "personal": "personal_very_casual",
@@ -163,20 +174,64 @@ class AppClassifier:
 
     def _load_overrides(self) -> None:
         try:
-            raw_apps = storage.get_setting("style_app_overrides", "{}")
-            self._app_overrides = json.loads(raw_apps) if isinstance(raw_apps, str) else dict(raw_apps or {})
+            raw_apps = _safe_storage_setting("style_app_overrides", "{}")
+            parsed_apps = json.loads(raw_apps) if isinstance(raw_apps, str) else raw_apps
+            self._app_overrides = {
+                str(key).lower().strip(): str(value).lower().strip()
+                for key, value in dict(parsed_apps or {}).items()
+                if str(key).strip() and str(value).strip()
+            }
         except Exception:
             self._app_overrides = {}
 
         try:
-            raw_domains = storage.get_setting("style_domain_overrides", "{}")
-            self._domain_overrides = json.loads(raw_domains) if isinstance(raw_domains, str) else dict(raw_domains or {})
+            raw_domains = _safe_storage_setting("style_domain_overrides", "{}")
+            parsed_domains = json.loads(raw_domains) if isinstance(raw_domains, str) else raw_domains
+            self._domain_overrides = {
+                str(key).lower().strip(): str(value).lower().strip()
+                for key, value in dict(parsed_domains or {}).items()
+                if str(key).strip() and str(value).strip()
+            }
         except Exception:
             self._domain_overrides = {}
 
     def _save_overrides(self) -> None:
-        storage.save_setting("style_app_overrides", json.dumps(self._app_overrides))
-        storage.save_setting("style_domain_overrides", json.dumps(self._domain_overrides))
+        try:
+            storage.save_setting("style_app_overrides", json.dumps(self._app_overrides))
+        except Exception as exc:
+            log.debug("[STYLE] app override save unavailable: %s", exc)
+        try:
+            storage.save_setting("style_domain_overrides", json.dumps(self._domain_overrides))
+        except Exception as exc:
+            log.debug("[STYLE] domain override save unavailable: %s", exc)
+
+    def set_app_override(self, exe_name: str, category: str) -> None:
+        clean = exe_name.lower().strip()
+        self._app_overrides[clean] = category.lower().strip()
+        self._save_overrides()
+
+    def remove_app_override(self, exe_name: str) -> None:
+        clean = exe_name.lower().strip()
+        if clean in self._app_overrides:
+            del self._app_overrides[clean]
+            self._save_overrides()
+
+    def set_domain_override(self, domain: str, category: str) -> None:
+        clean = domain.lower().strip()
+        self._domain_overrides[clean] = category.lower().strip()
+        self._save_overrides()
+
+    def remove_domain_override(self, domain: str) -> None:
+        clean = domain.lower().strip()
+        if clean in self._domain_overrides:
+            del self._domain_overrides[clean]
+            self._save_overrides()
+
+    def get_app_overrides(self) -> dict[str, str]:
+        return dict(self._app_overrides)
+
+    def get_domain_overrides(self) -> dict[str, str]:
+        return dict(self._domain_overrides)
 
     def set_app_override(self, exe_name: str, category: str) -> None:
         clean = exe_name.lower().strip()
@@ -250,8 +305,10 @@ class AppClassifier:
             return "email"
 
         # Developer apps
-        if any(d in exe_lower or d in title_lower for d in ("code", "cursor", "pycharm", "sublime", "terminal", "powershell", "cmd.exe", "wt.exe", "github")):
-            # If explicit developer check
+        if any(d in exe_lower or d in title_lower for d in (
+            "code", "cursor", "pycharm", "sublime", "terminal", "powershell", "cmd.exe", "wt.exe",
+            "pwsh", "conhost", "bash", "wsl", "mintty", "putty", "alacritty", "wezterm", "kitty", "github"
+        )):
             if "claude code" in title_lower:
                 return "other"
             return "developer"
@@ -263,27 +320,6 @@ class AppClassifier:
         return "other"
 
 
-class StyleOverrideManager:
-    """Manages temporary per-session style overrides with automatic reversion."""
-
-    def __init__(self):
-        self._temporary_override: str | None = None
-
-    def set_temporary_override(self, style_id: str) -> None:
-        self._temporary_override = style_id
-
-    def get_temporary_override(self) -> str | None:
-        return self._temporary_override
-
-    def clear_temporary_override(self) -> None:
-        self._temporary_override = None
-
-    def consume_temporary_override(self) -> str | None:
-        val = self._temporary_override
-        self._temporary_override = None
-        return val
-
-
 def detect_app_category(title: str, exe_name: str, domain: str | None = None) -> str:
     """Helper function to detect app category."""
     classifier = AppClassifier()
@@ -291,11 +327,54 @@ def detect_app_category(title: str, exe_name: str, domain: str | None = None) ->
 
 
 def normalize_app_name(title: str, exe_name: str) -> str:
-    title_lower = title.lower()
-    exe_lower = exe_name.lower()
+    # Strip zero-width / BOM characters. Edge and several Electron apps inject a
+    # zero-width space into their window title (real observed title:
+    # "Microsoft" + U+200B + " Edge"), and that character used to survive into
+    # the stored ``app_name``, splitting one application into two separate rows
+    # in Insights.
+    #
+    # NOTE: these are written as *escape sequences*. They were previously pasted
+    # in as literal invisible characters, which happens to work but is
+    # unreadable and can be silently destroyed by an editor that normalises
+    # whitespace.
+    title = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", title or "").strip()
 
-    if "chrome" in exe_lower or "chrome" in title_lower:
+    title_lower = title.lower()
+    exe_lower = (exe_name or "").lower()
+
+    # ---- Executable-first resolution -------------------------------------
+    # The process image name is authoritative and cannot be spoofed by a
+    # document or tab name, so it is matched before any window-title heuristic.
+    # Previously only "chrome" was handled, so Edge (msedge.exe) fell through to
+    # the " - " title split and was recorded under its *tab title* instead of
+    # "Microsoft Edge".
+    if ("msedge" in exe_lower and "webview" not in exe_lower) or "microsoft edge" in title_lower:
+        return "Microsoft Edge"
+    if ("chrome" in exe_lower and "webview" not in exe_lower) or "google chrome" in title_lower:
         return "Google Chrome"
+    if "brave" in exe_lower:
+        return "Brave"
+    if "firefox" in exe_lower:
+        return "Mozilla Firefox"
+    if "vivaldi" in exe_lower:
+        return "Vivaldi"
+    if "opera" in exe_lower:
+        return "Opera"
+    if "comet" in exe_lower:
+        return "Comet"
+    # Antigravity is a VS Code fork, so it must win over the generic "code"
+    # test below or it would be reported as "VS Code".
+    if "antigravity" in exe_lower:
+        return "Antigravity"
+
+    if any(t in exe_lower for t in ("windowsterminal", "wt.exe")) or "windows terminal" in title_lower:
+        return "Windows Terminal"
+    if "powershell" in exe_lower or "pwsh" in exe_lower or "powershell" in title_lower:
+        return "PowerShell"
+    if "cmd.exe" in exe_lower or "command prompt" in title_lower:
+        return "Command Prompt"
+    if "bash" in exe_lower or "mintty" in exe_lower or "git bash" in title_lower or "mingw" in title_lower:
+        return "Git Bash"
     if "code" in exe_lower or "visual studio code" in title_lower or "vscode" in title_lower:
         return "VS Code"
     if "claude" in title_lower or "claude" in exe_lower:
@@ -310,23 +389,29 @@ def normalize_app_name(title: str, exe_name: str) -> str:
         return "Telegram"
     if "outlook" in exe_lower or "outlook" in title_lower:
         return "Outlook"
-    if "word" in exe_lower or "winword" in exe_lower or "word" in title_lower:
+    # A bare "word" test against the *title* matched things like "Password
+    # Manager" and "Wordle", so the title test is narrowed to the real product
+    # name. The executable test still covers WINWORD.EXE and WordPad.exe.
+    if "word" in exe_lower or "microsoft word" in title_lower or " - word" in title_lower:
         return "Microsoft Word"
     if "notion" in exe_lower or "notion" in title_lower:
         return "Notion"
     if "explorer" in exe_lower:
         return "File Explorer"
 
-    if " - " in title:
-        parts = [p.strip() for p in title.split(" - ")]
-        if len(parts) >= 2:
-            return parts[-1]
+    if "ai speech desktop app" in title_lower or "voiceflowlauncher" in exe_lower or "workbuddy" in exe_lower:
+        return "AI Speech Desktop App"
 
-    clean_exe = exe_name.replace(".exe", "").capitalize()
-    if clean_exe and clean_exe != "General":
-        return clean_exe
+    # Do not derive an app name from arbitrary window-title fragments. A browser
+    # tab like "YouTube - Google Chrome" or a document title like
+    # "release notes - VS Code" is content, not proof of the application. If we
+    # cannot identify the executable, keep the row unattributed rather than
+    # inventing a fake app for Insights.
+    clean_exe = exe_name.replace(".exe", "").strip()
+    if clean_exe and clean_exe.lower() not in {"general", "applicationframehost"}:
+        return clean_exe[:1].upper() + clean_exe[1:]
 
-    return title[:28] if title else "General App"
+    return "General App"
 
 
 def get_app_info_for_hwnd(hwnd: int | None) -> tuple[str, str]:
@@ -348,17 +433,44 @@ def get_app_info_for_hwnd(hwnd: int | None) -> tuple[str, str]:
 
         exe_name = "general.exe"
         if pid.value:
-            import win32process
-            import win32api
-            import win32con
-
+            # Pure-ctypes resolution goes FIRST because it needs no third-party
+            # package, so it always works. Previously the pywin32 imports sat
+            # here unguarded: on a venv without pywin32 they raised
+            # ModuleNotFoundError, which skipped this whole block, skipped
+            # normalize_app_name(), and landed on the outer handler — returning
+            # ("General App", "general.exe") for EVERY dictation. That silently
+            # blanked Desktop Application Intelligence in Insights.
             try:
-                handle = win32api.OpenProcess(win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ, False, pid.value)
-                if handle:
-                    exe_name = os.path.basename(win32process.GetModuleFileNameEx(handle, 0))
-                    win32api.CloseHandle(handle)
-            except Exception:
-                pass
+                kernel32 = ctypes.windll.kernel32
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+                if h_proc:
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = wintypes.DWORD(1024)
+                    if kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size)):
+                        exe_name = os.path.basename(buf.value)
+                    kernel32.CloseHandle(h_proc)
+            except Exception as err:
+                log.debug("ctypes exe lookup failed for pid %s: %s", pid.value, err)
+
+            if exe_name == "general.exe":
+                # Optional secondary attempt. pywin32 is NOT a hard requirement,
+                # so the import lives inside the try: a missing package now
+                # degrades quietly instead of aborting the entire lookup.
+                try:
+                    import win32process  # type: ignore
+                    import win32api  # type: ignore
+                    import win32con  # type: ignore
+
+                    handle = win32api.OpenProcess(
+                        win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+                        False, pid.value,
+                    )
+                    if handle:
+                        exe_name = os.path.basename(win32process.GetModuleFileNameEx(handle, 0))
+                        win32api.CloseHandle(handle)
+                except Exception:
+                    pass
 
         app_name = normalize_app_name(window_title, exe_name)
         return (app_name, exe_name)
@@ -382,12 +494,7 @@ def get_active_app_info() -> tuple[str, str]:
 
 
 def _window_title_for_hwnd(hwnd: int | None) -> str:
-    """Return the raw window title (e.g. the browser tab text) for classification.
-
-    The normalized display name collapses every Chrome/Edge window to
-    "Google Chrome", which would hide the site-specific tab title the
-    classifier needs (WhatsApp Web, Slack, GitHub, ...).
-    """
+    """Return the raw window title (e.g. the browser tab text) for classification."""
     if sys.platform != "win32" or not hwnd:
         return ""
     try:
@@ -419,10 +526,38 @@ _CATEGORY_STYLE_PREFIXES = ("personal_", "work_", "email_", "developer_", "other
 
 def _canonical_style(style_id: str) -> str:
     """Strip any category card prefix so an id resolves to its base style."""
+    if not isinstance(style_id, str):
+        return ""
     for prefix in _CATEGORY_STYLE_PREFIXES:
         if style_id.startswith(prefix):
             return style_id[len(prefix):]
     return style_id
+
+
+class StyleOverrideManager:
+    """Manages temporary per-dictation style overrides."""
+
+    def __init__(self) -> None:
+        self._temporary_override: str | None = None
+        self._lock = threading.RLock()
+
+    def set_temporary_override(self, style: str | None) -> None:
+        with self._lock:
+            self._temporary_override = _canonical_style(style) if style else None
+
+    def get_temporary_override(self) -> str | None:
+        with self._lock:
+            return self._temporary_override
+
+    def consume_temporary_override(self) -> str | None:
+        with self._lock:
+            val = self._temporary_override
+            self._temporary_override = None
+            return val
+
+    def clear_temporary_override(self) -> None:
+        with self._lock:
+            self._temporary_override = None
 
 
 class StyleEngine:
@@ -439,12 +574,15 @@ class StyleEngine:
 
     def get_category_style(self, category: str) -> str:
         default_val = CATEGORY_DEFAULTS.get(category, "casual")
-        raw_val = storage.get_setting(f"style_{category}", default_val)
+        raw_val = _safe_storage_setting(f"style_{category}", default_val)
         # Normalize to canonical short style if stored as full card ID or vice-versa
-        return _canonical_style(raw_val)
+        return _canonical_style(raw_val) or _canonical_style(default_val)
 
     def set_category_style(self, category: str, style_id: str) -> None:
-        storage.save_setting(f"style_{category}", style_id)
+        try:
+            storage.save_setting(f"style_{category}", style_id)
+        except Exception as exc:
+            log.debug("[STYLE] category style save unavailable: %s", exc)
 
     def resolve(
         self,
@@ -496,14 +634,16 @@ class StyleEngine:
         app_title, exe_name = get_active_app_info()
         category = self.classifier.classify(app_title, exe_name)
         default_style_id = CATEGORY_DEFAULTS.get(category, "cleanup_light")
-        style_id = storage.get_setting(f"style_{category}", default_style_id)
+        style_id = _safe_storage_setting(f"style_{category}", default_style_id)
+        if not isinstance(style_id, str):
+            style_id = default_style_id
         instruction = STYLE_INSTRUCTIONS.get(style_id, STYLE_INSTRUCTIONS.get("cleanup_light", "Format text."))
         log.info("[STYLE ENGINE] App: '%s' | Category: '%s' | Selected Style ID: '%s'", app_title, category, style_id)
         return (app_title, category, instruction)
 
     def get_session_style_for_hwnd(self, hwnd: int | None, site_host: str | None = None) -> tuple[str, str, str, str]:
         resolved = self.resolve(hwnd, site_host=site_host)
-        cleanup_level = str(storage.get_setting("style_autocleanup", "cleanup_light"))
+        cleanup_level = str(_safe_storage_setting("style_autocleanup", "cleanup_light") or "cleanup_light")
         return (resolved.app_name, resolved.category, resolved.style_id, cleanup_level)
 
     def resolve_for_target(self, hwnd: int | None, consume_override: bool = True) -> ResolvedStyle:
@@ -519,7 +659,12 @@ class StyleEngine:
             else self.override_manager.get_temporary_override()
         )
 
-        stored = storage.get_setting(f"style_{category}", CATEGORY_DEFAULTS.get(category, "other_formal"))
+        stored = _safe_storage_setting(
+            f"style_{category}",
+            CATEGORY_DEFAULTS.get(category, "other_formal"),
+        )
+        if not isinstance(stored, str):
+            stored = CATEGORY_DEFAULTS.get(category, "other_formal")
         if temp_override:
             style_id = temp_override
         # Check if stored setting belongs to this category

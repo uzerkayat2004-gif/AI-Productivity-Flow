@@ -21,6 +21,12 @@ _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
 # ---------------------------------------------------------------- design tokens
 
 
+
+def _coerce_accent_shift(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 def resolve_design(direction: dict[str, Any], theme: Any) -> dict[str, Any]:
     brief = direction.get("brief") if isinstance(direction.get("brief"), dict) else {}
     base_bg, base_accent = "#0b1020", "#67e8f9"
@@ -40,7 +46,7 @@ def resolve_design(direction: dict[str, Any], theme: Any) -> dict[str, Any]:
         "#34d399",
         "#fb7185",
     ]
-    shift = int(brief.get("accent_shift") or 0)
+    shift = _coerce_accent_shift(brief.get("accent_shift"))
     if shift:
         palette = palette[shift:] + palette[:shift]
     light = isinstance(theme, dict) and str(theme.get("mode", "")).lower() == "light"
@@ -229,8 +235,8 @@ def _timeline(title: str, labels: list[str], entry: dict[str, Any], design: dict
 
 
 def _counter_stats(title: str, labels: list[str], entry: dict[str, Any], design: dict[str, Any], index: int) -> str:
-    to = int(entry.get("count_to") or 95)
-    frm = int(entry.get("count_from") or 0)
+    to = int(_finite_count(entry.get("count_to"), 95))
+    frm = int(_finite_count(entry.get("count_from"), 0))
     suffix = escape(str(entry.get("count_suffix") or ""))
     stats = [
         f'<div class="vfd-panel cue" data-cue="0" style="text-align:center;flex:1">'
@@ -276,7 +282,7 @@ def _before_after(title: str, labels: list[str], entry: dict[str, Any], design: 
 
 
 def _scale_comparison(title: str, labels: list[str], entry: dict[str, Any], design: dict[str, Any], index: int) -> str:
-    to = float(entry.get("count_to") or 10)
+    to = _finite_count(entry.get("count_to"), 10)
     ratios = [1.0, max(0.15, min(2.6, to / 20.0)), max(0.1, min(3.6, to / 8.0))]
     circles = "".join(
         f'<circle class="cue" data-cue="0" data-delay="{0.25 + i * 0.4:.2f}" cx="{80 + i * 150 + r * 20:.0f}" '
@@ -309,7 +315,7 @@ def _layer_reveal(title: str, labels: list[str], entry: dict[str, Any], design: 
 
 
 def _chart_growth(title: str, labels: list[str], entry: dict[str, Any], design: dict[str, Any], index: int) -> str:
-    to = int(entry.get("count_to") or 80)
+    to = int(_finite_count(entry.get("count_to"), 80))
     bars = [0.35, 0.55, 0.78, min(1.0, to / 100.0 + 0.2)]
     rects = "".join(
         f'<rect class="cue" data-cue="0" data-delay="{0.2 + i * 0.35:.2f}" data-grow x="{40 + i * 70}" '
@@ -386,11 +392,21 @@ _BUILDERS = {
 # ---------------------------------------------------------------- three presets
 
 
+def _finite_count(value: Any, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number):
+        return default
+    return number
+
+
 def _three_for(treatment: str, entry: dict[str, Any], design: dict[str, Any]) -> dict[str, Any] | None:
     accent = design["accent"]
     if treatment == "particle-field":
         return {
-            "camera": {"position": [0, 1.2, 6], "fov": 55},
+            "camera": {"position": [0, 1.2, 6], "lookAt": [0, 0, 0], "fov": 55, "near": 0.1, "far": 40.0},
             "toneMapping": "aces",
             "background": design["bg"],
             "lights": [{"type": "ambient", "intensity": 0.7}],
@@ -421,7 +437,7 @@ def _three_for(treatment: str, entry: dict[str, Any], design: dict[str, Any]) ->
                 }
             )
         return {
-            "camera": {"position": [0, 2.4, 7.5], "fov": 50},
+            "camera": {"position": [0, 2.4, 7.5], "lookAt": [0, 0, 0], "fov": 50, "near": 0.1, "far": 40.0},
             "toneMapping": "aces",
             "background": design["bg"],
             "lights": [
@@ -449,7 +465,7 @@ def _three_for(treatment: str, entry: dict[str, Any], design: dict[str, Any]) ->
                 }
             )
         return {
-            "camera": {"position": [4.6, 3.4, 5.4], "fov": 46},
+            "camera": {"position": [4.6, 3.4, 5.4], "lookAt": [0, 0, 0], "fov": 46, "near": 0.1, "far": 40.0},
             "toneMapping": "aces",
             "background": design["bg"],
             "lights": [

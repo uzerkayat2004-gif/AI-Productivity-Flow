@@ -54,9 +54,14 @@ def test_vad_failure_uses_direct_audio_fallback(monkeypatch) -> None:
     transcriber.model.transcribe = transcribe
     monkeypatch.setattr(
         "voice_flow.transcriber.dictionary_engine.get_initial_prompt",
-        lambda: "",
+        lambda *args, **kwargs: "",
     )
     monkeypatch.setattr("voice_flow.transcriber.config.sample_rate", 16000)
+    try:
+        from voice_flow.storage import storage
+        monkeypatch.setattr(storage, "get_setting", lambda key, default=None: "local/faster-whisper-base.en")
+    except Exception:
+        pass
     assert transcriber.transcribe(audio) == "fallback words"
     assert calls == [True, False]
 

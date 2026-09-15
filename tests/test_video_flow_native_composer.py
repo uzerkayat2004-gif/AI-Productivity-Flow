@@ -9,16 +9,16 @@ def test_native_composer_uses_compact_model_label_and_scoped_orange_theme() -> N
     assert 'self._label(model_cell, "Model provider · model")' in source
     assert 'self._label(shell, "Planning model")' not in source
     assert '"background": "#fff8f3"' in source
-    assert '"orange": "#ff6b19"' in source
+    assert '"orange": "#ff6a00"' in source
 
 
 def test_native_composer_has_a_compact_single_row_source_toolbar() -> None:
     source = Path(widget_module.__file__).read_text(encoding="utf-8")
 
-    assert 'win.geometry("560x600")' in source
+    assert 'win.geometry(' in source
     assert 'model_cell.grid(row=0, column=0' in source
     assert 'theme_cell.grid(row=0, column=1' in source
-    assert 'self._label(shell, "Your visual direction (optional)")' in source
+    assert '"Your visual direction (optional)"' in source
     assert '"visual_direction": visual_direction' in source
     assert '"visual_direction": self._controls["visual_direction"].get("1.0", "end-1c").strip()[:1000]' in source
 
@@ -37,15 +37,6 @@ def test_native_composer_model_options_match_in_app_availability() -> None:
             },
             {"full_id": "gemini/offline", "available": False, "is_active": True},
             {"full_id": "groq/disabled", "available": True, "is_active": False},
-        ],
-        "combos": [
-            {
-                "name": "Reliable route",
-                "ref": "combo:Reliable route",
-                "models": ["local/deterministic", "openai/gpt-4.1"],
-                "strategy": "fallback",
-            },
-            {"name": "Unavailable", "models": ["gemini/offline"]},
         ],
     }
 

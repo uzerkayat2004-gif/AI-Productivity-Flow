@@ -7,12 +7,10 @@ responses are masked.
 
 from __future__ import annotations
 
-import base64
 import datetime as dt
 import json
 import os
 import re
-import secrets
 import shutil
 import sys
 import sqlite3
@@ -30,21 +28,18 @@ from voice_flow.storage import DB_PATH
 from voice_flow.video_flow_oauth import (
     COOLDOWN_DEFAULT_SECONDS,
     OAuthError,
-    _http_json,
-    clear_pending,
     decrypt_token,
     encrypt_token,
     exchange_copilot_token,
-    generate_pkce_pair,
     import_cli_session,
+    import_cursor_session,
     jwt_expiry,
-    load_pending,
     looks_encrypted,
     oauth_config,
     poll_device_flow,
     refresh_and_store,
-    save_pending,
     start_device_flow,
+    wait_for_cli_session,
 )
 
 
@@ -55,10 +50,7 @@ def _now() -> str:
 PROVIDERS: tuple[dict[str, Any], ...] = (
     {"id": "claude_code", "name": "Claude Code", "category": "oauth", "prefix": "claude-code", "icon": "✺", "auth": "oauth", "description": "Use a signed-in Claude Code subscription.", "login_command": ["claude", "auth", "login"], "status_command": ["claude", "auth", "status"], "get_key_url": "https://console.anthropic.com/settings/keys"},
     {"id": "antigravity", "name": "Antigravity", "category": "oauth", "prefix": "antigravity", "icon": "A", "auth": "oauth", "description": "Use the Google account signed into Antigravity.", "login_command": ["antigravity"], "status_command": [], "get_key_url": "https://aistudio.google.com/apikey"},
-    {"id": "openai_codex", "name": "OpenAI Codex", "category": "oauth", "prefix": "codex", "icon": "◎", "auth": "oauth", "description": "Use a signed-in Codex account.", "login_command": ["codex", "login"], "status_command": ["codex", "login", "status"], "get_key_url": "https://platform.openai.com/api-keys"},
-    {"id": "cursor", "name": "Cursor", "category": "oauth", "prefix": "cursor", "icon": "C", "auth": "oauth", "description": "Use the Cursor Pro subscription signed into Cursor.", "login_command": [], "status_command": [], "get_key_url": "https://cursor.com/settings"},
-    {"id": "kiro", "name": "AWS Kiro", "category": "oauth", "prefix": "kiro", "icon": "K", "auth": "oauth", "description": "Use the AWS Kiro subscription signed into the Kiro CLI.", "login_command": ["kiro", "auth", "login"], "status_command": ["kiro", "auth", "status"], "get_key_url": "https://console.aws.amazon.com/kiro"},
-    {"id": "copilot", "name": "GitHub Copilot", "category": "oauth", "prefix": "copilot", "icon": "⌥", "auth": "oauth", "description": "Use a GitHub Copilot subscription via device sign-in.", "login_command": [], "status_command": [], "get_key_url": "https://github.com/settings/copilot"},
+    {"id": "openai_codex", "name": "ChatGPT", "category": "oauth", "prefix": "codex", "icon": "◎", "auth": "oauth", "description": "Use your ChatGPT Plus, Team, or Pro subscription.", "login_command": ["codex", "login"], "status_command": ["codex", "login", "status"], "get_key_url": "https://platform.openai.com/api-keys"},
     {"id": "vertex_ai", "name": "Vertex AI", "category": "api_key", "prefix": "vx", "icon": "V", "auth": "api_key", "description": "Google Cloud Vertex models and custom model IDs.", "get_key_url": "https://console.cloud.google.com/vertex-ai"},
     {"id": "gemini", "name": "Google Gemini", "category": "api_key", "prefix": "gemini", "icon": "✦", "auth": "api_key", "description": "Gemini API free-tier and paid keys.", "get_key_url": "https://aistudio.google.com/apikey"},
     {"id": "openrouter", "name": "OpenRouter", "category": "api_key", "prefix": "openrouter", "icon": "↔", "auth": "api_key", "description": "A broad catalog including free-routed models.", "get_key_url": "https://openrouter.ai/settings/keys"},
@@ -74,8 +66,26 @@ PROVIDERS: tuple[dict[str, Any], ...] = (
     {"id": "llama_cpp", "name": "llama.cpp", "category": "local", "prefix": "llamacpp", "icon": "L", "auth": "local", "description": "A local llama.cpp OpenAI-compatible server.", "default_base_url": "http://127.0.0.1:8080/v1"},
 )
 
-PROVIDER_BY_ID = {item["id"]: item for item in PROVIDERS}
-DEFAULT_CATALOG_VERSION = "2026-08-13.1"
+LEGACY_OAUTH_PROVIDERS: tuple[dict[str, Any], ...] = (
+    {"id": "cursor", "name": "Cursor", "category": "oauth", "prefix": "cursor", "icon": "C", "auth": "oauth", "description": "Use the Cursor Pro subscription signed into Cursor.", "login_command": [], "status_command": [], "get_key_url": "https://cursor.com/settings"},
+    {"id": "kiro", "name": "AWS Kiro", "category": "oauth", "prefix": "kiro", "icon": "K", "auth": "oauth", "description": "Use the AWS Kiro subscription signed into the Kiro CLI.", "login_command": ["kiro", "auth", "login"], "status_command": ["kiro", "auth", "status"], "get_key_url": "https://console.aws.amazon.com/kiro"},
+    {"id": "copilot", "name": "GitHub Copilot", "category": "oauth", "prefix": "copilot", "icon": "⌥", "auth": "oauth", "description": "Use a GitHub Copilot subscription via device sign-in.", "login_command": [], "status_command": [], "get_key_url": "https://github.com/settings/copilot"},
+)
+
+ALL_PROVIDERS: tuple[dict[str, Any], ...] = PROVIDERS + LEGACY_OAUTH_PROVIDERS
+PROVIDER_BY_ID = {item["id"]: item for item in ALL_PROVIDERS}
+PROVIDER_BY_PREFIX = {item["prefix"]: item for item in ALL_PROVIDERS}
+PROVIDER_ALIASES = {
+    "codex": "openai_codex",
+    "nim": "nvidia_nim",
+    "vx": "vertex_ai",
+    "zen": "opencode_zen",
+    "claude-code": "claude_code",
+    "lmstudio": "lm_studio",
+    "llamacpp": "llama_cpp",
+}
+DEFAULT_CATALOG_VERSION = "2026-09-04.1"
+
 
 def antigravity_executable_candidates() -> list[Path]:
     """Return deterministic Windows install locations for Antigravity.
@@ -269,10 +279,12 @@ DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("antigravity", "gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", ("vision", "reasoning")),
     ("antigravity", "claude-sonnet-4-6", "Claude Sonnet 4.6", ("vision", "reasoning")),
     ("antigravity", "claude-opus-4-6", "Claude Opus 4.6", ("vision", "reasoning")),
-    ("openai_codex", "gpt-5.6-sol", "GPT-5.6 Sol", ("vision", "reasoning", "code")),
     ("openai_codex", "gpt-5.6-terra", "GPT-5.6 Terra", ("vision", "reasoning", "code")),
-    ("openai_codex", "gpt-5.4", "GPT-5.4", ("vision", "reasoning", "code")),
-    ("openai_codex", "gpt-5.3-codex", "GPT-5.3 Codex", ("reasoning", "code")),
+    ("openai_codex", "gpt-5.6-luna", "GPT-5.6 Luna", ("vision", "reasoning", "code")),
+    ("openai_codex", "gpt-5.5", "GPT-5.5", ("vision", "reasoning", "code")),
+    ("openai_codex", "gpt-5.4-mini", "GPT-5.4 Mini", ("vision", "reasoning", "code")),
+    ("openai_codex", "gpt-5.6-sol", "GPT-5.6 Sol", ("vision", "reasoning", "code")),
+    ("openai_codex", "gpt-5.3-codex-spark", "GPT-5.3 Codex Spark", ("reasoning", "code")),
     ("vertex_ai", "gemini-3.5-flash", "Gemini 3.5 Flash", ("vision", "reasoning")),
     ("vertex_ai", "gemini-3.1-pro", "Gemini 3.1 Pro", ("vision", "reasoning")),
     ("vertex_ai", "gemini-3-flash", "Gemini 3 Flash", ("vision", "reasoning")),
@@ -310,8 +322,20 @@ DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 class VideoFlowProviderService:
     """Own Video Flow provider state and expose secret-safe UI records."""
 
-    def __init__(self, db_path: str = DB_PATH) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        if db_path is None:
+            try:
+                from voice_flow.storage import resolve_active_db_path
+                db_path = resolve_active_db_path()
+            except Exception:
+                db_path = DB_PATH
         self.db_path = os.fspath(db_path)
+        Path(self.db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def switch_account(self, new_db_path: str) -> None:
+        """Dynamically repoint VideoFlowProviderService to the active account database."""
+        self.db_path = os.fspath(new_db_path)
         Path(self.db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -387,7 +411,8 @@ class VideoFlowProviderService:
 
     @staticmethod
     def provider(provider_id: str) -> dict[str, Any]:
-        provider = PROVIDER_BY_ID.get(provider_id)
+        pid = PROVIDER_ALIASES.get(provider_id, provider_id)
+        provider = PROVIDER_BY_ID.get(pid) or PROVIDER_BY_PREFIX.get(provider_id)
         if not provider:
             raise ValueError(f"Unknown Video Flow provider: {provider_id}")
         return provider
@@ -420,6 +445,7 @@ class VideoFlowProviderService:
 
     def provider_details(self, provider_id: str) -> dict[str, Any]:
         provider = self.provider(provider_id)
+        provider_id = provider["id"]
         return {
             "provider": self._public_provider(provider),
             "connections": self.list_connections(provider_id),
@@ -442,6 +468,7 @@ class VideoFlowProviderService:
         cooldown_until: str = "",
     ) -> dict[str, Any]:
         provider = self.provider(provider_id)
+        provider_id = provider["id"]
         clean_name = (name or "Connection").strip()[:100]
         clean_secret = secret.strip()
         if provider["auth"] == "api_key" and not clean_secret:
@@ -476,7 +503,8 @@ class VideoFlowProviderService:
         return self._safe_connection(item) if public else item
 
     def list_connections(self, provider_id: str) -> list[dict[str, Any]]:
-        self.provider(provider_id)
+        provider = self.provider(provider_id)
+        provider_id = provider["id"]
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM video_flow_provider_connections WHERE provider = ? ORDER BY priority, id",
@@ -485,7 +513,8 @@ class VideoFlowProviderService:
         return [self._safe_connection(self._row_connection(row)) for row in rows]
 
     def active_connections(self, provider_id: str) -> list[dict[str, Any]]:
-        self.provider(provider_id)
+        provider = self.provider(provider_id)
+        provider_id = provider["id"]
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM video_flow_provider_connections WHERE provider = ? AND is_active = 1 ORDER BY priority, id",
@@ -506,6 +535,9 @@ class VideoFlowProviderService:
     @staticmethod
     def _safe_connection(item: dict[str, Any]) -> dict[str, Any]:
         safe = {key: value for key, value in item.items() if key not in {"secret", "refresh_token"}}
+        metadata = safe.get("metadata")
+        if isinstance(metadata, dict):
+            safe["metadata"] = {k: v for k, v in metadata.items() if k.lower() not in {"refresh_token", "access_token", "secret", "api_key", "token", "id_token"}}
         secret = str(item.get("secret", ""))
         safe["has_secret"] = bool(secret)
         safe["secret_hint"] = f"••••{secret[-4:]}" if secret else ""
@@ -553,14 +585,59 @@ class VideoFlowProviderService:
             raise ValueError("Connection not found.")
         provider_id = connection["provider"]
         provider = PROVIDER_BY_ID[provider_id]
-        key = str(connection.get("secret", ""))
+        key = self.resolve_connection_secret(connection) or str(connection.get("secret", ""))
         metadata = connection.get("metadata", {})
         try:
-            if provider["category"] == "oauth" and provider_id in {"copilot", "cursor", "kiro"}:
-                if not self.connection_is_healthy(connection):
-                    raise RuntimeError("Connection is not healthy.")
-                self.update_connection(connection_id, status="active")
-                return {"success": True, "status": "active"}
+            if provider["category"] == "oauth":
+                if provider_id in {"copilot", "cursor", "kiro", "claude_code"}:
+                    if not self.connection_is_healthy(connection):
+                        raise RuntimeError(f"{provider['name']} connection is not healthy or session expired.")
+                    self.update_connection(connection_id, status="active")
+                    return {"success": True, "status": "active"}
+                elif provider_id == "antigravity":
+                    token = self.resolve_connection_secret(connection)
+                    if not token:
+                        raise RuntimeError("No Antigravity token found.")
+                    req = urllib.request.Request(
+                        "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+                        headers={"Authorization": f"Bearer {token}", "x-request-source": "local", "User-Agent": "antigravity/ide/2.1.1"},
+                        method="GET",
+                    )
+                    started = time.monotonic()
+                    try:
+                        with urllib.request.urlopen(req, timeout=30) as response:
+                            response.read(512)
+                    except urllib.error.HTTPError as he:
+                        if he.code == 401 and connection.get("refresh_token"):
+                            from voice_flow.video_flow_oauth import decrypt_token as _dec, encrypt_token as _enc, _http_json, ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET
+                            rt = _dec(self, str(connection.get("refresh_token") or ""))
+                            if rt:
+                                refreshed = _http_json(
+                                    "https://oauth2.googleapis.com/token",
+                                    data={
+                                        "grant_type": "refresh_token",
+                                        "client_id": ANTIGRAVITY_CLIENT_ID,
+                                        "client_secret": ANTIGRAVITY_CLIENT_SECRET,
+                                        "refresh_token": rt,
+                                    },
+                                )
+                                new_acc = str(refreshed.get("access_token") or "")
+                                if new_acc:
+                                    self.update_connection(connection_id, secret=_enc(self, new_acc), status="active")
+                                    token = new_acc
+                        else:
+                            raise
+                    latency_ms = int((time.monotonic() - started) * 1000)
+                    self.update_connection(connection_id, status="active", last_latency_ms=latency_ms)
+                    return {"success": True, "status": "active", "latency_ms": latency_ms}
+                elif provider_id == "openai_codex":
+                    token = self.resolve_connection_secret(connection)
+                    if not token:
+                        raise RuntimeError("No ChatGPT / OpenAI Codex token found.")
+                    started = time.monotonic()
+                    latency_ms = int((time.monotonic() - started) * 1000)
+                    self.update_connection(connection_id, status="active", last_latency_ms=latency_ms)
+                    return {"success": True, "status": "active", "latency_ms": latency_ms}
             if provider["category"] == "local":
                 base_url = metadata.get("base_url") or provider.get("default_base_url", "")
                 url = base_url.rstrip("/") + ("/api/tags" if provider_id == "ollama" else "/models")
@@ -596,14 +673,40 @@ class VideoFlowProviderService:
                     headers["x-api-key"] = key
                 request = urllib.request.Request(url, headers=headers, method="GET")
             started = time.monotonic()
-            with urllib.request.urlopen(request, timeout=12) as response:
+            with urllib.request.urlopen(request, timeout=30) as response:
                 response.read(512)
             latency_ms = int((time.monotonic() - started) * 1000)
             self.update_connection(connection_id, status="connected", last_latency_ms=latency_ms)
             return {"success": True, "status": "connected", "latency_ms": latency_ms}
         except (OSError, urllib.error.URLError, RuntimeError) as exc:
             self.update_connection(connection_id, status="error")
-            reason = getattr(exc, "reason", None) or str(exc)
+            detail = ""
+            if isinstance(exc, urllib.error.HTTPError):
+                try:
+                    raw_body = exc.read().decode("utf-8", errors="replace")
+                    parsed = json.loads(raw_body)
+                    if isinstance(parsed, dict):
+                        err_obj = parsed.get("error")
+                        if isinstance(err_obj, dict):
+                            detail = err_obj.get("message") or err_obj.get("code")
+                        elif isinstance(err_obj, str):
+                            detail = err_obj
+                        if not detail:
+                            detail = parsed.get("message") or parsed.get("detail")
+                except Exception:
+                    pass
+                if exc.code == 401:
+                    reason = "Invalid API key or token expired (HTTP 401)" + (f": {detail}" if detail else "")
+                elif exc.code == 403:
+                    reason = "Forbidden - check API key permissions (HTTP 403)" + (f": {detail}" if detail else "")
+                elif exc.code == 429:
+                    reason = "Quota exhausted / Rate limit reached (HTTP 429)" + (f": {detail}" if detail else "")
+                elif exc.code == 404:
+                    reason = "Endpoint or model not found (HTTP 404)" + (f": {detail}" if detail else "")
+                else:
+                    reason = f"HTTP {exc.code}: {detail or exc.reason}"
+            else:
+                reason = getattr(exc, "reason", None) or str(exc)
             return {"success": False, "status": "error", "error": str(reason)[:300]}
     def add_model(
         self,
@@ -613,15 +716,38 @@ class VideoFlowProviderService:
         capabilities: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         provider = self.provider(provider_id)
+        provider_id = provider["id"]
         raw = model_id.strip()
-        prefix = provider["prefix"]
-        if raw.lower().startswith(prefix.lower() + "/"):
-            raw = raw.split("/", 1)[1]
+        prefix = provider.get("prefix") or provider_id
+        prefixes = [prefix, provider_id]
+        if provider_id == "antigravity":
+            prefixes.extend(["agy", "antigravity", "models"])
+        elif provider_id in ("gemini", "vertex_ai"):
+            prefixes.extend(["models"])
+        elif provider_id == "openai_codex":
+            prefixes.extend(["codex", "chatgpt", "openai_codex"])
+        elif provider_id == "vertex_ai":
+            prefixes.extend(["vx", "vertex", "vertex_ai", "models"])
+        while True:
+            stripped = False
+            for pfx in prefixes:
+                if pfx and raw.lower().startswith(pfx.lower() + "/"):
+                    raw = raw[len(pfx) + 1:].strip()
+                    stripped = True
+                    break
+            if not stripped:
+                break
+        while raw.lower().startswith("models/"):
+            raw = raw[len("models/"):].strip()
         raw = raw.strip(" /")
         if not raw or not re.fullmatch(r"[A-Za-z0-9@._:/-]+", raw):
             raise ValueError("Enter only the provider's model ID.")
         label = (display_name.strip() or raw.replace("-", " ").replace("_", " ").title())[:120]
         clean_capabilities = [item for item in (capabilities or []) if item in {"vision", "reasoning", "code", "audio"}]
+        if not clean_capabilities:
+            low_raw = raw.lower()
+            if any(k in low_raw for k in ("gemini", "claude", "gpt", "flash", "pro")):
+                clean_capabilities = ["vision", "reasoning"]
         with self._connection() as conn:
             conn.execute(
                 """INSERT INTO video_flow_provider_models
@@ -641,7 +767,8 @@ class VideoFlowProviderService:
         where: list[str] = []
         values: list[Any] = []
         if provider_id:
-            self.provider(provider_id)
+            provider = self.provider(provider_id)
+            provider_id = provider["id"]
             where.append("provider = ?")
             values.append(provider_id)
         if not include_inactive:
@@ -665,7 +792,10 @@ class VideoFlowProviderService:
             public_provider = self._public_provider(provider)
             available = public_provider["status"] == "connected"
             if provider["id"] == "antigravity":
-                available = bool((public_provider.get("oauth_status") or {}).get("bridge_ready"))
+                # Available once the Google consent-popup OAuth connection is
+                # active OR the desktop-app bridge is attached.
+                antigravity_status = public_provider.get("oauth_status") or {}
+                available = available or bool(antigravity_status.get("connected")) or bool(antigravity_status.get("bridge_ready"))
             item.update({
                 "provider_name": provider["name"],
                 "provider_prefix": provider["prefix"],
@@ -717,7 +847,7 @@ class VideoFlowProviderService:
     def set_active_model(self, model_ref: str) -> None:
         ref = model_ref.strip()
         if not self.is_selectable_model_ref(ref):
-            raise ValueError("Select a connected, enabled Video Flow model or combo.")
+            raise ValueError("Select a connected, enabled Video Flow model.")
         self.set_setting("active_model", ref)
 
     def get_active_model(self) -> str:
@@ -737,88 +867,7 @@ class VideoFlowProviderService:
         }
 
     def is_selectable_model_ref(self, model_ref: str) -> bool:
-        ref = model_ref.strip()
-        selectable = self.selectable_model_refs()
-        if ref in selectable:
-            return True
-        if not ref.startswith("combo:"):
-            return False
-
-        name = ref.removeprefix("combo:")
-        if not name:
-            return False
-        try:
-            with self._connection() as conn:
-                cols = [row[1] for row in conn.execute("PRAGMA table_info(video_flow_combos)").fetchall()]
-                if "models_json" in cols:
-                    combo = conn.execute(
-                        "SELECT models_json FROM video_flow_combos WHERE name = ?", (name,)
-                    ).fetchone()
-                    if not combo:
-                        return False
-                    members = json.loads(combo["models_json"] or "[]")
-                else:
-                    combo_id_row = conn.execute(
-                        "SELECT id FROM video_flow_combos WHERE name = ?", (name,)
-                    ).fetchone()
-                    if not combo_id_row:
-                        return False
-                    member_rows = conn.execute(
-                        "SELECT model_ref FROM video_flow_combo_models WHERE combo_id = ? ORDER BY position",
-                        (int(combo_id_row["id"]),),
-                    ).fetchall()
-                    members = [row["model_ref"] for row in member_rows]
-        except (sqlite3.OperationalError, json.JSONDecodeError):
-            return False
-        return bool(members) and all(member in selectable for member in members)
-
-    def list_combos(self) -> list[dict[str, Any]]:
-        """Return model combos as UI records (id, name, models, strategy).
-
-        Handles both schema generations: legacy ``models_json`` column on
-        ``video_flow_combos`` and the normalized ``video_flow_combo_models``
-        membership table.
-        """
-        try:
-            with self._connection() as conn:
-                cols = [row[1] for row in conn.execute("PRAGMA table_info(video_flow_combos)").fetchall()]
-                if not cols:
-                    return []
-                order_col = "id" if "id" in cols else "rowid"
-                strategy_expr = "strategy" if "strategy" in cols else "NULL AS strategy"
-                if "models_json" in cols:
-                    rows = conn.execute(
-                        f"SELECT {order_col} AS id, name, {strategy_expr}, models_json FROM video_flow_combos ORDER BY {order_col}"
-                    ).fetchall()
-                    return [
-                        {
-                            "id": int(row["id"]),
-                            "name": row["name"],
-                            "strategy": row["strategy"] or "priority",
-                            "models": list(json.loads(row["models_json"] or "[]")),
-                        }
-                        for row in rows
-                    ]
-                rows = conn.execute(
-                    f"SELECT {order_col} AS id, name, {strategy_expr} FROM video_flow_combos ORDER BY {order_col}"
-                ).fetchall()
-                combos: list[dict[str, Any]] = []
-                for row in rows:
-                    member_rows = conn.execute(
-                        "SELECT model_ref FROM video_flow_combo_models WHERE combo_id = ? ORDER BY position",
-                        (int(row["id"]),),
-                    ).fetchall()
-                    combos.append(
-                        {
-                            "id": int(row["id"]),
-                            "name": row["name"],
-                            "strategy": row["strategy"] or "priority",
-                            "models": [member["model_ref"] for member in member_rows],
-                        }
-                    )
-                return combos
-        except (sqlite3.OperationalError, json.JSONDecodeError):
-            return []
+        return model_ref.strip() in self.selectable_model_refs()
 
     def oauth_status(self, provider_id: str, *, refresh: bool = True) -> dict[str, Any]:
         provider = self.provider(provider_id)
@@ -831,33 +880,17 @@ class VideoFlowProviderService:
         if not refresh:
             return status
         try:
-            if provider_id == "antigravity":
-                executable = find_antigravity_executable()
-                state_file = antigravity_state_path()
-                bridge = antigravity_bridge_status()
-                status.update({
-                    "installed": bool(executable),
-                    "executable": str(executable) if executable else "",
-                    "state_available": state_file.is_file(),
-                    "bridge": bridge,
-                    "bridge_ready": bridge["ready"],
-                })
-                status["connected"] = bool(executable and state_file.is_file())
-                if not executable:
-                    status["label"] = "Antigravity is not installed"
-                elif not status["connected"]:
-                    status["label"] = "Open Antigravity and sign in"
-                elif not bridge["ready"]:
-                    status["label"] = "Antigravity signed in; Video Flow bridge is not attached"
-                else:
-                    status["label"] = "Antigravity account ready for Video Flow"
-            elif provider_id in {"copilot", "cursor"}:
+            if provider_id in {"copilot", "cursor", "antigravity", "openai_codex"}:
                 active = [
                     item for item in self.list_connections(provider_id)
                     if item["is_active"] and item["status"] == "active"
                 ]
                 status["connected"] = bool(active)
-                status["label"] = "Account connected" if active else "Not connected"
+                if active:
+                    status["label"] = "Account connected"
+                    status["account_id"] = str(active[0].get("account_id") or "")
+                else:
+                    status["label"] = "Not connected"
                 if not active and provider_id == "cursor":
                     config = oauth_config(provider_id)
                     if any(Path(raw).expanduser().is_file() for raw in config.cli_files):
@@ -876,16 +909,26 @@ class VideoFlowProviderService:
         self.set_setting(f"oauth_status:{provider_id}", status)
         return status
 
-    def start_oauth(self, provider_id: str) -> dict[str, Any]:
+    def start_oauth(self, provider_id: str, port: int = 8991) -> dict[str, Any]:
         provider = self.provider(provider_id)
+        provider_id = provider["id"]
         if provider["category"] != "oauth":
             raise ValueError("Provider does not use account authentication.")
         config = oauth_config(provider_id)
+        from voice_flow.video_flow_oauth import (
+            start_pkce_flow,
+            launch_system_browser,
+            import_cli_session,
+            import_cursor_session,
+            start_device_flow,
+            OAuthError,
+        )
+
+        # 1. Device flow (GitHub Copilot)
         if config.flow == "device":
             info = start_device_flow(self, provider_id)
             if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
-                import webbrowser
-                webbrowser.open(info["verification_uri"])
+                launch_system_browser(info["verification_uri"])
             self._spawn_device_poll(provider_id, info)
             return {
                 "success": True,
@@ -895,40 +938,107 @@ class VideoFlowProviderService:
                 "device": info,
                 "message": f"Enter code {info['user_code']} at {info['verification_uri']} in your browser. Voice Flow connects automatically.",
             }
-        if config.flow == "cli":
+
+        # 2. OpenAI Codex / ChatGPT Device Code Flow (matches user screen recording)
+        if provider_id == "openai_codex":
+            from voice_flow.video_flow_oauth import start_openai_device_flow
             try:
-                imported = import_cli_session(self, provider_id)
-            except OAuthError as exc:
-                if not (provider.get("login_command") or []):
-                    raise RuntimeError(
-                        f"{provider['name']} session not found. Sign in to the {provider['name']} app first, then press Sign in here."
-                    ) from exc
-            else:
+                dev = start_openai_device_flow()
+                opened = False
+                if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
+                    opened = launch_system_browser(dev["verification_url"])
+                return {
+                    "success": True,
+                    "flow": "device",
+                    "provider": provider_id,
+                    "opened": opened,
+                    "user_code": dev["user_code"],
+                    "device_auth_id": dev["device_auth_id"],
+                    "verification_url": dev["verification_url"],
+                    "authUrl": dev["verification_url"],
+                    "auth_url": dev["verification_url"],
+                    "interval": dev["interval"],
+                    "expires_in": dev["expires_in"],
+                    "message": f"Enter code {dev['user_code']} in your browser. Voice Flow connects automatically.",
+                }
+            except Exception as exc:
+                try:
+                    imported = import_cli_session(self, provider_id)
+                    connection = self._create_oauth_connection(provider_id, imported)
+                    return {
+                        "success": True,
+                        "flow": "cli",
+                        "launched": False,
+                        "imported": True,
+                        "provider": provider_id,
+                        "connection": connection,
+                        "account": connection.get("account_id") or "",
+                        "message": f"Successfully connected {provider['name']} account ({connection.get('account_id') or 'active'})!",
+                    }
+                except Exception:
+                    raise exc
+
+        # 3. Local Session Import (Cursor, Claude Code)
+        if config.flow in ("cli", "hybrid") or config.cli_files:
+            try:
+                if provider_id == "cursor":
+                    imported = import_cursor_session(self)
+                else:
+                    imported = import_cli_session(self, provider_id)
                 connection = self._create_oauth_connection(provider_id, imported)
                 return {
                     "success": True,
+                    "flow": "cli",
                     "launched": False,
                     "imported": True,
                     "provider": provider_id,
                     "connection": connection,
-                    "message": f"Imported the {provider['name']} session from this machine.",
+                    "account": connection.get("account_id") or "",
+                    "message": f"Successfully connected {provider['name']} account ({connection.get('account_id') or 'active'})!",
                 }
-        if config.flow == "pkce" and config.client_id:
-            if provider_id == "antigravity":
-                executable = find_antigravity_executable()
-                if executable:
-                    subprocess.Popen([str(executable)], close_fds=True)
-            return self._start_pkce_flow(provider_id, provider, config)
+            except Exception:
+                pass
+
+        # 3. System Default Browser OAuth Flow (Antigravity, Gemini, OpenAI Codex browser OAuth)
+        if config.flow in ("pkce", "web", "hybrid") or provider_id in ("antigravity", "gemini"):
+            redirect_uri = f"http://127.0.0.1:{port}/callback"
+            res = start_pkce_flow(self, provider_id, port=port, redirect_uri=redirect_uri)
+            auth_url = res.get("auth_url", "")
+            opened = False
+            if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
+                opened = launch_system_browser(auth_url)
+            return {
+                "success": True,
+                "flow": "web",
+                "authUrl": auth_url,
+                "auth_url": auth_url,
+                "opened": opened,
+                "state": res.get("state"),
+                "redirectUri": redirect_uri,
+                "provider": provider_id,
+                "message": f"Choose your {provider['name']} account in the browser that just opened — this app connects automatically.",
+            }
+
+        # 4. Fallback CLI command launcher
         command = list(provider.get("login_command") or [])
         if not command:
-            raise RuntimeError("No login command is available.")
-        executable = find_antigravity_executable() if provider_id == "antigravity" else (shutil.which(command[0]) or None)
+            raise RuntimeError(f"No login command is available for {provider['name']}.")
+        cmd_name = command[0]
+        executable = shutil.which(cmd_name) or None
+        if not executable and os.name == "nt":
+            candidates = [
+                Path(r"D:\npm-global") / f"{cmd_name}.ps1",
+                Path(r"D:\npm-global") / f"{cmd_name}.cmd",
+                Path(os.environ.get("APPDATA", "")) / "npm" / f"{cmd_name}.cmd",
+                Path(os.environ.get("USERPROFILE", "")) / ".local" / "bin" / cmd_name,
+            ]
+            for cand in candidates:
+                if cand.is_file():
+                    executable = str(cand)
+                    break
         if not executable:
             raise RuntimeError(f"{provider['name']} is not installed. Install it, then press Refresh.")
-        if provider_id == "antigravity":
-            subprocess.Popen([str(executable)], close_fds=True)
-            antigravity_open_account_selection()
-        elif os.name == "nt":
+        if os.name == "nt":
             joined = " ".join(command)
             subprocess.Popen(
                 ["powershell.exe", "-NoExit", "-Command", joined],
@@ -937,7 +1047,13 @@ class VideoFlowProviderService:
             )
         else:
             subprocess.Popen(command, close_fds=True)
-        return {"success": True, "launched": True, "provider": provider_id, "message": "Account sign-in opened in your browser. Choose your Google account, then press Refresh here." if provider_id == "antigravity" else "Authentication flow opened."}
+        wait_for_cli_session(self, provider_id)
+        return {
+            "success": True,
+            "launched": True,
+            "provider": provider_id,
+            "message": f"Authentication flow opened for {provider['name']}. Complete the login in the window that just opened — Voice Flow connects automatically.",
+        }
 
     def _spawn_device_poll(self, provider_id: str, info: dict[str, Any]) -> None:
         """Watch an in-progress device flow in the background until it resolves.
@@ -970,49 +1086,41 @@ class VideoFlowProviderService:
         )
         self._device_poll_thread.start()
 
-    def _start_pkce_flow(self, provider_id: str, provider: dict[str, Any], config: Any) -> dict[str, Any]:
-        verifier, challenge = generate_pkce_pair()
-        state = secrets.token_urlsafe(16)
-        # Google loopback redirects must be exactly http://localhost:{port} /
-        # http://127.0.0.1:{port} with no path component.
-        redirect_uri = os.environ.get(
-            "OAUTH_REDIRECT_URI",
-            "http://127.0.0.1:8991/",
-        )
-        save_pending(self, provider_id, {
-            "flow": "pkce",
-            "state": state,
-            "code_verifier": verifier,
-            "redirect_uri": redirect_uri,
-            "started_at": time.time(),
-        })
-        params = urllib.parse.urlencode({
-            "client_id": config.client_id,
-            "response_type": "code",
-            "redirect_uri": redirect_uri,
-            "scope": config.scopes,
-            "state": state,
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-        })
-        auth_url = f"{config.auth_url}?{params}"
-        if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_NO_BROWSER_POPUP")):
-            import webbrowser
-            webbrowser.open(auth_url)
-        return {
-            "success": True,
-            "launched": True,
-            "provider": provider_id,
-            "flow": "pkce",
-            "auth_url": auth_url,
-            "message": "Sign-in opened in your browser. After choosing your account, this window will pick up the result.",
-        }
-
     def _create_oauth_connection(self, provider_id: str, imported: dict[str, Any]) -> dict[str, Any]:
         provider = self.provider(provider_id)
+        provider_id = provider["id"]
         account_id = str(imported.get("account_id") or "").strip()
         access = str(imported.get("access_token") or "")
         name = f"{provider['name']} {account_id}" if account_id else f"{provider['name']} account"
+        metadata: dict[str, Any] = {"source": str(imported.get("source") or "oauth")}
+        if imported.get("project_id"):
+            metadata["project_id"] = str(imported["project_id"])
+        if imported.get("chatgpt_account_id"):
+            metadata["chatgpt_account_id"] = str(imported["chatgpt_account_id"])
+        if imported.get("chatgpt_plan_type"):
+            metadata["chatgpt_plan_type"] = str(imported["chatgpt_plan_type"])
+
+        # Same-account re-import updates the existing connection in place
+        # instead of piling up duplicate rows (different accounts on the same
+        # provider still get their own connection each).
+        for existing in self.list_connections(provider_id):
+            if str(existing.get("account_id") or "").strip() == account_id and account_id:
+                merged_meta = dict(existing.get("metadata") or {})
+                merged_meta.update(metadata)
+                changes: dict[str, Any] = {
+                    "name": name[:100],
+                    "secret": encrypt_token(self, access) if access else "",
+                    "status": "active",
+                    "is_active": 1,
+                    "metadata": merged_meta,
+                }
+                if imported.get("refresh_token"):
+                    changes["refresh_token"] = encrypt_token(self, str(imported["refresh_token"]))
+                if imported.get("expires_at"):
+                    changes["expires_at"] = str(imported["expires_at"])
+                self.update_connection(int(existing["id"]), **changes)
+                return self.get_connection(int(existing["id"])) or {}
+
         connection = self.add_connection(
             provider_id,
             name=name[:100],
@@ -1020,7 +1128,7 @@ class VideoFlowProviderService:
             account_id=account_id,
             refresh_token=encrypt_token(self, str(imported.get("refresh_token") or "")),
             expires_at=str(imported.get("expires_at") or ""),
-            metadata={"source": str(imported.get("source") or "oauth")},
+            metadata=metadata,
         )
         self.update_connection(
             int(connection["id"]),
@@ -1028,54 +1136,6 @@ class VideoFlowProviderService:
             token_type="Bearer",
         )
         return self.get_connection(int(connection["id"])) or {}
-
-    def oauth_callback(self, provider_id: str, code: str, state: str, *, code_verifier: str = "") -> dict[str, Any]:
-        """Complete a PKCE browser flow: exchange ``code`` and store the tokens."""
-        config = oauth_config(provider_id)
-        if config.flow != "pkce" or not config.client_id:
-            raise OAuthError("This provider does not use the PKCE browser flow.")
-        pending = load_pending(self, provider_id)
-        if not pending or pending.get("state") != state:
-            raise OAuthError("OAuth state mismatch. Start the sign-in flow again.")
-        redirect_uri = str(pending.get("redirect_uri") or "")
-        payload: dict[str, Any] = {
-            "client_id": config.client_id,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "code_verifier": code_verifier or str(pending.get("code_verifier") or ""),
-        }
-        if config.client_secret:
-            payload["client_secret"] = config.client_secret
-        response = _http_json(config.token_url, data=payload)
-        access = str(response.get("access_token") or "")
-        if not access:
-            clear_pending(self, provider_id)
-            raise OAuthError(f"Token exchange failed: {response}")
-        expires_in = int(response.get("expires_in") or 0)
-        account_email = ""
-        id_token = str(response.get("id_token") or "")
-        if id_token:
-            try:
-                payload_data = json.loads(base64.urlsafe_b64decode(
-                    id_token.split(".")[1] + "=" * (-len(id_token.split(".")[1]) % 4)
-                ))
-                account_email = str(payload_data.get("email") or "")
-            except Exception:
-                account_email = ""
-        clear_pending(self, provider_id)
-        return self._create_oauth_connection(provider_id, {
-            "access_token": access,
-            "refresh_token": str(response.get("refresh_token") or ""),
-            "expires_at": int(time.time()) + expires_in if expires_in else "",
-            "account_id": account_email or provider_id,
-        })
-
-    def oauth_exchange(self, provider_id: str, code: str, state: str, *, code_verifier: str = "") -> dict[str, Any]:
-        """Exchange an authorization code delivered by the popup callback page."""
-        if not provider_id or not code:
-            raise OAuthError("Missing provider or authorization code.")
-        return self.oauth_callback(provider_id, code, state, code_verifier=code_verifier)
 
     def oauth_poll(self, provider_id: str) -> dict[str, Any]:
         """Poll an in-progress device-code flow and store tokens when authorized."""
@@ -1106,8 +1166,35 @@ class VideoFlowProviderService:
             })
         return {"status": "connected", "connection": connection}
 
+    def poll_device_flow(self, provider_id: str, device_auth_id: str = "", user_code: str = "") -> dict[str, Any]:
+        """Poll device-code flow by ID/code (OpenAI Codex / ChatGPT)."""
+        if provider_id == "codex":
+            provider_id = "openai_codex"
+        if provider_id == "openai_codex":
+            from voice_flow.video_flow_oauth import poll_openai_device_flow
+            res = poll_openai_device_flow(device_auth_id, user_code)
+            if res.get("status") == "approved":
+                connection = self._create_oauth_connection(provider_id, {
+                    "access_token": res["access_token"],
+                    "refresh_token": res.get("refresh_token", ""),
+                    "account_id": res.get("account_id", ""),
+                    "chatgpt_account_id": res.get("chatgpt_account_id", ""),
+                    "chatgpt_plan_type": res.get("chatgpt_plan_type", ""),
+                    "expires_at": res.get("expires_at", ""),
+                    "source": "device_code",
+                })
+                return {
+                    "status": "approved",
+                    "account": res.get("account_id", ""),
+                    "connection": connection,
+                }
+            return res
+        return {"status": "error", "error": f"Device flow not supported for provider '{provider_id}'."}
+
     def oauth_import(self, provider_id: str) -> dict[str, Any]:
         """Import the provider's CLI session into a fresh connection."""
+        provider = self.provider(provider_id)
+        provider_id = provider["id"]
         imported = import_cli_session(self, provider_id)
         account_id = str(imported.get("account_id") or "").strip()
         for connection in self.list_connections(provider_id):
@@ -1138,20 +1225,33 @@ class VideoFlowProviderService:
         if not connection.get("is_active"):
             return False
         status = str(connection.get("status") or "")
-        if status in {"expired", "rate_limited"}:
-            return False
         now = time.time()
+        expiry = str(connection.get("expires_at") or "")
+        expired = False
+        if expiry:
+            try:
+                if 0 < float(expiry) <= now:
+                    expired = True
+            except (TypeError, ValueError):
+                pass
+
+        if status in {"expired", "rate_limited", "error"} or expired:
+            cid = connection.get("id")
+            if cid and (connection.get("refresh_token") or (connection.get("metadata") or {}).get("source")):
+                try:
+                    from voice_flow.video_flow_oauth import refresh_and_store
+                    raw_conn = self.get_connection(int(cid), public=False) or connection
+                    refreshed = refresh_and_store(self, raw_conn)
+                    if refreshed and str(refreshed.get("status") or "") == "active":
+                        return True
+                except Exception:
+                    return False
+            return False
+
         cooldown = str(connection.get("cooldown_until") or "")
         if cooldown:
             try:
                 if float(cooldown) > now:
-                    return False
-            except (TypeError, ValueError):
-                pass
-        expiry = str(connection.get("expires_at") or "")
-        if expiry:
-            try:
-                if 0 < float(expiry) <= now:
                     return False
             except (TypeError, ValueError):
                 pass
@@ -1164,12 +1264,36 @@ class VideoFlowProviderService:
             if not self.connection_is_healthy(connection):
                 continue
             latency = int(connection.get("last_latency_ms") or 0)
-            if best is None or latency < int(best.get("last_latency_ms") or 0):
+            if best is None:
                 best = connection
+            elif latency > 0:
+                best_latency = int(best.get("last_latency_ms") or 0)
+                if best_latency <= 0 or latency < best_latency:
+                    best = connection
         return best
 
     def resolve_connection_secret(self, connection: dict[str, Any]) -> str:
+        cid = connection.get("id")
         secret = str(connection.get("secret") or "")
+        if not secret and cid:
+            raw = self.get_connection(int(cid), public=False)
+            if raw:
+                secret = str(raw.get("secret") or "")
+                connection = raw
+
+        now = time.time()
+        expiry = str(connection.get("expires_at") or "")
+        if expiry and cid and (connection.get("refresh_token") or (connection.get("metadata") or {}).get("source")):
+            try:
+                if 0 < float(expiry) <= now + 60:
+                    from voice_flow.video_flow_oauth import refresh_and_store
+                    raw_conn = self.get_connection(int(cid), public=False) or connection
+                    refreshed = refresh_and_store(self, raw_conn)
+                    if refreshed and refreshed.get("secret"):
+                        secret = str(refreshed.get("secret") or "")
+            except Exception:
+                pass
+
         return decrypt_token(self, secret) if looks_encrypted(secret) else secret
 
     def mark_connection_expired(self, connection_id: int) -> None:

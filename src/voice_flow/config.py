@@ -18,9 +18,10 @@ class Config:
     language: str = "en"
     device: str = "cpu"
     compute_type: str = "int8"
-    cpu_threads: int = field(default_factory=lambda: max(2, min(4, (os.cpu_count() or 8) // 2)))
+    cpu_threads: int = field(default_factory=lambda: max(2, min(8, (os.cpu_count() or 8) // 2)))  # 6 on 12-thread CPUs
 
     # --- Speed & Accuracy Settings ---
+    short_audio_local_max_seconds: float = 8.0  # local whisper first below this; cloud round-trip can't beat local decode on short clips
     beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
     temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
 
@@ -36,11 +37,17 @@ class Config:
     selected_mic_device: str | int | None = None  # Selected hardware mic device index/name
 
     # --- Clipboard Injection ---
-    clipboard_restore_delay_ms: int = 250  # Delay before restoring clipboard after paste
+    clipboard_restore_delay_ms: int = 180  # Delay before restoring clipboard after paste
 
     # --- Hotkeys & Shortcuts ---
     push_to_talk_shortcut: str = "Ctrl+Win"
     hands_free_shortcut: str = "Middle Click / Ctrl+Win"
+    hotkey_trigger: str = "ctrl_win"  # "ctrl_win", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "custom"
+    custom_hotkey: str = "Alt+Space"
+    custom_trigger_type: str = "hold"  # "double_tap", "hold", "toggle"
+    dictation_trigger_mode: str = "hybrid"  # "hybrid", "ptt_only", "toggle_only", "disabled"
+    middle_click_enabled: bool = True
+    ctrl_key_dictation_enabled: bool = False
 
     # --- Overlay Bar ---
     bar_width: int = 360

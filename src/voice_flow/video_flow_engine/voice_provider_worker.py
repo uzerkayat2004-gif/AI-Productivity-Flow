@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -71,7 +72,8 @@ def synthesize_to_wav(text: str, full_voice_id: str, output: Path) -> None:
         result = subprocess.run(
             [ffmpeg, "-y", "-v", "error", "-i", str(raw),
              "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(wav)],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         if result.returncode != 0 or not wav.is_file():
             raise RuntimeError(f"FFmpeg audio conversion failed: {result.stderr[-300:]}")
@@ -111,8 +113,10 @@ def _edge_bytes(text: str, voice: str) -> bytes | None:
 def _engine_bytes(text: str, full_model_id: str) -> bytes | None:
     """Cloud voices reuse the app's shared TTS engine (keys from Audio Flow)."""
     try:
-        from voice_flow import tts_engine
-        return tts_engine._synthesize(text, full_model_id)
+        # Import the module-level singleton (the class instance), not the
+        # module: `from voice_flow import tts_engine` yields the module.
+        from voice_flow.tts_engine import tts_engine as engine_instance
+        return engine_instance._synthesize(text, full_model_id)
     except Exception as exc:  # surfaced to Narova as a provider error
         raise RuntimeError(f"TTS synthesis via {full_model_id!r} failed: {exc}") from exc
 
@@ -140,6 +144,10 @@ def _handle(request: dict) -> dict:
             output = Path(str(request.get("output") or ""))
             if not text:
                 raise ValueError("synthesize request has no text")
+            if len(text) > 20_000:
+                raise ValueError("synthesize text exceeds the 20000-character limit")
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,127}", speaker.strip() or DEFAULT_VOICE):
+                raise ValueError("synthesize speaker id contains unsafe characters")
             if not output.is_absolute():
                 raise ValueError("synthesize output must be an absolute path")
             output.parent.mkdir(parents=True, exist_ok=True)

@@ -2,9 +2,14 @@
 
 Configures seamless, zero-console auto-starting for Voice Flow on Windows:
 1. Windows Registry: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\VoiceFlow
-2. Windows Startup Folder: %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Voice Flow.lnk
-3. User Desktop: %USERPROFILE%\\Desktop\\Voice Flow.lnk
-4. Start Menu Programs: %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Voice Flow.lnk
+   (the ONLY boot autostart mechanism - registering more than one launches
+   two app instances at logon)
+2. User Desktop: %USERPROFILE%\\Desktop\\Voice Flow.lnk (manual launch only)
+3. Start Menu Programs: %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Voice Flow.lnk
+   (manual launch only)
+
+Legacy Startup-folder .lnk autostart shortcuts are detected and removed so
+upgrades can never leave a second boot mechanism behind.
 """
 
 from __future__ import annotations
@@ -38,6 +43,16 @@ def _installed_watchdog_command() -> tuple[str, str, str] | None:
 
 
 def get_vbs_launcher_path() -> Path:
+    """Prefer the stable installed copy so dev checkouts never hijack the
+    boot autorun: a dev-tree run must keep the Run key pointed at the
+    installed launcher, not at its own (changing) project root."""
+    stable_root = Path.home() / ".gemini" / "antigravity" / "scratch" / "voice-flow"
+    stable_vbs = stable_root / "VoiceFlowLauncher.vbs"
+    try:
+        if stable_vbs.exists() and get_project_root().resolve() != stable_root.resolve():
+            return stable_vbs
+    except Exception:
+        pass
     return get_project_root() / "VoiceFlowLauncher.vbs"
 
 
@@ -165,22 +180,89 @@ def unregister_registry_autorun() -> bool:
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE) as key:
-            try:
-                winreg.DeleteValue(key, "VoiceFlow")
-                print(f"[OK] Registry Auto-Run removed: HKCU\\{key_path}\\VoiceFlow")
-                return True
-            except FileNotFoundError:
-                return True
+            for val_name in ("VoiceFlow", "Voice Flow", "AI Productivity Flow"):
+                try:
+                    winreg.DeleteValue(key, val_name)
+                    print(f"[OK] Registry Auto-Run removed: HKCU\\{key_path}\\{val_name}")
+                except FileNotFoundError:
+                    pass
+            return True
     except Exception as e:
         print(f"[ERROR] Failed to remove Registry Auto-Run: {e}")
         return False
+
+
+def is_registry_autorun_enabled() -> bool:
+    """Check if Voice Flow is registered in HKCU Run key."""
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+            for val_name in ("VoiceFlow", "Voice Flow", "AI Productivity Flow"):
+                try:
+                    val, _ = winreg.QueryValueEx(key, val_name)
+                    if val and str(val).strip():
+                        return True
+                except (FileNotFoundError, OSError):
+                    pass
+        return False
+    except Exception:
+        return False
+
+
+def is_startup_folder_enabled() -> bool:
+    """Check if Voice Flow shortcut exists in Startup folder."""
+    try:
+        startup_dir = get_startup_dir()
+        for name in ("Voice Flow.lnk", "VoiceFlow.lnk", "AI Productivity Flow.lnk"):
+            if (startup_dir / name).exists():
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def is_autostart_enabled() -> bool:
+    """Check if Voice Flow auto-start is active in Registry or Startup folder."""
+    return is_registry_autorun_enabled() or is_startup_folder_enabled()
+
+
+def set_autostart(enabled: bool) -> bool:
+    """Enable or disable Windows auto-start cleanly across Registry and Startup folder."""
+    if enabled:
+        reg_ok = register_registry_autorun()
+        unregister_startup_folder()  # Prevent duplicate startup
+        return reg_ok
+    else:
+        reg_ok = unregister_registry_autorun()
+        su_ok = unregister_startup_folder()
+        return reg_ok and su_ok
+
+
+def ensure_single_autostart_mechanism() -> bool:
+    """Guarantee exactly ONE boot mechanism: the HKCU Run key.
+
+    Older installs registered a "dual-layer" autostart (Run key AND a
+    Startup-folder .lnk), so Windows launched the app twice at logon and two
+    app windows opened. This (re)registers the Run key and removes every
+    Startup-folder shortcut so an install/upgrade can never leave a second
+    boot mechanism behind."""
+    reg_ok = register_registry_autorun()
+    lnk_ok = unregister_startup_folder()
+    return reg_ok and lnk_ok
 
 
 def register_startup_folder() -> bool:
     """Register Voice Flow shortcut in Windows Startup Folder."""
     startup_dir = get_startup_dir()
     startup_dir.mkdir(parents=True, exist_ok=True)
-    shortcut_path = startup_dir / "Voice Flow.lnk"
+    for legacy in ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk"):
+        legacy_sc = startup_dir / legacy
+        if legacy_sc.exists():
+            try:
+                legacy_sc.unlink()
+            except Exception:
+                pass
+    shortcut_path = startup_dir / "AI Productivity Flow.lnk"
 
     icon_path = get_icon_path()
     installed = _installed_watchdog_command()
@@ -219,16 +301,17 @@ def register_startup_folder() -> bool:
 
 def unregister_startup_folder() -> bool:
     startup_dir = get_startup_dir()
-    shortcut_path = startup_dir / "Voice Flow.lnk"
-    if shortcut_path.exists():
-        try:
-            shortcut_path.unlink()
-            print(f"[OK] Startup folder shortcut removed: {shortcut_path}")
-            return True
-        except Exception as e:
-            print(f"[ERROR] Could not remove shortcut at {shortcut_path}: {e}")
-            return False
-    return True
+    success = True
+    for name in ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk", "AI Productivity Flow.lnk"):
+        shortcut_path = startup_dir / name
+        if shortcut_path.exists():
+            try:
+                shortcut_path.unlink()
+                print(f"[OK] Startup folder shortcut removed: {shortcut_path}")
+            except Exception as e:
+                print(f"[ERROR] Could not remove shortcut at {shortcut_path}: {e}")
+                success = False
+    return success
 
 
 def register_desktop_shortcuts() -> bool:
@@ -241,7 +324,17 @@ def register_desktop_shortcuts() -> bool:
     success_all = True
     # Desktop shortcuts
     for dt in get_desktop_dirs():
-        dt_sc = dt / "Voice Flow.lnk"
+        # Remove legacy shortcuts to prevent duplicate desktop icons
+        for legacy in ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk"):
+            legacy_dt = dt / legacy
+            if legacy_dt.exists():
+                try:
+                    legacy_dt.unlink()
+                    print(f"[OK] Cleaned up legacy shortcut: {legacy_dt}")
+                except Exception as e:
+                    print(f"[WARNING] Could not remove legacy shortcut at {legacy_dt}: {e}")
+
+        dt_sc = dt / "AI Productivity Flow.lnk"
         ok = create_windows_shortcut(
             shortcut_path=dt_sc,
             target_path=wscript_path,
@@ -257,7 +350,16 @@ def register_desktop_shortcuts() -> bool:
 
     # Start Menu Programs shortcut
     sm_dir = get_start_menu_programs_dir()
-    sm_sc = sm_dir / "Voice Flow.lnk"
+    for legacy in ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk"):
+        legacy_sm = sm_dir / legacy
+        if legacy_sm.exists():
+            try:
+                legacy_sm.unlink()
+                print(f"[OK] Cleaned up legacy Start Menu shortcut: {legacy_sm}")
+            except Exception as e:
+                print(f"[WARNING] Could not remove legacy Start Menu shortcut at {legacy_sm}: {e}")
+
+    sm_sc = sm_dir / "AI Productivity Flow.lnk"
     ok_sm = create_windows_shortcut(
         shortcut_path=sm_sc,
         target_path=wscript_path,
@@ -304,20 +406,21 @@ If Not fso.FileExists(strPythonw) Then
     strPythonw = "pythonw.exe"
 End If
 
-WshShell.Run \"\"\"\" & strPythonw & \"\"\" -m voice_flow.watchdog\", 0, False
+WshShell.Run \"\"\"\" & strPythonw & \"\"\" -m voice_flow.gui.desktop_launcher\", 0, False
 """
         vbs_path.write_text(vbs_content, encoding="utf-8")
         print(f"  [OK] Launcher VBS written.")
     else:
         print(f"[1/4] Found Launcher VBS at {vbs_path}")
 
-    # Step 2: Register Windows Registry Auto-Run
+    # Step 2: Register Windows Registry Auto-Run (the ONLY boot mechanism)
     print("\n[2/4] Configuring Windows Registry Auto-Run (HKCU)...")
     reg_ok = register_registry_autorun()
 
-    # Step 3: Register Startup Directory Shortcut
-    print("\n[3/4] Configuring Windows Startup Folder Shortcut...")
-    su_ok = register_startup_folder()
+    # Step 3: Ensure a single boot mechanism - remove any legacy Startup
+    # Folder shortcut so Windows cannot launch the app twice at logon.
+    print("\n[3/4] Removing legacy Startup Folder shortcut (single boot mechanism)...")
+    su_ok = unregister_startup_folder()
 
     # Step 4: Register Desktop & Start Menu Shortcuts
     print("\n[4/4] Creating Desktop & Start Menu Program Shortcuts...")
@@ -326,9 +429,9 @@ WshShell.Run \"\"\"\" & strPythonw & \"\"\" -m voice_flow.watchdog\", 0, False
     print("\n========================================================")
     if reg_ok and su_ok and dt_ok:
         print("  INSTALLATION SUCCESSFUL!")
-        print("  Voice Flow is now configured for dual-layer auto-startup:")
-        print("  1. Windows Registry (HKCU Run)")
-        print("  2. Windows Startup Folder (.lnk)")
+        print("  Voice Flow is now configured for single-mechanism auto-startup:")
+        print("  1. Windows Registry (HKCU Run) - the only boot autostart entry")
+        print("  2. Legacy Startup Folder .lnk removed (no duplicate instances at logon)")
         print("  3. Background Watchdog Supervisor (Auto-Recovery)")
         print("  4. Zero Console Popup (Silent pythonw execution)")
         print("========================================================")
@@ -364,7 +467,9 @@ def status_report() -> None:
     print(f"1. Registry Auto-Run:  {reg_val}")
 
     # 2. Startup Folder
-    startup_sc = get_startup_dir() / "Voice Flow.lnk"
+    startup_sc = get_startup_dir() / "AI Productivity Flow.lnk"
+    if not startup_sc.exists():
+        startup_sc = get_startup_dir() / "Voice Flow.lnk"
     print(f"2. Startup Shortcut:   {'EXISTS (' + str(startup_sc) + ')' if startup_sc.exists() else 'MISSING'}")
 
     # 3. Launcher VBS
@@ -372,8 +477,11 @@ def status_report() -> None:
     print(f"3. Launcher VBS:       {'EXISTS (' + str(vbs) + ')' if vbs.exists() else 'MISSING'}")
 
     # 4. Desktop Shortcut
-    dts = [p / "Voice Flow.lnk" for p in get_desktop_dirs()]
+    dts = [p / "AI Productivity Flow.lnk" for p in get_desktop_dirs()]
     found_dts = [str(p) for p in dts if p.exists()]
+    if not found_dts:
+        legacy_dts = [p / "Voice Flow.lnk" for p in get_desktop_dirs()]
+        found_dts = [str(p) for p in legacy_dts if p.exists()]
     print(f"4. Desktop Shortcuts:  {', '.join(found_dts) if found_dts else 'MISSING'}")
 
     print("========================================================")

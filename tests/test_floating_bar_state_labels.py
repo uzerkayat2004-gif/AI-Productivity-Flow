@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from voice_flow.overlay import FloatingOverlayBar
+from voice_flow.overlay import FloatingOverlayBar, _safe_done_label
 
 
 class RecordingCanvas:
@@ -92,3 +92,54 @@ def test_error_bar_uses_neutral_working_copy_without_decorative_lines() -> None:
     assert [call["text"] for call in text_calls] == ["Working"]
     assert text_calls[0]["fill"] == bar.TEXT_WHITE
     assert not any(name == "create_line" for name, _args, _kwargs in canvas.calls)
+
+
+def test_done_bar_renders_safe_fixed_outcome_only() -> None:
+    bar = FloatingOverlayBar()
+    bar.state = "DONE"
+    # The caller's full text may contain dictation after a colon; it must not
+    # be rendered in the overlay.
+    bar.done_label = _safe_done_label("AI polished — Email / Professional")
+
+    canvas = _render(bar)
+
+    labels = [call["text"] for call in _text_calls(canvas)]
+    assert "AI polished" in labels
+    assert "Email / Professional" not in labels
+    assert "I will arrive at five" not in labels
+    assert _safe_done_label("AI polished: I will arrive at five") == "AI polished"
+    assert _safe_done_label("AI polished — Email / Professional") == "AI polished"
+
+
+def test_local_fallback_error_renders_safe_outcome_without_error_text() -> None:
+    bar = FloatingOverlayBar()
+    bar.state = "ERROR"
+    bar.error_message = "Cleaned locally: private dictated words"
+    bar.done_label = _safe_done_label(bar.error_message)
+
+    canvas = _render(bar)
+
+    labels = [call["text"] for call in _text_calls(canvas)]
+    assert labels == ["Cleaned locally"]
+
+
+def test_voice_completion_feedback_stays_readable_and_cannot_reset_new_recording():
+    from types import SimpleNamespace
+    bar = FloatingOverlayBar()
+    timers = []
+    bar.win = object()
+    bar.root = SimpleNamespace(after=lambda delay, callback: timers.append((delay, callback)))
+    bar._run_on_ui = lambda callback: callback()
+    bar._bring_to_top = lambda: None
+    bar._draw = lambda: None
+    bar._animate = lambda generation: None
+    bar.show_done("AI polished")
+    assert bar.state == "DONE" and bar.done_label == "AI polished"
+    assert timers[-1][0] >= 4000
+    stale = timers[-1][1]
+    bar.state = "RECORDING"
+    bar._animation_generation += 1
+    stale()
+    assert bar.state == "RECORDING"
+    bar.show_error("Cleaned locally")
+    assert timers[-1][0] >= 5000

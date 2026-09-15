@@ -1,15 +1,20 @@
-// Voice Flow PWA Service Worker — Network-First Strategy (v9)
-const CACHE_NAME = "voice-flow-cache-v10";
+// Voice Flow PWA Service Worker — Network-First Strategy (v38)
+const CACHE_NAME = "voice-flow-cache-v41";
 const APP_SHELL = "/index.html";
 const ASSETS_TO_CACHE = [
   APP_SHELL,
   "/design-system.css",
   "/styles.css",
+  "/usability.css",
   "/video-flow.css",
   "/app.js",
   "/video-flow.js",
   "/manifest.json",
-  "/assets/logo.png"
+  "/assets/logo.png",
+  "/assets/logo.svg",
+  "/assets/icon.png",
+  "/assets/favicon.ico",
+  "/favicon.ico"
 ];
 
 self.addEventListener("install", (evt) => {
@@ -31,7 +36,7 @@ self.addEventListener("activate", (evt) => {
       );
     })
   );
-  self.clients.claim();
+  evt.waitUntil(self.clients.claim());
 });
 
 self.addEventListener("fetch", (evt) => {
@@ -41,13 +46,14 @@ self.addEventListener("fetch", (evt) => {
       .then((response) => {
         if (response && response.status === 200 && response.type === "basic") {
           const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            if (evt.request.mode === "navigate") {
-              cache.put(APP_SHELL, response.clone());
-            } else {
-              cache.put(evt.request, responseToCache);
-            }
-          });
+          evt.waitUntil(
+            caches.open(CACHE_NAME).then((cache) => {
+              if (new URL(evt.request.url).pathname === "/") {
+                return cache.put(APP_SHELL, response.clone());
+              }
+              return cache.put(evt.request, responseToCache);
+            }).catch(() => {})
+          );
         }
         return response;
       })

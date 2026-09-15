@@ -1,7 +1,7 @@
 [project]
 name = "voice-flow"
 version = "1.0.0"
-description = "AI Productivity Flow — Windows desktop productivity app for voice dictation, selected-text audio, and visual explainer videos."
+description = "Flow — Open-source multimodal information accessibility and transformation platform (Speech, Audio, Video)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -15,10 +15,13 @@ dependencies = [
     "pyperclip>=1.9.0",
     "pyautogui>=0.9.54",
     "pywebview>=4.4.1",
+    "pystray>=0.19.5",
+    "pillow>=10.0.0",
+    "psutil>=5.9.0",
     "edge-tts>=7.0.0",
     "pypdf>=5.0.0",
-    "pywinauto>=0.6.9",
-    "comtypes>=1.4.0",
+    "websockets>=14.0",
+    "requests>=2.31.0",
 ]
 
 [project.scripts]
@@ -32,5 +35,7 @@ build-backend = "hatchling.build"
 packages = ["src/voice_flow"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+addopts = "-s"
 pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

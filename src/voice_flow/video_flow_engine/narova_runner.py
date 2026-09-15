@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import runtime_env
-from .process_manager import ProcessManager
+from .process_manager import ProcessManager, hidden_window_kwargs
 from .sandbox import EngineError
 
 
@@ -122,11 +122,20 @@ class NarovaRunner:
             for relative, content in files.items():
                 rel = str(relative).replace("\\", "/").strip("/")
                 parts = Path(rel).parts
-                if not rel or rel.startswith("..") or ".." in parts or ":" in rel:
+                if not rel or rel == "." or rel.startswith("..") or ".." in parts or ":" in rel or len(rel) > 256 or len(parts) > 16:
                     continue
                 target = narova_dir.joinpath(*parts)
+                try:
+                    resolved = target.resolve()
+                    if resolved != narova_dir.resolve() and narova_dir.resolve() not in resolved.parents:
+                        continue
+                except (OSError, ValueError):
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(str(content), encoding="utf-8")
+                try:
+                    target.write_text(content if isinstance(content, str) else str(content), encoding="utf-8")
+                except (OSError, UnicodeError, ValueError):
+                    continue
         serialized = json.dumps(production, ensure_ascii=False, indent=2)
         (project_dir / "bridge-output.json").write_text(serialized, encoding="utf-8")
         config_path = narova_dir / "reel.config.json"
@@ -167,6 +176,7 @@ class NarovaRunner:
     ) -> None:
         manager.raise_if_cancelled(job_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        hide_kwargs = hidden_window_kwargs()
         process = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -176,17 +186,27 @@ class NarovaRunner:
             encoding="utf-8",
             errors="replace",
             env=_safe_environment(),
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP | hide_kwargs.get("creationflags", 0)
+                if os.name == "nt"
+                else 0
+            ),
+            startupinfo=hide_kwargs.get("startupinfo"),
         )
         manager.register(job_id, process)
         try:
             try:
                 output, _ = process.communicate(timeout=self.timeout_seconds)
             except subprocess.TimeoutExpired as exc:
-                manager.cancel_job(job_id)
+                manager.terminate_job(job_id)
+                try:
+                    process.communicate(timeout=10)
+                except Exception:
+                    pass
                 raise EngineError("timeout", f"Command timed out after {self.timeout_seconds:g}s") from exc
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"$ {' '.join(command)}\n{output}\n")
+            manager.raise_if_cancelled(job_id)
             if process.returncode != 0:
                 raise EngineError(error_code, f"{error_code.replace('_', ' ')} command failed; see logs/{log_path.name}")
         finally:

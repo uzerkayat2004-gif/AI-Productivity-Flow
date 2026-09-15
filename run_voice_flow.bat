@@ -54,10 +54,10 @@ if exist "%~dp0VoiceFlowLauncher.vbs" (
     wscript.exe "%~dp0VoiceFlowLauncher.vbs"
 ) else (
     if exist "%~dp0.venv\Scripts\pythonw.exe" (
-        start "" "%~dp0.venv\Scripts\pythonw.exe" -m voice_flow.watchdog
+        start "" "%~dp0.venv\Scripts\pythonw.exe" -m voice_flow.gui.desktop_launcher
     ) else if exist "C:\Python314\pythonw.exe" (
-        start "" "C:\Python314\pythonw.exe" -m voice_flow.watchdog
+        start "" "C:\Python314\pythonw.exe" -m voice_flow.gui.desktop_launcher
     ) else (
-        start "" pythonw -m voice_flow.watchdog
+        start "" pythonw -m voice_flow.gui.desktop_launcher
     )
 )

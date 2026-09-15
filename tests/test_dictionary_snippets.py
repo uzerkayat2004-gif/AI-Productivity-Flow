@@ -160,6 +160,22 @@ def test_dictionary_reload_is_immediate_after_storage_change(store):
     assert engine.apply_dictionary_post_processing("openai") == "OpenAI"
 
 
+def test_auto_captured_rows_are_visible_but_never_active_dictionary_rules(store):
+    """Learned metadata must not silently become a spelling rewrite."""
+    assert store.add_dictionary_word("LearnedTerm", category="Auto-Captured")
+    engine = DictionaryEngine(store)
+
+    assert engine.apply_dictionary_post_processing("learnedterm") == "learnedterm"
+    assert "LearnedTerm" not in engine.get_initial_prompt()
+    assert store.get_dictionary_entries(include_auto=True)[0]["category"] == "Auto-Captured"
+
+
+def test_dictionary_update_rejects_legacy_expansion_syntax(store):
+    assert store.add_dictionary_word("VoiceFlow")
+    assert not store.update_dictionary_word("VoiceFlow", "shortcut -> expansion")
+    assert store.get_dictionary_words() == ["VoiceFlow"]
+
+
 def test_engine_snapshot_reads_remain_safe_while_lexicon_changes(store):
     engine = DictionaryEngine(store)
     errors = []
@@ -186,6 +202,15 @@ def test_static_ui_has_no_snippets_page_after_feature_removal():
     assert "loadSnippets" not in javascript and "renderSnippets" not in javascript
 
 
+def test_static_dictionary_page_uses_auto_learn():
+    """Suggestions section was removed; words auto-learn in JS background."""
+    root = Path(__file__).parents[1] / "src" / "voice_flow" / "gui"
+    html = (root / "index.html").read_text(encoding="utf8")
+    dictionary_page = html.split('<section id="page-dictionary"', 1)[1].split("</section>", 1)[0]
+    # Old manual-approval UI was removed; auto-learn comment marks intent
+    assert "auto-learn" in dictionary_page.lower() or "Auto-learned" in dictionary_page
+
+
 @contextmanager
 def api_server(store, monkeypatch):
     import voice_flow.gui.api_server as api
@@ -209,6 +234,70 @@ def post(url, path, body):
             return error.code, json.load(error)
 
 
+def get(url, path):
+    try:
+        with urlopen(url + path) as response:
+            return response.status, json.load(response)
+    except HTTPError as error:
+        with error:
+            return error.code, json.load(error)
+
+
+def test_api_returns_evidence_backed_dictionary_suggestions(store, monkeypatch):
+    for _ in range(3):
+        store.record_lexicon_candidate("Kubernetes", "cuber netties", source="usage-history")
+    with api_server(store, monkeypatch) as url:
+        status, suggestions = get(url, "/api/dictionary/suggestions")
+    assert status == 200
+    assert [(item["term"], item["variant"], item["state"]) for item in suggestions] == [
+        ("Kubernetes", "cuber netties", "suggested")
+    ]
+
+
+def test_repeated_name_mishearing_promotes_to_suggestion_with_evidence(store):
+    """Genuinely repeated user vocabulary (used 3+ times with a heard-as
+    variant) must surface as an evidence-backed suggestion, never silently."""
+    from voice_flow.correction_learning import extract_correction_pairs
+
+    pairs = extract_correction_pairs("please ask joe ee to review", "Please ask Joey to review")
+    assert ("Joey", "joe ee") in pairs
+    for term, variant in pairs:
+        store.record_lexicon_candidate(term, variant, source="correction")
+        store.record_lexicon_candidate(term, variant, source="correction")
+        store.record_lexicon_candidate(term, variant, source="correction")
+    suggestions = store.get_lexicon_suggestions()
+    joey = [item for item in suggestions if item["term"] == "Joey"]
+    assert joey and joey[0]["variant"] == "joe ee" and joey[0]["evidence"] >= 3
+
+
+def test_ignored_suggestion_never_resurfaces(store):
+    """Ignore persistence: an ignored suggestion stays ignored and does not
+    resurface in the suggestion list, even with further observations."""
+    for _ in range(3):
+        store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    candidate = store.get_lexicon_suggestions()[0]
+    assert store.set_lexicon_candidate_state(candidate["id"], "ignored")
+    assert store.get_lexicon_suggestions() == []
+    # Further observations of the same pair must not flip it back to suggested.
+    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    assert store.get_lexicon_suggestions() == []
+
+
+def test_suggestions_require_heard_as_variant_evidence(store):
+    """A suggestion is a candidate correction with evidence: term plus the
+    heard-as variant and counts — never a bare single filler word."""
+    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    assert store.get_lexicon_suggestions() == []
+    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    suggestions = store.get_lexicon_suggestions()
+    assert len(suggestions) == 1
+    item = suggestions[0]
+    assert item["term"] == "Kubernetes" and item["variant"] == "cuber netties"
+    assert item["evidence"] >= 3 and item["state"] == "suggested"
+
+
 def test_api_correction_crud(store, monkeypatch):
     with api_server(store, monkeypatch) as url:
         status, correction = post(url, "/api/dictionary/corrections/add", {"wrong_text": "ada lovelace", "correct_text": "Ada Lovelace"})
@@ -217,6 +306,22 @@ def test_api_correction_crud(store, monkeypatch):
         assert status == 200 and changed_correction["success"]
         status, removed = post(url, "/api/dictionary/corrections/remove", {"id": correction["correction"]["id"]})
         assert status == 200 and removed["success"]
+
+
+def test_api_dictionary_details_shows_auto_rows_with_provenance(store, monkeypatch):
+    assert store.add_dictionary_word("PersonalTerm")
+    assert store.add_dictionary_word("LearnedTerm", category="Auto-Captured")
+    with api_server(store, monkeypatch) as url:
+        status, entries = get(url, "/api/dictionary?details=1&include_auto=1")
+        assert status == 200
+    assert [(item["word"], item["category"]) for item in entries] == [
+        ("PersonalTerm", "Personal"),
+        ("LearnedTerm", "Auto-Captured"),
+    ]
+    with api_server(store, monkeypatch) as url:
+        status, words = get(url, "/api/dictionary")
+        assert status == 200
+    assert words == ["PersonalTerm", "LearnedTerm"]
 
 
 def test_api_rejects_origin_before_body_and_oversized_body(store, monkeypatch):
@@ -232,7 +337,7 @@ def test_api_rejects_origin_before_body_and_oversized_body(store, monkeypatch):
         assert " 413 " in header_only("Content-Type: application/json\r\nContent-Length: 65537")
 
 
-def test_pipeline_polishes_then_styles_then_history_before_inject(monkeypatch):
+def test_pipeline_polishes_then_styles_then_saves_final_outcome_after_inject(monkeypatch):
     """The final styled text is what is saved and pasted, never re-styled."""
     from types import SimpleNamespace
     import voice_flow.main as main
@@ -241,9 +346,19 @@ def test_pipeline_polishes_then_styles_then_history_before_inject(monkeypatch):
     order = []
     # The polisher owns the AI pass plus deterministic cleanup and the
     # dictionary vocabulary pass; the pipeline then styles once.
-    monkeypatch.setattr(main.polisher, "polish", lambda text, style_instruction="", cleanup_level=None, **kw: order.append("polish") or "polished")
+    def fake_polish(text, style_instruction="", cleanup_level=None, **kw):
+        order.append("polish")
+        kw["outcome_callback"]("ai_accepted")
+        return "polished"
+    monkeypatch.setattr(main.polisher, "polish", fake_polish)
     monkeypatch.setattr(main, "smart_format", lambda text, style, context: order.append("style") or "styled")
-    monkeypatch.setattr(main, "storage", SimpleNamespace(add_dictation=lambda **kwargs: order.append(("history", kwargs["polished_text"])) or SimpleNamespace(id=1)))
+    history_done = threading.Event()
+    saved = []
+    def save_history(raw, polished, *args, **kwargs):
+        order.append(("history", polished))
+        saved.append(kwargs)
+        history_done.set()
+    monkeypatch.setattr(main, "storage", SimpleNamespace(add_dictation=save_history))
     app = object.__new__(main.VoiceFlowApp)
     app._state_lock = threading.RLock()
     app.state = main.DictationState.PROCESSING
@@ -255,4 +370,7 @@ def test_pipeline_polishes_then_styles_then_history_before_inject(monkeypatch):
     session = main.DictationSession(1, "App", "other", "other_formal", 0, "cleanup_light", CursorContext(), False)
     app.session = session
     app._process_dictation_pipeline(session, object(), 1.0)
-    assert order == ["polish", "style", ("history", "styled"), ("inject", "styled"), ("done", "styled")]
+    assert history_done.wait(2)
+    assert order[:3] == ["polish", "style", ("inject", "styled")]
+    assert ("history", "styled") in order and ("done", "AI polished") in order
+    assert saved[0]["status"] == "success" and saved[0]["insertion_status"] == "pasted"

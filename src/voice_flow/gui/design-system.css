@@ -9,50 +9,50 @@
 /* ---------- 1. THEME TOKENS ---------- */
 :root,
 html[data-theme="dark"] {
-  --accent: #ffffff;
-  --accent-strong: #e8e8e8;
-  --accent-deep: #d4d4d4;
-  --accent-soft: rgba(255, 255, 255, 0.12);
-  --accent-glow: rgba(255, 255, 255, 0.45);
-  --accent-text: #ffffff;
-  --peach: #d4d4d4;
+  --accent: #f3e5d8;
+  --accent-strong: #e8d3c3;
+  --accent-deep: #dfcbb5;
+  --accent-soft: rgba(243, 229, 216, 0.12);
+  --accent-glow: rgba(243, 229, 216, 0.3);
+  --accent-text: #F9FAFB;
+  --peach: #e8d3c3;
 
-  --primary-orange: #ffffff;
-  --primary-orange-hover: #e0e0e0;
-  --primary-orange-light: #2b2b2b;
-  --primary-orange-border: rgba(255, 255, 255, 0.4);
+  --primary-orange: #f3e5d8;
+  --primary-orange-hover: #e8d3c3;
+  --primary-orange-light: rgba(243, 229, 216, 0.1);
+  --primary-orange-border: rgba(243, 229, 216, 0.35);
 
-  /* legacy styles.css tokens → black & white in dark */
-  --text-main: #f5f5f5;
-  --text-muted: #b3b3b3;
-  --text-light: #8a8a8a;
-  --border-color: rgba(255, 255, 255, 0.09);
-  --bg-main: #0a0a0a;
-  --bg-sidebar: rgba(10, 10, 10, 0.94);
-  --card-bg: #131313;
+  /* legacy styles.css tokens → developer-grid dark spec */
+  --text-main: #F9FAFB;
+  --text-muted: #8B949E;
+  --text-light: #6B7280;
+  --border-color: rgba(255, 255, 255, 0.07);
+  --bg-main: #0f1015;
+  --bg-sidebar: #0b0c10;
+  --card-bg: #181922;
 
-  --bg: #0a0a0a;
+  --bg: #0f1015;
   --bg-grad-1: rgba(255, 255, 255, 0.035);
   --bg-grad-2: rgba(255, 255, 255, 0.02);
-  --surface: #131313;
-  --surface-2: #1a1a1a;
-  --surface-3: #101010;
-  --sidebar-bg: rgba(10, 10, 10, 0.94);
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --text: #f5f5f5;
-  --text-muted: #b3b3b3;
-  --text-light: #8a8a8a;
+  --surface: #181922;
+  --surface-2: #1b1c24;
+  --surface-3: #202129;
+  --sidebar-bg: #0b0c10;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #F9FAFB;
+  --text-muted: #8B949E;
+  --text-light: #6B7280;
 
-  --success: #4ade80;
+  --success: #22C55E;
   --success-bg: rgba(74, 222, 128, 0.12);
   --danger: #f87171;
   --danger-bg: rgba(248, 113, 113, 0.12);
 
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 8px 26px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 18px 54px rgba(0, 0, 0, 0.75);
-  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 html[data-theme="light"] {
@@ -201,6 +201,100 @@ html[data-theme="light"] .nav-item.active {
   opacity: 0.9;
 }
 
+/* ---------- THEME TOGGLE BUTTON IN SIDEBAR ---------- */
+.theme-nav-item {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 8px 12px !important;
+  border-radius: 12px !important;
+  user-select: none !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid var(--border) !important;
+  background: var(--surface-1) !important;
+  margin-top: 6px !important;
+}
+
+.theme-nav-item:hover {
+  background: var(--surface-2) !important;
+  border-color: var(--accent-soft) !important;
+  transform: translateY(-1px);
+}
+
+.theme-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-nav-left .nav-icon {
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: none !important;
+}
+
+.theme-nav-item:hover .theme-nav-left .nav-icon {
+  transform: rotate(20deg) scale(1.15);
+}
+
+.theme-nav-toggle-switch {
+  width: 34px;
+  height: 18px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  position: relative;
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  flex-shrink: 0;
+}
+
+.theme-nav-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease;
+}
+
+html[data-theme="dark"] .theme-nav-item {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html[data-theme="dark"] .theme-nav-toggle-switch {
+  background: linear-gradient(135deg, var(--accent, #f3e5d8), var(--accent-deep, #dfcbb5));
+  border-color: rgba(243, 229, 216, 0.4);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .theme-nav-toggle-knob {
+  transform: translateX(16px);
+  background: #ffffff;
+}
+
+html[data-theme="light"] .theme-nav-item {
+  background: #fdfaf7 !important;
+  border-color: rgba(120, 90, 40, 0.15) !important;
+}
+
+html[data-theme="light"] .theme-nav-toggle-switch {
+  background: #e2d7cb;
+  border-color: #d1c4b5;
+}
+
+html[data-theme="light"] .theme-nav-toggle-knob {
+  transform: translateX(0);
+  background: #ffffff;
+}
+
 .main-content { color: var(--text); }
 
 /* ---------- 4. PAGE HEADERS ---------- */
@@ -301,6 +395,10 @@ textarea:focus {
 .modal-overlay {
   background: rgba(0, 0, 0, 0.55) !important;
   backdrop-filter: blur(14px);
+}
+.modal-overlay.hidden,
+.hidden {
+  display: none !important;
 }
 
 .perfect-keys-card {
@@ -764,13 +862,22 @@ kbd {
 
 /* ---------- 15. DARK MODE — PURE BLACK & WHITE ---------- */
 html[data-theme="dark"] {
-  /* hardcoded-orange leftovers get forced to white/gray */
-  --accent-text: #ffffff;
+  /* hardcoded leftovers get forced to cream */
+  --accent-text: #F9FAFB;
 }
 
 html[data-theme="dark"] .brand-icon {
-  background: linear-gradient(135deg, #ffffff, #d4d4d4) !important;
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
   box-shadow: 0 2px 10px rgba(255, 255, 255, 0.25);
+}
+
+/* Sidebar logo is a transparent PNG <img>: opt out of the tinted
+   badge background above so it blends with the dark sidebar.
+   Higher specificity (0,2,2) than the rule above (0,2,1); the
+   alpha-aware drop-shadow filter from `img.brand-icon` still applies. */
+html[data-theme="dark"] img.brand-icon {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Audio provider logo card badge — RNG warm orange theme identity */
@@ -796,20 +903,20 @@ html[data-theme="dark"] .audio-card-logo {
 }
 
 html[data-theme="dark"] #insights-speed-badge {
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] #gauge-grad stop {
-  stop-color: #ffffff;
+  stop-color: #f3e5d8;
 }
 
 html[data-theme="dark"] .arc-gauge path[stroke*="rgba(255, 107, 0"] {
-  stroke: rgba(255, 255, 255, 0.14) !important;
+  stroke: rgba(255, 255, 255, 0.08) !important;
 }
 
 html[data-theme="dark"] #gauge-fill {
-  stroke: #ffffff !important;
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.45));
+  stroke: #f3e5d8 !important;
+  filter: drop-shadow(0 0 6px rgba(243, 229, 216, 0.4));
 }
 
 html[data-theme="dark"] .gauge-badge {
@@ -837,34 +944,35 @@ html[data-theme="light"] .btn-emoji {
 html[data-theme="dark"] .status-badge,
 html[data-theme="dark"] .active-pill-badge,
 html[data-theme="dark"] .priority-pill-badge {
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .style-hero-banner {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: #1b1c24 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .style-hero-desc {
-  color: #333333 !important;
+  color: #8B949E !important;
 }
 
 html[data-theme="dark"] .selected-preset-badge {
-  background: #ffffff !important;
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
   color: #0a0a0a !important;
-  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 14px rgba(243, 229, 216, 0.3);
 }
 
 html[data-theme="dark"] .vf-toast {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
-  box-shadow: 0 10px 30px rgba(255, 255, 255, 0.15);
+  background: #181922 !important;
+  color: #F9FAFB !important;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
 /* Select dropdown options readable in dark */
 html[data-theme="dark"] select option {
-  background: #131313 !important;
-  color: #f5f5f5 !important;
+  background: #181922 !important;
+  color: #F9FAFB !important;
 }
 
 /* Recording pulse bar + audio priority badge — theme-aware */
@@ -889,9 +997,9 @@ html[data-theme="light"] .audio-priority-badge {
 
 /* Style hero (solid white panel, black ink) */
 html[data-theme="dark"] .app-icon-pill {
-  background: rgba(10, 10, 10, 0.06) !important;
-  border-color: rgba(10, 10, 10, 0.15) !important;
-  color: #0a0a0a !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: #F9FAFB !important;
 }
 
 /* Video Flow — black & white */
@@ -899,44 +1007,44 @@ html[data-theme="dark"] .vf-badge,
 html[data-theme="dark"] .vf-live-pill {
   background: rgba(255, 255, 255, 0.12) !important;
   border-color: rgba(255, 255, 255, 0.3) !important;
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .vf-file-icon,
 html[data-theme="dark"] .vf-mode-icon {
-  background: #ffffff !important;
-  color: #0a0a0a !important;
+  background: rgba(243, 229, 216, 0.14) !important;
+  color: #f3e5d8 !important;
 }
 
 html[data-theme="dark"] .vf-coverage-note {
   background: rgba(255, 255, 255, 0.08) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
 }
-html[data-theme="dark"] .vf-coverage-note strong { color: #f5f5f5 !important; }
-html[data-theme="dark"] .vf-coverage-note span { color: #e5e5e5 !important; }
+html[data-theme="dark"] .vf-coverage-note strong { color: #F9FAFB !important; }
+html[data-theme="dark"] .vf-coverage-note span { color: #8B949E !important; }
 
 html[data-theme="dark"] .vf-kicker,
-html[data-theme="dark"] .vf-model-hero .vf-kicker { color: #ffffff !important; }
+html[data-theme="dark"] .vf-model-hero .vf-kicker { color: #F9FAFB !important; }
 
 html[data-theme="dark"] .vf-empty-icon {
   background: rgba(255, 255, 255, 0.12) !important;
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .vf-model-hero {
-  background: linear-gradient(135deg, #1c1c1c, #101010) !important;
+  background: linear-gradient(135deg, #1b1c24, #121318) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
 }
 html[data-theme="dark"] .vf-model-hero p { color: #b3b3b3 !important; }
 
 html[data-theme="dark"] .vf-model-picker-button,
 html[data-theme="dark"] .vf-model-picker-copy {
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 html[data-theme="dark"] .vf-model-picker-copy span,
 html[data-theme="dark"] .vf-model-picker-copy small { color: #b3b3b3 !important; }
 html[data-theme="dark"] .vf-model-picker-copy strong,
-html[data-theme="dark"] .vf-model-picker-action { color: #f5f5f5 !important; }
+html[data-theme="dark"] .vf-model-picker-action { color: #F9FAFB !important; }
 
 html[data-theme="dark"] .vf-generate-button {
   color: #0a0a0a !important;
@@ -947,12 +1055,12 @@ html[data-theme="dark"] .vf-external-consent {
   border-color: rgba(255, 255, 255, 0.25) !important;
 }
 html[data-theme="dark"] .vf-external-consent strong,
-html[data-theme="dark"] .vf-external-consent small { color: #f5f5f5 !important; }
+html[data-theme="dark"] .vf-external-consent small { color: #F9FAFB !important; }
 
 html[data-theme="dark"] .vf-model-row select {
-  background: #131313 !important;
+  background: #181922 !important;
   border-color: rgba(255, 255, 255, 0.3) !important;
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .vf-active-model span,
@@ -971,24 +1079,24 @@ html[data-theme="dark"] .app-cat-pill.comms,
 html[data-theme="dark"] .app-cat-pill.writing,
 html[data-theme="dark"] .app-cat-pill.browsing {
   background: rgba(255, 255, 255, 0.1) !important;
-  color: #e5e5e5 !important;
+  color: #8B949E !important;
 }
 
 html[data-theme="dark"] .select-preset-action {
   background: rgba(255, 255, 255, 0.08) !important;
-  color: #e5e5e5 !important;
+  color: #8B949E !important;
 }
 
 html[data-theme="dark"] .telemetry-live-pill {
   background: rgba(255, 255, 255, 0.1) !important;
   border-color: rgba(255, 255, 255, 0.25) !important;
-  color: #e5e5e5 !important;
+  color: #8B949E !important;
 }
 
 html[data-theme="dark"] .archetype-tag-badge {
   background: rgba(255, 255, 255, 0.1) !important;
   border-color: rgba(255, 255, 255, 0.25) !important;
-  color: #e5e5e5 !important;
+  color: #8B949E !important;
 }
 
 html[data-theme="dark"] .archetype-avatar-aura {
@@ -999,14 +1107,14 @@ html[data-theme="dark"] .archetype-avatar-aura {
 
 html[data-theme="dark"] .provider-large-badge {
   background: rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
+  color: #F9FAFB !important;
 }
 
 html[data-theme="dark"] .provider-card-logo {
-  color: #f5f5f5 !important;
+  color: #F9FAFB !important;
 }
 
-html[data-theme="dark"] #insights-vocab-status { color: #e5e5e5 !important; }
+html[data-theme="dark"] #insights-vocab-status { color: #8B949E !important; }
 
 /* ---------- Audio Flow Grid & Card Layout Overlap Fix ---------- */
 #page-audioflow .providers-cards-grid {
@@ -1103,3 +1211,1301 @@ html[data-theme="light"] #page-audioflow .af-inner-box {
   border: 1px solid rgba(255, 96, 32, 0.2) !important;
   box-shadow: inset 0 1px 3px rgba(255, 96, 32, 0.04) !important;
 }
+
+
+/* ---------- 16. AUDIO FLOW — simplified, friendly selector cards ---------- */
+/* Scope: #page-audioflow only. Does not affect Video Flow / Voice Flow pages
+   or the TTS API key provider cards below the selectors. */
+
+#page-audioflow .af2-card {
+  padding: 24px;
+  border-radius: 20px;
+  margin-bottom: 20px;
+}
+
+#page-audioflow .af2-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+#page-audioflow .af2-head-main {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+#page-audioflow .af2-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#page-audioflow .af2-title-icon { font-size: 22px; }
+
+#page-audioflow .af2-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+#page-audioflow .af2-subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+#page-audioflow .af2-head-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#page-audioflow .af2-toggle-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+#page-audioflow .af2-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+
+#page-audioflow .af2-block:last-child { margin-bottom: 0; }
+
+#page-audioflow .af2-block-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+/* Voice/summary picker button — override the dark .vf-model-picker-button
+   look (video-flow.css) with an ID-scoped, theme-aware surface. */
+#page-audioflow .af2-picker {
+  margin-top: 0;
+  background: var(--surface) !important;
+  border: 1px solid var(--accent-glow) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 2px 10px var(--accent-soft);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#page-audioflow .af2-picker:hover {
+  border-color: var(--accent) !important;
+  box-shadow: 0 4px 16px var(--accent-soft);
+}
+
+#page-audioflow .af2-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#page-audioflow .af2-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
+#page-audioflow .af2-meta-chip strong {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+#page-audioflow .af2-speed-block {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+#page-audioflow .af2-speed-copy .af2-block-label { margin-bottom: 3px; }
+
+#page-audioflow .af2-block-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+#page-audioflow .af2-speaker-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow);
+  color: var(--accent-text);
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+#page-audioflow .af2-depth-pills {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+#page-audioflow .af2-depth-pills span {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Privacy consent row — theme-aware instead of the dark-only amber wash */
+#page-audioflow .af2-consent {
+  display: flex;
+  margin-top: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+#page-audioflow .af2-consent strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+#page-audioflow .af2-consent small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+
+
+
+/* ---------- 17. MONTHLY ACTIVITY CALENDAR (INSIGHTS) ---------- */
+.monthly-calendar-card {
+  padding: 24px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+
+.calendar-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.calendar-month-title {
+  margin: 4px 0 0 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.calendar-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendar-nav-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.calendar-nav-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--accent-glow);
+  color: var(--accent-text);
+}
+
+.calendar-nav-btn.today-btn {
+  padding: 5px 12px;
+  font-size: 11.5px;
+  background: var(--accent-soft);
+  border-color: var(--accent-glow);
+  color: var(--accent-text);
+}
+
+.calendar-summary-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.cal-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cal-stat-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.cal-stat-value {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.cal-stat-peak .cal-stat-value {
+  color: var(--accent-text);
+}
+
+.calendar-day-headers {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.calendar-day-headers span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.calendar-grid-7col {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.cal-day-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cal-day-cell:hover {
+  transform: translateY(-2px);
+  z-index: 10;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  border-color: var(--accent-glow);
+}
+
+.cal-day-cell.empty-pad {
+  opacity: 0.25;
+  background: transparent !important;
+  border-style: dashed !important;
+  cursor: default;
+}
+.cal-day-cell.empty-pad:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.cal-day-cell.future-day {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cal-day-cell.is-today {
+  border: 2px solid var(--accent) !important;
+  box-shadow: 0 0 12px var(--accent-glow) !important;
+}
+
+.cal-day-cell.is-peak-day {
+  border: 2px solid #ffb703 !important;
+  box-shadow: 0 0 14px rgba(255, 183, 3, 0.4) !important;
+}
+
+.cal-day-num {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.cal-day-peak-icon {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  font-size: 11px;
+}
+
+.cal-day-words {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  line-height: 1;
+  margin-top: auto;
+}
+
+/* Heatmap intensity color levels for month grid */
+.cal-day-cell.level-0 {
+  background: var(--surface-2);
+}
+
+.cal-day-cell.level-1 {
+  background: rgba(255, 96, 32, 0.18) !important;
+  border-color: rgba(255, 96, 32, 0.3) !important;
+}
+
+.cal-day-cell.level-2 {
+  background: rgba(255, 96, 32, 0.38) !important;
+  border-color: rgba(255, 96, 32, 0.5) !important;
+}
+
+.cal-day-cell.level-3 {
+  background: rgba(255, 96, 32, 0.62) !important;
+  border-color: rgba(255, 96, 32, 0.75) !important;
+}
+.cal-day-cell.level-3 .cal-day-num,
+.cal-day-cell.level-3 .cal-day-words {
+  color: #F9FAFB !important;
+}
+
+.cal-day-cell.level-4 {
+  background: linear-gradient(135deg, #ff6020 0%, #e0520f 100%) !important;
+  border-color: #ff6020 !important;
+  box-shadow: 0 2px 10px rgba(255, 96, 32, 0.35);
+}
+.cal-day-cell.level-4 .cal-day-num,
+.cal-day-cell.level-4 .cal-day-words {
+  color: #F9FAFB !important;
+}
+
+/* Hover Tooltip Popup */
+.cal-day-cell .cal-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  text-align: left;
+}
+
+.cal-day-cell:hover .cal-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+.cal-tooltip-date {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ff9d66;
+}
+
+.cal-tooltip-words {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-top: 2px;
+}
+
+.cal-tooltip-sub {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.calendar-footer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cal-footer-note {
+  cursor: pointer;
+  opacity: 0.85;
+}
+.cal-footer-note:hover {
+  color: var(--accent-text);
+  opacity: 1;
+}
+
+.legend-squares {
+  display: flex;
+  gap: 4px;
+}
+
+.legend-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--border);
+}
+
+.legend-cell.level-0 { background: var(--surface-2); }
+.legend-cell.level-1 { background: rgba(255, 96, 32, 0.25); border-color: rgba(255, 96, 32, 0.4); }
+.legend-cell.level-2 { background: rgba(255, 96, 32, 0.5); border-color: rgba(255, 96, 32, 0.65); }
+.legend-cell.level-3 { background: rgba(255, 96, 32, 0.75); border-color: rgba(255, 96, 32, 0.9); }
+.legend-cell.level-4 { background: #ff6020; border-color: #ff6020; }
+
+
+/* =========================================================
+   DARK MODE — PRIMARY BUTTON READABILITY FIX
+   Cream/Champagne fill with ink text so labels stay 100%
+   readable (NotebookLM login, Generate video, Add Word).
+   Light mode is untouched — every rule below is dark-scoped.
+   ========================================================= */
+html[data-theme="dark"] .btn-primary {
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgba(243, 229, 216, 0.45) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+html[data-theme="dark"] .btn-primary:hover {
+  background: linear-gradient(135deg, #fdf3e7, #e8d3c3) !important;
+  color: #0a0a0a !important;
+}
+
+html[data-theme="dark"] .vf-generate-button {
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e8d3c3, #dfcbb5) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button strong {
+  color: #0a0a0a !important;
+}
+
+html[data-theme="dark"] .vf-generate-button small {
+  color: rgba(10, 10, 10, 0.72) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button > span:first-child {
+  background: rgba(10, 10, 10, 0.08) !important;
+  box-shadow: inset 0 1px 2px rgba(10, 10, 10, 0.12) !important;
+}
+
+/* =========================================================
+   DARK MODE — PRIMARY BUTTON READABILITY FIX
+   Cream/Champagne fill with ink text so labels stay 100%
+   readable (NotebookLM login, Generate video, Add Word).
+   Light mode is untouched — every rule below is dark-scoped.
+   ========================================================= */
+html[data-theme="dark"] .btn-primary {
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
+  color: #0a0a0a !important;
+  border: 1px solid rgba(243, 229, 216, 0.45) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+html[data-theme="dark"] .btn-primary:hover {
+  background: linear-gradient(135deg, #fdf3e7, #e8d3c3) !important;
+  color: #0a0a0a !important;
+}
+
+html[data-theme="dark"] .vf-generate-button {
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #e8d3c3, #dfcbb5) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button strong {
+  color: #0a0a0a !important;
+}
+
+html[data-theme="dark"] .vf-generate-button small {
+  color: rgba(10, 10, 10, 0.72) !important;
+}
+
+html[data-theme="dark"] .vf-generate-button > span:first-child {
+  background: rgba(10, 10, 10, 0.08) !important;
+  box-shadow: inset 0 1px 2px rgba(10, 10, 10, 0.12) !important;
+}
+
+/* =========================================================
+   DARK MODE — CREAM TEXT UNIFICATION (safety net)
+   ========================================================= */
+html[data-theme="dark"] .cal-tooltip-words { color: #F9FAFB !important; }
+
+html[data-theme="dark"] #vf-toast {
+  background: #181922 !important;
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] .brand-title,
+html[data-theme="dark"] .page-title,
+html[data-theme="dark"] .nav-label,
+html[data-theme="dark"] .setting-title,
+html[data-theme="dark"] .setting-desc,
+html[data-theme="dark"] .metric-val,
+html[data-theme="dark"] .provider-name-text,
+html[data-theme="dark"] .provider-card-name,
+html[data-theme="dark"] .provider-detail-title,
+html[data-theme="dark"] .style-card-name,
+html[data-theme="dark"] .stat-value,
+html[data-theme="dark"] .dictation-text {
+  color: #F9FAFB !important;
+}
+
+/* =========================================================
+   VIDEO FLOW — PROVIDER GRID UI FIXES
+   1) Provider toggles must never be squeezed below 44px
+      (the Antigravity card squished its toggle to ~33px).
+   2) The custom-providers empty state spans the full grid
+      width so it sits centered instead of hugging the left.
+   Both themes; layout-only, no feature changes.
+   ========================================================= */
+#vf-oauth-provider-grid .provider-card-item,
+#vf-api-provider-grid .provider-card-item,
+#vf-local-provider-grid .provider-card-item,
+#vf-custom-provider-grid .provider-card-item {
+  gap: 10px;
+}
+
+#vf-oauth-provider-grid .provider-card-left,
+#vf-api-provider-grid .provider-card-left,
+#vf-local-provider-grid .provider-card-left,
+#vf-custom-provider-grid .provider-card-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#vf-oauth-provider-grid .provider-card-name,
+#vf-api-provider-grid .provider-card-name,
+#vf-local-provider-grid .provider-card-name,
+#vf-custom-provider-grid .provider-card-name,
+#vf-oauth-provider-grid .provider-card-status,
+#vf-api-provider-grid .provider-card-status,
+#vf-local-provider-grid .provider-card-status,
+#vf-custom-provider-grid .provider-card-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#vf-oauth-provider-grid .toggle-switch,
+#vf-api-provider-grid .toggle-switch,
+#vf-local-provider-grid .toggle-switch,
+#vf-custom-provider-grid .toggle-switch {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+}
+
+#vf-custom-provider-grid .vf-empty-state {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+/* =========================================================
+   VIDEO FLOW MODEL SELECTOR — warm Audio Flow card treatment
+   Mirrors the #page-audioflow .exec-policy-card styling so the
+   Video Flow model selector card matches that exact vibe.
+   Light mode: warm cream/orange. Dark mode: cream-on-black.
+   Color theme only — no layout or feature changes.
+   ========================================================= */
+#vf-model-hero {
+  background: linear-gradient(135deg, var(--accent-soft) 0%, var(--surface) 50%, var(--surface-3) 100%) !important;
+  border: 1px solid var(--accent-glow) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-md), 0 0 44px var(--accent-glow) !important;
+  backdrop-filter: blur(20px);
+  position: relative;
+  overflow: hidden;
+}
+
+#vf-model-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(600px 200px at 15% -20%, var(--accent-soft), transparent 65%);
+  pointer-events: none;
+}
+
+#vf-model-hero h2 {
+  color: var(--accent-text) !important;
+}
+
+html[data-theme="dark"] #vf-model-hero .af-inner-box {
+  /* Near-black elevated surface — matches the Audio Flow dark vibe */
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+
+html[data-theme="light"] #vf-model-hero .af-inner-box {
+  background: rgba(255, 248, 240, 0.8) !important;
+  border: 1px solid rgba(255, 96, 32, 0.15) !important;
+  border-radius: 12px !important;
+}
+
+html[data-theme="dark"] #vf-model-hero .pill-chip {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+}
+
+html[data-theme="light"] #vf-model-hero .pill-chip {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid var(--accent-soft) !important;
+}
+
+#vf-model-hero .vf-model-picker-button {
+  background: var(--surface) !important;
+  border: 1px solid var(--accent-glow) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 14px var(--accent-soft);
+  color: var(--text-main) !important;
+}
+
+#vf-model-hero .vf-model-picker-button:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 18px var(--accent-glow);
+}
+
+/* =========================================================
+   VIDEO HISTORY — discoverable collapsed header
+   Collapsed by default (unchanged behavior); the bar now
+   clearly reads as an expandable video-history section.
+   ========================================================= */
+#vf-history-toggle .vf-history-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+#vf-history-toggle .vf-history-toggle-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow);
+  flex-shrink: 0;
+}
+
+#vf-history-toggle .vf-history-toggle-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  min-width: 0;
+}
+
+#vf-history-toggle .vf-history-toggle-copy strong {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  color: var(--text-main);
+  text-transform: uppercase;
+}
+
+#vf-history-toggle .vf-history-toggle-copy small {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+#vf-history-toggle .vf-history-toggle-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+#vf-history-toggle .vf-history-view-hint {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow);
+  padding: 5px 14px;
+  border-radius: 20px;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#vf-history-toggle:hover .vf-history-view-hint {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-soft);
+}
+
+#vf-history-toggle[aria-expanded="true"] .vf-history-view-hint {
+  display: none;
+}
+
+/* =========================================================
+   VOICE FLOW PAGE — API KEY PROVIDERS GRID
+   Four columns like the Audio Flow provider grid: widen the
+   content area to 1210px so 4 cards (~292px each) fit per row.
+   ========================================================= */
+#providers-grid-container.providers-cards-grid {
+  max-width: 1210px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+/* Downloadable model cards must match the API provider cards exactly
+   (same 4-column grid and card footprint); only the inner content
+   differs. The grid id is overridden here or the base auto-fill rule
+   would give 3 wider columns. minmax(0, 1fr) keeps every column at the
+   same width — a nowrap model name would otherwise stretch its column
+   past the provider card width. */
+#voice-downloadable-models-grid.providers-cards-grid {
+  max-width: 1210px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  /* A downloading card grows taller (progress box); the finished cards
+     next to it must keep their own 104px height instead of stretching
+     and leaving dead space. */
+  align-items: start;
+}
+
+#voice-downloadable-models-grid .provider-card-item {
+  min-width: 0;
+}
+
+#voice-downloadable-models-grid .provider-card-info,
+#voice-downloadable-models-grid .provider-card-name {
+  min-width: 0;
+}
+
+/* =========================================================
+   DARK MODE — DEVELOPER GRID THEME (spec applied)
+   Canvas #0f1015 + subtle 32px grid, solid #0b0c10 sidebar,
+   elevated #181922 cards, crisp 1px borders, orange accents.
+   Color/styling only — no layout or feature changes.
+   ========================================================= */
+html[data-theme="dark"] #app {
+  background-color: var(--bg) !important;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+html[data-theme="dark"] .sidebar {
+  background: #0b0c10 !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .nav-item.active {
+  background: rgba(243, 229, 216, 0.12) !important;
+  color: #f3e5d8 !important;
+  border: 1px solid rgba(243, 229, 216, 0.35) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .nav-item.active::before { display: none !important; }
+
+html[data-theme="dark"] .nav-item {
+  border: 1px solid transparent;
+}
+
+html[data-theme="dark"] .btn-secondary,
+html[data-theme="dark"] .action-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #D1D5DB !important;
+}
+
+html[data-theme="dark"] .btn-secondary:hover,
+html[data-theme="dark"] .action-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] .toggle-switch .toggle-slider {
+  background: #2D3139 !important;
+  border: none !important;
+}
+
+html[data-theme="dark"] .toggle-switch input:checked + .toggle-slider {
+  background: linear-gradient(135deg, #f3e5d8, #e8d3c3) !important;
+}
+
+html[data-theme="dark"] .toggle-switch .toggle-slider:before {
+  background: #ffffff !important;
+}
+
+html[data-theme="dark"] .status-dot-indicator.connected {
+  background: #22C55E !important;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5) !important;
+}
+
+html[data-theme="dark"] .status-badge.status-connected {
+  background: rgba(34, 197, 94, 0.12) !important;
+  color: #22C55E !important;
+  border: 1px solid rgba(34, 197, 94, 0.35) !important;
+}
+
+/* =========================================================
+   DARK MODE — NO-GLOW POLISH
+   Removes the orange glow shadows / radial highlights and keeps
+   only subtle elevation. Accent-colored headings read white.
+   ========================================================= */
+html[data-theme="dark"] .exec-policy-card,
+html[data-theme="dark"] .stretched-metrics-banner,
+html[data-theme="dark"] .vf-generate-button,
+html[data-theme="dark"] .af-engine-badge,
+html[data-theme="dark"] .audio-status-badge,
+html[data-theme="dark"] .perfect-keys-card,
+html[data-theme="dark"] .mode-select-dropdown {
+  box-shadow: var(--shadow-sm) !important;
+  animation: none !important;
+}
+
+html[data-theme="dark"] .speed-pill-btn.active {
+  color: #0a0a0a !important;
+}
+
+html[data-theme="dark"] .vf-generate-button:hover:not(:disabled) {
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="dark"] #vf-model-hero {
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="dark"] #vf-model-hero::before {
+  content: none !important;
+}
+
+html[data-theme="dark"] #vf-model-hero .vf-model-picker-button {
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] #vf-model-hero .vf-model-picker-button:focus {
+  box-shadow: 0 0 0 3px rgba(243, 229, 216, 0.2) !important;
+}
+
+/* =========================================================
+   DARK MODE — GLOW ELIMINATION (final pass)
+   Flat dark card surfaces + neutral borders; active states use
+   soft orange tints instead of loud fills. Light mode untouched.
+   ========================================================= */
+
+/* Generic + Audio/Video Flow hero cards: flat surface, no glow border */
+html[data-theme="dark"] .exec-policy-card,
+html[data-theme="dark"] #vf-model-hero,
+html[data-theme="dark"] .stretched-metrics-banner {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="dark"] .stretched-metrics-banner .metric-divider {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Providers page model cards carry inline orange gradients/borders */
+html[data-theme="dark"] #page-providers .exec-policy-card {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="dark"] #page-providers .exec-policy-card h2 {
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] #page-providers .pf-inner-box {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* Engine badge ("Text-to-Speech Engine"): neutral dark chip */
+html[data-theme="dark"] .af-engine-badge {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #D1D5DB !important;
+  box-shadow: none !important;
+}
+
+/* Status badges: neutral dark chip, no pulse */
+html[data-theme="dark"] .audio-status-badge {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #D1D5DB !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* Audio provider card logos: no warm glow */
+html[data-theme="dark"] .audio-card-logo {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #F9FAFB !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="light"] .audio-card-logo {
+  box-shadow: none !important;
+}
+
+/* Dictionary counter badge + active tag: soft orange active state */
+html[data-theme="dark"] .dict-counter-badge {
+  background: rgba(243, 229, 216, 0.12) !important;
+  color: #f3e5d8 !important;
+  border: 1px solid rgba(243, 229, 216, 0.35) !important;
+}
+
+html[data-theme="dark"] .dict-tag-btn.active {
+  background: rgba(243, 229, 216, 0.12) !important;
+  color: #f3e5d8 !important;
+  border: 1px solid rgba(243, 229, 216, 0.35) !important;
+  box-shadow: none !important;
+}
+
+/*VF model selector pill chip: neutral dark */
+html[data-theme="dark"] #vf-model-hero .pill-chip {
+  border: 1px solid var(--border) !important;
+}
+
+html[data-theme="dark"] #vf-model-hero .audio-status-badge {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* af2-card (Audio Flow Reading Voice / Smart Summaries): flat dark surface */
+html[data-theme="dark"] #page-audioflow .af2-card,
+html[data-theme="dark"] .af2-card {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+html[data-theme="dark"] #page-audioflow .af2-card::before,
+html[data-theme="dark"] .af2-card::before {
+  content: none !important;
+}
+
+/* =========================================================
+   DARK MODE — NEUTRAL CHIPS / BADGES (final)
+   The small pills (app badge, history hint + icon, "Change"
+   action, meta chips, Listen badge) become neutral dark chips:
+   soft white fill, subtle border, light gray text.
+   ========================================================= */
+html[data-theme="dark"] .app-badge,
+html[data-theme="dark"] .vf-history-view-hint,
+html[data-theme="dark"] .vf-history-toggle-icon,
+html[data-theme="dark"] .vf-model-picker-action,
+html[data-theme="dark"] .af2-meta-chip,
+html[data-theme="dark"] #exec-audio-failover-count,
+html[data-theme="dark"] .af2-speaker-badge {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #D1D5DB !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .af2-meta-chip strong,
+html[data-theme="dark"] .vf-model-picker-action b {
+  color: #F9FAFB !important;
+}
+
+/* =========================================================
+   NAV ICONS — Lucide-style stroke SVGs
+   18x18, 2px stroke, no fill, no glow. Colors inherit the
+   nav-item state: muted -> hover bright -> active accent.
+   ========================================================= */
+.nav-icon {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+  fill: none;
+  stroke: currentColor;
+  display: block;
+}
+
+/* Dark mode: active speed pill uses the cream fill -> ink text */
+html[data-theme="dark"] .speed-pill-btn.active {
+  color: #0a0a0a !important;
+}
+
+/* =========================================================
+   SETTINGS MODAL — dark theme (matches app surfaces)
+   Light mode untouched (modal stays white/cream).
+   ========================================================= */
+html[data-theme="dark"] .modal-card {
+  background: #181922 !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] .modal-sidebar {
+  background: #0b0c10 !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+html[data-theme="dark"] .modal-sidebar h3,
+html[data-theme="dark"] .modal-body h3 {
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] .modal-body {
+  background: transparent !important;
+  color: #F9FAFB !important;
+}
+
+html[data-theme="dark"] .settings-group-card {
+  background: var(--surface-2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
+html[data-theme="dark"] .setting-title { color: #F9FAFB !important; }
+html[data-theme="dark"] .setting-desc { color: #8B949E !important; }
+
+html[data-theme="dark"] .setting-row { border-bottom-color: rgba(255, 255, 255, 0.07) !important; }
+
+html[data-theme="dark"] .kbd-pill {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #F9FAFB !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .custom-select {
+  background: var(--surface-2) !important;
+  color: #F9FAFB !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+html[data-theme="dark"] .modal-body code {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #D1D5DB !important;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ---------- Settings rows: keep controls from being flex-squeezed ---------- */
+/* The 44px toggle and pill buttons were shrinking when the row text was wide,
+   which made the knob overflow its track (glitch) and wrapped button labels. */
+.setting-row .toggle-switch {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+}
+
+.setting-row .btn-secondary,
+.setting-row .btn-primary {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---------- Provider brand logos (real marks, official colors) ---------- */
+/* White chip so true logo colors stay readable on any theme. */
+.provider-brand-logo {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  color: #1f2937;
+}
+
+.provider-brand-logo svg,
+.vf-picker-model-icon svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+html[data-theme="dark"] .provider-brand-logo {
+  background: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.provider-brand-logo svg,
+.vf-picker-model-icon svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+html[data-theme="dark"] .provider-brand-logo {
+  background: #ffffff;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+
+/* ---------- Light mode: feature header pills ---------- */
+/* These chips hard-code white text; on the cream light surface that vanished. */
+html:not([data-theme="dark"]) .pill-chip span[style*="color: #fff"],
+html:not([data-theme="dark"]) .pill-chip span[style*="color:#fff"] {
+  color: #221b12 !important;
+}
+
+/* The Voice Flow pill uses rgba(0,0,0,.35) glass — lighten for light mode. */
+html:not([data-theme="dark"]) .pill-chip[style*="rgba(0, 0, 0, 0.35)"] {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(120, 90, 40, 0.25) !important;
+}
+
+/* --surface-2 chips (Audio/Video Flow headers): soften on light theme. */
+html:not([data-theme="dark"]) .pill-chip[style*="var(--surface-2)"] {
+  border-color: rgba(120, 90, 40, 0.25) !important;
+}
+
+/* ---------- Insights speed badge: single consolidated style ---------- */
+/* One rule per tier (replaces per-call inline color overrides). Geometry
+   comes from the base .gauge-badge rule in styles.css. */
+.gauge-badge.gauge-ultra, .gauge-badge.gauge-rapid {
+  color: #c2410c !important;
+}
+.gauge-badge.gauge-fast {
+  color: #047857 !important;
+}
+.gauge-badge.gauge-active {
+  color: #1f2937 !important;
+}
+.gauge-badge.gauge-empty {
+  color: #6b7280 !important;
+}
+html[data-theme="dark"] .gauge-badge.gauge-ultra,
+html[data-theme="dark"] .gauge-badge.gauge-rapid {
+  color: #ff9d4d !important;
+}
+html[data-theme="dark"] .gauge-badge.gauge-fast {
+  color: #34d399 !important;
+}
+html[data-theme="dark"] .gauge-badge.gauge-active {
+  color: #f9fafb !important;
+}
+html[data-theme="dark"] .gauge-badge.gauge-empty {
+  color: #9ca3af !important;
+}
+
+/* ---------- Dictionary chip inline edit ---------- */
+.chip-edit-input {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+/* =========================================================
+   SETTINGS MODAL SHELL + SYSTEM TAB — dark theme polish
+   Scoped to #settings-modal internals only.
+   ========================================================= */
+html[data-theme="dark"] #settings-modal .modal-sidebar .settings-side-sub,
+html[data-theme="dark"] #settings-modal .settings-tab-sub {
+  color: #8B949E !important;
+}
+
+html[data-theme="dark"] #settings-modal #set-tab-system .runtime-line {
+  color: #8B949E !important;
+}
+
+html[data-theme="dark"] #settings-modal .info-tip {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: #8B949E !important;
+}
+
+html[data-theme="dark"] #settings-modal .info-tip:hover,
+html[data-theme="dark"] #settings-modal .info-tip:focus-visible {
+  color: var(--primary-orange) !important;
+  border-color: rgba(255, 107, 0, 0.55) !important;
+}
+
+html[data-theme="dark"] #settings-modal .info-tip::after {
+  background: #20212b !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #F9FAFB !important;
+}
+

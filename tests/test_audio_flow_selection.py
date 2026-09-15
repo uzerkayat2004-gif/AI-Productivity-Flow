@@ -36,6 +36,12 @@ class _Overlay:
     def show_summarizing(self, mode: str = "") -> None:
         self.states.append(("summarizing", mode))
 
+    def show_audio_summary_progress(self, progress: int = 0, stage: str = "") -> None:
+        self.states.append(("audio_summary_progress", (progress, stage)))
+
+    def clear_audio_summary_status(self) -> None:
+        self.states.append(("audio_summary_cleared", None))
+
 
 def _selection_app(injector: object) -> VoiceFlowApp:
     app = object.__new__(VoiceFlowApp)
@@ -178,3 +184,237 @@ def test_explicit_selection_bypasses_recent_dictation_guard(monkeypatch) -> None
 
     assert spoken == ["intentionally selected dictation text"]
     assert not any(state[0] == "error" for state in app.overlay.states)
+
+
+def test_depth_selection_hitboxes_and_summarizing_transition() -> None:
+    widget = AudioFlowFloatingWidget()
+    triggers = []
+    widget.on_trigger = lambda text, mode="full", summary_depth=None: triggers.append((text, mode, summary_depth))
+    widget._current_text = "test article text"
+    widget._is_visible = True
+
+    # 1. Short hitbox: event.x <= 82 -> auto dismisses selection widget
+    widget._current_text = "test article text"
+    widget._stage = AudioFlowFloatingWidget.STAGE_DEPTH_SELECT
+    widget._on_click(SimpleNamespace(x=30))
+    assert triggers[-1] == ("test article text", "summary", "short")
+    assert widget._is_visible is False
+
+    # 2. Balanced hitbox: 82 < event.x <= 174 -> auto dismisses selection widget
+    widget._current_text = "test article text"
+    widget._is_visible = True
+    widget._stage = AudioFlowFloatingWidget.STAGE_DEPTH_SELECT
+    widget._on_click(SimpleNamespace(x=120))
+    assert triggers[-1] == ("test article text", "summary", "balanced")
+    assert widget._is_visible is False
+
+    # 3. Deep dive hitbox: event.x > 174 -> auto dismisses selection widget
+    widget._current_text = "test article text"
+    widget._is_visible = True
+    widget._stage = AudioFlowFloatingWidget.STAGE_DEPTH_SELECT
+    widget._on_click(SimpleNamespace(x=200))
+    assert triggers[-1] == ("test article text", "summary", "deep_dive")
+    assert widget._is_visible is False
+
+
+def test_audio_summary_pipeline_worker_calls_summarize_with_fallback(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    generate_calls = []
+    launched_tokens = []
+    widget_states = []
+
+    class FakeNotebookLMService:
+        def generate(self, text, depth="balanced", *, cancelled=None, on_progress=None):
+            generate_calls.append((text, depth))
+            return {"audio_path": "/fake/audio.m4a", "depth": depth}
+
+    class FakeTTS:
+        def is_speaking(self):
+            return False
+
+        def speak(self, text, **kwargs):
+            pass
+
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module, "tts_engine", FakeTTS())
+    monkeypatch.setattr(main_module.audio_flow_widget, "show_summarizing", lambda: widget_states.append("summarizing"))
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: widget_states.append(f"playing_{p}"))
+
+    from voice_flow import audio_notebooklm
+    monkeypatch.setattr(audio_notebooklm, "audio_notebooklm_service", FakeNotebookLMService())
+
+    from voice_flow import audio_summary_player
+    monkeypatch.setattr(audio_summary_player, "launch_summary_audio_player", lambda path, depth="balanced", **kwargs: (launched_tokens.append(depth) or "tok123"))
+
+    app._process_audio_flow_pipeline(
+        text_override="Long document text for summary",
+        mode="summary",
+        summary_depth="short",
+    )
+
+    time.sleep(0.3)  # Allow worker thread to execute
+    assert len(generate_calls) == 1
+    assert generate_calls[0] == ("Long document text for summary", "short")
+    assert launched_tokens == ["short"]
+
+
+def test_audio_summary_pipeline_worker_handles_tts_error_safely(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    widget_resets = []
+
+    class BrokenNotebookLMService:
+        def generate(self, text, depth="balanced", *, cancelled=None, on_progress=None):
+            raise RuntimeError("NotebookLM connection failed")
+
+    class FakeTTS:
+        def is_speaking(self):
+            return False
+
+        def speak(self, text, **kwargs):
+            pass
+
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module, "tts_engine", FakeTTS())
+    monkeypatch.setattr(main_module.audio_flow_widget, "show_summarizing", lambda: None)
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: widget_resets.append(p))
+
+    from voice_flow import audio_notebooklm
+    monkeypatch.setattr(audio_notebooklm, "audio_notebooklm_service", BrokenNotebookLMService())
+
+    app._process_audio_flow_pipeline(
+        text_override="Text to summarize",
+        mode="summary",
+        summary_depth="balanced",
+    )
+
+    time.sleep(0.3)  # Allow worker thread to execute
+    assert widget_resets == [False]
+    assert any(s[0] == "error" and "NotebookLM" in str(s[1]) for s in app.overlay.states)
+
+
+def test_mouse_release_never_invalidates_audio_summary_generation(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text_strict=lambda **_kwargs: ""))
+    app._audio_summary_generation = 42
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: None)
+    monkeypatch.setattr(
+        main_module.ctypes,
+        "windll",
+        SimpleNamespace(user32=SimpleNamespace(IsWindow=lambda _hwnd: False, GetForegroundWindow=lambda: 1)),
+    )
+
+    # Trigger click release
+    app._on_mouse_release(100, 100, drag_distance=0.0)
+    assert app._audio_summary_generation == 42, "Mouse click must not touch _audio_summary_generation"
+
+    # Trigger drag release
+    app._on_mouse_release(200, 200, drag_distance=20.0)
+    time.sleep(0.05)
+    assert app._audio_summary_generation == 42, "Mouse drag must not touch _audio_summary_generation"
+
+
+def test_pipeline_on_done_and_on_error_unconditionally_close_widget(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    widget_calls = []
+
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: widget_calls.append(("set_playing", p)))
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: widget_calls.append(("hide", True)))
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    app._is_voice_flow_dictation = lambda _text: False
+
+    class TTS:
+        def __init__(self) -> None:
+            self.callbacks = None
+        def is_speaking(self) -> bool:
+            return False
+        def speak(self, _text, *, on_start, on_done, on_error) -> None:
+            self.callbacks = (on_start, on_done, on_error)
+        def stop(self) -> None:
+            pass
+
+    tts = TTS()
+    monkeypatch.setattr(main_module, "tts_engine", tts)
+
+    app._process_audio_flow_pipeline(text_override="testing close")
+    assert tts.callbacks is not None
+    _on_start, _on_done, _on_error = tts.callbacks
+
+    # Invalidate token artificially to simulate concurrent actions
+    app._audio_summary_generation += 10
+
+    # _on_done MUST unconditionally close widget and clear overlay
+    widget_calls.clear()
+    _on_done()
+    assert ("set_playing", False) in widget_calls
+    assert ("hide", True) in widget_calls
+    assert app.overlay.cleared > 0
+    assert any(s[0] == "ready" for s in app.overlay.states)
+
+    # _on_error MUST unconditionally close widget and clear overlay
+    widget_calls.clear()
+    _on_error("custom playback failure")
+    assert ("set_playing", False) in widget_calls
+    assert ("hide", True) in widget_calls
+    assert any(s[0] == "error" and "Audio Flow: custom playback failure" in str(s[1]) for s in app.overlay.states)
+
+
+def test_widget_set_playing_false_unconditionally_hides_despite_generation_change() -> None:
+    widget = AudioFlowFloatingWidget()
+    withdrawn = []
+
+    class Win:
+        def withdraw(self) -> None:
+            withdrawn.append(True)
+        def update(self) -> None:
+            pass
+
+    class Root:
+        def after(self, _delay: int, callback) -> None:
+            callback()
+
+    widget.root = Root()
+    widget.win = Win()
+    widget._is_visible = True
+    widget._is_playing = True
+    widget._stage = AudioFlowFloatingWidget.STAGE_PLAYBACK_CONTROL
+    widget._show_generation = 1
+
+    # Simulate generation bump while playing (e.g. text selection elsewhere)
+    widget._show_generation = 99
+
+    # Calling set_playing(False) must unconditionally reset state and withdraw window
+    widget.set_playing(False)
+
+    assert widget._is_playing is False
+    assert widget._is_paused is False
+    assert widget._stage == AudioFlowFloatingWidget.STAGE_MINIMAL
+    assert widget._is_visible is False
+    assert withdrawn == [True]
+
+
+def test_widget_hide_on_playback_completion_withdraws_immediately() -> None:
+    widget = AudioFlowFloatingWidget()
+    withdrawn = []
+
+    class Win:
+        def withdraw(self) -> None:
+            withdrawn.append(True)
+
+    class Root:
+        def after(self, _delay: int, callback) -> None:
+            callback()
+
+    widget.root = Root()
+    widget.win = Win()
+    widget._is_visible = True
+    widget._is_playing = False
+    widget._show_generation = 5
+
+    # Newer generation mismatch
+    widget._show_generation = 10
+
+    # hide() due to completed playback must withdraw immediately
+    widget.hide()
+
+    assert widget._is_visible is False
+    assert withdrawn == [True]

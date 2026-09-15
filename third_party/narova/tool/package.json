@@ -1,0 +1,75 @@
+{
+  "name": "@narova/narova",
+  "version": "0.31.14",
+  "description": "Local-first prompt-to-video CLI for AI agents, with deterministic scene scripts, TTS, word-synced captions, product walkthroughs, and 2D/3D rendering.",
+  "keywords": [
+    "video",
+    "video-generation",
+    "prompt-to-video",
+    "text-to-video",
+    "programmatic-video",
+    "video-cli",
+    "agent-skills",
+    "motion-graphics",
+    "text-to-speech",
+    "tts",
+    "captions",
+    "subtitles",
+    "ffmpeg",
+    "threejs",
+    "local-first"
+  ],
+  "homepage": "https://ammar-hasan.github.io/narova/",
+  "bugs": {
+    "url": "https://github.com/ammar-hasan/narova/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ammar-hasan/narova.git",
+    "directory": "tool"
+  },
+  "author": "Ammar Hasan",
+  "type": "commonjs",
+  "main": "src/pipeline.js",
+  "bin": {
+    "narova": "bin/narova.js",
+    "narova-setup": "setup.sh",
+    "narova-uninstall": "uninstall.sh"
+  },
+  "scripts": {
+    "test": "npm run -s test:js && npm run -s test:py",
+    "test:js": "node --test test/*.test.js",
+    "test:py": "PYTHONPATH=py python3 -m unittest discover -s py/tests",
+    "test:install": "node --test test/install.test.js",
+    "test:stock-live": "node --test live-tests/stock-providers.live.test.js",
+    "prepublishOnly": "npm test && node ../scripts/check-package.js && node ../scripts/test-packed-package.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "vendor/",
+    "setup.sh",
+    "uninstall.sh",
+    "py/*.py",
+    "py/*.txt",
+    "py/narova_tts/*.py"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
+  "optionalDependencies": {
+    "@fontsource/noto-sans-arabic": "5.3.0",
+    "@napi-rs/canvas": "1.0.3",
+    "fontkit": "2.0.4"
+  },
+  "license": "MIT"
+}

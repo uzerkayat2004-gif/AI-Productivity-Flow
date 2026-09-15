@@ -57,7 +57,12 @@ class AudioArchive:
         path = self.resolve(stored_path)
         if not path:
             return False
-        return time.time() - (timestamp if timestamp is not None else path.stat().st_mtime) < AUDIO_RETENTION_SECONDS
+        if timestamp is not None:
+            return time.time() - timestamp < AUDIO_RETENTION_SECONDS
+        try:
+            return time.time() - path.stat().st_mtime < AUDIO_RETENTION_SECONDS
+        except OSError:
+            return False
 
     def remove(self, stored_path: str | None) -> bool:
         path = self.resolve(stored_path)
@@ -76,3 +81,14 @@ class AudioArchive:
             except OSError:
                 continue
         return removed
+
+    def purge_all(self) -> int:
+        """Purge all audio files in archive to free disk space immediately."""
+        count = 0
+        for path in self.root.glob("*.wav"):
+            try:
+                path.unlink()
+                count += 1
+            except OSError:
+                continue
+        return count

@@ -5,13 +5,15 @@ import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from voice_flow.gui import desktop_launcher
+from voice_flow.gui import api_server, desktop_launcher
 from voice_flow.gui.api_server import VoiceFlowApiHandler
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION
 from voice_flow import runtime_guard
 
 
 def test_api_exposes_current_runtime_contract() -> None:
+    original_controller = api_server.runtime_controller
+    api_server.register_runtime_controller(None)
     server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -24,7 +26,14 @@ def test_api_exposes_current_runtime_contract() -> None:
         assert payload["contract_version"] == RUNTIME_CONTRACT_VERSION
         assert payload["features"]["video_flow_providers"] is True
         assert payload["features"]["agentic_video_flow"] is True
+        assert payload["engine_ready"] is False
+        assert runtime_guard.runtime_is_compatible(port=server.server_port) is True
+        assert runtime_guard.runtime_is_engine_ready(port=server.server_port) is False
+
+        api_server.register_runtime_controller(object())
+        assert runtime_guard.runtime_is_engine_ready(port=server.server_port) is True
     finally:
+        api_server.register_runtime_controller(original_controller)
         server.shutdown()
         server.server_close()
 
@@ -60,3 +69,16 @@ def test_prepare_runtime_never_terminates_compatible_runtime(monkeypatch) -> Non
     result = runtime_guard.prepare_runtime_port(port=8991)
 
     assert result.status == "compatible"
+
+
+def test_prepare_runtime_reclaims_compatible_fallback_when_engine_is_required(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_guard, "runtime_is_engine_ready", lambda **_: False, raising=False)
+    monkeypatch.setattr(runtime_guard, "runtime_is_compatible", lambda **_: True)
+    listeners = iter(([8123], []))
+    monkeypatch.setattr(runtime_guard, "listener_pids", lambda *_: next(listeners, []))
+    monkeypatch.setattr(runtime_guard, "terminate_voice_flow_listeners", lambda pids, **_: pids)
+
+    result = runtime_guard.prepare_runtime_port(port=8991, require_engine=True)
+
+    assert result.status == "reclaimed"
+    assert result.terminated_pids == (8123,)

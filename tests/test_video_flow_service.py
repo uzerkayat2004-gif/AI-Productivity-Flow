@@ -212,3 +212,118 @@ def test_blank_model_selection_uses_verified_groq_instead_of_stale_policy() -> N
     assert gateway._provider == "groq"
     assert gateway._model_id == "openai/gpt-oss-120b"
 
+
+def test_failure_preserves_error_message_and_code_in_meta(tmp_path: Path) -> None:
+    class _FailingEngine:
+        def run(self, job_id: str, **kwargs: object) -> dict:
+            return {
+                "state": "failed",
+                "error_code": "auth_expired",
+                "error_message": "Google account login expired. Please sign in to NotebookLM in Video Flow settings.",
+            }
+
+        def cancel(self, job_id: str) -> None:
+            pass
+
+    service = VideoFlowService(
+        store=VideoFlowStore(tmp_path / "jobs.db"),
+        projects_root=tmp_path / "projects",
+        engine_factory=lambda **_: _FailingEngine(),
+    )
+    queued = service.queue("Test source text for failing video generation")
+    job = _wait(service, queued.job_id)
+
+    assert job.state == "failed"
+    assert job.meta["error_code"] == "auth_expired"
+    assert job.meta["error_message"] == "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+
+
+def test_default_video_engine_is_notebooklm(tmp_path: Path) -> None:
+    engine = _Engine()
+    service = VideoFlowService(
+        store=VideoFlowStore(tmp_path / "jobs.db"),
+        projects_root=tmp_path / "projects",
+        engine_factory=lambda **_: engine,
+    )
+    queued = service.queue("Test default engine selection")
+    _wait(service, queued.job_id)
+
+    assert queued.meta["video_engine"] == "notebooklm"
+    assert queued.meta["provider"] == "notebooklm"
+    assert engine.calls[0]["video_engine"] == "notebooklm"
+    assert engine.calls[0]["provider"] == "notebooklm"
+
+
+def test_queue_defaults_allow_local_fallback_to_true(tmp_path: Path) -> None:
+    engine = _Engine()
+    service = VideoFlowService(
+        store=VideoFlowStore(tmp_path / "jobs.db"),
+        projects_root=tmp_path / "projects",
+        engine_factory=lambda **_: engine,
+    )
+    queued = service.queue("Test fallback policy default")
+    _wait(service, queued.job_id)
+
+    assert queued.meta["allow_local_fallback"] is True
+    assert engine.calls[0]["allow_local_fallback"] is True
+
+
+def test_queue_preserves_explicit_allow_local_fallback_false(tmp_path: Path) -> None:
+    engine = _Engine()
+    service = VideoFlowService(
+        store=VideoFlowStore(tmp_path / "jobs.db"),
+        projects_root=tmp_path / "projects",
+        engine_factory=lambda **_: engine,
+    )
+    queued = service.queue("Test fallback policy explicit false", allow_local_fallback=False)
+    _wait(service, queued.job_id)
+
+    assert queued.meta["allow_local_fallback"] is False
+    assert engine.calls[0]["allow_local_fallback"] is False
+
+class _CustomProviderStorage:
+    """Storage stub exposing one Video Flow custom provider (settings JSON)."""
+
+    def __init__(self, *, api_format: str = "openai") -> None:
+        self._entry = {
+            "id": "custom-9router",
+            "name": "9router",
+            "base_url": "http://localhost:20127/v1",
+            "api_format": api_format,
+            "api_key": "sk-legacy-flat",
+            "api_keys": [
+                {"name": "old", "key": "sk-disabled", "priority": 1, "is_active": False, "status": "error"},
+                {"name": "9router key", "key": "sk-active", "priority": 2, "is_active": True, "status": "active"},
+            ],
+            "models": [{"model_id": "ag/claude-sonnet-4-6", "is_active": True}],
+        }
+
+    def get_setting(self, *_: object) -> str:
+        return ""
+
+    def get_video_flow_custom_providers(self) -> list[dict]:
+        return [self._entry]
+
+
+def test_custom_provider_gateway_resolves_active_key_and_endpoint() -> None:
+    gateway = ProviderModelGateway.from_storage(_CustomProviderStorage(), "custom-9router/ag/claude-sonnet-4-6")
+
+    assert gateway._provider == "custom-9router"
+    assert gateway._model_id == "ag/claude-sonnet-4-6"
+    assert gateway._endpoint == "http://localhost:20127/v1/chat/completions"
+    assert gateway._api_key == "sk-active"  # active api_keys entry wins over the flat field
+
+
+def test_custom_provider_gateway_falls_back_to_flat_api_key() -> None:
+    storage = _CustomProviderStorage()
+    storage._entry["api_keys"] = []
+    gateway = ProviderModelGateway.from_storage(storage, "custom-9router/ag/claude-sonnet-4-6")
+
+    assert gateway._api_key == "sk-legacy-flat"
+
+
+def test_custom_provider_gateway_missing_entry_raises_cleanly() -> None:
+    import pytest
+
+    with pytest.raises(RuntimeError, match="custom-nope"):
+        ProviderModelGateway.from_storage(_CustomProviderStorage(), "custom-nope/some-model")

@@ -178,10 +178,12 @@ def apply_capitalization_policy(
 
     # 5. Multi-sentence capitalization after periods, question marks, and exclamation points
     def _cap_match(m: re.Match) -> str:
-        punct = m.group(1)
-        space = m.group(2)
-        char = m.group(3)
-        return f"{punct}{space}{char.upper()}"
+        # The pattern defines exactly two groups: punct+space, then the letter.
+        # Reading a third group raised "no such group" on every multi-sentence
+        # dictation and aborted the whole pipeline (long messages were lost).
+        punct_with_space = m.group(1)
+        char = m.group(2)
+        return f"{punct_with_space}{char.upper()}"
 
     text = re.sub(r"([.!?]\s+)([a-z])", _cap_match, text)
 

@@ -1,5 +1,4 @@
 # VISUAL_DIVERSITY — scene selection and repetition prevention
-> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 ## Where diversity is decided
 

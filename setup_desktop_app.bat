@@ -28,7 +28,7 @@ echo ========================================================
 echo   INSTALLATION COMPLETE!
 echo   Voice Flow is now configured with resilient auto-startup:
 echo   - Registry: HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VoiceFlow
-echo   - Startup Folder: %%APPDATA%%\Microsoft\Windows\Start Menu\Programs\Startup\Voice Flow.lnk
+echo   - Startup Folder: %%APPDATA%%\Microsoft\Windows\Start Menu\Programs\Startup\AI Productivity Flow.lnk
 echo   - Auto-Recovery: Background Watchdog Supervisor
 echo   - Zero Console Popup: Enabled (Silent pythonw execution)
 echo ========================================================

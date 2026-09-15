@@ -1,5 +1,4 @@
 # NEXT_STEPS — future improvements only (not part of this upgrade)
-> 🗄️ Historical implementation report (2026-08-22 visual upgrade mission). For current architecture see [VIDEO_FLOW_ARCHITECTURE.md](../VIDEO_FLOW_ARCHITECTURE.md).
 
 1. **Concept→treatment heuristics** — a small semantic classifier that biases
    3D treatments for inherently spatial concepts (orbits, cutaways, fields)
