@@ -328,7 +328,10 @@ def test_api_server_permissions_http_endpoints():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/api/platform/permissions")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/api/platform/permissions",
+            headers={"Connection": "close"},
+        )
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.load(resp)
         assert data["success"] is True
@@ -340,7 +343,7 @@ def test_api_server_permissions_http_endpoints():
         post_req = urllib.request.Request(
             f"http://127.0.0.1:{server.server_port}/api/platform/permissions/open",
             data=post_data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Connection": "close"},
         )
         with urllib.request.urlopen(post_req, timeout=3) as resp:
             post_res = json.load(resp)
@@ -348,6 +351,7 @@ def test_api_server_permissions_http_endpoints():
     finally:
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2)
 
 
 def test_macos_backend_methods_off_platform_resilience():

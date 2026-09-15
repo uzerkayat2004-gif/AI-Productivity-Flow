@@ -18,10 +18,11 @@ def test_api_exposes_current_runtime_contract() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        with urllib.request.urlopen(
+        req = urllib.request.Request(
             f"http://127.0.0.1:{server.server_port}/api/runtime",
-            timeout=2,
-        ) as response:
+            headers={"Connection": "close"},
+        )
+        with urllib.request.urlopen(req, timeout=2) as response:
             payload = json.load(response)
         assert payload["contract_version"] == RUNTIME_CONTRACT_VERSION
         assert payload["features"]["video_flow_providers"] is True
@@ -36,6 +37,7 @@ def test_api_exposes_current_runtime_contract() -> None:
         api_server.register_runtime_controller(original_controller)
         server.shutdown()
         server.server_close()
+        thread.join(timeout=2)
 
 
 def test_desktop_readiness_requires_current_runtime_contract(monkeypatch) -> None:

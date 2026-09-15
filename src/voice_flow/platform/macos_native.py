@@ -134,6 +134,17 @@ class _Loader:
         self._symbols[key] = func
         return func
 
+    def data_symbol(self, framework: str, name: str, *, optional: bool = False) -> int | None:
+        handle = self.framework(framework)
+        if handle is None:
+            return None
+        try:
+            return ctypes.c_void_p.in_dll(handle, name).value
+        except (AttributeError, ValueError) as exc:
+            if not optional:
+                log.debug("[MACOS] data symbol %s.%s not present: %s", framework, name, exc)
+            return None
+
 
 _loader = _Loader()
 
@@ -200,11 +211,9 @@ def cf_release(ref: int) -> None:
 
 def cfbool(value: bool) -> int:
     """Create a CFBooleanRef (constants, not owned)."""
-    fn = _loader.symbol("CoreFoundation", "kCFBooleanTrue", optional=True)
-    if value:
-        return ctypes.cast(fn, ctypes.c_void_p).value if fn is not None else 0
-    fn_false = _loader.symbol("CoreFoundation", "kCFBooleanFalse", optional=True)
-    return ctypes.cast(fn_false, ctypes.c_void_p).value if fn_false is not None else 0
+    sym = "kCFBooleanTrue" if value else "kCFBooleanFalse"
+    ptr = _loader.data_symbol("CoreFoundation", sym, optional=True)
+    return ptr or 0
 
 
 class _CFDictionaryKeyCallBacks(ctypes.Structure):
@@ -369,10 +378,8 @@ def frontmost_window_owner() -> dict[str, Any]:
     }
     key_refs: dict[str, int] = {}
     for label, symbol_name in key_names.items():
-        fn = _loader.symbol("CoreGraphics", symbol_name.decode(), optional=True)
-        if fn is None:
-            continue
-        key_refs[label] = ctypes.cast(fn, ctypes.c_void_p).value or 0
+        val = _loader.data_symbol("CoreGraphics", symbol_name.decode(), optional=True)
+        key_refs[label] = val or 0
 
     arr = list_fn(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID)
     if not arr:
@@ -552,10 +559,7 @@ def microphone_status() -> int | None:
         if not sel:
             return None
         # AVMediaTypeAudio is an exported NSString* constant.
-        try:
-            media_type = ctypes.cast(av.AVMediaTypeAudio, ctypes.c_void_p).value
-        except AttributeError:
-            return None
+        media_type = _loader.data_symbol("AVFoundation", "AVMediaTypeAudio", optional=True)
         if not media_type:
             return None
         return int(send(cls, sel, ctypes.c_void_p(media_type)))
@@ -589,9 +593,8 @@ def request_microphone_access(callback: Any = None) -> bool:
         sel = sel_register(b"requestAccessForMediaType:completionHandler:")
         if not sel:
             return False
-        try:
-            media_type = ctypes.cast(av.AVMediaTypeAudio, ctypes.c_void_p).value
-        except AttributeError:
+        media_type = _loader.data_symbol("AVFoundation", "AVMediaTypeAudio", optional=True)
+        if not media_type:
             return False
         # A NULL block is acceptable: macOS still shows the prompt, we simply
         # poll the status afterwards instead of receiving the callback.
