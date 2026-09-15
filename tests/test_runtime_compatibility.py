@@ -15,6 +15,8 @@ def test_api_exposes_current_runtime_contract() -> None:
     original_controller = api_server.runtime_controller
     api_server.register_runtime_controller(None)
     server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
+    server.daemon_threads = True
+    server.block_on_close = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

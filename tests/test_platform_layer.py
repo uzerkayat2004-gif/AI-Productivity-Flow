@@ -325,6 +325,8 @@ def test_api_server_permissions_http_endpoints():
     from voice_flow.gui.api_server import VoiceFlowApiHandler
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
+    server.daemon_threads = True
+    server.block_on_close = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

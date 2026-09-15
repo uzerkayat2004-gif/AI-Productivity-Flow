@@ -23,7 +23,7 @@ def _runtime_payload(*, host: str, port: int, timeout: float) -> dict | None:
     try:
         request = urllib.request.Request(
             f"http://{host}:{port}/api/runtime",
-            headers={"User-Agent": "VoiceFlowRuntimeGuard"},
+            headers={"User-Agent": "VoiceFlowRuntimeGuard", "Connection": "close"},
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.load(response)

@@ -203,6 +203,8 @@ class WindowsBackend:
     def beep(self, kind: str = "start") -> bool:
         if not IS_WINDOWS:
             return False
+        if os.environ.get("CI"):
+            return True
         try:
             import winsound
 
@@ -323,7 +325,7 @@ class WindowsBackend:
     # ------------------------------------------------------------------
     def system_tts_to_file(self, text: str, out_path: str, voice: str | None = None) -> bool:
         """Synthesize via SAPI. Delegates to tts_engine when it exposes a helper."""
-        if not IS_WINDOWS:
+        if not IS_WINDOWS or os.environ.get("CI"):
             return False
         try:
             import win32com.client  # type: ignore[import-not-found]
@@ -347,14 +349,51 @@ class WindowsBackend:
     def system_tts_voices(self) -> list[str]:
         if not IS_WINDOWS:
             return []
+        # Query Windows Registry for SAPI voices first. This is fast, has zero COM
+        # overhead, and works in headless CI runners without audio devices.
         try:
-            import win32com.client  # type: ignore[import-not-found]
+            import winreg
 
-            engine = win32com.client.Dispatch("SAPI.SpVoice")
-            return [v.GetDescription() for v in engine.GetVoices()]
-        except Exception as exc:
-            log.debug("[WIN] system_tts_voices failed: %s", exc)
-            return []
+            voices: list[str] = []
+            roots = [
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Speech\Voices\Tokens"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Speech\Voices\Tokens"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Speech\Voices\Tokens"),
+            ]
+            seen: set[str] = set()
+            for root, base_path in roots:
+                try:
+                    with winreg.OpenKey(root, base_path) as k:
+                        count, _, _ = winreg.QueryInfoKey(k)
+                        for i in range(count):
+                            subkey_name = winreg.EnumKey(k, i)
+                            if subkey_name in seen:
+                                continue
+                            seen.add(subkey_name)
+                            try:
+                                with winreg.OpenKey(k, subkey_name) as sk:
+                                    desc, _ = winreg.QueryValueEx(sk, "")
+                                    if desc and str(desc) not in voices:
+                                        voices.append(str(desc))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+            if voices:
+                return voices
+        except Exception:
+            pass
+
+        # If registry returned nothing and not in CI, fallback to COM Dispatch
+        if not os.environ.get("CI"):
+            try:
+                import win32com.client  # type: ignore[import-not-found]
+
+                engine = win32com.client.Dispatch("SAPI.SpVoice")
+                return [v.GetDescription() for v in engine.GetVoices()]
+            except Exception as exc:
+                log.debug("[WIN] system_tts_voices COM fallback failed: %s", exc)
+        return []
 
 
 __all__ = ["WindowsBackend"]
