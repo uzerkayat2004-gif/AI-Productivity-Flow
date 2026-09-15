@@ -42,26 +42,28 @@ if sys.platform != "win32":
             except Exception:
                 pass
 
-try:
-    import webview
-    import pystray
-    from PIL import Image
-except Exception:  # missing desktop dependency falls back to browser launcher
-    webview = None  # type: ignore[assignment]
-    pystray = None  # type: ignore[assignment]
-    Image = None  # type: ignore[assignment]
-    import traceback
+webview = None  # type: ignore[assignment]
+pystray = None  # type: ignore[assignment]
+Image = None  # type: ignore[assignment]
+
+if not os.environ.get("CI"):
     try:
-        crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
-        crash_path.parent.mkdir(parents=True, exist_ok=True)
-        crash_path.write_text(
-            "desktop_launcher optional import failure:\n" + traceback.format_exc(), encoding="utf-8"
-        )
-    except Exception:
-        pass
+        import webview
+        import pystray
+        from PIL import Image
+    except Exception:  # missing desktop dependency falls back to browser launcher
+        import traceback
+        try:
+            crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
+            crash_path.parent.mkdir(parents=True, exist_ok=True)
+            crash_path.write_text(
+                "desktop_launcher optional import failure:\n" + traceback.format_exc(), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
 # Hide console window on Windows immediately so the GUI runs silently
-if sys.platform == "win32":
+if sys.platform == "win32" and not os.environ.get("CI"):
     try:
         import ctypes
         hwnd = ctypes.windll.kernel32.GetConsoleWindow()
