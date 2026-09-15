@@ -16,12 +16,16 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-from ctypes import wintypes
+from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
 import os
 from pathlib import Path
 import subprocess
 import sys
-import winreg
+
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore[assignment]
 
 
 def get_project_root() -> Path:

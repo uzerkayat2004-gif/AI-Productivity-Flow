@@ -9,14 +9,17 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
+from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
 import os
 import threading
 import time
 from typing import Any, Callable
 
-from pynput import keyboard
+try:
+    from pynput import keyboard
+except Exception:
+    keyboard = None  # type: ignore[assignment]
 
 from voice_flow.injector import VF_SYNTHETIC_EXTRA_INFO, is_synthetic_input_active
 from voice_flow.mouse_hook import Win32MouseHook
@@ -61,7 +64,7 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
     ]
 
 LRESULT = ctypes.c_ssize_t
-HOOKPROC = ctypes.WINFUNCTYPE(
+HOOKPROC = WINFUNCTYPE(
     LRESULT,
     ctypes.c_int,
     wintypes.WPARAM,
@@ -69,14 +72,15 @@ HOOKPROC = ctypes.WINFUNCTYPE(
 )
 
 try:
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
-    user32.SetWindowsHookExW.restype = wintypes.HHOOK
-    user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
-    user32.UnhookWindowsHookEx.restype = wintypes.BOOL
-    user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
-    user32.CallNextHookEx.restype = LRESULT
+    user32 = windll.user32
+    kernel32 = windll.kernel32
+    if IS_WINDOWS:
+        user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+        user32.SetWindowsHookExW.restype = wintypes.HHOOK
+        user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+        user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+        user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallNextHookEx.restype = LRESULT
 except Exception:
     user32 = None
     kernel32 = None
@@ -272,7 +276,7 @@ class Win32KeyboardHook:
         with self._lock:
             if self._hook_thread and self._hook_thread.is_alive():
                 return True
-            if user32 is None or kernel32 is None:
+            if not IS_WINDOWS or user32 is None or kernel32 is None:
                 return False
             self._stop_event.clear()
             self._installed_event.clear()
@@ -507,6 +511,9 @@ class InputTriggerListener:
         log.info("[INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).")
 
     def _start_key_listener(self) -> None:
+        if keyboard is None:
+            log.info("[INPUT] pynput keyboard listener is unavailable on this platform.")
+            return
         try:
             if self._key_listener is not None:
                 try:
@@ -1244,12 +1251,17 @@ class InputTriggerListener:
                 if vk_c and alt_down and not ctrl_down:
                     if self._on_copy_last and not self._is_recording:
                         try:
-                            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
-                            if fg_hwnd:
-                                pid = wintypes.DWORD()
-                                ctypes.windll.user32.GetWindowThreadProcessId(fg_hwnd, ctypes.byref(pid))
-                                if pid.value == os.getpid():
+                            if not IS_WINDOWS:
+                                from voice_flow.platform import get_backend
+                                if get_backend().is_own_window_focused():
                                     threading.Thread(target=self._on_copy_last, daemon=True).start()
+                            else:
+                                fg_hwnd = windll.user32.GetForegroundWindow()
+                                if fg_hwnd:
+                                    pid = wintypes.DWORD()
+                                    windll.user32.GetWindowThreadProcessId(fg_hwnd, ctypes.byref(pid))
+                                    if pid.value == os.getpid():
+                                        threading.Thread(target=self._on_copy_last, daemon=True).start()
                         except Exception:
                             pass
 

@@ -3342,6 +3342,42 @@
     </div>
   </div>
 
+  <!-- MACOS PERMISSIONS ONBOARDING MODAL -->
+  <div id="vf-macos-permissions-modal" class="vf-modal-backdrop" style="display: none;" role="dialog" aria-modal="true">
+    <div class="vf-modal-card" style="max-width: 540px; border: 1px solid rgba(255,255,255,0.12);">
+      <div class="vf-modal-glow" style="background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);"></div>
+      
+      <div class="vf-modal-header">
+        <div class="vf-modal-icon-badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; font-size: 20px;">
+          <span>🍎</span>
+        </div>
+        <div class="vf-modal-titles">
+          <h3 class="vf-modal-title">macOS Permissions Required</h3>
+          <span class="vf-modal-badge-pill" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc;">Setup</span>
+        </div>
+        <button type="button" class="vf-modal-close-btn" id="vf-macos-perm-close-x" aria-label="Close">✕</button>
+      </div>
+
+      <div class="vf-modal-body" style="padding-top: 14px;">
+        <p class="vf-modal-message" style="margin-bottom: 16px; font-size: 13.5px; color: var(--text-secondary, #94a3b8); line-height: 1.5;">
+          Voice Flow needs macOS system permissions to capture your voice, paste text into your applications, and listen for your global dictation hotkeys.
+        </p>
+        <div id="vf-macos-perm-list" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Dynamically populated from /api/platform/permissions -->
+        </div>
+      </div>
+
+      <div class="vf-modal-actions" style="margin-top: 22px; display: flex; justify-content: space-between; align-items: center;">
+        <button type="button" class="vf-modal-btn vf-modal-btn-cancel" id="vf-macos-perm-btn-dismiss">
+          <span>Continue Later</span>
+        </button>
+        <button type="button" class="vf-modal-btn vf-modal-btn-confirm" id="vf-macos-perm-btn-refresh" style="background: #4f46e5; color: #fff;">
+          <span>Check Status</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
 
   <script src="provider-logos.js?v=20260913-icons-all"></script>

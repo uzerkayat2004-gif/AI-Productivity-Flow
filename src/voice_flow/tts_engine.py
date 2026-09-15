@@ -272,7 +272,7 @@ class TTSEngine:
         import edge_tts
         import ctypes
 
-        winmm = ctypes.windll.winmm
+        winmm = getattr(getattr(ctypes, "windll", None), "winmm", None)
         rate_str = self._get_speed_rate_str()
         pitch_str = "+0Hz"
 
@@ -425,7 +425,7 @@ class TTSEngine:
             import edge_tts
             import ctypes
 
-            winmm = ctypes.windll.winmm
+            winmm = getattr(getattr(ctypes, "windll", None), "winmm", None)
             rate_str = self._get_speed_rate_str()
             pitch_str = "+0Hz"
 
@@ -723,8 +723,25 @@ class TTSEngine:
         return f"{'+' if pct >= 0 else ''}{pct}%"
 
     def _synthesize_sapi(self, text: str) -> bytes | None:
-        """Offline zero-network fallback using Windows SAPI Speech API."""
+        """Offline zero-network fallback using Windows SAPI Speech API or macOS say."""
         tmp_path = None
+        if sys.platform == "darwin":
+            try:
+                from voice_flow.platform import get_backend
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_f:
+                    tmp_path = tmp_f.name
+                ok = get_backend().system_tts_to_file(text, tmp_path)
+                if ok and os.path.exists(tmp_path):
+                    with open(tmp_path, "rb") as fp:
+                        data = fp.read()
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                    return data
+            except Exception as e:
+                log.debug("macOS native TTS error: %s", e)
+            return None
         try:
             import win32com.client
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_f:
@@ -1301,10 +1318,33 @@ class TTSEngine:
         alias = f"vf_audio_{time.time_ns()}"
         mci_played = False
 
+        if sys.platform == "darwin":
+            try:
+                import subprocess
+                self._player_proc = subprocess.Popen(["afplay", safe_path])
+                while self._player_proc.poll() is None:
+                    if self._stop_event.is_set() or session != self._session:
+                        self._player_proc.terminate()
+                        break
+                    time.sleep(0.05)
+            except Exception as e:
+                log.error("macOS afplay playback error: %s", e)
+            finally:
+                self._player_proc = None
+                try:
+                    if os.path.exists(tmp_path):
+                        time.sleep(0.1)
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+            return
+
         try:
             import ctypes
 
-            winmm = ctypes.windll.winmm
+            winmm = getattr(getattr(ctypes, "windll", None), "winmm", None)
+            if not winmm:
+                raise RuntimeError("winmm is not available")
             self._active_mci_alias = alias
             mci_type = "type waveaudio" if is_wav else "type MPEGVideo"
             open_res = winmm.mciSendStringW(f'open "{safe_path}" {mci_type} alias {alias}', None, 0, 0)

@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any
 import ctypes
-from ctypes import wintypes
+from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
 
 if sys.stdout is None:
     class DummyWriter:
@@ -529,13 +529,16 @@ class VoiceFlowApp:
         if current_ext:
             self._last_target_hwnd = current_ext
             return current_ext
+        if not IS_WINDOWS:
+            return None
+        user32 = windll.user32
         last_known = getattr(self, "_last_target_hwnd", None)
-        if last_known and ctypes.windll.user32.IsWindow(last_known) and not self._is_internal_window(last_known):
+        if last_known and user32.IsWindow(last_known) and not self._is_internal_window(last_known):
             return last_known
         session_target = getattr(session, "target_hwnd", None) or (session.get("hwnd") if isinstance(session, dict) else None)
-        if session_target and ctypes.windll.user32.IsWindow(session_target) and not self._is_internal_window(session_target):
+        if session_target and user32.IsWindow(session_target) and not self._is_internal_window(session_target):
             return session_target
-        if fallback_hwnd and ctypes.windll.user32.IsWindow(fallback_hwnd) and not self._is_internal_window(fallback_hwnd):
+        if fallback_hwnd and user32.IsWindow(fallback_hwnd) and not self._is_internal_window(fallback_hwnd):
             return fallback_hwnd
         return None
 

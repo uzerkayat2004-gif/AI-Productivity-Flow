@@ -93,3 +93,12 @@ verify_timing_mapping_benchmark.py
 tmp/
 work/
 
+# The test_*.py rule above targets throwaway probe scripts dropped in the repo
+# root. It must never hide the real suite: without this negation any NEW file
+# under tests/ is silently untracked and CI runs green against nothing.
+# Scoped deliberately to tests/ only - a broader negation would re-expose the
+# *.db / *.env rules above and leak real user transcripts and API keys.
+!tests/**/*.py
+!tests/**/*.js
+!tests/**/*.json
+

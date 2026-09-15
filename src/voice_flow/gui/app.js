@@ -9373,3 +9373,137 @@ async function handleVaultImport(pass, vaultData) {
   });
   return await res.json();
 }
+
+// =============================================================================
+// macOS Permissions Onboarding Modal & Settings Integration
+// =============================================================================
+async function checkMacOSPermissions() {
+  try {
+    const res = await fetch("/api/platform/permissions");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.platform === "macos" ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function openMacOSPermissionSettings(key) {
+  try {
+    const res = await fetch("/api/platform/permissions/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+function renderMacOSPermissionsList(permissions) {
+  const container = document.getElementById("vf-macos-perm-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const icons = {
+    microphone: "🎙️",
+    accessibility: "♿",
+    input_monitoring: "⌨️",
+  };
+
+  permissions.forEach((perm) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; gap: 12px;";
+
+    const left = document.createElement("div");
+    left.style.cssText = "display: flex; align-items: flex-start; gap: 12px; flex: 1;";
+
+    const icon = document.createElement("div");
+    icon.style.cssText = "font-size: 20px; line-height: 1; padding-top: 2px;";
+    icon.textContent = icons[perm.key] || "⚙️";
+
+    const textWrap = document.createElement("div");
+    const title = document.createElement("div");
+    title.style.cssText = "font-size: 13.5px; font-weight: 600; color: var(--text, #fff); margin-bottom: 2px;";
+    title.textContent = perm.label;
+
+    const desc = document.createElement("div");
+    desc.style.cssText = "font-size: 12px; color: var(--text-secondary, #94a3b8); line-height: 1.4;";
+    desc.textContent = perm.description;
+
+    textWrap.appendChild(title);
+    textWrap.appendChild(desc);
+    left.appendChild(icon);
+    left.appendChild(textWrap);
+
+    const right = document.createElement("div");
+    if (perm.granted) {
+      const grantedBadge = document.createElement("span");
+      grantedBadge.style.cssText = "display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 9999px; background: rgba(34,197,94,0.15); color: #4ade80; font-size: 12px; font-weight: 600;";
+      grantedBadge.textContent = "✓ Granted";
+      right.appendChild(grantedBadge);
+    } else {
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.style.cssText = "padding: 6px 12px; border-radius: 6px; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.4); color: #c7d2fe; font-size: 12px; font-weight: 600; cursor: pointer;";
+      openBtn.textContent = "Open Settings";
+      openBtn.onclick = async () => {
+        openBtn.textContent = "Opening...";
+        await openMacOSPermissionSettings(perm.key);
+        setTimeout(refreshMacOSPermissionsModal, 1500);
+      };
+      right.appendChild(openBtn);
+    }
+
+    row.appendChild(left);
+    row.appendChild(right);
+    container.appendChild(row);
+  });
+}
+
+function hideMacOSPermissionsModal() {
+  const modal = document.getElementById("vf-macos-permissions-modal");
+  if (modal) modal.style.display = "none";
+}
+
+async function refreshMacOSPermissionsModal() {
+  const data = await checkMacOSPermissions();
+  if (!data) return hideMacOSPermissionsModal();
+  if (data.allRequiredGranted) {
+    hideMacOSPermissionsModal();
+    return;
+  }
+  renderMacOSPermissionsList(data.permissions || []);
+}
+
+async function initMacOSPermissionsOnboarding() {
+  const data = await checkMacOSPermissions();
+  if (!data || data.allRequiredGranted) return;
+  if (sessionStorage.getItem("vf_macos_perm_dismissed")) return;
+
+  const modal = document.getElementById("vf-macos-permissions-modal");
+  if (!modal) return;
+
+  renderMacOSPermissionsList(data.permissions || []);
+  modal.style.display = "flex";
+
+  const closeBtn = document.getElementById("vf-macos-perm-close-x");
+  const dismissBtn = document.getElementById("vf-macos-perm-btn-dismiss");
+  const refreshBtn = document.getElementById("vf-macos-perm-btn-refresh");
+
+  const dismiss = () => {
+    sessionStorage.setItem("vf_macos_perm_dismissed", "1");
+    hideMacOSPermissionsModal();
+  };
+
+  if (closeBtn) closeBtn.onclick = dismiss;
+  if (dismissBtn) dismissBtn.onclick = dismiss;
+  if (refreshBtn) refreshBtn.onclick = () => refreshMacOSPermissionsModal();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => setTimeout(initMacOSPermissionsOnboarding, 600));
+} else {
+  setTimeout(initMacOSPermissionsOnboarding, 600);
+}

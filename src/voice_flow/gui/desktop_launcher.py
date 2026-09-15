@@ -9,7 +9,10 @@ import subprocess
 import sys
 import threading
 import time
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore[assignment]
 from pathlib import Path
 
 # Ensure src and project root directories are in sys.path
@@ -21,7 +24,7 @@ for _p in (_src_dir, _project_root):
     if _p and _p not in sys.path and os.path.exists(_p):
         sys.path.insert(0, _p)
 
-# Ensure virtualenv site-packages are loaded even when invoked via base pythonw
+# Ensure virtualenv site-packages are loaded even when invoked via base pythonw / python
 _venv_site = Path(_project_root) / ".venv" / "Lib" / "site-packages"
 if _venv_site.is_dir():
     try:
@@ -29,22 +32,33 @@ if _venv_site.is_dir():
         site.addsitedir(str(_venv_site))
     except Exception:
         pass
+if sys.platform != "win32":
+    import glob
+    for _ps in glob.glob(str(Path(_project_root) / ".venv" / "lib" / "python*" / "site-packages")):
+        if os.path.isdir(_ps):
+            try:
+                import site
+                site.addsitedir(_ps)
+            except Exception:
+                pass
 
 try:
     import webview
     import pystray
     from PIL import Image
-except Exception:  # missing desktop dependency must never die silently
+except Exception:  # missing desktop dependency falls back to browser launcher
+    webview = None  # type: ignore[assignment]
+    pystray = None  # type: ignore[assignment]
+    Image = None  # type: ignore[assignment]
     import traceback
     try:
         crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
         crash_path.parent.mkdir(parents=True, exist_ok=True)
         crash_path.write_text(
-            "desktop_launcher import failure:\n" + traceback.format_exc(), encoding="utf-8"
+            "desktop_launcher optional import failure:\n" + traceback.format_exc(), encoding="utf-8"
         )
     except Exception:
         pass
-    raise
 
 # Hide console window on Windows immediately so the GUI runs silently
 if sys.platform == "win32":
@@ -468,6 +482,10 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass
+
+    if webview is None:
+        _fallback_to_browser(url, on_quit_callback, keep_alive=True)
+        return
 
     try:
         window = webview.create_window(**create_kwargs)

@@ -816,6 +816,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.google_auth import handle_me
             handle_me(self)
             return
+        if path == "/api/platform/permissions":
+            from voice_flow.platform import get_backend
+            report = get_backend().permission_report()
+            self.send_json_response({"success": True, **report.to_dict()})
+            return
         if path == "/api/auth/status":
             _sync_active_storage()
             from voice_flow.account_manager import get_account_manager
@@ -2342,6 +2347,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         if path == "/auth/desktop/session":
             from voice_flow.google_auth import handle_desktop_session
             handle_desktop_session(self, str(data.get("pair_token") or ""))
+            return
+
+        if path == "/api/platform/permissions/open":
+            from voice_flow.platform import get_backend
+            key = str(data.get("key") or "").strip()
+            ok = get_backend().open_permission_settings(key)
+            self.send_json_response({"success": ok})
             return
 
         # Multi-Account Authentication & Profile Management

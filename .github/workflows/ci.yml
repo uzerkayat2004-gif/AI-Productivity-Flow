@@ -1,0 +1,73 @@
+name: CI & Multi-Platform Build
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  windows-tests:
+    name: Windows Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package and dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio
+
+      - name: Run Windows Test Suite
+        run: |
+          pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py -v
+
+  macos-build:
+    name: macOS Validation & App Packaging
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio
+
+      - name: Verify core package import
+        run: |
+          python -c "import voice_flow; print('voice_flow import OK')"
+
+      - name: Verify API server import
+        run: |
+          python -c "from voice_flow.gui.api_server import start_api_server; print('start_api_server import OK')"
+
+      - name: Run Platform Abstraction Tests
+        run: |
+          pytest tests/test_platform_layer.py -v
+
+      - name: Build macOS Application Bundle (.app & .zip)
+        run: |
+          python scripts/build_macos_app.py
+
+      - name: Upload macOS Unsigned App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceFlow-macOS-unsigned
+          path: dist/VoiceFlow-macOS-unsigned.zip
+          if-no-files-found: error
