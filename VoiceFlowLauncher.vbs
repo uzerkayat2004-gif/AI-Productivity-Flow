@@ -34,10 +34,12 @@ If fso.FileExists(strPyCfg) Then
 End If
 
 If strPython = "" Or Not fso.FileExists(strPython) Then
+    localApp = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%")
+    userPyCore = localApp & "\Python\pythoncore-3.14-64\pythonw.exe"
     If fso.FileExists(strVenv & "\Scripts\pythonw.exe") Then
         strPython = strVenv & "\Scripts\pythonw.exe"
-    ElseIf fso.FileExists("C:\Users\Asus\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe") Then
-        strPython = "C:\Users\Asus\AppData\Local\Python\pythoncore-3.14-64\pythonw.exe"
+    ElseIf fso.FileExists(userPyCore) Then
+        strPython = userPyCore
     ElseIf fso.FileExists("C:\Python314\pythonw.exe") Then
         strPython = "C:\Python314\pythonw.exe"
     ElseIf fso.FileExists(strVenv & "\Scripts\python.exe") Then

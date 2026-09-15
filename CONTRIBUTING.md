@@ -49,7 +49,7 @@ cd video_flow_renderer && npm run typecheck
 ## 🏗️ Architecture & How to Extend
 
 ### 1. Adding a Generative Video Provider
-All generative video models must implement the [`GenerativeVideoProvider`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_generation/provider.py) interface in `src/voice_flow/video_generation/`:
+All generative video models must implement the `GenerativeVideoProvider` interface in `src/voice_flow/video_generation/`:
 
 ```python
 from voice_flow.video_generation import (

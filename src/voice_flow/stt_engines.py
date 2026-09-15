@@ -405,7 +405,11 @@ def _openai(data: bytes, key: str, model: str, fname: str = "audio.wav", ctype: 
 
 
 def _deepgram(data: bytes, key: str, model: str, fname: str = "audio.wav", ctype: str = "audio/wav", poll_seconds: int = 300, vocabulary: list[str] | None = None, deadline: float | None = None) -> str:
-    model = model or "nova-3"
+    clean_model = (model or "").strip().lower()
+    if not clean_model or clean_model == "flux" or clean_model.startswith("flux-") or "flux" in clean_model:
+        model = "nova-3"
+    else:
+        model = model or "nova-3"
     url = f"https://api.deepgram.com/v1/listen?model={model}&smart_format=true&language=en"
     if vocabulary:
         # Nova-3 rejects the nova-2-era `keywords` parameter (HTTP 400
@@ -421,7 +425,8 @@ def _deepgram(data: bytes, key: str, model: str, fname: str = "audio.wav", ctype
             url += f"&keyterm={urllib.parse.quote(t)}"
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Authorization": f"Token {key}", "Content-Type": ctype, "Accept": "application/json", "Connection": "keep-alive", **UA})
-    data = json.loads(_send(req, deadline=deadline))
+    send_kwargs = {"deadline": deadline} if deadline is not None else {}
+    data = json.loads(_send(req, **send_kwargs))
     # Defensive chain: a 200 with an unexpected shape is empty output,
     # not a provider failure worth tripping the breaker.
     _channels = (data.get("results") or {}).get("channels") or [{}]

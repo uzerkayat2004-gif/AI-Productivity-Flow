@@ -266,7 +266,8 @@ class BenchmarkRunner:
 
                     try:
                         output = self.polisher._polish_with_api_pool(
-                            raw_text, test_keys, style_instruction=style
+                            raw_text, test_keys, style_instruction=style,
+                            model_ref=f"{engine_name}/benchmark"
                         )
                         if output:
                             output = self.polisher._post_process_ai_response(output, raw_text)

@@ -98,16 +98,16 @@ def get_src_dir() -> Path:
 
     # 4. Known project workspace paths (.zcode, D:\Projects\voice-flow, and scratch workspaces)
     known_candidates = [
-        Path(r"C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow\src"),
+        Path.home() / ".zcode" / "workspace" / "default" / "AI-Productivity-Flow" / "src",
         Path(r"D:\Projects\voice-flow\src"),
-        Path(r"C:\Users\Asus\.gemini\antigravity\scratch\AI-Productivity-Flow\src"),
+        Path.home() / ".gemini" / "antigravity" / "scratch" / "AI-Productivity-Flow" / "src",
     ]
     for cand in known_candidates:
         if cand.is_dir() and (cand / "voice_flow").is_dir():
             return cand
 
     # 5. Check scratch directory dynamically
-    scratch_dir = Path(r"C:\Users\Asus\.gemini\antigravity\scratch")
+    scratch_dir = Path.home() / ".gemini" / "antigravity" / "scratch"
     if scratch_dir.is_dir():
         try:
             for sub in scratch_dir.iterdir():
@@ -173,7 +173,7 @@ def get_pythonw_executable() -> str:
             return str(current_dir_pyw)
 
     # 4. Check scratch subdirectories for .venv with pyvenv.cfg
-    scratch_dir = Path(r"C:\Users\Asus\.gemini\antigravity\scratch")
+    scratch_dir = Path.home() / ".gemini" / "antigravity" / "scratch"
     if scratch_dir.is_dir():
         try:
             for sub in scratch_dir.iterdir():

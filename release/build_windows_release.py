@@ -12,12 +12,13 @@ Output: dist/AI-Productivity-Flow-Setup-x64.exe + .sha256
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BUILD = Path(r"C:/Users/Asus/apf-release-build")
+BUILD = Path(os.environ.get("APF_BUILD_DIR", Path.home() / "apf-release-build"))
 STAGING = BUILD / "staging"
 DIST = REPO / "dist"
 ISCC = Path(r"C:/Program Files (x86)/Inno Setup 6/ISCC.exe")

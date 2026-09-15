@@ -46,15 +46,15 @@ Procedural 2D    WebGL / 3D    Generative Video
 
 | Component | Source Path | Description |
 | :--- | :--- | :--- |
-| **Evidence Assembly** | [`src/voice_flow/video_flow_engine/evidence.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_flow_engine/evidence.py) | Deterministic extraction of claims, entities, relationships, confidence, and provenance from raw sources. |
-| **Source Adapters** | [`src/voice_flow/video_flow_engine/sources.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_flow_engine/sources.py) | Normalizes plaintext, markdown, URLs, PDFs, and screenshots with byte limits and chunking. |
-| **Visual Director** | [`src/voice_flow/video_flow_engine/director.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_flow_engine/director.py) | Maps pedagogical goals to visual patterns (`statement`, `comparison`, `process`, `metric`, `diagram`). |
-| **Diversity Engine** | [`src/voice_flow/video_flow_engine/diversity.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_flow_engine/diversity.py) | Validates scene type distribution, prevents visual repetition, and enforces pacing rules. |
-| **Quality & QA** | [`src/voice_flow/video_flow_engine/quality.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_flow_engine/quality.py) | Evaluates factual grounding, readability, duration constraints, and triggers targeted scene repair. |
-| **Hybrid Render Router** | [`src/voice_flow/video_generation/router.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_generation/router.py) | Evaluates scene render strategies against user policy, with guaranteed zero-cost fallback. |
-| **Generative Contracts** | [`src/voice_flow/video_generation/contracts.py`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/src/voice_flow/video_generation/contracts.py) | Provider-neutral request, asset, capability, and routing definitions. |
-| **Deterministic Renderer** | [`video_flow_renderer/`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/video_flow_renderer/) | React 18 + Remotion 4 compositor for deterministic 1080p60/1080p30 video output. |
-| **Benchmark Harness** | [`tests/benchmarks/`](file:///C:/Users/Asus/.gemini/antigravity/scratch/voice-flow/tests/benchmarks/) | 12 domain benchmark fixtures scoring fidelity, grounding, diversity, and fallback success. |
+| **Evidence Assembly** | `src/voice_flow/video_flow_engine/evidence.py` | Deterministic extraction of claims, entities, relationships, confidence, and provenance from raw sources. |
+| **Source Adapters** | `src/voice_flow/video_flow_engine/sources.py` | Normalizes plaintext, markdown, URLs, PDFs, and screenshots with byte limits and chunking. |
+| **Visual Director** | `src/voice_flow/video_flow_engine/director.py` | Maps pedagogical goals to visual patterns (`statement`, `comparison`, `process`, `metric`, `diagram`). |
+| **Diversity Engine** | `src/voice_flow/video_flow_engine/diversity.py` | Validates scene type distribution, prevents visual repetition, and enforces pacing rules. |
+| **Quality & QA** | `src/voice_flow/video_flow_engine/quality.py` | Evaluates factual grounding, readability, duration constraints, and triggers targeted scene repair. |
+| **Hybrid Render Router** | `src/voice_flow/video_generation/router.py` | Evaluates scene render strategies against user policy, with guaranteed zero-cost fallback. |
+| **Generative Contracts** | `src/voice_flow/video_generation/contracts.py` | Provider-neutral request, asset, capability, and routing definitions. |
+| **Deterministic Renderer** | `video_flow_renderer/` | React 18 + Remotion 4 compositor for deterministic 1080p60/1080p30 video output. |
+| **Benchmark Harness** | `tests/benchmarks/` | 12 domain benchmark fixtures scoring fidelity, grounding, diversity, and fallback success. |
 
 ### 🧪 Experimental & Prototype Components
 

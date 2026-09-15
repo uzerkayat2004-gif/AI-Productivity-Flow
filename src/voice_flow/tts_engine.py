@@ -950,7 +950,7 @@ class TTSEngine:
                 log.error("ElevenLabs TTS error: %s", e)
 
         log.warning("ElevenLabs TTS: all keys failed, falling back to Edge TTS")
-        return None
+        return self._synthesize_edge_tts(text)
 
     def _synthesize_deepgram(self, text: str, model_name: str) -> bytes | None:
         active_keys = self._get_active_keys_for_provider("deepgram")
@@ -992,13 +992,13 @@ class TTSEngine:
                 log.error("Deepgram TTS error: %s", e)
 
         log.warning("Deepgram TTS: all keys failed, falling back to Edge TTS")
-        return None
+        return self._synthesize_edge_tts(text)
 
     def _synthesize_openai(self, text: str, model_voice_spec: str) -> bytes | None:
         active_keys = self._get_active_keys_for_provider("openai")
         if not active_keys:
             log.warning("OpenAI TTS: No active API key configured, falling back to Edge TTS")
-            return None
+            return self._synthesize_edge_tts(text)
 
         spec_parts = model_voice_spec.split(":", 1)
         model = spec_parts[0] if spec_parts[0] else "tts-1"
@@ -1043,14 +1043,14 @@ class TTSEngine:
                 log.error("OpenAI TTS error: %s", e)
 
         log.warning("OpenAI TTS: all keys failed, falling back to Edge TTS")
-        return None
+        return self._synthesize_edge_tts(text)
 
     def _synthesize_google(self, text: str, model_id: str) -> bytes | None:
         """Synthesize speech using Google Cloud TTS REST API with API key."""
         active_keys = self._get_active_keys_for_provider("google")
         if not active_keys:
             log.warning("Google Cloud TTS: No active API key configured, falling back to Edge TTS")
-            return None
+            return self._synthesize_edge_tts(text)
 
         speed = float(storage.get_setting("audio_flow_speed", 1.0))
         speaking_rate = speed
@@ -1107,7 +1107,7 @@ class TTSEngine:
                 log.error("Google Cloud TTS synthesis error: %s", _sanitize_error_msg(e))
 
         log.warning("Google Cloud TTS: all keys failed, falling back to Edge TTS")
-        return None
+        return self._synthesize_edge_tts(text)
 
     def _synthesize_gemini(self, text: str, model_voice_spec: str) -> bytes | None:
         """Synthesize speech using Gemini TTS (generativelanguage.googleapis.com)."""

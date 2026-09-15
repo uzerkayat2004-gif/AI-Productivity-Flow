@@ -74,8 +74,9 @@ credentials.json
 token.json
 probe_temp_worker.txt
 
-# Repository-owned documentation images (hero) must survive the *.png rule
+# Repository-owned documentation images (hero) and GUI assets must survive the *.png rule
 !docs/assets/**
+!src/voice_flow/gui/assets/**
 
 # Local audit, experiment, and scratch directories
 video-flow-*/
@@ -83,13 +84,16 @@ storyboard/
 plan/
 website/
 nvmodels.json
-test_*.txt
-test_*.py
-test_*.vbs
-v2_tests_result.txt
-render_acceptance_videos.py
-verify_timing_mapping_benchmark.py
+/test_*.txt
+/test_*.py
+/test_*.vbs
+/v2_tests_result.txt
+/render_acceptance_videos.py
+/verify_timing_mapping_benchmark.py
 *.tmp
 tmp/
 work/
+!/tests/**
+/tests/**/__pycache__/
+/tests/**/*.py[cod]
 

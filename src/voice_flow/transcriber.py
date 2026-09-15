@@ -734,3 +734,18 @@ class Transcriber:
             except Exception:
                 log.warning("[STT] Dictionary post-processing unavailable; keeping raw transcript.")
         return result
+
+    @property
+    def _cloud_stt_failures(self) -> int:
+        breakers = getattr(self, "_cloud_stt_breakers", {})
+        if not isinstance(breakers, dict) or not breakers:
+            return 0
+        return max((v[0] for v in breakers.values()), default=0)
+
+    @property
+    def _cloud_stt_blocked_until(self) -> float:
+        breakers = getattr(self, "_cloud_stt_breakers", {})
+        if not isinstance(breakers, dict) or not breakers:
+            return 0.0
+        return max((v[1] for v in breakers.values()), default=0.0)
+

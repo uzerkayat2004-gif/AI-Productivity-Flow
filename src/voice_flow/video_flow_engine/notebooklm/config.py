@@ -16,8 +16,8 @@ DEFAULT_PROFILE = "video-flow-experiment"
 FALLBACK_PROFILE = "default"
 NOTEBOOKLM_ROOT = Path(os.environ.get("NOTEBOOKLM_HOME", Path.home() / ".notebooklm"))
 PROFILES_ROOT = NOTEBOOKLM_ROOT / "profiles"
-CANONICAL_EXPERIMENT_STORAGE = Path(r"C:\Users\Asus\.notebooklm\profiles\video-flow-experiment\storage_state.json")
-ISOLATED_EXPERIMENT_DIR = Path(r"C:\Users\Asus\notebooklm-experiment")
+CANONICAL_EXPERIMENT_STORAGE = PROFILES_ROOT / "video-flow-experiment" / "storage_state.json"
+ISOLATED_EXPERIMENT_DIR = Path(os.environ.get("NOTEBOOKLM_EXPERIMENT_DIR", Path.home() / "notebooklm-experiment"))
 ISOLATED_CLI_PATH = ISOLATED_EXPERIMENT_DIR / ".venv" / "Scripts" / "notebooklm.exe"
 ISOLATED_MCP_PATH = ISOLATED_EXPERIMENT_DIR / ".venv" / "Scripts" / "notebooklm-mcp.exe"
 DEFAULT_MCP_CONFIG_PATH = ISOLATED_EXPERIMENT_DIR / "notebooklm-mcp-config.json"
@@ -43,13 +43,6 @@ def get_profiles_dir() -> Path:
         resolved = Path(env_home).expanduser().resolve() / "profiles"
         logger.debug("NotebookLM profiles root (NOTEBOOKLM_HOME): %s", resolved)
         return resolved
-    if PROFILES_ROOT.is_dir():
-        logger.debug("NotebookLM profiles root (default): %s", PROFILES_ROOT)
-        return PROFILES_ROOT
-    asus_root = Path(r"C:\Users\Asus\.notebooklm\profiles")
-    if asus_root.is_dir():
-        logger.debug("NotebookLM profiles root (asus): %s", asus_root)
-        return asus_root
     logger.debug("NotebookLM profiles root (default): %s", PROFILES_ROOT)
     return PROFILES_ROOT
 
@@ -63,9 +56,6 @@ def get_profile_dir(profile: str | None = None) -> Path:
     user_home_dir = Path.home() / ".notebooklm" / "profiles" / name
     if user_home_dir.is_dir():
         return user_home_dir
-    asus_dir = Path(r"C:\Users\Asus\.notebooklm\profiles") / name
-    if asus_dir.is_dir():
-        return asus_dir
     return primary
 
 
@@ -80,9 +70,6 @@ def get_storage_state_path(profile: str | None = None) -> Path:
     canonical_home = Path.home() / ".notebooklm" / "profiles" / name / "storage_state.json"
     if canonical_home.is_file():
         return canonical_home
-    canonical_asus = Path(r"C:\Users\Asus\.notebooklm\profiles") / name / "storage_state.json"
-    if canonical_asus.is_file():
-        return canonical_asus
     return primary
 
 
@@ -94,19 +81,15 @@ def get_storage_backup_path(profile: str | None = None) -> Path:
     if backup_path.is_file():
         return backup_path
     canonical_dir = Path.home() / ".notebooklm"
-    asus_dir = Path(r"C:\Users\Asus\.notebooklm")
     is_canonical = False
     try:
-        is_canonical = canonical_dir in storage_path.parents or asus_dir in storage_path.parents
+        is_canonical = canonical_dir in storage_path.parents
     except Exception:
         pass
     if is_canonical:
         canonical_backup = canonical_dir / "profiles" / name / "storage_state.backup.json"
         if canonical_backup.is_file():
             return canonical_backup
-        canonical_asus_backup = asus_dir / "profiles" / name / "storage_state.backup.json"
-        if canonical_asus_backup.is_file():
-            return canonical_asus_backup
     return backup_path
 
 
@@ -361,7 +344,7 @@ def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | No
     1. Explicit path argument
     2. Application setting (video_flow_notebooklm_cli)
     3. Environment variable (NOTEBOOKLM_CLI)
-    4. Isolated experiment path (C:\Users\Asus\notebooklm-experiment\.venv\Scripts\notebooklm.exe)
+    4. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm.exe)
     """
     if explicit_path:
         path = Path(explicit_path).expanduser().resolve()
@@ -449,7 +432,7 @@ def resolve_notebooklm_mcp(explicit_path: Path | str | None = None) -> Path | No
     1. Explicit path argument
     2. Application setting (video_flow_notebooklm_mcp)
     3. Environment variable (NOTEBOOKLM_MCP)
-    4. Isolated experiment path (C:\Users\Asus\notebooklm-experiment\.venv\Scripts\notebooklm-mcp.exe)
+    4. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm-mcp.exe)
     5. Sibling of resolved CLI path
     6. System PATH lookup (shutil.which)
     """

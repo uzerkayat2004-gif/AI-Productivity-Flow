@@ -508,7 +508,7 @@ def _candidate_preserves_content(
     if not allow_compression:
         from collections import Counter
         anchors = {"not", "never", "without", "no", "neither", "nor"}
-        src_anchors = Counter(t for t in src_tokens if t in anchors or any(c.isdigit() for c in t))
+        src_anchors = Counter(t for t in src_tokens if t in anchors or t.isdigit())
         candidate_anchors = Counter(cand_tokens)
         if any(candidate_anchors[t] < count for t, count in src_anchors.items()):
             return False
@@ -1244,7 +1244,9 @@ class TextPolisher:
         # exists, the user picked no concrete model, and the text is short).
         use_fast_lane = (
             bool(api_keys.get("gemini"))
-            and preferred_model is None
+            and preferred_provider == "gemini"
+            and preferred_model != AI_POLISH_FAST_MODEL
+            and speed_mode == "balanced"
             and not long_text
         )
         if preferred_provider and preferred_provider in providers and (
