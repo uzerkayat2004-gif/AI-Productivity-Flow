@@ -15,6 +15,7 @@ Three things are verified:
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -241,7 +242,7 @@ def test_null_backend_reports_no_permissions():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not IS_WINDOWS, reason="Windows only")
+@pytest.mark.skipif(not IS_WINDOWS or bool(os.environ.get("CI")), reason="Requires interactive Windows desktop session")
 def test_windows_clipboard_roundtrip_preserves_user_clipboard():
     backend = get_backend()
     saved = backend.read_clipboard()

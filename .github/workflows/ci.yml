@@ -26,9 +26,13 @@ jobs:
           pip install -e .
           pip install pytest pytest-asyncio pytest-timeout
 
-      - name: Run Windows Test Suite
+      - name: Run Platform Tests
         run: |
-          pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py -v --timeout=60
+          pytest tests/test_platform_layer.py -vv -s --timeout=30
+
+      - name: Run Runtime Compatibility Tests
+        run: |
+          pytest tests/test_runtime_compatibility.py -vv -s --timeout=30
 
   macos-build:
     name: macOS Validation & App Packaging
