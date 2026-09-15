@@ -12,7 +12,7 @@ Features:
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
+from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
 import queue
 import threading
@@ -35,8 +35,8 @@ WM_NCMBUTTONDOWN = 0x00A7
 WM_NCMBUTTONUP = 0x00A8
 WM_NCMBUTTONDBLCLK = 0x00A9
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+user32 = windll.user32
+kernel32 = windll.kernel32
 
 # Structs for low-level mouse hook
 class POINT(ctypes.Structure):
@@ -55,21 +55,22 @@ class MSLLHOOKSTRUCT(ctypes.Structure):
 
 # Exact 64-bit safe types for Windows LowLevelMouseProc
 LRESULT = ctypes.c_ssize_t
-HOOKPROC = ctypes.WINFUNCTYPE(
+HOOKPROC = WINFUNCTYPE(
     LRESULT,
     ctypes.c_int,
     wintypes.WPARAM,
     wintypes.LPARAM,
 )
 
-user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
-user32.SetWindowsHookExW.restype = wintypes.HHOOK
+if IS_WINDOWS:
+    user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+    user32.SetWindowsHookExW.restype = wintypes.HHOOK
 
-user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
-user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+    user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+    user32.UnhookWindowsHookEx.restype = wintypes.BOOL
 
-user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
-user32.CallNextHookEx.restype = LRESULT
+    user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+    user32.CallNextHookEx.restype = LRESULT
 
 
 class Win32MouseHook:
@@ -136,6 +137,9 @@ class Win32MouseHook:
 
     def start(self) -> None:
         """Start the Win32 mouse hook thread and watchdog."""
+        if not IS_WINDOWS:
+            log.info("[MOUSE HOOK] Non-Windows platform; mouse hook inactive.")
+            return
         with self._lock:
             if self._hook_thread and self._hook_thread.is_alive():
                 return
@@ -161,6 +165,8 @@ class Win32MouseHook:
 
     def stop(self) -> None:
         """Stop the mouse hook and release system resources."""
+        if not IS_WINDOWS:
+            return
         self._stop_event.set()
         with self._lock:
             self._unhook()
@@ -193,6 +199,8 @@ class Win32MouseHook:
 
     def is_healthy(self) -> bool:
         """Check whether the mouse hook is currently active and healthy."""
+        if not IS_WINDOWS:
+            return True
         with self._lock:
             return self._is_hooked and self._hook_handle is not None and self._hook_thread is not None and self._hook_thread.is_alive()
 

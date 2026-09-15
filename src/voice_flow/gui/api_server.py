@@ -816,6 +816,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.google_auth import handle_me
             handle_me(self)
             return
+        if path == "/api/platform/permissions":
+            from voice_flow.platform import get_backend
+            report = get_backend().permission_report()
+            self.send_json_response({"success": True, **report.to_dict()})
+            return
         if path == "/api/auth/status":
             _sync_active_storage()
             from voice_flow.account_manager import get_account_manager
@@ -918,7 +923,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     theme = "dark"
                 raw_html = index_file.read_text(encoding="utf-8")
                 # Pre-inject data-theme directly onto the root <html> element
-                raw_html = re.sub(r'<html\b([^>]*)>', lambda m: f'<html {re.sub(r"""data-theme=["\'][^"\']*["\']""", "", m.group(1)).strip()} data-theme="{theme}">', raw_html, count=1)
+                def _inject_theme_tag(m):
+                    clean_attrs = re.sub(r'data-theme=["\'][^"\']*["\']', '', m.group(1)).strip()
+                    if clean_attrs:
+                        return f'<html {clean_attrs} data-theme="{theme}">'
+                    return f'<html data-theme="{theme}">'
+                raw_html = re.sub(r'<html\b([^>]*)>', _inject_theme_tag, raw_html, count=1)
                 polishing_enabled = _polishing_enabled()
                 if polishing_enabled:
                     raw_html = re.sub(
@@ -2342,6 +2352,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         if path == "/auth/desktop/session":
             from voice_flow.google_auth import handle_desktop_session
             handle_desktop_session(self, str(data.get("pair_token") or ""))
+            return
+
+        if path == "/api/platform/permissions/open":
+            from voice_flow.platform import get_backend
+            key = str(data.get("key") or "").strip()
+            ok = get_backend().open_permission_settings(key)
+            self.send_json_response({"success": ok})
             return
 
         # Multi-Account Authentication & Profile Management

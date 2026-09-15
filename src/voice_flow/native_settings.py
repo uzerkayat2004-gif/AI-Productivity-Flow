@@ -41,6 +41,12 @@ def default_launch_command() -> str:
 
 
 def get_launch_at_login(registry: Any | None = None) -> NativeResult:
+    if registry is None and sys.platform == "darwin":
+        try:
+            from voice_flow.platform import get_backend
+            return NativeResult(get_backend().get_launch_at_login())
+        except Exception as exc:
+            return NativeResult(False, f"macOS launch-at-login error: {exc}")
     reg = _winreg(registry)
     if reg is None:
         return NativeResult(False, "Windows launch-at-login is unavailable on this platform")
@@ -58,6 +64,13 @@ def set_launch_at_login(enabled: bool, command: str | None = None, registry: Any
     """Set only Voice Flow's HKCU startup value; never mutate it on import."""
     if not isinstance(enabled, bool):
         return NativeResult(False, "launch_at_login must be a boolean")
+    if registry is None and sys.platform == "darwin":
+        try:
+            from voice_flow.platform import get_backend
+            ok = get_backend().set_launch_at_login(enabled, command)
+            return NativeResult(ok)
+        except Exception as exc:
+            return NativeResult(False, f"macOS launch-at-login error: {exc}")
     reg = _winreg(registry)
     if reg is None:
         return NativeResult(False, "Windows launch-at-login is unavailable on this platform")

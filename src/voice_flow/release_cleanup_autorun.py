@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None  # type: ignore[assignment]
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_VALUE_NAMES = ("VoiceFlow", "Voice Flow", "AI Productivity Flow")
@@ -20,6 +23,8 @@ STARTUP_LNK_NAMES = ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk", "AI Pro
 
 def remove_registry_autorun() -> int:
     """Delete all known Voice Flow value names from the HKCU Run key."""
+    if winreg is None:
+        return 0
     removed = 0
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:

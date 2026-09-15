@@ -5,7 +5,7 @@ with specialized Microsoft Excel spreadsheet cell & table navigation support and
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
+from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
 import logging
 import os
 import re
@@ -13,15 +13,18 @@ import sys
 import threading
 import time
 
-import pyautogui
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = False
+    pyautogui.PAUSE = 0.02
+except Exception:
+    pyautogui = None  # type: ignore[assignment]
+
 import pyperclip
 
 from voice_flow.config import config
 
 log = logging.getLogger(__name__)
-
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE = 0.02
 
 # Win32 Virtual Key Codes
 VK_SHIFT = 0x10
@@ -134,8 +137,14 @@ def _get_process_name_safe(pid: int) -> str:
     """Safely query the executable image base name for a PID with limited rights."""
     if not pid:
         return ""
+    if not IS_WINDOWS:
+        try:
+            import psutil
+            return psutil.Process(pid).name().lower()
+        except Exception:
+            return ""
     try:
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = windll.kernel32
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         h_proc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
         if h_proc:
@@ -273,14 +282,21 @@ def is_internal_window(hwnd: int | None, overlay_hwnd: int | None = None) -> boo
 
 
 def get_active_window_title() -> str:
-    """Retrieve the title of the currently focused window on Windows."""
+    """Retrieve the title of the currently focused window."""
+    if not IS_WINDOWS:
+        try:
+            from voice_flow.platform import get_backend
+            return get_backend().active_window_title()
+        except Exception:
+            return ""
     try:
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        user32 = windll.user32
+        hwnd = user32.GetForegroundWindow()
         if not hwnd:
             return ""
-        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        length = user32.GetWindowTextLengthW(hwnd)
         buff = ctypes.create_unicode_buffer(length + 1)
-        ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
+        user32.GetWindowTextW(hwnd, buff, length + 1)
         return buff.value
     except Exception:
         return ""
@@ -288,11 +304,14 @@ def get_active_window_title() -> str:
 
 def get_window_class_name(hwnd: int) -> str:
     """Retrieve the Win32 class name of the given window."""
+    if not IS_WINDOWS or not hwnd:
+        return ""
     try:
-        if not hwnd or not ctypes.windll.user32.IsWindow(hwnd):
+        user32 = windll.user32
+        if not user32.IsWindow(hwnd):
             return ""
         buff = ctypes.create_unicode_buffer(256)
-        ctypes.windll.user32.GetClassNameW(hwnd, buff, 256)
+        user32.GetClassNameW(hwnd, buff, 256)
         return buff.value
     except Exception:
         return ""
@@ -304,12 +323,12 @@ def is_same_window_hierarchy(hwnd1: int | None, hwnd2: int | None) -> bool:
     This handles cases where hwnd1 is a child control (e.g. Windows Terminal text area or XAML island)
     and hwnd2 is the top-level window (or vice-versa), or both share the same root ancestor.
     """
-    if not hwnd1 or not hwnd2:
+    if not IS_WINDOWS or not hwnd1 or not hwnd2:
         return False
     if hwnd1 == hwnd2:
         return True
     try:
-        user32 = ctypes.windll.user32
+        user32 = windll.user32
         if user32.IsChild(hwnd1, hwnd2) or user32.IsChild(hwnd2, hwnd1):
             return True
         root1 = user32.GetAncestor(hwnd1, 2) or hwnd1  # GA_ROOT = 2
@@ -331,10 +350,12 @@ def focus_target_window(hwnd: int) -> None:
     Operates on the root ancestor top-level window so child island windows (such as in Windows Terminal)
     can be brought to the foreground properly, then sets input focus to the target HWND.
     """
-    if not hwnd or not ctypes.windll.user32.IsWindow(hwnd) or is_internal_window(hwnd):
+    if not IS_WINDOWS or not hwnd:
         return
     try:
-        user32 = ctypes.windll.user32
+        user32 = windll.user32
+        if not user32.IsWindow(hwnd) or is_internal_window(hwnd):
+            return
         current_foreground = user32.GetForegroundWindow()
         if is_same_window_hierarchy(current_foreground, hwnd):
             user32.SetFocus(hwnd)
@@ -352,7 +373,7 @@ def focus_target_window(hwnd: int) -> None:
         # Force foreground focus by attaching thread input
         fore_thread = user32.GetWindowThreadProcessId(current_foreground, None)
         target_thread = user32.GetWindowThreadProcessId(root_target, None)
-        curr_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+        curr_thread = windll.kernel32.GetCurrentThreadId()
 
         if target_thread != curr_thread:
             user32.AttachThreadInput(curr_thread, target_thread, True)
@@ -376,8 +397,8 @@ def focus_target_window(hwnd: int) -> None:
     except Exception as e:
         log.warning("[INJECTOR] Failed to restore focus to hwnd %d: %s", hwnd, e)
         try:
-            root_target = ctypes.windll.user32.GetAncestor(hwnd, 2) or hwnd
-            ctypes.windll.user32.SetForegroundWindow(root_target)
+            root_target = windll.user32.GetAncestor(hwnd, 2) or hwnd
+            windll.user32.SetForegroundWindow(root_target)
             time.sleep(0.04)
         except Exception:
             pass
@@ -390,8 +411,10 @@ _clipboard_token_lock = threading.Lock()
 
 def _suppress_win_start_menu() -> None:
     """Send a dummy key event to prevent Windows from opening the Start menu on Win key release."""
+    if not IS_WINDOWS:
+        return
     try:
-        user32 = ctypes.windll.user32
+        user32 = windll.user32
         user32.keybd_event(VK_CONTROL, 0, 0, VF_SYNTHETIC_EXTRA_INFO)
         user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
         user32.keybd_event(VK_NONAME, 0, 0, VF_SYNTHETIC_EXTRA_INFO)
@@ -403,36 +426,48 @@ def _suppress_win_start_menu() -> None:
 def _force_release_modifiers() -> None:
     """Force release any held modifier keys (Win, Alt, Shift, Ctrl) to prevent hotkey collisions.
     Crucially suppresses Windows Start Menu opening if Win key is released."""
-    user32 = ctypes.windll.user32
-    win_down = bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
-    if win_down:
-        _suppress_win_start_menu()
-    for vk in (VK_LWIN, VK_RWIN, VK_MENU, VK_SHIFT, VK_CONTROL):
-        if bool(user32.GetAsyncKeyState(vk) & 0x8000):
-            user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
-    if win_down:
-        _suppress_win_start_menu()
+    if not IS_WINDOWS:
+        return
+    try:
+        user32 = windll.user32
+        win_down = bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
+        if win_down:
+            _suppress_win_start_menu()
+        for vk in (VK_LWIN, VK_RWIN, VK_MENU, VK_SHIFT, VK_CONTROL):
+            if bool(user32.GetAsyncKeyState(vk) & 0x8000):
+                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
+        if win_down:
+            _suppress_win_start_menu()
+    except Exception:
+        pass
 
 
 def _wait_for_modifiers_released(timeout_ms: int = 100) -> None:
     """Wait for Ctrl, Alt, Shift, and Win keys to be physically released before pasting."""
-    start = time.time()
-    user32 = ctypes.windll.user32
-    while (time.time() - start) * 1000 < timeout_ms:
-        ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-        win = bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
-        alt = bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
-        shift = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
-        if not ctrl and not win and not alt and not shift:
-            break
-        time.sleep(0.003)
-    _force_release_modifiers()
+    if not IS_WINDOWS:
+        return
+    try:
+        start = time.time()
+        user32 = windll.user32
+        while (time.time() - start) * 1000 < timeout_ms:
+            ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            win = bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000))
+            alt = bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
+            shift = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            if not ctrl and not win and not alt and not shift:
+                break
+            time.sleep(0.003)
+        _force_release_modifiers()
+    except Exception:
+        pass
 
 
 def _set_clipboard_win32(text: str) -> bool:
     """Direct native Win32 clipboard writer fallback."""
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
+    if not IS_WINDOWS:
+        return False
+    user32 = windll.user32
+    kernel32 = windll.kernel32
     # Without explicit prototypes ctypes truncates 64-bit HGLOBAL/HANDLE
     # returns to 32 bits -> GlobalLock hands back a garbage pointer.
     kernel32.GlobalAlloc.restype = ctypes.c_void_p
@@ -471,6 +506,12 @@ def _set_clipboard_win32(text: str) -> bool:
 
 def _safe_copy_to_clipboard(text: str) -> bool:
     """Copy text to clipboard with retries and native Win32 fallback."""
+    if not IS_WINDOWS:
+        try:
+            from voice_flow.platform import get_backend
+            return get_backend().copy_to_clipboard(text)
+        except Exception:
+            pass
     for _ in range(3):
         try:
             pyperclip.copy(text)
@@ -482,6 +523,12 @@ def _safe_copy_to_clipboard(text: str) -> bool:
 
 def _safe_paste_from_clipboard() -> str:
     """Read text from clipboard safely."""
+    if not IS_WINDOWS:
+        try:
+            from voice_flow.platform import get_backend
+            return get_backend().read_clipboard()
+        except Exception:
+            pass
     for _ in range(3):
         try:
             return pyperclip.paste() or ""
@@ -641,6 +688,33 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
         log.warning("[INJECTOR] inject_text called with empty text, skipping.")
         return False
 
+    if not IS_WINDOWS:
+        try:
+            from voice_flow.platform import get_backend
+            backend = get_backend()
+            if backend.is_own_window_focused():
+                log.warning("[INJECTOR] Target is an internal app window; refusing to paste into internal app. Dictation remains safely on clipboard.")
+                backend.copy_to_clipboard(text)
+                return False
+            saved = backend.read_clipboard()
+            if not backend.copy_to_clipboard(text):
+                log.error("[INJECTOR] Could not write text to clipboard; skipping paste.")
+                return False
+            time.sleep(0.015)
+            ok = backend.send_paste()
+            if press_enter:
+                time.sleep(0.05)
+                backend.send_enter()
+            if saved:
+                def _restore_clip():
+                    time.sleep(0.2)
+                    backend.copy_to_clipboard(saved)
+                threading.Thread(target=_restore_clip, daemon=True).start()
+            return bool(ok)
+        except Exception as exc:
+            log.error("[INJECTOR] Non-Windows inject_text failed: %s", exc)
+            return False
+
     if target_hwnd and is_internal_window(target_hwnd):
         log.warning(
             "[INJECTOR] Target hwnd %d is an internal app window ('%s'); refusing to paste into internal app. Dictation remains safely on clipboard.",
@@ -756,8 +830,14 @@ class ClipboardInjector:
         and skips synthetic Ctrl+C for legacy console windows to protect running CLI processes.
         """
         with _paste_lock:
+            if not IS_WINDOWS:
+                try:
+                    from voice_flow.platform import get_backend
+                    return get_backend().get_selected_text()
+                except Exception:
+                    return ""
             try:
-                user32 = ctypes.windll.user32
+                user32 = windll.user32
                 # 1. If the user is actively holding physical modifier keys (Ctrl, Win, Alt, Shift),
                 # NEVER inject synthetic Ctrl+C which would collide with user keystrokes (e.g. Ctrl-click, Shift-select).
                 # Crucially, NEVER synthesize fake keyup events here which would corrupt physical key states.
