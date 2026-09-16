@@ -289,4 +289,28 @@ def test_queue_video_from_screen_enforces_allow_local_fallback() -> None:
             assert kwargs.get("allow_local_fallback") is True
             assert kwargs.get("source_text") == "Sample text for video fallback test"
             assert kwargs.get("provider") == "notebooklm"
+
+
+def test_video_flow_screen_widget_show_composer_opens_window() -> None:
+    import tkinter as tk
+    from voice_flow.video_flow_widget import VideoFlowScreenWidget
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        widget = VideoFlowScreenWidget()
+        widget.attach_root(root)
+        widget.show_composer("Selected text for video flow test", "summary")
+        root.update()
+
+        assert widget.win is not None
+        assert widget.win.winfo_exists()
+        assert widget.win.state() == "normal"
+        assert widget._controls["source"].get("1.0", "end-1c") == "Selected text for video flow test"
+        assert widget._controls["title"].get() == "Selected text for video flow test"
+        widget.hide()
+        assert widget.win.state() == "withdrawn"
+    finally:
+        root.destroy()
+
 

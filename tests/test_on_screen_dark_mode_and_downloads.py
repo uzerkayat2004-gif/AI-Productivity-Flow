@@ -84,3 +84,20 @@ def test_video_flow_composer_dark_mode_tokens(monkeypatch):
     assert colors_dark["border"] == "#3b3834"
     assert colors_dark["orange"] == "#e6b092"
     assert colors_dark["background"] == "#161615"
+
+
+def test_audio_flow_widget_minimal_circle_dark_mode(monkeypatch):
+    from voice_flow.storage import storage
+    from voice_flow.audio_flow_widget import AudioFlowFloatingWidget
+
+    widget = AudioFlowFloatingWidget.__new__(AudioFlowFloatingWidget)
+    widget._image_cache = {}
+
+    # Light mode
+    monkeypatch.setattr(storage, "get_setting", lambda k, default=None: "light" if k == "on_screen_ui_theme" else default)
+    assert not widget._is_theme_dark()
+
+    # Dark mode
+    monkeypatch.setattr(storage, "get_setting", lambda k, default=None: "dark" if k == "on_screen_ui_theme" else default)
+    assert widget._is_theme_dark()
+

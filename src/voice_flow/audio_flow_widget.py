@@ -243,9 +243,10 @@ class AudioFlowFloatingWidget:
         # Swap background colors: circle stages use border color, card stages use white/dark card
         try:
             if self._stage == self.STAGE_MINIMAL:
-                self.win.config(bg=ORANGE_DEEP)
+                min_bg = "#3b3834" if self._is_theme_dark() else ORANGE_DEEP
+                self.win.config(bg=min_bg)
                 if self.canvas:
-                    self.canvas.config(bg=ORANGE_DEEP)
+                    self.canvas.config(bg=min_bg)
             else:
                 card_bg = "#20201f" if self._is_theme_dark() else WHITE
                 self.win.config(bg=card_bg)
@@ -487,21 +488,25 @@ class AudioFlowFloatingWidget:
         scale = 4  # 4x supersample for crisp antialiasing
         s = self.SIZE
         S = s * scale
-        # KEY FIX: Fill entire image with BORDER color so that when the 1-bit
-        # SetWindowRgn clips pixels at the circle edge, the exposed sub-pixels
-        # are orange (matching the circle rim) instead of white — eliminating
-        # the jagged white staircase fringe against dark backgrounds.
-        border_col = (255, 95, 10) if (is_hover or is_playing) else (235, 88, 0)
+        is_dark = self._is_theme_dark()
+
+        if is_dark:
+            # App Dark Studio palette: dark matte card with champagne/peach secondary accent
+            border_col = (230, 176, 146) if (is_hover or is_playing) else (59, 56, 52)
+            bg_col = (43, 37, 32) if (is_hover or is_playing) else (32, 32, 31)
+        else:
+            # Sunrise White ceramic disk with vibrant orange border
+            border_col = (255, 95, 10) if (is_hover or is_playing) else (235, 88, 0)
+            bg_col = (255, 248, 242) if (is_hover or is_playing) else (255, 255, 255)
+
         img = Image.new("RGB", (S, S), border_col)
         draw = ImageDraw.Draw(img)
 
-        # 1. Sunrise White ceramic disk with vibrant orange border
-        bg_col = (255, 248, 242) if (is_hover or is_playing) else (255, 255, 255)
         border_w = int(1.8 * scale) if (is_hover or is_playing) else int(1.6 * scale)
 
         # Outer filled circle — border fills from edge inward
         draw.ellipse([0, 0, S - 1, S - 1], fill=border_col)
-        # Inner filled circle — white ceramic interior
+        # Inner filled circle — ceramic interior
         inset = border_w
         draw.ellipse([inset, inset, S - 1 - inset, S - 1 - inset], fill=bg_col)
 
@@ -511,18 +516,25 @@ class AudioFlowFloatingWidget:
         if is_playing:
             # Rotating progress track and arc
             arc_m = 3.2 * scale
-            track_col = (255, 220, 195)
+            if is_dark:
+                track_col = (59, 56, 52)
+                arc_col = (230, 176, 146)
+                glyph_col = (245, 241, 234) if is_hover else (230, 176, 146)
+            else:
+                track_col = (255, 220, 195)
+                arc_col = (235, 88, 0)
+                glyph_col = (215, 60, 0) if is_hover else (235, 88, 0)
+
             draw.ellipse([arc_m, arc_m, S - arc_m, S - arc_m], outline=track_col, width=int(1.6 * scale))
             start = (anim_frame * 30) % 360
             draw.arc(
                 [arc_m, arc_m, S - arc_m, S - arc_m],
                 start=start,
                 end=start + 90,
-                fill=(235, 88, 0),
+                fill=arc_col,
                 width=int(2.0 * scale),
             )
             # Center vector glyph
-            glyph_col = (215, 60, 0) if is_hover else (235, 88, 0)
             if is_paused:
                 tri_r = 3.6 * scale
                 pts = [
@@ -538,10 +550,15 @@ class AudioFlowFloatingWidget:
                 draw.rounded_rectangle([cx - gap - bar_w, cy - bar_h, cx - gap, cy + bar_h], radius=0.8 * scale, fill=glyph_col)
                 draw.rounded_rectangle([cx + gap, cy - bar_h, cx + gap + bar_w, cy + bar_h], radius=0.8 * scale, fill=glyph_col)
         else:
-            # Crisp High-Contrast Acoustic Waveform
-            c_deep = (210, 60, 0) if not is_hover else (230, 75, 0)
-            c_mid = (245, 90, 0) if not is_hover else (255, 110, 10)
-            c_dot = (255, 140, 55)
+            # Crisp Acoustic Waveform
+            if is_dark:
+                c_deep = (245, 195, 168) if is_hover else (230, 176, 146)
+                c_mid = (230, 176, 146) if is_hover else (212, 148, 116)
+                c_dot = (255, 215, 195) if is_hover else (230, 176, 146)
+            else:
+                c_deep = (210, 60, 0) if not is_hover else (230, 75, 0)
+                c_mid = (245, 90, 0) if not is_hover else (255, 110, 10)
+                c_dot = (255, 140, 55)
 
             # Center pillar (bold & tall)
             h_center = (16.5 if is_hover else 15.0) * scale
@@ -1137,7 +1154,7 @@ class AudioFlowFloatingWidget:
         try:
             if self._stage == self.STAGE_MINIMAL:
                 is_h = self._hover is not None
-                key = ("minimal", is_h, self._is_playing, self._is_paused, (self._anim_frame % 12) if self._is_playing else 0)
+                key = ("minimal", is_h, self._is_playing, self._is_paused, (self._anim_frame % 12) if self._is_playing else 0, is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_minimal_image(is_h, self._is_playing, self._is_paused, self._anim_frame)
                 photo = self._image_cache[key]
@@ -1193,11 +1210,16 @@ class AudioFlowFloatingWidget:
 
         if self._stage == self.STAGE_MINIMAL:
             pad = 1
-            fill = "#FFF8F2" if (self._hover is not None or self._is_playing) else WHITE
-            outline = "#FF5F0A" if (self._hover is not None or self._is_playing) else ORANGE_DEEP
+            if is_dark:
+                fill = "#282725" if (self._hover is not None or self._is_playing) else "#20201f"
+                outline = "#e6b092" if (self._hover is not None or self._is_playing) else "#3b3834"
+                glyph_col = "#e6b092" if (self._hover is not None or self._is_playing) else "#d49474"
+            else:
+                fill = "#FFF8F2" if (self._hover is not None or self._is_playing) else WHITE
+                outline = "#FF5F0A" if (self._hover is not None or self._is_playing) else ORANGE_DEEP
+                glyph_col = ORANGE_DEEP if not (self._hover is not None or self._is_playing) else "#D63C00"
             c.create_oval(pad, pad, w - pad, h - pad, fill=fill, outline=outline, width=2)
             glyph = "⏸" if self._is_playing and not self._is_paused else ("▶" if self._is_playing else "♫")
-            glyph_col = ORANGE_DEEP if not (self._hover is not None or self._is_playing) else "#D63C00"
             c.create_text(w / 2, h / 2, text=glyph, fill=glyph_col, font=("Segoe UI", 9, "bold"), anchor="center")
         elif self._stage == self.STAGE_MODE_SELECT:
             self._draw_card(c, w, h)

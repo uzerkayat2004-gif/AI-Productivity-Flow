@@ -29,6 +29,7 @@ from typing import Any, Callable
 log = logging.getLogger("voice_flow.video_flow_widget")
 
 from voice_flow.video_flow_documents import DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, extract_document_text
+from voice_flow.storage import storage
 
 try:
     from voice_flow.video_flow_engine.notebooklm.document_profiler import (
@@ -359,6 +360,8 @@ class VideoFlowScreenWidget:
         self.on_generate: Callable[[dict[str, Any]], dict[str, Any]] | None = None
         self._source_text = ""
         self._source_name = ""
+        self._initial_text = ""
+        self._initial_title = ""
         self._mode = "summary"
         self._provider = "notebooklm"
         self._controls: dict[str, Any] = {}
@@ -423,8 +426,8 @@ class VideoFlowScreenWidget:
             try:
                 callback = self._ui_queue.get_nowait()
                 callback()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.exception("Error running callback in video_flow_widget UI queue: %s", exc)
 
     def launch(self, selected_text: str = "", mode: str = "summary") -> "VideoFlowScreenWidget":
         """Public, stable entrypoint for callers outside the dashboard."""
@@ -517,6 +520,9 @@ class VideoFlowScreenWidget:
     def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None) -> None:
         clean = (selected_text or "").strip()
         self._mode = mode if mode in {"summary", "full"} else "summary"
+        self._source_text = clean
+        self._source_name = "Selected text" if clean else ""
+        self._initial_text = clean
         if anchor_bar is not None:
             self._anchor_win = anchor_bar
         if self.root is None:
@@ -527,25 +533,31 @@ class VideoFlowScreenWidget:
                 self.root = getattr(tk, "_default_root", None)
             if not self.root:
                 return
-            curr_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+            try:
+                curr_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+            except Exception:
+                curr_theme = "light"
             if not self.win or not self.win.winfo_exists() or getattr(self, "_built_theme", None) != curr_theme:
                 self._build()
             if not self.win:
                 return
 
-            clean = (self._initial_text or "").strip()
+            source_txt = getattr(self, "_source_text", "") or ""
             if "source" in self._controls:
                 self._controls["source"].delete("1.0", "end")
-                if clean:
-                    self._controls["source"].insert("1.0", clean)
+                if source_txt:
+                    self._controls["source"].insert("1.0", source_txt)
             if "title" in self._controls:
-                self._controls["title"].set(self._initial_title)
+                current_title = self._controls["title"].get().strip()
+                if not current_title and source_txt:
+                    first_line = source_txt.strip().split("\n")[0].strip()[:60]
+                    self._controls["title"].set(first_line)
             if "mode" in self._controls:
                 self._controls["mode"].set(self._mode)
             if "file_label" in self._controls:
                 self._controls["file_label"].set(self._source_name or "No document selected")
             if "status" in self._controls:
-                self._controls["status"].set("Selected text is ready." if clean else "Paste text or choose a document.")
+                self._controls["status"].set("Selected text is ready." if source_txt else "Paste text or choose a document.")
             self._stop_grid()
             self._check_notebooklm_auth()
             self._refresh_models()
@@ -575,7 +587,10 @@ class VideoFlowScreenWidget:
                 pass
         self.win = None
         self._controls.clear()
-        self._built_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        try:
+            self._built_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        except Exception:
+            self._built_theme = "light"
         self.colors = get_composer_colors()
         colors = self.colors
         win = tk.Toplevel(self.root)
