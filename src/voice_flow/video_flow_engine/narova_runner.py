@@ -230,6 +230,15 @@ def _safe_environment() -> dict[str, str]:
         environment["NAROVA_HF_MODULES"] = str(runtime / "hyperframes")
         ff_dir = runtime / "ffmpeg"
         environment["PATH"] = str(ff_dir) + os.pathsep + environment.get("PATH", "")
+    else:
+        extra_paths = [
+            Path(r"C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin"),
+            Path(r"C:\ProgramData\chocolatey\bin"),
+            Path.home() / ".narova" / "bin",
+        ]
+        path_prefixes = [str(p) for p in extra_paths if p.is_dir()]
+        if path_prefixes:
+            environment["PATH"] = os.pathsep.join(path_prefixes) + os.pathsep + environment.get("PATH", "")
     return environment
 
 

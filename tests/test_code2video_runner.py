@@ -59,7 +59,60 @@ def test_planner_uses_vendored_outline_and_storyboard_prompts(tmp_path: Path) ->
     assert (tmp_path / "storyboard" / "storyboard.json").is_file()
 
 
+def test_extract_json_object_strips_markdown_bold_and_repairs():
+    from voice_flow.video_flow_engine.code2video_runner import _extract_json_object
+
+    # Case 1: wrapped in markdown bold like vf-7053030dcf214e15890cb9226fea18aa
+    raw_response = """{
+        "topic": "AI Productivity Flow",
+        **"target_audience": "University students and professionals",**
+        "sections": [{"id": "s1", "title": "Intro", "content": "Text"}]
+    }"""
+    parsed = _extract_json_object(raw_response)
+    assert parsed["topic"] == "AI Productivity Flow"
+    assert parsed["target_audience"] == "University students and professionals"
+    assert len(parsed["sections"]) == 1
+
+    # Case 2: key-level bold, unquoted bold keys, and markdown bullets with trailing commas
+    raw_bullets = """
+    Here is the outline:
+    ```json
+    {
+        **"topic"**: "Test Topic",
+        **target_audience**: "Learners",
+        "sections": [
+            * {"id": "s1", "title": "Sec 1", },
+        ],
+    }
+    ```
+    """
+    parsed2 = _extract_json_object(raw_bullets)
+    assert parsed2["topic"] == "Test Topic"
+    assert parsed2["target_audience"] == "Learners"
+
+    # Case 3: Python relaxed dict with single quotes and boolean true
+    raw_relaxed = "{'topic': 'Relaxed', 'sections': [{'id': 's1', 'active': true}]}"
+    parsed3 = _extract_json_object(raw_relaxed)
+    assert parsed3["topic"] == "Relaxed"
 
 
+def test_code2video_runner_respects_allow_local_fallback(tmp_path: Path):
+    from voice_flow.video_flow_engine.code2video_runner import Code2VideoRunner
 
+    def broken_gateway(_prompt: str, **_: object) -> str:
+        raise RuntimeError("Gateway connection failed completely")
 
+    broken_gateway.is_local = True
+    runner = Code2VideoRunner(gateway=broken_gateway)
+
+    # When allow_local_fallback is True, should fall back to deterministic storyboard instead of raising
+    result = runner.plan(
+        "Source text explaining distributed systems and consensus.",
+        project_dir=tmp_path,
+        duration_seconds=30,
+        allow_external_ai=True,
+        allow_local_fallback=True,
+    )
+    assert "topic" in result
+    assert len(result["sections"]) >= 1
+    assert (tmp_path / "storyboard" / "storyboard.json").is_file()

@@ -237,6 +237,30 @@ def write_storage_state_guarded(
             "existing_cookies": existing_count,
             "rejected_path": str(rejected_path) if rejected_path else None,
         }
+
+    # Defense in depth: Refuse to write cookies belonging to switched_from account
+    try:
+        from voice_flow.storage import storage
+        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+        if switched_from:
+            sw_from = str(switched_from).strip().lower()
+            parsed = json.loads(content) if isinstance(content, str) else content
+            if isinstance(parsed, dict):
+                acc = (parsed.get("notebooklm") or {}).get("account", {}) or parsed.get("account", {})
+                email = acc.get("email") if isinstance(acc, dict) else None
+                if email and str(email).strip().lower() == sw_from:
+                    logger.warning(
+                        "Refused to overwrite storage state %s with cookies matching switched_from '%s' from %s",
+                        t, sw_from, source,
+                    )
+                    return {
+                        "written": False,
+                        "reason": "switched_from_account_rejected",
+                        "existing_cookies": existing_count,
+                    }
+    except Exception:
+        pass
+
     atomic_write_text(t, content)
     return {"written": True, "existing_cookies": existing_count, "new_cookies": new_count}
 
@@ -275,6 +299,44 @@ def mirror_storage_state_guarded(
             logger.warning("Could not mirror storage state to %s: %s", t, exc)
             skipped.append({"path": str(t), "error": str(exc)[:200]})
     return {"written": written, "skipped": skipped, "new_cookies": new_count}
+
+
+def is_profile_disconnected(profile: str | None = None) -> bool:
+    """Check if the NotebookLM profile is explicitly marked disconnected."""
+    try:
+        from voice_flow.storage import storage
+        if storage.get_setting("video_flow_notebooklm_disconnected") in (True, "true", "True", 1, "1"):
+            return True
+    except Exception:
+        pass
+    try:
+        from voice_flow.gui import api_server
+        if api_server.storage.get_setting("video_flow_notebooklm_disconnected") in (True, "true", "True", 1, "1"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def is_profile_unauthenticated(profile: str | None = None) -> bool:
+    """Check if the NotebookLM profile is in an unauthenticated or disconnected state."""
+    if is_profile_disconnected(profile):
+        return True
+    try:
+        from voice_flow.storage import storage
+        auth_val = storage.get_setting("video_flow_notebooklm_authenticated")
+        if auth_val in (False, "false", "False", 0, "0"):
+            return True
+    except Exception:
+        pass
+    try:
+        from voice_flow.gui import api_server
+        auth_val = api_server.storage.get_setting("video_flow_notebooklm_authenticated")
+        if auth_val in (False, "false", "False", 0, "0"):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def has_valid_storage_state(profile: str | None = None) -> bool:

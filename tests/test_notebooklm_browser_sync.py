@@ -124,6 +124,27 @@ class TestCookieValidator:
         assert valid is False
         assert "expired" in msg.lower()
 
+    def test_validate_empty_or_whitespace_psid_or_sid(self):
+        # Empty string __Secure-1PSID
+        cookies_empty_psid = [
+            {"name": "__Secure-1PSID", "value": "", "expires": time.time() + 1000},
+            {"name": "SID", "value": "valid_sid", "expires": time.time() + 1000},
+        ]
+        valid, msg, details = validate_extracted_cookies(cookies_empty_psid)
+        assert valid is False
+        assert "__Secure-1PSID" in msg
+        assert "__Secure-1PSID" in details.get("missing_cookies", [])
+
+        # Whitespace-only SID
+        cookies_ws_sid = [
+            {"name": "__Secure-1PSID", "value": "valid_psid", "expires": time.time() + 1000},
+            {"name": "SID", "value": "   ", "expires": time.time() + 1000},
+        ]
+        valid, msg, details = validate_extracted_cookies(cookies_ws_sid)
+        assert valid is False
+        assert "SID" in msg
+        assert "SID" in details.get("missing_cookies", [])
+
 
 class TestSaveAndRecovery:
     def test_save_cookies_creates_safe_copy(self, tmp_path, monkeypatch):
@@ -152,6 +173,30 @@ class TestSaveAndRecovery:
         data = json.loads(safe_file.read_text(encoding="utf-8"))
         assert len(data["cookies"]) == 3
         assert data["account"]["email"] == "user@gmail.com"
+
+    def test_save_cookies_refuses_when_switched_from_matches(self, tmp_path, monkeypatch):
+        profile_dir = tmp_path / "test_profile"
+        profile_dir.mkdir()
+        st_file = profile_dir / "storage_state.json"
+        bk_file = profile_dir / "storage_state.backup.json"
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: st_file,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: bk_file,
+        )
+        monkeypatch.setattr(
+            "voice_flow.storage.storage.get_setting",
+            lambda key: "victim@gmail.com" if key == "video_flow_notebooklm_switched_from" else None,
+        )
+
+        res = save_cookies_to_profile(_sample_valid_cookies(), profile="test_profile", email="victim@gmail.com")
+        assert res["success"] is False
+        assert "switched-from" in res["error"]
+        assert not st_file.exists()
 
     def test_validate_storage_file_restores_from_safe_copy(self, tmp_path):
         target = tmp_path / "storage_state.json"
@@ -421,3 +466,250 @@ class TestApiServerSyncEndpoints:
                 assert data["profiles"][0]["email"] == "test@gmail.com"
         finally:
             server.shutdown()
+
+
+class TestDeadCookieLoopPrevention:
+    def test_auto_sync_skips_browser_profile_sqlite_when_playwright_dead(self, tmp_path, monkeypatch):
+        """When Playwright live check finds session expired, step 2 must NOT resurrect dead cookies from SQLite."""
+        target = tmp_path / "storage_state.json"
+        target.write_text(json.dumps({"cookies": _sample_valid_cookies()}), encoding="utf-8")
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        (bp_dir / "Default").mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        # Mock Playwright returning session dead / interactive needed
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.sync_cookies_with_playwright",
+            lambda **kwargs: {"success": False, "needs_interactive": True, "error": "Expired"},
+        )
+        # Mock extract_cookies_from_sqlite returning cookies
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda cf, ud: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_skips_browser_profile_sqlite_with_identical_cookies(self, tmp_path, monkeypatch):
+        """Step 2 must skip browser_profile SQLite cookies if they match target_storage core cookies."""
+        target = tmp_path / "storage_state.json"
+        cookies = _sample_valid_cookies()
+        target.write_text(json.dumps({"cookies": cookies}), encoding="utf-8")
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.sync_cookies_with_playwright",
+            lambda **kwargs: {"success": False, "error": "Unavailable"},
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: cookies,
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_rejects_anonymous_browser_profile_when_expected_email_set(self, tmp_path, monkeypatch):
+        """Never attribute anonymous browser_profile cookies to expected_email."""
+        target = tmp_path / "storage_state.json"
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.sync_cookies_with_playwright",
+            lambda **kwargs: {"success": False, "error": "Unavailable"},
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile", expected_email="specific.user@gmail.com")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_skips_browser_profile_when_disconnected(self, tmp_path, monkeypatch):
+        """Step 2 must NOT restore cookies from browser_profile SQLite when profile is marked disconnected."""
+        target = tmp_path / "storage_state.json"
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.storage.storage.get_setting",
+            lambda key: True if key == "video_flow_notebooklm_disconnected" else None,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_skips_browser_profile_when_unauthenticated(self, tmp_path, monkeypatch):
+        """Step 2 must NOT restore cookies from browser_profile SQLite when profile is in unauthenticated state."""
+        target = tmp_path / "storage_state.json"
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.storage.storage.get_setting",
+            lambda key: False if key == "video_flow_notebooklm_authenticated" else None,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_skips_browser_profile_when_recent_auth_error(self, tmp_path, monkeypatch):
+        """Step 2 must NOT restore cookies from browser_profile SQLite when an auth error recently occurred."""
+        target = tmp_path / "storage_state.json"
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.login_flow.get_login_state",
+            lambda: {"error": "Authentication failed", "success": False, "running": False},
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+
+    def test_auto_sync_refuses_to_restore_switched_from_cookies(self, tmp_path, monkeypatch):
+        """When switched_from is active, refuse to restore ANY cookies belonging to switched_from."""
+        target = tmp_path / "storage_state.json"
+        safe_copy = tmp_path / "storage_state.safe_copy.json"
+        safe_copy.write_text(
+            json.dumps({"cookies": _sample_valid_cookies(), "account": {"email": "old_user@gmail.com"}}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.storage.storage.get_setting",
+            lambda key: "old_user@gmail.com" if key == "video_flow_notebooklm_switched_from" else None,
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "restored_storage_state.safe_copy.json"
+        assert res["success"] is False
+
+    def test_auto_sync_skips_browser_profile_matching_switched_from(self, tmp_path, monkeypatch):
+        """When switched_from matches email in browser_profile Local State, refuse to restore."""
+        target = tmp_path / "storage_state.json"
+        bp_dir = tmp_path / "browser_profile"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+        cf = bp_dir / "Default" / "Network" / "Cookies"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text("dummy", encoding="utf-8")
+        ls_file = bp_dir / "Local State"
+        ls_file.write_text(
+            json.dumps({"profile": {"info_cache": {"Default": {"user_name": "switched_victim@gmail.com"}}}}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "storage_state.backup.json",
+        )
+        monkeypatch.setattr(
+            "voice_flow.storage.storage.get_setting",
+            lambda key: "switched_victim@gmail.com" if key == "video_flow_notebooklm_switched_from" else None,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: _sample_valid_cookies(),
+        )
+
+        res = auto_sync_from_browser(profile="test-profile")
+        assert res.get("source") != "browser_profile"
+        assert res["success"] is False
+

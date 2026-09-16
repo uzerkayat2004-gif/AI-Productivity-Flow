@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 
 log = logging.getLogger(__name__)
 import sqlite3
@@ -337,6 +338,12 @@ def start_notebooklm_browser_flow(
     flow = _notebooklm_flow()
     state = _NOTEBOOKLM_STATE_PREFIX + secrets.token_urlsafe(24)
     redirect_uri = provider_redirect_uri(port)
+    if switch_account:
+        try:
+            from voice_flow.video_flow_engine.notebooklm.login_flow import _terminate_stale_login_processes
+            _terminate_stale_login_processes(profile or "video-flow-experiment")
+        except Exception:
+            pass
     _notebooklm_pending_save({
         "provider": "notebooklm",
         "state": state,
@@ -516,8 +523,8 @@ def complete_notebooklm_flow(code: str, state: str, port: int) -> dict[str, Any]
         if not isinstance(cookies, list):
             cookies = []
 
-        # When switching accounts to a different email, clean old master token
-        if account_changed:
+        # When switching accounts to a different email, clean old master token and wipe browser profile
+        if account_changed or is_switch:
             try:
                 mt_file = get_profile_dir(resolved_prof) / "master_token.json"
                 if mt_file.is_file():
@@ -529,10 +536,14 @@ def complete_notebooklm_flow(code: str, state: str, port: int) -> dict[str, Any]
                 pass
             try:
                 from voice_flow.video_flow_engine.notebooklm.login_flow import (
-                    _login_log_path,
                     _terminate_stale_login_processes,
+                    _profile_browser_dir,
                 )
-                _terminate_stale_login_processes(resolved_prof, _login_log_path())
+                from voice_flow.video_flow_engine.notebooklm.config import is_pytest_real_home_path
+                _terminate_stale_login_processes(resolved_prof)
+                b_dir = _profile_browser_dir(resolved_prof)
+                if b_dir.is_dir() and not is_pytest_real_home_path(b_dir):
+                    shutil.rmtree(b_dir, ignore_errors=True)
             except Exception:
                 pass
 
@@ -1231,7 +1242,7 @@ NOTEBOOKLM_OFFICIAL_LOGIN_URL = (
     "https://accounts.google.com/ServiceLogin?service=wise&continue=https%3A%2F%2Fnotebooklm.google.com%2F"
 )
 NOTEBOOKLM_ACCOUNT_CHOOSER_URL = (
-    "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fnotebooklm.google.com%2F"
+    "https://accounts.google.com/AccountChooser?service=wise&prompt=select_account&continue=https%3A%2F%2Fnotebooklm.google.com%2F"
 )
 
 PROVIDER_NOTEBOOKLM_CLIENT_ID = (
@@ -1297,6 +1308,7 @@ def get_notebooklm_direct_login_url(switch_account: bool = False) -> str:
     """Return the official Google NotebookLM web sign-in URL.
 
     Opens directly to Google NotebookLM without any third-party app consent screen.
+    Forces Google Account Chooser with service=wise and prompt=select_account when switch_account is True.
     """
     if switch_account:
         return NOTEBOOKLM_ACCOUNT_CHOOSER_URL

@@ -2480,14 +2480,15 @@
 </div>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">On-Screen UI &amp; Appearance</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">On-Screen UI Color <span aria-label="About On-Screen UI Color" class="info-tip" data-tip="Choose light mode or dark mode for on-screen popups and player windows. Resting floating bar remains unchanged." tabindex="0">i</span></div>
-<div class="setting-desc" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 2px;">Color type for on-screen summary players and dialogs (resting floating bar stays in resting design)</div>
+<div class="setting-title">On-Screen UI Dark Mode <span aria-label="About On-Screen UI Dark Mode" class="info-tip" data-tip="Toggle between Dark Mode (ON) and Light Mode (OFF) for on-screen popups, summaries, and dialogs. Note: The resting floating bar permanently maintains its sleek resting appearance." tabindex="0">i</span></div>
+<div class="setting-desc" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 2px;">Switch on-screen UI color between Light Mode and Dark Mode (resting floating bar stays in resting design)</div>
 </div>
-<div class="vf-row-control">
-<div class="button-group" id="on-screen-ui-theme-group" style="display: inline-flex; gap: 4px;">
-<button type="button" class="action-btn active" id="btn-on-screen-light" onclick="setOnScreenUITheme('light')">Light Mode</button>
-<button type="button" class="action-btn" id="btn-on-screen-dark" onclick="setOnScreenUITheme('dark')">Dark Mode</button>
-</div>
+<div class="vf-row-control" style="display: inline-flex; align-items: center; gap: 12px;">
+<span id="on-screen-ui-theme-label" class="kbd-pill" style="font-weight: 600; min-width: 90px; text-align: center; font-size: 12px;">Light Mode</span>
+<label class="toggle-switch" title="Toggle On-Screen UI Dark/Light Mode">
+<input type="checkbox" id="toggle-on-screen-ui-theme" onchange="toggleOnScreenUITheme(this.checked)">
+<span class="toggle-slider"></span>
+</label>
 </div>
 </div></div></section>
 </div>

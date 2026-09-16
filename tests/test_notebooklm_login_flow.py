@@ -568,5 +568,124 @@ def test_prepare_browser_profile_disables_picker_and_first_run(tmp_path, monkeyp
     assert default_prefs["signin"]["allowed"] is True
 
 
+def test_terminate_stale_login_processes_optional_log_and_normalization(tmp_path, monkeypatch):
+    """Verify _terminate_stale_login_processes works without log_path and normalizes path separators."""
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setattr(login_flow.os, "name", "nt")
+    monkeypatch.setattr(
+        login_flow.subprocess, "run",
+        lambda *a, **k: calls.append(a) or SimpleNamespace(stdout="4321\n", returncode=0),
+    )
+
+    fake_b_dir = tmp_path / "fake_prof" / "browser_profile"
+    fake_b_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(login_flow, "_profile_browser_dir", lambda p: fake_b_dir)
+
+    # Call with log_path omitted (defaults to None)
+    killed = login_flow._terminate_stale_login_processes("my-test-profile")
+    assert killed == 1
+    assert len(calls) >= 2
+    ps_cmd = calls[0][0]
+    assert ps_cmd[0] == "powershell"
+    script = " ".join(ps_cmd)
+    assert "--user-data-dir=" in script
+    assert "my-test-profile" in script
+    assert "\\" not in script.split("$marker = '")[1].split("'")[0]  # normalized to forward slashes
+
+
+def test_clean_account_state_for_switch_wipes_all_state_and_browser_dir(tmp_path, monkeypatch):
+    """Verify _clean_account_state_for_switch wipes browser_profile, storage state, backups, and master token."""
+    db_path = str(tmp_path / "test_switch_wipe.db")
+    test_storage = StorageEngine(db_path)
+    test_storage.save_setting("video_flow_notebooklm_email", "switch.old@gmail.com")
+    monkeypatch.setattr("voice_flow.storage.storage", test_storage)
+    monkeypatch.setattr(api_server, "storage", test_storage)
+
+    prof_dir = tmp_path / "profiles" / "switch-wipe-prof"
+    prof_dir.mkdir(parents=True, exist_ok=True)
+    st_file = prof_dir / "storage_state.json"
+    st_file.write_text(json.dumps({
+        "cookies": [{"name": "SID", "value": "old-secret"}],
+        "account": {"email": "switch.old@gmail.com"},
+        "notebooklm": {"account": {"email": "switch.old@gmail.com"}},
+    }), encoding="utf-8")
+    b_file = prof_dir / "storage_state.backup.json"
+    b_file.write_text(json.dumps({"cookies": [{"name": "SID", "value": "old-backup"}]}), encoding="utf-8")
+    safe_file = prof_dir / "storage_state.safe_copy.json"
+    safe_file.write_text(json.dumps({"cookies": [{"name": "SID", "value": "old-safe"}]}), encoding="utf-8")
+    mt_file = prof_dir / "master_token.json"
+    mt_file.write_text(json.dumps({"account": "switch.old@gmail.com", "token": "old-token"}), encoding="utf-8")
+
+    b_dir = prof_dir / "browser_profile"
+    b_dir.mkdir(parents=True, exist_ok=True)
+    (b_dir / "Web Data").write_text("token storage", encoding="utf-8")
+    (b_dir / "Local State").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(login_flow, "_profile_browser_dir", lambda p: b_dir)
+    monkeypatch.setattr(login_flow, "_master_token_json_path", lambda p: mt_file)
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_state_path", lambda p: st_file)
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path", lambda p: b_file)
+    monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda p, l=None: 0)
+
+    login_flow._clean_account_state_for_switch("switch-wipe-prof")
+
+    assert test_storage.get_setting("video_flow_notebooklm_switched_from") == "switch.old@gmail.com"
+    assert not b_dir.exists()
+    assert not b_file.exists()
+    assert not safe_file.exists()
+    assert not mt_file.exists()
+
+    st_data = json.loads(st_file.read_text(encoding="utf-8"))
+    assert st_data["cookies"] == []
+    assert "account" not in st_data
+
+
+def test_watch_login_rejects_identical_switched_from_account(tmp_path, monkeypatch):
+    """Verify _watch_login does not report success when switch_account is True and email matches switched_from."""
+    monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: Path("C:/fake/notebooklm.exe"))
+
+    db_path = str(tmp_path / "test_switch_rej.db")
+    test_storage = StorageEngine(db_path)
+    test_storage.save_setting("video_flow_notebooklm_switched_from", "same.user@gmail.com")
+    monkeypatch.setattr("voice_flow.storage.storage", test_storage)
+    monkeypatch.setattr(api_server, "storage", test_storage)
+
+    prof_dir = tmp_path / "profiles" / "rej-prof"
+    prof_dir.mkdir(parents=True, exist_ok=True)
+    st_file = prof_dir / "storage_state.json"
+    st_file.write_text(json.dumps({
+        "cookies": [{"name": "SID", "value": "dummy-sid"}],
+        "account": {"email": "same.user@gmail.com"},
+    }), encoding="utf-8")
+
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_state_path", lambda p: st_file)
+    monkeypatch.setattr(login_flow, "_storage_email", lambda: "same.user@gmail.com")
+    monkeypatch.setattr(login_flow, "verify_online", lambda **k: {"authenticated": True, "email": "same.user@gmail.com"})
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda cmd, log_path, timeout: (0, ""))
+    monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda p, l=None: 0)
+
+    log_file = tmp_path / "login.log"
+    log_file.write_text("", encoding="utf-8")
+
+    login_flow._watch_login(
+        profile="rej-prof",
+        mode="browser",
+        account_email=None,
+        browser="chrome",
+        browser_timeout=60,
+        log_path=log_file,
+        switch_account=True,
+    )
+
+    state = login_flow.get_login_state()
+    assert state["running"] is False
+    assert state["success"] is False
+    assert "Account switch failed: still signed in as same.user@gmail.com" in (state["error"] or "")
+
+
+
 
 

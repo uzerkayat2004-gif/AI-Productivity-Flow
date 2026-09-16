@@ -313,19 +313,45 @@ def _profile_browser_dir(profile: str) -> Path:
     return get_profile_dir(profile) / "browser_profile"
 
 
-def _terminate_stale_login_processes(profile: str, log_path: Path) -> int:
+def _matches_profile_user_data_dir(cmdline_norm: str, marker_norm: str, profile_name: str) -> bool:
+    """True if cmdline matches the profile marker or a --user-data-dir for this profile."""
+    if marker_norm in cmdline_norm:
+        return True
+    if "--user-data-dir=" in cmdline_norm:
+        prof_cf = profile_name.casefold()
+        for part in cmdline_norm.split():
+            if "--user-data-dir=" in part:
+                udd_val = part.split("--user-data-dir=", 1)[1].strip('"\'')
+                udd_norm = udd_val.replace("\\", "/").casefold()
+                segments = [s for s in udd_norm.split("/") if s]
+                if (
+                    prof_cf in segments
+                    or f"/profiles/{prof_cf}" in udd_norm
+                    or f"/{prof_cf}/browser_profile" in udd_norm
+                ):
+                    return True
+    return False
+
+
+def _terminate_stale_login_processes(profile: str, log_path: Path | str | None = None) -> int:
     """Kill leftover browsers from a previous sign-in still holding the
     profile's browser directory — a wedged SingletonLock would block every
     future sign-in window. Only processes whose command line carries OUR
     browser_profile path are touched; the user's daily browser is never
     matched."""
     killed = 0
-    marker = str(_profile_browser_dir(profile))
+    raw_marker = str(_profile_browser_dir(profile))
+    marker = raw_marker.replace("\\", "/").casefold()
+    prof_cf = profile.casefold()
     if os.name == "nt":
         script = (
             f"$marker = '{marker}'.ToLower(); "
+            f"$prof = '{prof_cf}'.ToLower(); "
             "Get-CimInstance Win32_Process | "
-            "Where-Object { ($_.Name -match 'chrome|msedge|chromium') -and ($_.CommandLine -and $_.CommandLine.ToLower().Contains('browser_profile')) } | "
+            "Where-Object { ($_.Name -match 'chrome|msedge|chromium') -and ($_.CommandLine -and "
+            "(($_.CommandLine.Replace('\\', '/').ToLower().Contains($marker)) -or "
+            "($_.CommandLine.ToLower().Contains('--user-data-dir=') -and "
+            "($_.CommandLine.Replace('\\', '/').ToLower() -match ('[\\/](profiles[\\/])?' + [regex]::Escape($prof) + '([\\/]|$|browser_profile)'))))) } | "
             "Select-Object -ExpandProperty ProcessId"
         )
         try:
@@ -348,15 +374,14 @@ def _terminate_stale_login_processes(profile: str, log_path: Path) -> int:
     try:
         import psutil
         my_pid = os.getpid()
-        marker_cf = marker.casefold()
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 if proc.info["pid"] == my_pid:
                     continue
                 name = (proc.info.get("name") or "").casefold()
                 if name in ("chrome.exe", "msedge.exe", "chromium.exe"):
-                    cmdline = " ".join(proc.info.get("cmdline") or []).casefold()
-                    if marker_cf in cmdline:
+                    cmdline_norm = " ".join(proc.info.get("cmdline") or []).replace("\\", "/").casefold()
+                    if _matches_profile_user_data_dir(cmdline_norm, marker, profile):
                         proc.kill()
                         killed += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -374,9 +399,10 @@ def _terminate_stale_login_processes(profile: str, log_path: Path) -> int:
     except Exception:
         pass
 
-    if killed:
+    if killed and log_path is not None:
         try:
-            with log_path.open("a", encoding="utf-8") as handle:
+            p = Path(log_path)
+            with p.open("a", encoding="utf-8") as handle:
                 handle.write(f"[cleared {killed} leftover sign-in browser process(es)]\n")
         except Exception:
             pass
@@ -395,6 +421,13 @@ def _clean_account_state_for_switch(profile: str) -> None:
     the user's live session.
     """
     logger.info("Explicit account switch requested — wiping stored NotebookLM credentials for profile %s", profile)
+    # Terminate any lingering browser processes first so file locks on browser_profile are released
+    try:
+        _terminate_stale_login_processes(profile)
+        time.sleep(0.3)
+    except Exception:
+        pass
+
     old_email = None
     try:
         from voice_flow.storage import storage
@@ -462,23 +495,14 @@ def _clean_account_state_for_switch(profile: str) -> None:
         pass
 
     try:
+        from .config import is_pytest_real_home_path
         b_dir = _profile_browser_dir(profile)
         if b_dir.is_dir() and not is_pytest_real_home_path(b_dir):
-            for sub in [b_dir / "Default", b_dir]:
-                for cf in [
-                    sub / "Network" / "Cookies",
-                    sub / "Network" / "Cookies-journal",
-                    sub / "Cookies",
-                    sub / "Cookies-journal",
-                    sub / "Preferences",
-                    sub / "Secure Preferences",
-                ]:
-                    try:
-                        if cf.is_file():
-                            cf.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-            shutil.rmtree(b_dir, ignore_errors=True)
+            for _ in range(3):
+                shutil.rmtree(b_dir, ignore_errors=True)
+                if not b_dir.exists():
+                    break
+                time.sleep(0.1)
     except Exception:
         pass
 
@@ -509,33 +533,16 @@ def _prepare_browser_profile(profile: str, switch_account: bool = False) -> None
     """Ensure the browser profile directory exists and is prepared so Chrome
     starts directly into the sign-in flow without first-run or profile-picker prompts."""
     browser_dir = _profile_browser_dir(profile)
-    browser_dir.mkdir(parents=True, exist_ok=True)
 
     if switch_account:
-        # Wipe old browser session cookies and stored login data so Chrome opens clean
-        default_dir = browser_dir / "Default"
-        if default_dir.is_dir():
-            for p in (
-                default_dir / "Network" / "Cookies",
-                default_dir / "Network" / "Cookies-journal",
-                default_dir / "Cookies",
-                default_dir / "Cookies-journal",
-                default_dir / "Login Data",
-                default_dir / "Login Data-journal",
-                default_dir / "Web Data",
-                default_dir / "Web Data-journal",
-            ):
-                if p.is_file():
-                    try:
-                        p.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-            sessions_dir = default_dir / "Sessions"
-            if sessions_dir.is_dir():
-                try:
-                    shutil.rmtree(sessions_dir, ignore_errors=True)
-                except Exception:
-                    pass
+        from .config import is_pytest_real_home_path
+        if browser_dir.is_dir() and not is_pytest_real_home_path(browser_dir):
+            try:
+                shutil.rmtree(browser_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    browser_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. First Run sentinel file: prevents Chrome from showing "Welcome to Chrome" / first-run dialogs
     first_run = browser_dir / "First Run"
@@ -703,13 +710,21 @@ def _watch_login(
             return
 
         with _STATE_LOCK:
-            if _STATE.get("success"):
-                return
+            _STATE.update(running=True, success=None, error=None, finished_at=None)
 
         code, err = None, ""
         durable = False
         _set_note("Google NotebookLM sign-in is opening — finish the sign-in there.")
         _terminate_stale_login_processes(profile, log_path)
+        if switch_account:
+            time.sleep(0.3)
+            try:
+                from .config import is_pytest_real_home_path
+                b_dir = _profile_browser_dir(profile)
+                if b_dir.is_dir() and not is_pytest_real_home_path(b_dir):
+                    shutil.rmtree(b_dir, ignore_errors=True)
+            except Exception:
+                pass
         _prepare_browser_profile(profile, switch_account=switch_account)
 
         # In a pytest test run where _run_login_once is not explicitly mocked, avoid launching real GUI browsers
@@ -803,6 +818,31 @@ def _watch_login(
             except Exception:
                 logger.debug("post-sign-in verification failed", exc_info=True)
 
+            switched_from = None
+            if switch_account:
+                try:
+                    from voice_flow.storage import storage
+                    switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+                except Exception:
+                    pass
+                if not switched_from:
+                    try:
+                        from voice_flow.gui import api_server
+                        switched_from = api_server.storage.get_setting("video_flow_notebooklm_switched_from")
+                    except Exception:
+                        pass
+                switched_from = str(switched_from or "").strip().lower()
+
+            if switch_account and switched_from and email and email.strip().lower() == switched_from:
+                logger.warning(
+                    "Account switch rejected: detected account %s is identical to switched_from %s",
+                    email,
+                    switched_from,
+                )
+                success = False
+                err = f"Account switch failed: still signed in as {email}. Please select a different account."
+
+        if success:
             email = email or _storage_email() or "your Google account"
             # Never persist the display placeholder as if it were a real account email.
             if not _is_placeholder(email):
@@ -868,6 +908,8 @@ def _watch_login(
             note = f"Signed in as {email}"
         elif success:
             note = "Signed in"
+        elif not success and err:
+            note = err
 
         with _STATE_LOCK:
             _STATE.update(
@@ -1030,6 +1072,16 @@ def disconnect_login(profile: str | None = None) -> dict[str, Any]:
         mt_file = _master_token_json_path(profile)
         if mt_file.is_file() and not is_pytest_real_home_path(mt_file):
             mt_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    try:
+        from .config import is_pytest_real_home_path
+        _terminate_stale_login_processes(profile, _login_log_path())
+        b_dir = _profile_browser_dir(profile)
+        if b_dir.is_dir() and not is_pytest_real_home_path(b_dir):
+            time.sleep(0.15)
+            shutil.rmtree(b_dir, ignore_errors=True)
     except Exception:
         pass
 

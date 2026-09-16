@@ -562,7 +562,8 @@ class StorageEngine:
                     status TEXT DEFAULT 'ready',
                     error TEXT,
                     progress INTEGER DEFAULT 100,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    downloaded INTEGER DEFAULT 0
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_audio_summary_history_created ON audio_summary_history (created_at DESC)")
@@ -3267,6 +3268,8 @@ class StorageEngine:
                         conn.execute("ALTER TABLE audio_summary_history ADD COLUMN error TEXT")
                     if "progress" not in cols:
                         conn.execute("ALTER TABLE audio_summary_history ADD COLUMN progress INTEGER DEFAULT 100")
+                    if "downloaded" not in cols:
+                        conn.execute("ALTER TABLE audio_summary_history ADD COLUMN downloaded INTEGER DEFAULT 0")
                     conn.commit()
             except Exception as exc:
                 log.debug("Audio summary history migration note: %s", exc)
@@ -3713,6 +3716,7 @@ class StorageEngine:
         status: str = "ready",
         error: str | None = None,
         progress: int = 100,
+        downloaded: int = 0,
     ) -> dict[str, Any]:
         """Record a completed or in-progress audio summary in history."""
         import uuid
@@ -3728,8 +3732,8 @@ class StorageEngine:
         with self._get_conn_ctx() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO audio_summary_history
-                (id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at, downloaded)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 uid,
                 summary_title,
@@ -3742,6 +3746,7 @@ class StorageEngine:
                 str(error) if error else None,
                 int(progress if progress is not None else 100),
                 now,
+                1 if downloaded else 0,
             ))
             conn.commit()
         return {
@@ -3756,6 +3761,7 @@ class StorageEngine:
             "error": str(error) if error else None,
             "progress": int(progress if progress is not None else 100),
             "created_at": now,
+            "downloaded": bool(downloaded),
         }
 
     def update_audio_summary_history(
@@ -3768,8 +3774,9 @@ class StorageEngine:
         audio_path: str | None = None,
         duration_sec: float | None = None,
         title: str | None = None,
+        downloaded: int | bool | None = None,
     ) -> bool:
-        """Update status, error, progress, or audio results of an existing summary."""
+        """Update status, error, progress, audio results, or downloaded flag of an existing summary."""
         updates: list[str] = []
         vals: list[Any] = []
         if status is not None:
@@ -3790,6 +3797,9 @@ class StorageEngine:
         if title is not None:
             updates.append("title = ?")
             vals.append(str(title).strip())
+        if downloaded is not None:
+            updates.append("downloaded = ?")
+            vals.append(1 if downloaded else 0)
         if not updates:
             return False
         vals.append(str(item_id or ""))
@@ -3802,7 +3812,7 @@ class StorageEngine:
         """Retrieve recent audio summary history records."""
         with self._get_conn_ctx() as conn:
             rows = conn.execute("""
-                SELECT id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at
+                SELECT id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at, downloaded
                 FROM audio_summary_history
                 ORDER BY created_at DESC
                 LIMIT ?
@@ -3820,6 +3830,7 @@ class StorageEngine:
                     "error": r[8],
                     "progress": int(r[9] if r[9] is not None else 100),
                     "created_at": r[10],
+                    "downloaded": bool(r[11]) if len(r) > 11 and r[11] else False,
                 }
                 for r in rows
             ]
@@ -3828,7 +3839,7 @@ class StorageEngine:
         """Lookup a specific audio summary history entry."""
         with self._get_conn_ctx() as conn:
             row = conn.execute("""
-                SELECT id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at
+                SELECT id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at, downloaded
                 FROM audio_summary_history
                 WHERE id = ?
             """, (str(item_id or ""),)).fetchone()
@@ -3846,6 +3857,7 @@ class StorageEngine:
                 "error": row[8],
                 "progress": int(row[9] if row[9] is not None else 100),
                 "created_at": row[10],
+                "downloaded": bool(row[11]) if len(row) > 11 and row[11] else False,
             }
 
     def delete_audio_summary_history(self, item_id: str) -> bool:

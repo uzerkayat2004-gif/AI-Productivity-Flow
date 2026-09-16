@@ -456,3 +456,79 @@ def test_generate_proactively_refreshes_when_session_near_expiry(tmp_path: Path,
     assert healed["called"] is True
     assert Path(result["audio_path"]).is_file()
 
+
+def test_auto_sync_from_browser_success_requires_verified_check_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from voice_flow.video_flow_engine.notebooklm.provider import NotebookLMVideoError
+
+    monkeypatch.setenv("VOICE_FLOW_TEST_AUTO_HEAL", "1")
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.login_flow.self_heal", lambda **k: {"ok": False})
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.browser_sync.auto_sync_from_browser", lambda **k: {"success": True})
+
+    def factory(**kwargs):
+        bridge = _Bridge(**kwargs)
+        bridge.check_auth = lambda *, raise_on_error: (_ for _ in ()).throw(
+            NotebookLMVideoError("auth_expired", "Expired")
+        )
+        return bridge
+
+    service = NotebookLMAudioSummaryService(root_dir=tmp_path / "audio_summaries", provider_factory=factory, sleep=lambda _s: None)
+
+    with pytest.raises(NotebookLMAudioSummaryError) as exc_info:
+        service.generate("Source text")
+
+    assert exc_info.value.code == "auth_expired"
+    assert exc_info.value.message == "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+
+
+def test_auto_sync_from_browser_succeeds_when_verified_auth_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from voice_flow.video_flow_engine.notebooklm.provider import NotebookLMVideoError
+
+    monkeypatch.setenv("VOICE_FLOW_TEST_AUTO_HEAL", "1")
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.login_flow.self_heal", lambda **k: {"ok": False})
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.browser_sync.auto_sync_from_browser", lambda **k: {"success": True})
+
+    calls = 0
+
+    def factory(**kwargs):
+        bridge = _Bridge(**kwargs)
+        orig_check = bridge.check_auth
+
+        def flaky_check(*, raise_on_error: bool):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise NotebookLMVideoError("auth_expired", "Session expired")
+            return orig_check(raise_on_error=raise_on_error)
+
+        bridge.check_auth = flaky_check
+        bridge.sync_storage_state = lambda force=False: None
+        return bridge
+
+    service = NotebookLMAudioSummaryService(root_dir=tmp_path / "audio_summaries", provider_factory=factory, sleep=lambda _s: None)
+    result = service.generate("Source text")
+    assert Path(result["audio_path"]).is_file()
+    assert calls >= 2
+
+
+def test_unhandled_raw_auth_error_does_not_crash_audio_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VOICE_FLOW_TEST_AUTO_HEAL", "1")
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.login_flow.self_heal", lambda **k: {"ok": False})
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.browser_sync.auto_sync_from_browser", lambda **k: {"success": False})
+
+    def factory(**kwargs):
+        bridge = _Bridge(**kwargs)
+        # Raw generic RuntimeError with auth indicator in message
+        bridge.check_auth = lambda *, raise_on_error: (_ for _ in ()).throw(
+            RuntimeError("accounts.google.com token expired; please re-authenticate")
+        )
+        return bridge
+
+    service = NotebookLMAudioSummaryService(root_dir=tmp_path / "audio_summaries", provider_factory=factory, sleep=lambda _s: None)
+
+    with pytest.raises(NotebookLMAudioSummaryError) as exc_info:
+        service.generate("Source text")
+
+    assert exc_info.value.code == "auth_expired"
+    assert exc_info.value.message == "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+
+

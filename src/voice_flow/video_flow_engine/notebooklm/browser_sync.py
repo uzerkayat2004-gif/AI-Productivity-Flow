@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -280,7 +281,7 @@ def extract_cookies_from_sqlite(
         query = (
             "SELECT host_key, name, path, encrypted_value, value, expires_utc, is_secure, is_httponly, samesite "
             "FROM cookies WHERE host_key LIKE '%google%' AND name IN "
-            "('SID', '__Secure-1PSID', '__Secure-1PSIDTS', '__Secure-3PSID', '__Secure-3PSIDTS', 'SAPISID', 'HSID', 'SSID', 'APISID', 'OSID')"
+            "('SID', '__Secure-1PSID', '__Secure-1PSIDTS', '__Secure-3PSID', '__Secure-3PSIDTS', 'SAPISID', 'HSID', 'SSID', 'APISID', 'OSID', 'LSID')"
         )
         cur.execute(query)
         rows = cur.fetchall()
@@ -295,11 +296,14 @@ def extract_cookies_from_sqlite(
             pass
 
     results: list[dict[str, Any]] = []
+    v20_detected = False
     for host_key, name, path, enc_val, val, expires_utc, is_secure, is_httponly, samesite in rows:
         cookie_val = str(val or "")
-        if not cookie_val and enc_val and master_key:
+        if not cookie_val and enc_val:
             prefix = bytes(enc_val[:3])
-            if prefix in (b"v10", b"v11"):
+            if prefix == b"v20":
+                v20_detected = True
+            elif prefix in (b"v10", b"v11") and master_key:
                 decrypted = _decrypt_v10_cookie_value(bytes(enc_val), master_key)
                 if decrypted:
                     cookie_val = decrypted
@@ -328,6 +332,13 @@ def extract_cookies_from_sqlite(
             "secure": bool(is_secure),
             "sameSite": same_site_str,
         })
+
+    if v20_detected and not results:
+        logger.info(
+            "Encountered Chrome 127+ App-Bound Encryption (v20) cookies in %s; "
+            "cannot decrypt cookies via external DPAPI outside Chrome.",
+            cookie_db_path,
+        )
 
     return results
 
@@ -422,17 +433,20 @@ def parse_cookie_payload(payload: Any) -> list[dict[str, Any]]:
 
 def validate_extracted_cookies(cookies: list[dict[str, Any]]) -> tuple[bool, str, dict[str, Any]]:
     """Verify that extracted cookies satisfy Google NotebookLM requirements."""
-    if not cookies:
+    if not cookies or not isinstance(cookies, list):
         return False, "No cookies provided", {}
 
     cookie_map: dict[str, str] = {}
     for c in cookies:
+        if not isinstance(c, dict):
+            continue
         name = str(c.get("name") or "").strip()
         val = str(c.get("value") or "").strip()
         if name and val:
             cookie_map[name] = val
 
-    missing = [req for req in REQUIRED_SESSION_COOKIE_NAMES if req not in cookie_map]
+    # Verify that required session cookies (__Secure-1PSID and SID) are present and non-empty
+    missing = [req for req in REQUIRED_SESSION_COOKIE_NAMES if not cookie_map.get(req)]
     if missing:
         return False, f"Missing required cookies: {', '.join(missing)}", {
             "cookies_found": sorted(cookie_map.keys()),
@@ -441,6 +455,8 @@ def validate_extracted_cookies(cookies: list[dict[str, Any]]) -> tuple[bool, str
 
     now = time.time()
     for c in cookies:
+        if not isinstance(c, dict):
+            continue
         name = str(c.get("name") or "").strip()
         if name in REQUIRED_SESSION_COOKIE_NAMES:
             expires = c.get("expires")
@@ -461,12 +477,14 @@ def validate_extracted_cookies(cookies: list[dict[str, Any]]) -> tuple[bool, str
     # keepalive predicate in config.has_valid_storage_state).
     details: dict[str, Any] = {
         "cookies_found": sorted(cookie_map.keys()),
-        "has_psid": "__Secure-1PSID" in cookie_map,
-        "has_sid": "SID" in cookie_map,
-        "has_psidts": "__Secure-1PSIDTS" in cookie_map,
+        "has_psid": bool(cookie_map.get("__Secure-1PSID")),
+        "has_sid": bool(cookie_map.get("SID")),
+        "has_psidts": bool(cookie_map.get("__Secure-1PSIDTS")),
         "count": len(cookies),
     }
     for c in cookies:
+        if not isinstance(c, dict):
+            continue
         name = str(c.get("name") or "").strip()
         if name in ("__Secure-1PSIDTS", "__Secure-3PSIDTS"):
             expires = c.get("expires")
@@ -518,6 +536,45 @@ def save_cookies_to_profile(
             resolved_email = storage.get_setting("video_flow_notebooklm_email")
         except Exception:
             pass
+    if not resolved_email:
+        try:
+            from voice_flow.gui import api_server
+
+            resolved_email = api_server.storage.get_setting("video_flow_notebooklm_email")
+        except Exception:
+            pass
+
+    # Check switched_from: if switched_from is set and matches resolved_email, refuse to save
+    switched_from = None
+    try:
+        from voice_flow.storage import storage
+
+        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+    except Exception:
+        pass
+    if not switched_from:
+        try:
+            from voice_flow.gui import api_server
+
+            switched_from = api_server.storage.get_setting("video_flow_notebooklm_switched_from")
+        except Exception:
+            pass
+
+    if switched_from and resolved_email:
+        s_from = str(switched_from).strip().lower()
+        r_email = str(resolved_email).strip().lower()
+        if s_from and r_email and s_from == r_email:
+            logger.warning(
+                "Refusing to save cookies in save_cookies_to_profile: resolved_email '%s' matches switched_from '%s'",
+                resolved_email,
+                switched_from,
+            )
+            return {
+                "success": False,
+                "error": f"Refusing to save session for switched-from account '{resolved_email}'",
+                "profile": profile_name,
+                "details": {**details, "switched_from": switched_from, "resolved_email": resolved_email},
+            }
 
     state_content = {
         "cookies": cookies,
@@ -644,8 +701,39 @@ def auto_sync_from_browser(
 
     target_storage = get_storage_state_path(profile_name)
 
+    # Profile state checks to prevent circular dead-cookie resurrection
+    from .config import is_profile_disconnected, is_profile_unauthenticated, is_session_near_expiry
+
+    is_disconnected = is_profile_disconnected(profile_name)
+    is_unauthenticated = is_profile_unauthenticated(profile_name)
+
+    recent_auth_error = False
+    try:
+        from .login_flow import get_login_state
+
+        l_state = get_login_state()
+        if l_state.get("error") or l_state.get("success") is False:
+            recent_auth_error = True
+    except Exception:
+        pass
+    if not recent_auth_error:
+        try:
+            from voice_flow.storage import storage
+
+            if storage.get_setting("video_flow_notebooklm_auth_error"):
+                recent_auth_error = True
+        except Exception:
+            pass
+
+    is_expired = False
+    try:
+        if is_session_near_expiry(profile_name):
+            is_expired = True
+    except Exception:
+        pass
+
     # Fast check 0A: If storage_state exists, try lightning-fast CLI refresh directly (5-7s)
-    if not os.environ.get("PYTEST_CURRENT_TEST") and target_storage.is_file():
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not is_disconnected and not is_unauthenticated and target_storage.is_file():
         try:
             from .login_flow import resolve_notebooklm_cli
             cli = resolve_notebooklm_cli()
@@ -662,7 +750,9 @@ def auto_sync_from_browser(
                         st_fresh = json.loads(target_storage.read_text(encoding="utf-8"))
                         f_acc = (st_fresh.get("notebooklm") or {}).get("account", {}) or st_fresh.get("account", {})
                         f_email = f_acc.get("email") if isinstance(f_acc, dict) else None
-                        if not expected_email or (f_email and f_email.lower().strip() == expected_email.lower().strip()):
+                        if switched_from and f_email and str(f_email).strip().lower() == switched_from:
+                            pass
+                        elif not expected_email or (f_email and f_email.lower().strip() == expected_email.lower().strip()):
                             return {
                                 "success": True,
                                 "profile": profile_name,
@@ -677,7 +767,8 @@ def auto_sync_from_browser(
             pass
 
     # Fast check 0B: If Playwright browser_profile is available and not in pytest, attempt headless live sync
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
+    pw_session_dead = False
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not is_disconnected:
         try:
             pw_res = sync_cookies_with_playwright(
                 profile=profile_name,
@@ -688,8 +779,14 @@ def auto_sync_from_browser(
             if pw_res.get("success"):
                 pw_res["source"] = "browser_profile_playwright"
                 return pw_res
+            if pw_res.get("needs_interactive") or pw_res.get("email_mismatch"):
+                pw_session_dead = True
+                is_expired = True
+                recent_auth_error = True
         except Exception:
-            pass
+            pw_session_dead = True
+            is_expired = True
+            recent_auth_error = True
 
     # 1. Check if valid safe_copy or backup exists in this profile directory
     target_storage = get_storage_state_path(profile_name)
@@ -779,49 +876,100 @@ def auto_sync_from_browser(
 
     # 2. Check persistent browser_profile directories (which store v10 DPAPI decryptable cookies)
     # Strictly isolated: Never cross-borrow default's browser profile into video-flow-experiment
-    candidate_bp_dirs: list[Path] = [target_storage.parent / "browser_profile"]
-    if is_real_notebooklm and profile_name == "default" and not expected_email:
-        candidate_bp_dirs.append(Path.home() / ".notebooklm" / "browser_profile")
+    # DEAD-COOKIE & CIRCULAR SYNC PREVENTION:
+    # Do NOT restore cookies from browser_profile SQLite if:
+    # 1. Profile is currently in an unauthenticated, expired, or disconnected state
+    # 2. An auth error recently occurred (or Playwright marked session dead)
+    # 3. switched_from matches
+    skip_browser_profile = (
+        pw_session_dead
+        or is_disconnected
+        or is_unauthenticated
+        or is_expired
+        or recent_auth_error
+    )
+    if not skip_browser_profile:
+        candidate_bp_dirs: list[Path] = [target_storage.parent / "browser_profile"]
+        if is_real_notebooklm and profile_name == "default" and not expected_email:
+            candidate_bp_dirs.append(Path.home() / ".notebooklm" / "browser_profile")
 
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        home_nlm = (Path.home() / ".notebooklm").resolve()
-        candidate_bp_dirs = [d for d in candidate_bp_dirs if home_nlm not in d.resolve().parents and d.resolve() != home_nlm]
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            home_nlm = (Path.home() / ".notebooklm").resolve()
+            candidate_bp_dirs = [d for d in candidate_bp_dirs if home_nlm not in d.resolve().parents and d.resolve() != home_nlm]
 
-    for bp_dir in candidate_bp_dirs:
-        if not bp_dir.is_dir():
-            continue
-        for sub in [bp_dir / "Default", bp_dir]:
-            cookie_candidates = [sub / "Network" / "Cookies", sub / "Cookies"]
-            for cf in cookie_candidates:
-                if not cf.is_file():
-                    continue
-                try:
-                    bp_cookies = extract_cookies_from_sqlite(cf, bp_dir)
-                    valid, _, _ = validate_extracted_cookies(bp_cookies)
-                    if valid:
-                        email = None
-                        try:
-                            ls_p = bp_dir / "Local State"
-                            if ls_p.is_file():
-                                raw_ls = _safe_windows_read_locked_file(ls_p)
-                                if raw_ls:
-                                    ls = json.loads(raw_ls.decode("utf-8", errors="replace"))
-                                    p_info = (ls.get("profile") or {}).get("info_cache", {}).get("Default", {})
-                                    email = p_info.get("user_name") or p_info.get("email")
-                        except Exception:
-                            pass
+        for bp_dir in candidate_bp_dirs:
+            if not bp_dir.is_dir():
+                continue
+            for sub in [bp_dir / "Default", bp_dir]:
+                cookie_candidates = [sub / "Network" / "Cookies", sub / "Cookies"]
+                for cf in cookie_candidates:
+                    if not cf.is_file():
+                        continue
+                    try:
+                        bp_cookies = extract_cookies_from_sqlite(cf, bp_dir)
+                        valid, _, _ = validate_extracted_cookies(bp_cookies)
+                        if valid:
+                            # Do not restore if browser_profile's cookies are identical to target_storage
+                            cand_core = {
+                                (str(ck.get("name")), str(ck.get("value")))
+                                for ck in bp_cookies
+                                if isinstance(ck, dict) and ck.get("name") in ("__Secure-1PSID", "SID", "__Secure-1PSIDTS")
+                            }
+                            # Check dead cookie values: if target_storage already had cookies that failed authentication,
+                            # ensure we do NOT restore the exact same dead cookie values (__Secure-1PSID / SID)
+                            target_psid = next((v for n, v in target_core_cookies if n == "__Secure-1PSID"), None)
+                            target_sid = next((v for n, v in target_core_cookies if n == "SID"), None)
+                            cand_psid = next((v for n, v in cand_core if n == "__Secure-1PSID"), None)
+                            cand_sid = next((v for n, v in cand_core if n == "SID"), None)
+                            if target_psid and target_sid and cand_psid == target_psid and cand_sid == target_sid:
+                                logger.debug("Skipping browser_profile SQLite cookies identical to dead target_storage cookies")
+                                continue
+                            if target_core_cookies and cand_core and (cand_core == target_core_cookies or cand_core.issubset(target_core_cookies)):
+                                logger.debug("Skipping browser_profile SQLite cookies identical to target_storage")
+                                continue
 
-                        if switched_from and email and str(email).strip().lower() == switched_from:
-                            continue
-                        if expected_email and email and expected_email.lower() != email.lower():
-                            continue
+                            email = None
+                            try:
+                                ls_p = bp_dir / "Local State"
+                                if ls_p.is_file():
+                                    raw_ls = _safe_windows_read_locked_file(ls_p)
+                                    if raw_ls:
+                                        ls = json.loads(raw_ls.decode("utf-8", errors="replace"))
+                                        p_info = (ls.get("profile") or {}).get("info_cache", {}).get("Default", {})
+                                        email = p_info.get("user_name") or p_info.get("email")
+                            except Exception:
+                                pass
 
-                        res = save_cookies_to_profile(bp_cookies, profile=profile_name, email=email or expected_email)
-                        if res.get("success"):
-                            res["source"] = "browser_profile"
-                            return res
-                except Exception as exc:
-                    logger.debug("Error extracting cookies from browser_profile %s: %s", cf, exc)
+                            # Refuse to restore ANY cookies belonging to switched_from
+                            if switched_from:
+                                if email and str(email).strip().lower() == switched_from:
+                                    logger.debug("Skipping browser_profile SQLite cookies matching switched_from '%s'", switched_from)
+                                    continue
+                                if not email:
+                                    logger.debug("Skipping anonymous browser_profile SQLite cookies while switched_from '%s' is active", switched_from)
+                                    continue
+
+                            if expected_email:
+                                if not email or expected_email.lower().strip() != str(email).lower().strip():
+                                    # Never attribute anonymous browser_profile cookies to expected_email!
+                                    continue
+
+                            res = save_cookies_to_profile(bp_cookies, profile=profile_name, email=email or expected_email)
+                            if res.get("success"):
+                                res["source"] = "browser_profile"
+                                return res
+                    except Exception as exc:
+                        logger.debug("Error extracting cookies from browser_profile %s: %s", cf, exc)
+    else:
+        logger.debug(
+            "Skipping browser_profile SQLite restore (pw_session_dead=%s, is_disconnected=%s, "
+            "is_unauthenticated=%s, is_expired=%s, recent_auth_error=%s)",
+            pw_session_dead,
+            is_disconnected,
+            is_unauthenticated,
+            is_expired,
+            recent_auth_error,
+        )
 
     # 3. Check system installed browsers (Chrome, Edge, Brave, Chromium)
     if os.environ.get("PYTEST_CURRENT_TEST"):
@@ -834,10 +982,11 @@ def auto_sync_from_browser(
     search_order = []
     if preferred_browser and preferred_browser.lower() in user_data_dirs:
         search_order.append(preferred_browser.lower())
-    for b in ("edge", "chrome", "brave", "chromium"):
+    for b in ("edge", "brave", "chrome", "chromium"):
         if b in user_data_dirs and b not in search_order:
             search_order.append(b)
 
+    chrome_v20_detected = False
     for b_name in search_order:
         b_path = user_data_dirs[b_name]
         candidate_subdirs = [b_path / "Default"] + list(b_path.glob("Profile *"))
@@ -850,8 +999,19 @@ def auto_sync_from_browser(
 
             try:
                 cookies = extract_cookies_from_sqlite(cookie_file, b_path)
+                if not cookies and b_name == "chrome":
+                    chrome_v20_detected = True
                 valid, _, _ = validate_extracted_cookies(cookies)
                 if valid:
+                    # Do not restore if cookies are identical to target_storage
+                    cand_core = {
+                        (str(ck.get("name")), str(ck.get("value")))
+                        for ck in cookies
+                        if isinstance(ck, dict) and ck.get("name") in ("__Secure-1PSID", "SID", "__Secure-1PSIDTS")
+                    }
+                    if target_core_cookies and cand_core and (cand_core == target_core_cookies or cand_core.issubset(target_core_cookies)):
+                        continue
+
                     # Check if email is associated with this profile
                     email = None
                     try:
@@ -865,8 +1025,10 @@ def auto_sync_from_browser(
                     except Exception:
                         pass
 
+                    if switched_from and email and str(email).strip().lower() == switched_from:
+                        continue
                     if expected_email:
-                        if not email or expected_email.lower() != email.lower():
+                        if not email or expected_email.lower().strip() != str(email).lower().strip():
                             continue
 
                     res = save_cookies_to_profile(cookies, profile=profile_name, email=email or expected_email)
@@ -878,7 +1040,7 @@ def auto_sync_from_browser(
                 logger.debug("Auto-sync error on %s %s: %s", b_name, sdir.name, exc)
                 continue
 
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not pw_session_dead and not skip_browser_profile:
         try:
             pw_fallback = sync_cookies_with_playwright(
                 profile=profile_name,
@@ -893,16 +1055,24 @@ def auto_sync_from_browser(
             pass
 
     if expected_email:
+        err_msg = f"No active Google session cookies found matching account '{expected_email}' in installed browsers."
+        if chrome_v20_detected:
+            err_msg += " (Chrome 127+ App-Bound Encryption prevents direct cookie extraction; interactive login required)."
         return {
             "success": False,
-            "error": f"No active Google session cookies found matching account '{expected_email}' in installed browsers.",
+            "error": err_msg,
             "profile": profile_name,
+            "chrome_v20_detected": chrome_v20_detected,
         }
 
+    err_msg = "No active Google session cookies could be read directly from browser databases."
+    if chrome_v20_detected:
+        err_msg += " Chrome 127+ App-Bound Encryption (v20) was detected; interactive sign-in or cookie import is required."
     return {
         "success": False,
-        "error": "No active Google session cookies could be read directly from browser databases.",
+        "error": err_msg,
         "profile": profile_name,
+        "chrome_v20_detected": chrome_v20_detected,
     }
 
 
@@ -1071,7 +1241,7 @@ def sync_cookies_with_playwright(
 
                 # Settle page network for DOM and storage state
                 try:
-                    page.wait_for_load_state("networkidle", timeout=5000)
+                    page.wait_for_load_state("domcontentloaded", timeout=5000)
                 except Exception:
                     pass
 
@@ -1080,10 +1250,18 @@ def sync_cookies_with_playwright(
                 try:
                     extracted_email = page.evaluate('''() => {
                         const nodes = Array.from(document.querySelectorAll('[aria-label]'));
+                        // Check avatar / account button aria-labels first
                         for (const n of nodes) {
                             const label = n.getAttribute('aria-label') || '';
-                            const match = label.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);
-                            if (match) return match[0];
+                            if (label.includes('Google Account') || label.includes('Account') || label.includes('signed in')) {
+                                const match = label.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);
+                                if (match) return match[0];
+                            }
+                        }
+                        for (const n of nodes) {
+                            const label = n.getAttribute('aria-label') || '';
+                            const match = label.match(/[a-zA-Z0-9._%+-]+@(?:gmail\\.com|[a-zA-Z0-9.-]+\\.google\\.com)/);
+                            if (match && !match[0].startsWith('support@') && !match[0].startsWith('feedback@') && !match[0].startsWith('noreply@')) return match[0];
                         }
                         return null;
                     }''')
@@ -1093,7 +1271,7 @@ def sync_cookies_with_playwright(
                 if not extracted_email:
                     try:
                         html = page.content()
-                        emails = re.findall(r'[\w\.-]+@(?:gmail|google)\.com', html)
+                        emails = [e for e in re.findall(r'[\w\.-]+@(?:gmail|google)\.com', html) if not e.startswith(('support', 'feedback', 'noreply'))]
                         if emails:
                             extracted_email = emails[0]
                     except Exception:

@@ -547,6 +547,7 @@ async function startNotebookLMAuth(switchAccount = false) {
           : "Google sign-in opened in your default browser. Select your account to sign in.")
     );
 
+    const startTime = Date.now();
     let attempts = 0;
     const maxAttempts = 250; // 50 x 600ms (30s) + 50 x 1200ms (60s) + 150 x 2000ms (300s) = ~6.5 minutes of adaptive patience
     const pollTick = async () => {
@@ -569,6 +570,16 @@ async function startNotebookLMAuth(switchAccount = false) {
         const login = stateData && stateData.login ? stateData.login : null;
         if (login && login.note && text) {
           text.textContent = login.note;
+        }
+
+        // When switchAccount is true, report error immediately if running === false and success === false
+        if (switchAccount && login && login.running === false && login.success === false) {
+          clearNlmAuthPollTimer();
+          if (loginBtn) loginBtn.disabled = false;
+          if (disconnectBtn) disconnectBtn.disabled = false;
+          await checkNotebookLMAuth(false);
+          vfToast(login.error || "Account switch did not complete. Please try again.", true);
+          return;
         }
 
         // Check if login failed
@@ -616,7 +627,15 @@ async function startNotebookLMAuth(switchAccount = false) {
         const statusData = await safeFetchJson("/api/video-flow/notebooklm/status");
         if (statusData && statusData.authenticated && statusData.email) {
           if (switchAccount && previousEmail && statusData.email.toLowerCase() === previousEmail.toLowerCase()) {
-            // Still reporting the old account while transitioning, keep waiting
+            // Still reporting the old account while transitioning, check if 25s elapsed
+            if (Date.now() - startTime >= 25000) {
+              clearNlmAuthPollTimer();
+              if (loginBtn) loginBtn.disabled = false;
+              if (disconnectBtn) disconnectBtn.disabled = false;
+              await checkNotebookLMAuth(false);
+              vfToast(`Account switch timed out: account was not changed from ${previousEmail}.`, true);
+              return;
+            }
           } else {
             clearNlmAuthPollTimer();
             if (loginBtn) loginBtn.disabled = false;
@@ -1063,7 +1082,7 @@ function vfRenderLegacyHistory() {
           <div class="vf-video-actions">
             ${complete ? `
               <button class="vf-icon-button" onclick="previewVideoFlow('${vfEscape(video.id)}')"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
-              <button type="button" class="vf-icon-button vf-download-btn" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="Download video">↓ Download</button>
+              <button type="button" class="vf-icon-button vf-download-btn ${video.downloaded ? 'is-downloaded' : ''}" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="${video.downloaded ? 'Downloaded to your Downloads folder (Click to download again)' : 'Download video'}">${video.downloaded ? '✓ Downloaded' : '↓ Download'}</button>
               <button class="vf-icon-button" onclick="shareVideoFlow('${vfEscape(video.id)}')">↗ Share</button>
             ` : ""}
             ${failed && !authFailed ? `<button class="vf-icon-button" onclick="retryVideoFlow('${vfEscape(video.id)}')">↻ 1-Click Retry</button>` : ""}
@@ -1324,9 +1343,12 @@ function vfLibraryCardHtml(video) {
 
   const menuActions = [];
   if (complete) {
+    const isDl = !!video.downloaded;
+    const dlTitle = isDl ? "Downloaded to your Downloads folder (Click to download again)" : "Download video";
+    const dlText = isDl ? "✓ Downloaded" : "↓ Download";
     actionButtons += `
       <button class="vf-icon-button" type="button" onclick="previewVideoFlow('${vfEscape(video.id)}')"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
-      <button class="vf-icon-button vf-download-btn" type="button" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="Download video">↓ Download</button>`;
+      <button class="vf-icon-button vf-download-btn ${isDl ? 'is-downloaded' : ''}" type="button" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="${dlTitle}">${dlText}</button>`;
     menuActions.push("share", "details", "delete");
   } else {
     menuActions.push("details", "delete");
@@ -6353,10 +6375,53 @@ async function downloadVideoFlow(videoId, btn) {
 
   try {
     const video = (typeof vfVideos !== "undefined" && Array.isArray(vfVideos))
-      ? vfVideos.find(v => String(v.id) === String(videoId))
-      : ((typeof vfPreviewVideo !== "undefined" && vfPreviewVideo && String(vfPreviewVideo.id) === String(videoId)) ? vfPreviewVideo : null);
+      ? vfVideos.find(v => String(v.id) === String(videoId) || String(v.job_id) === String(videoId) || String(v.video_id) === String(videoId))
+      : ((typeof vfPreviewVideo !== "undefined" && vfPreviewVideo && (String(vfPreviewVideo.id) === String(videoId) || String(vfPreviewVideo.job_id) === String(videoId))) ? vfPreviewVideo : null);
 
     const videoTitle = (video && video.title ? video.title : "").trim();
+
+    // 1. Direct native save to user's Downloads folder with exact title
+    let directSavedFilename = "";
+    try {
+      const saveRes = await fetch("/api/video-flow/videos/save-to-downloads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_id: videoId, title: videoTitle })
+      });
+      if (saveRes.ok) {
+        const sData = await saveRes.json();
+        if (sData && sData.success && sData.filename) {
+          directSavedFilename = sData.filename;
+          if (video) {
+            video.downloaded = true;
+          }
+          if (btn) {
+            btn.classList.remove("is-downloading");
+            btn.classList.remove("is-success");
+            btn.classList.add("is-downloaded");
+            btn.innerHTML = `✓ Downloaded`;
+            btn.title = "Downloaded to your Downloads folder (Click to download again)";
+            btn.disabled = false;
+          }
+          if (typeof vfToast === "function") {
+            const destPath = sData.path || `Downloads/${directSavedFilename}`;
+            vfToast(`Saved to Downloads: "${directSavedFilename}" (${destPath})`, false);
+          }
+          return;
+        }
+      } else {
+        const sErr = await saveRes.json().catch(() => ({}));
+        if (sErr && sErr.error) {
+          throw new Error(sErr.error);
+        }
+      }
+    } catch (saveErr) {
+      if (saveErr && saveErr.message && !saveErr.message.includes("fetch")) {
+        throw saveErr;
+      }
+      console.warn("Direct save to Downloads attempt:", saveErr);
+    }
+
     const titleParam = videoTitle ? `&title=${encodeURIComponent(videoTitle)}` : "";
     let targetUrl = `/api/video-flow/videos/file?id=${encodeURIComponent(videoId)}&download=1${titleParam}`;
     let response = await fetch(targetUrl);
@@ -6364,6 +6429,25 @@ async function downloadVideoFlow(videoId, btn) {
       response = await fetch(`/api/video-flow/videos/${encodeURIComponent(videoId)}/file?download=1${titleParam}`);
     }
     if (!response.ok) {
+      if (directSavedFilename) {
+        // Already successfully saved to Downloads folder via native endpoint!
+        if (btn) {
+          btn.classList.remove("is-downloading");
+          btn.classList.add("is-success");
+          btn.innerHTML = `✓ Downloaded!`;
+        }
+        if (typeof vfToast === "function") {
+          vfToast(`Saved "${directSavedFilename}" to your Downloads folder!`, false);
+        }
+        setTimeout(() => {
+          if (btn) {
+            btn.classList.remove("is-success");
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+          }
+        }, 2500);
+        return;
+      }
       throw new Error(`Video file is not available (${response.status})`);
     }
 
@@ -6391,21 +6475,23 @@ async function downloadVideoFlow(videoId, btn) {
       blob = new Blob([rawBlob], { type: "video/mp4" });
     }
 
-    const disposition = response.headers.get("Content-Disposition") || "";
-    let filename = vfSafeMediaFilename(videoTitle || `video_${String(videoId).slice(0, 12)}`, "video", ".mp4");
-    if (disposition.includes("filename*=UTF-8''")) {
-      const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
-      if (match && match[1]) {
-        try {
-          filename = decodeURIComponent(match[1].trim());
-        } catch (_) {}
-      }
-    } else if (disposition.includes("filename=")) {
-      const m = disposition.match(/filename=["']?([^"';]+)["']?/);
-      if (m && m[1]) {
-        const parsed = m[1].trim();
-        if (!parsed.startsWith("video_") || !videoTitle) {
-          filename = parsed;
+    let filename = directSavedFilename || vfSafeMediaFilename(videoTitle || `video_${String(videoId).slice(0, 12)}`, "video", ".mp4");
+    if (!directSavedFilename) {
+      const disposition = response.headers.get("Content-Disposition") || "";
+      if (disposition.includes("filename*=UTF-8''")) {
+        const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+        if (match && match[1]) {
+          try {
+            filename = decodeURIComponent(match[1].trim());
+          } catch (_) {}
+        }
+      } else if (disposition.includes("filename=")) {
+        const m = disposition.match(/filename=["']?([^"';]+)["']?/);
+        if (m && m[1]) {
+          const parsed = m[1].trim();
+          if (!parsed.startsWith("video_") || !videoTitle) {
+            filename = parsed;
+          }
         }
       }
     }
@@ -6413,31 +6499,31 @@ async function downloadVideoFlow(videoId, btn) {
       filename = filename.replace(/\.[a-zA-Z0-9]{2,5}$/, "") + ".mp4";
     }
 
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+    try {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+    } catch (_) {}
 
+    if (video) {
+      video.downloaded = true;
+    }
     if (btn) {
       btn.classList.remove("is-downloading");
-      btn.classList.add("is-success");
-      btn.innerHTML = `✓ Downloaded!`;
+      btn.classList.remove("is-success");
+      btn.classList.add("is-downloaded");
+      btn.innerHTML = `✓ Downloaded`;
+      btn.title = "Downloaded to your Downloads folder (Click to download again)";
+      btn.disabled = false;
     }
     if (typeof vfToast === "function") {
-      vfToast(`Downloaded "${filename}"`, false);
+      vfToast(`Saved "${filename}" to your Downloads folder!`, false);
     }
-
-    setTimeout(() => {
-      if (btn) {
-        btn.classList.remove("is-success");
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-      }
-    }, 2500);
   } catch (err) {
     console.error("Video download error:", err);
     if (btn) {

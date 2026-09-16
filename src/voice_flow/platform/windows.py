@@ -234,6 +234,11 @@ class WindowsBackend:
         if not IS_WINDOWS:
             return False
         try:
+            from voice_flow import installer
+            return installer.is_autostart_enabled()
+        except Exception:
+            pass
+        try:
             import winreg
 
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_READ) as key:
@@ -248,6 +253,12 @@ class WindowsBackend:
     def set_launch_at_login(self, enabled: bool, command: str | None = None) -> bool:
         if not IS_WINDOWS:
             return False
+        if command is None:
+            try:
+                from voice_flow import installer
+                return installer.set_autostart(enabled)
+            except Exception:
+                pass
         try:
             import winreg
 

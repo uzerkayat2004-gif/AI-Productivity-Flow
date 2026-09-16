@@ -24,7 +24,7 @@ from voice_flow.storage import storage
 
 log = logging.getLogger(__name__)
 
-# --- "Sunrise" design system colors ---
+# --- "Sunrise" design system colors (dynamically adapted to on_screen_ui_theme) ---
 ORANGE = "#FF6A00"
 ORANGE_DEEP = "#E85D04"
 ORANGE_SOFT = "#FFE3D0"
@@ -34,8 +34,53 @@ INK = "#241708"
 GRAY = "#8A8A93"
 BORDER = "#FFD0B0"
 BG_LIGHT = "#FAFAFA"
+BADGE_BG = "#F5F5F7"
+BADGE_FG = "#8A8A93"
+BTN_TEXT = "#FFFFFF"
 
 SPEEDS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+
+def _apply_theme_colors() -> None:
+    """Dynamically set palette matching on_screen_ui_theme (light/dark)."""
+    global ORANGE, ORANGE_DEEP, ORANGE_SOFT, ORANGE_FAINT, WHITE, INK, GRAY, BORDER, BG_LIGHT, BADGE_BG, BADGE_FG, BTN_TEXT
+    is_dark = False
+    try:
+        from voice_flow.storage import storage
+        t = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        is_dark = (t == "dark")
+    except Exception:
+        pass
+    if is_dark:
+        # App dark studio palette matching design-system and studio-polish
+        ORANGE = "#e6b092"          # Warm secondary champagne/peach accent (--polish-accent)
+        ORANGE_DEEP = "#d49474"     # Active accent
+        ORANGE_SOFT = "#372c25"     # Selected row tint (--polish-tint)
+        ORANGE_FAINT = "#282725"    # Well container background (--polish-well)
+        WHITE = "#20201f"           # Card surface (--polish-paper)
+        INK = "#f5f1ea"             # Primary text ink (--polish-ink)
+        GRAY = "#b6aea2"            # Muted text (--polish-muted)
+        BORDER = "#3b3834"          # Subtle border (--polish-line)
+        BG_LIGHT = "#161615"        # Canvas background (--polish-canvas)
+        BADGE_BG = "#282725"        # Dark badge container
+        BADGE_FG = "#b6aea2"        # Muted badge text
+        BTN_TEXT = "#20201f"        # Dark text on peach button
+    else:
+        ORANGE = "#FF6A00"
+        ORANGE_DEEP = "#E85D04"
+        ORANGE_SOFT = "#FFE3D0"
+        ORANGE_FAINT = "#FFF3EA"
+        WHITE = "#FFFFFF"
+        INK = "#241708"
+        GRAY = "#8A8A93"
+        BORDER = "#FFD0B0"
+        BG_LIGHT = "#FAFAFA"
+        BADGE_BG = "#F5F5F7"
+        BADGE_FG = "#8A8A93"
+        BTN_TEXT = "#FFFFFF"
+
+
+_apply_theme_colors()
 
 
 def calculate_anchored_dialog_geometry(
@@ -205,21 +250,29 @@ class AudioFlowSettingsDialog:
         on_speed_change: Callable[[float], None] | None = None,
         on_voice_change: Callable[[str], None] | None = None,
     ) -> AudioFlowSettingsDialog:
+        _apply_theme_colors()
         if cls._instance is not None and cls._instance.win and cls._instance.win.winfo_exists():
-            if parent is not None:
-                cls._instance.parent = parent
-                cls._instance._anchor_win = parent
-            if on_speed_change is not None:
-                cls._instance.on_speed_change = on_speed_change
-            if on_voice_change is not None:
-                cls._instance.on_voice_change = on_voice_change
-            cls._instance._center_window()
-            cls._instance.win.deiconify()
-            cls._instance.win.state("normal")
-            cls._instance.win.lift()
-            cls._instance.win.attributes("-topmost", True)
-            cls._instance.win.focus_force()
-            return cls._instance
+            if getattr(cls._instance, "_rendered_bg", None) != BG_LIGHT:
+                try:
+                    cls._instance.win.destroy()
+                except Exception:
+                    pass
+                cls._instance = None
+            else:
+                if parent is not None:
+                    cls._instance.parent = parent
+                    cls._instance._anchor_win = parent
+                if on_speed_change is not None:
+                    cls._instance.on_speed_change = on_speed_change
+                if on_voice_change is not None:
+                    cls._instance.on_voice_change = on_voice_change
+                cls._instance._center_window()
+                cls._instance.win.deiconify()
+                cls._instance.win.state("normal")
+                cls._instance.win.lift()
+                cls._instance.win.attributes("-topmost", True)
+                cls._instance.win.focus_force()
+                return cls._instance
 
         inst = cls(parent, on_speed_change, on_voice_change)
         cls._instance = inst
@@ -252,6 +305,7 @@ class AudioFlowSettingsDialog:
         self.win.geometry("420x520")
         self.win.minsize(380, 460)
         self.win.config(bg=BG_LIGHT)
+        self._rendered_bg = BG_LIGHT
         self.win.attributes("-topmost", True)
 
         try:
@@ -371,9 +425,9 @@ class AudioFlowSettingsDialog:
             header,
             text="💾 Save",
             bg=ORANGE,
-            fg=WHITE,
+            fg=BTN_TEXT,
             activebackground=ORANGE_DEEP,
-            activeforeground=WHITE,
+            activeforeground=BTN_TEXT,
             font=("Segoe UI", 9, "bold"),
             bd=0,
             cursor="hand2",
@@ -500,7 +554,7 @@ class AudioFlowSettingsDialog:
         for spd in SPEEDS:
             is_active = abs(spd - curr_speed) < 0.01
             bg_col = ORANGE if is_active else WHITE
-            fg_col = WHITE if is_active else INK
+            fg_col = BTN_TEXT if is_active else INK
             bd_col = ORANGE_DEEP if is_active else BORDER
 
             btn = tk.Button(
@@ -509,7 +563,7 @@ class AudioFlowSettingsDialog:
                 bg=bg_col,
                 fg=fg_col,
                 activebackground=ORANGE_DEEP,
-                activeforeground=WHITE,
+                activeforeground=BTN_TEXT,
                 font=("Segoe UI", 8, "bold"),
                 bd=0,
                 relief="flat",
@@ -625,8 +679,8 @@ class AudioFlowSettingsDialog:
                 prov_tag = tk.Label(
                     row,
                     text=short_prov,
-                    bg=ORANGE_FAINT if is_sel else "#F5F5F7",
-                    fg=ORANGE_DEEP if is_sel else GRAY,
+                    bg=ORANGE_FAINT if is_sel else BADGE_BG,
+                    fg=ORANGE_DEEP if is_sel else BADGE_FG,
                     font=("Segoe UI", 7, "bold"),
                     padx=6,
                     pady=2,
@@ -638,13 +692,13 @@ class AudioFlowSettingsDialog:
                         r.config(bg=ORANGE_FAINT)
                         l.config(bg=ORANGE_FAINT, fg=ORANGE_DEEP)
                         i.config(bg=ORANGE_FAINT, fg=ORANGE)
-                        t.config(bg=WHITE, fg=ORANGE_DEEP)
+                        t.config(bg=ORANGE_SOFT, fg=ORANGE_DEEP)
 
                     def _hover_leave(e, r=row, l=txt_lbl, i=ind_lbl, t=prov_tag):
                         r.config(bg=WHITE)
                         l.config(bg=WHITE, fg=INK)
                         i.config(bg=WHITE, fg=BORDER)
-                        t.config(bg="#F5F5F7", fg=GRAY)
+                        t.config(bg=BADGE_BG, fg=BADGE_FG)
 
                     for widget_item in (row, txt_lbl, ind_lbl, prov_tag):
                         widget_item.bind("<Enter>", _hover_enter)

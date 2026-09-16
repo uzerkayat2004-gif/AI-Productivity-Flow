@@ -44,8 +44,8 @@ except Exception:
 
 LOCAL_MODEL_REF = "local/deterministic"
 
-# Refined, modern Sunrise design palette
-COMPOSER_COLORS = {
+# Refined, dual-theme Sunrise design palette
+COMPOSER_LIGHT_COLORS = {
     "background": "#fff8f3",      # OFFWHITE page behind the card
     "surface": "#ffffff",         # WHITE card
     "surface_soft": "#ffe3d0",    # ORANGE_SOFT
@@ -67,8 +67,47 @@ COMPOSER_COLORS = {
     "amber_text": "#b45309",      # Dark amber text
 }
 
-# Sunrise grid animation: the six status dots cascade through five orange tones
-GRID_TONES = ("#ff6a00", "#ff8b3d", "#ffb488", "#ffcdb4", "#ffe3d0")
+COMPOSER_DARK_COLORS = {
+    "background": "#161615",      # Warm dark canvas (--polish-canvas)
+    "surface": "#20201f",         # Deep matte paper surface (--polish-paper)
+    "surface_soft": "#282725",    # Elevated container/well (--polish-well)
+    "surface_faint": "#282725",   # Input background
+    "text": "#f5f1ea",            # Warm ink (--polish-ink)
+    "muted": "#b6aea2",           # Muted text (--polish-muted)
+    "border": "#3b3834",          # Subtle border line (--polish-line)
+    "border_focus": "#e6b092",    # Warm secondary accent (--polish-accent)
+    "orange": "#e6b092",          # Warm champagne/peach secondary accent
+    "orange_dark": "#d49474",     # Active accent
+    "orange_light": "#372c25",    # Warm dark tint badge (--polish-tint)
+    "green": "#34d399",           # Connected green
+    "green_bg": "#14291f",        # Dark green bg
+    "green_border": "#1d4a36",    # Dark green border
+    "green_text": "#4ade80",      # Bright green text
+    "amber": "#fbbf24",           # Amber text
+    "amber_bg": "#2b2413",        # Dark amber pill bg
+    "amber_border": "#4a3b18",    # Dark amber pill border
+    "amber_text": "#fbbf24",      # Dark amber text
+}
+
+
+def get_composer_colors() -> dict[str, str]:
+    """Return the composer color tokens matching on_screen_ui_theme."""
+    try:
+        from voice_flow.storage import storage
+        t = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        if t == "dark":
+            return dict(COMPOSER_DARK_COLORS)
+    except Exception:
+        pass
+    return dict(COMPOSER_LIGHT_COLORS)
+
+
+COMPOSER_COLORS = get_composer_colors()
+
+# Sunrise grid animation tones: light mode and dark mode
+GRID_TONES_LIGHT = ("#ff6a00", "#ff8b3d", "#ffb488", "#ffcdb4", "#ffe3d0")
+GRID_TONES_DARK = ("#e6b092", "#d49474", "#b67b5e", "#785340", "#372c25")
+GRID_TONES = GRID_TONES_LIGHT
 GRID_TICK_MS = 80
 GRID_IDLE_DOT = 1
 
@@ -488,16 +527,19 @@ class VideoFlowScreenWidget:
                 self.root = getattr(tk, "_default_root", None)
             if not self.root:
                 return
-            if not self.win or not self.win.winfo_exists():
+            curr_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+            if not self.win or not self.win.winfo_exists() or getattr(self, "_built_theme", None) != curr_theme:
                 self._build()
-            # Ensure window is hidden while updating content and calculating position
-            self.win.withdraw()
-            text = self._controls.get("source")
-            if text:
-                text.delete("1.0", "end")
-                text.insert("1.0", clean)
-            self._source_text = clean
-            self._source_name = "Selected text" if clean else ""
+            if not self.win:
+                return
+
+            clean = (self._initial_text or "").strip()
+            if "source" in self._controls:
+                self._controls["source"].delete("1.0", "end")
+                if clean:
+                    self._controls["source"].insert("1.0", clean)
+            if "title" in self._controls:
+                self._controls["title"].set(self._initial_title)
             if "mode" in self._controls:
                 self._controls["mode"].set(self._mode)
             if "file_label" in self._controls:
@@ -533,7 +575,9 @@ class VideoFlowScreenWidget:
                 pass
         self.win = None
         self._controls.clear()
-        colors = COMPOSER_COLORS
+        self._built_theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        self.colors = get_composer_colors()
+        colors = self.colors
         win = tk.Toplevel(self.root)
         self.win = win
         win.withdraw()
@@ -1201,9 +1245,8 @@ class VideoFlowScreenWidget:
 
         refresh_provider_cards()
 
-    @staticmethod
-    def _configure_styles(master: tk.Misc) -> None:
-        colors = COMPOSER_COLORS
+    def _configure_styles(self, master: tk.Misc) -> None:
+        colors = getattr(self, "colors", None) or get_composer_colors()
         style = ttk.Style(master)
         try:
             if "clam" in style.theme_names():
@@ -1214,8 +1257,8 @@ class VideoFlowScreenWidget:
         style.configure(
             "VideoFlow.TCombobox",
             foreground=colors["text"],
-            fieldbackground=colors["surface"],
-            background=colors["surface"],
+            fieldbackground=colors["surface_soft"],
+            background=colors["surface_soft"],
             arrowcolor=colors["orange_dark"],
             bordercolor=colors["border"],
             lightcolor=colors["border"],
@@ -1224,12 +1267,20 @@ class VideoFlowScreenWidget:
         )
         style.map(
             "VideoFlow.TCombobox",
-            fieldbackground=[("readonly", colors["surface"])],
+            fieldbackground=[("readonly", colors["surface_soft"])],
             foreground=[("readonly", colors["text"])],
-            selectbackground=[("readonly", colors["surface_soft"])],
+            selectbackground=[("readonly", colors["surface"])],
             selectforeground=[("readonly", colors["text"])],
-            bordercolor=[("focus", colors["orange"]), ("active", colors["orange"])],
+            bordercolor=[("focus", colors["border_focus"]), ("active", colors["border_focus"])],
         )
+
+        try:
+            master.option_add("*TCombobox*Listbox.background", colors["surface_soft"])
+            master.option_add("*TCombobox*Listbox.foreground", colors["text"])
+            master.option_add("*TCombobox*Listbox.selectBackground", colors["surface"])
+            master.option_add("*TCombobox*Listbox.selectForeground", colors["text"])
+        except Exception:
+            pass
 
         style.configure(
             "VideoFlow.Vertical.TScrollbar",
@@ -1249,18 +1300,18 @@ class VideoFlowScreenWidget:
             arrowcolor=[("active", colors["orange_dark"]), ("pressed", colors["orange_dark"])],
         )
 
-    @staticmethod
-    def _label(parent: tk.Misc, text: str) -> None:
+    def _label(self, parent: tk.Misc, text: str) -> None:
+        colors = getattr(self, "colors", None) or get_composer_colors()
         tk.Label(
             parent,
             text=text,
-            bg=COMPOSER_COLORS["surface"],
-            fg=COMPOSER_COLORS["muted"],
+            bg=colors["surface"],
+            fg=colors["muted"],
             font=("Segoe UI", 8, "bold"),
         ).pack(anchor="w", pady=(0, 2))
 
     def _paint_grid_idle(self) -> None:
-        colors = COMPOSER_COLORS
+        colors = getattr(self, "colors", None) or get_composer_colors()
         for index, dot in enumerate(self._grid_dots):
             dot.configure(bg=colors["orange"] if index == GRID_IDLE_DOT else colors["surface_soft"])
 
@@ -1279,7 +1330,8 @@ class VideoFlowScreenWidget:
             self._grid_after_id = None
             return
         try:
-            tones = GRID_TONES
+            is_dark = getattr(self, "_built_theme", "light") == "dark"
+            tones = GRID_TONES_DARK if is_dark else GRID_TONES_LIGHT
             for index, dot in enumerate(self._grid_dots):
                 dot.configure(bg=tones[(self._grid_step - index) % len(tones)])
             self._grid_step += 1
@@ -1305,9 +1357,10 @@ class VideoFlowScreenWidget:
         label = self._controls.get("status_label")
         if label is None:
             return
+        colors = getattr(self, "colors", None) or get_composer_colors()
         try:
             if label.winfo_exists():
-                label.configure(fg=COMPOSER_COLORS["orange_dark"] if active else COMPOSER_COLORS["muted"])
+                label.configure(fg=colors["orange_dark"] if active else colors["muted"])
         except tk.TclError:
             pass
 
@@ -1539,7 +1592,7 @@ class VideoFlowScreenWidget:
 
         if not self.win or not self.win.winfo_exists() or not self._auth_pill_frame:
             return
-        colors = COMPOSER_COLORS
+        colors = getattr(self, "colors", None) or get_composer_colors()
         if authenticated:
             effective_email = email or self._auth_email
             pill_bg = colors.get("green_bg", "#ecfdf5")

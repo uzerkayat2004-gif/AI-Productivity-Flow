@@ -1023,9 +1023,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "message": "Floating bar shown and position reset"})
         elif path == "/api/settings/autostart/status":
             try:
-                from voice_flow.platform import get_backend
-                enabled = get_backend().get_launch_at_login()
-                storage.save_setting("autostart_enabled", enabled)
+                stored = storage.get_setting("autostart_enabled", None)
+                if stored is not None:
+                    enabled = bool(stored)
+                else:
+                    from voice_flow.platform import get_backend
+                    enabled = get_backend().get_launch_at_login()
+                    storage.save_setting("autostart_enabled", enabled)
                 self.send_json_response({"success": True, "enabled": enabled})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc), "enabled": False}, 500)
@@ -1258,12 +1262,34 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"videos": [_shim_video(job) for job in get_video_flow_service().list()]})
         elif path == "/api/audio-flow/history":
             try:
+                from voice_flow.audio_summary_player import resolve_summary_audio, safe_media_filename, get_user_downloads_dir
                 summaries = storage.get_audio_summary_history(limit=50)
                 for s in summaries:
                     s_title = str(s.get("title") or s.get("text_snippet") or "Audio Summary").strip()
                     title_enc = urllib.parse.quote(s_title)
                     s["media_url"] = f"/api/audio-flow/summary/media?id={urllib.parse.quote(str(s['id']))}"
                     s["download_url"] = f"/api/audio-flow/summary/media?id={urllib.parse.quote(str(s['id']))}&download=1&format=mp3&title={title_enc}"
+                    resolved = resolve_summary_audio(str(s["id"]))
+                    s["has_audio"] = bool(resolved and resolved[0].is_file())
+                    if not s["has_audio"] and s.get("status") == "ready":
+                        s["status"] = "failed"
+                        s["error"] = s.get("error") or "Audio summary file is no longer available on disk"
+
+                    # Check persistent downloaded status
+                    downloaded = bool(s.get("downloaded"))
+                    if not downloaded and s["has_audio"]:
+                        try:
+                            cand_name = safe_media_filename(
+                                s_title,
+                                default="Audio_Summary",
+                                ext=".mp3",
+                                source_text=s.get("full_text") or s.get("text_snippet"),
+                            )
+                            if (get_user_downloads_dir() / cand_name).is_file():
+                                downloaded = True
+                        except Exception:
+                            pass
+                    s["downloaded"] = downloaded
                 self.send_json_response({"success": True, "summaries": summaries})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
@@ -1356,7 +1382,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     if not authenticated and not details.get("disconnected") and not os.environ.get("PYTEST_CURRENT_TEST"):
                         auth_saved = storage.get_setting("video_flow_notebooklm_authenticated")
                         saved_email = storage.get_setting("video_flow_notebooklm_email")
-                        if auth_saved and auth_saved not in (False, "false", "False", 0, "0"):
+                        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+                        if switched_from and saved_email and str(saved_email).strip().lower() == str(switched_from).strip().lower():
+                            saved_email = None
+                        if auth_saved and auth_saved not in (False, "false", "False", 0, "0") and saved_email:
                             try:
                                 from voice_flow.video_flow_engine.notebooklm import browser_sync
                                 sync_res = browser_sync.auto_sync_from_browser(
@@ -1452,8 +1481,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                         pass
                                 if not healed:
                                     online_verified = False
-                                    # Never log out the user if storage_state has cookies
-                                    if not (storage_path and Path(storage_path).is_file() and details.get("cookies_count", 0) > 0):
+                                    if is_auth_revocation:
+                                        authenticated = False
+                                    elif not (storage_path and Path(storage_path).is_file() and details.get("cookies_count", 0) > 0):
                                         authenticated = False
                             else:
                                 online_verified = None
@@ -5067,6 +5097,170 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 storage.save_setting("on_screen_ui_theme", theme)
                 self.send_json_response({"success": True, "theme": theme})
 
+        elif path == "/api/video-flow/videos/save-to-downloads":
+            video_id = str(data.get("video_id") or data.get("id") or "").strip()
+            req_title = str(data.get("title") or "").strip()
+            if not video_id:
+                self.send_json_response({"success": False, "error": "Missing video id"}, 400)
+                return
+
+            from voice_flow.audio_summary_player import safe_media_filename, save_media_to_downloads
+            from voice_flow.paths import data_dir
+
+            job = get_video_flow_service().get(video_id)
+            if job is None and video_id.startswith("vf-"):
+                job = get_video_flow_service().get(video_id[3:])
+            elif job is None and not video_id.startswith("vf-"):
+                job = get_video_flow_service().get(f"vf-{video_id}")
+
+            meta = (job.meta or {}) if job is not None else {}
+            meta_title = (meta.get("title") or meta.get("prompt") or meta.get("source_name") or "").strip()
+            source_text = meta.get("source_text") or meta.get("prompt") or ""
+            if not source_text:
+                for vid in (video_id, video_id.replace("vf-", ""), f"vf-{video_id}"):
+                    src_file = data_dir() / "v3_projects" / vid / "source.txt"
+                    if src_file.is_file():
+                        try:
+                            source_text = src_file.read_text(encoding="utf-8", errors="replace")
+                            break
+                        except Exception:
+                            pass
+
+            video_title = req_title or meta_title or f"video_{video_id}"
+            if meta_title and len(meta_title) > len(req_title):
+                video_title = meta_title
+
+            path_cand = None
+            if job is not None and meta.get("output_path"):
+                p = Path(meta["output_path"]).expanduser().resolve()
+                if p.is_file() and p.stat().st_size > 1000:
+                    path_cand = p
+
+            if not path_cand or not path_cand.is_file():
+                for vid in (video_id, video_id.replace("vf-", ""), f"vf-{video_id}"):
+                    candidates = [
+                        data_dir() / "v3_projects" / vid / "video.mp4",
+                        data_dir() / "v3_projects" / vid / f"export_{vid}.mp4",
+                        data_dir() / "v3_projects" / vid / "concat.mp4",
+                        data_dir() / "v3_projects" / vid / "export" / "video.mp4",
+                        data_dir() / "v3_projects" / vid / "narova" / "out" / "video.mp4",
+                        data_dir() / "v3_projects" / vid / "narova" / "project" / "out" / "video.mp4",
+                        data_dir() / "v3_projects" / vid / "out" / "video.mp4",
+                        data_dir() / "notebooklm" / "videos" / f"{vid}.mp4",
+                        data_dir() / "notebooklm" / vid / "video.mp4",
+                        data_dir() / "notebooklm_videos" / f"{vid}.mp4",
+                    ]
+                    if meta.get("video_path"):
+                        candidates.append(Path(str(meta["video_path"])))
+                    for cand in candidates:
+                        if cand and cand.is_file() and cand.stat().st_size > 1000:
+                            path_cand = cand
+                            break
+                    if path_cand:
+                        break
+
+            if not path_cand or not path_cand.is_file():
+                for vid in (video_id, video_id.replace("vf-", ""), f"vf-{video_id}"):
+                    proj_dir = data_dir() / "v3_projects" / vid
+                    if proj_dir.is_dir():
+                        found = sorted(
+                            list(proj_dir.glob("*.mp4")) + list(proj_dir.rglob("*.mp4")),
+                            key=lambda p: p.stat().st_size,
+                            reverse=True,
+                        )
+                        if found and found[0].stat().st_size > 1000:
+                            path_cand = found[0]
+                            break
+
+            if not path_cand or not path_cand.is_file():
+                err_msg = "Video file is not ready or not found on disk"
+                if job is not None and job.state in ("failed", "cancelled"):
+                    err_msg = f"Video generation {job.state}. Please retry generating this video."
+                elif job is not None and job.state == "processing":
+                    err_msg = "Video is still generating. Please wait until generation completes."
+                self.send_json_response({"success": False, "error": err_msg}, 404)
+                return
+
+            clean_filename = safe_media_filename(
+                video_title,
+                default=f"video_{video_id[:8]}",
+                ext=".mp4",
+                source_text=source_text,
+                prompt=meta.get("prompt"),
+            )
+            try:
+                saved_path, final_name = save_media_to_downloads(path_cand, clean_filename)
+                if job is not None:
+                    try:
+                        get_video_flow_service().update_meta(job.job_id, {"downloaded": True})
+                    except Exception:
+                        pass
+                self.send_json_response({
+                    "success": True,
+                    "filename": final_name,
+                    "path": str(saved_path),
+                    "size_bytes": saved_path.stat().st_size,
+                })
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
+
+        elif path == "/api/audio-flow/summary/save-to-downloads":
+            audio_id = str(data.get("id") or data.get("audio_id") or "").strip()
+            req_title = str(data.get("title") or "").strip()
+            format_ext = str(data.get("format") or "mp3").strip().lower()
+            if not format_ext.startswith("."):
+                format_ext = f".{format_ext}"
+            if not audio_id:
+                self.send_json_response({"success": False, "error": "Missing audio id"}, 400)
+                return
+
+            from voice_flow.audio_summary_player import resolve_summary_audio, safe_media_filename, ensure_mp3_audio, save_media_to_downloads
+
+            resolved = resolve_summary_audio(audio_id)
+            if not resolved or not resolved[0].is_file():
+                self.send_json_response({"success": False, "error": "Audio summary file is not available"}, 404)
+                return
+
+            audio_path = resolved[0]
+            if format_ext == ".mp3":
+                converted = ensure_mp3_audio(audio_path)
+                if converted and converted.is_file():
+                    audio_path = converted
+
+            hist_entry = None
+            try:
+                hist_entry = storage.get_audio_summary_history_by_id(audio_id)
+            except Exception:
+                pass
+
+            audio_title = req_title
+            source_snippet = ""
+            if hist_entry:
+                if not audio_title:
+                    audio_title = hist_entry.get("title") or hist_entry.get("text_snippet")
+                source_snippet = hist_entry.get("full_text") or hist_entry.get("text_snippet") or ""
+
+            clean_filename = safe_media_filename(
+                audio_title or audio_path.stem,
+                default="Audio_Summary",
+                ext=format_ext,
+                source_text=source_snippet,
+            )
+            try:
+                saved_path, final_name = save_media_to_downloads(audio_path, clean_filename)
+                try:
+                    storage.update_audio_summary_history(audio_id, downloaded=1)
+                except Exception:
+                    pass
+                self.send_json_response({
+                    "success": True,
+                    "filename": final_name,
+                    "path": str(saved_path),
+                    "size_bytes": saved_path.stat().st_size,
+                })
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
+
         elif path == "/api/voice-flow-stt/update":
             model_id = str(data.get("model_id") or data.get("model") or data.get("model_ref") or "").strip()
             if not model_id:
@@ -5241,15 +5435,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     )
                     resolved = resolve_summary_audio(item_id)
                     audio_path = resolved[0] if resolved else (hist.get("audio_path") if hist else None)
-                    if not audio_path or not Path(audio_path).is_file():
-                        media_dir = (data_dir() / "audio_summaries").resolve()
-                        cand_files = sorted(
-                            list(media_dir.glob("*.m4a")) + list(media_dir.glob("*.mp3")),
-                            key=lambda p: p.stat().st_mtime,
-                            reverse=True,
-                        )
-                        if cand_files:
-                            audio_path = cand_files[0]
+                    if hist and hist.get("status") in ("failed", "cancelled") and (not audio_path or not Path(audio_path).is_file()):
+                        self.send_json_response({"success": False, "error": "This audio summary failed or was cancelled during generation."}, 400)
+                        return
                     if not audio_path or not Path(audio_path).is_file():
                         self.send_json_response({"success": False, "error": "Audio summary file not found on disk"}, 404)
                     else:
@@ -5267,7 +5455,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             "success": True,
                             "token": token,
                             "mode": "native_window",
-                            "player_url": f"{base_url}/audio-summary-player.html?id={urllib.parse.quote(token)}&depth={urllib.parse.quote(depth)}&title={urllib.parse.quote(title)}",
+                            "player_url": f"{base_url}/audio-summary-player.html?id={urllib.parse.quote(token)}&depth={urllib.parse.quote(depth)}&title={urllib.parse.quote(title)}&autoplay=1",
                         })
                 except Exception as e:
                     self.send_json_response({"success": False, "error": str(e)}, 500)
@@ -8253,16 +8441,68 @@ def _shim_video(job) -> dict:
         public_status = "cancelled"
     else:
         public_status = "processing"
-    playable = public_status == "completed" or job.progress >= 100.0
+
+    out_path_str = meta.get("output_path") or ""
+    has_output_file = False
+    if out_path_str:
+        p = Path(out_path_str).expanduser().resolve()
+        has_output_file = p.is_file() and p.stat().st_size > 1000
+    if not has_output_file:
+        cand_p = data_dir() / "v3_projects" / job.job_id / "video.mp4"
+        has_output_file = cand_p.is_file() and cand_p.stat().st_size > 1000
+
+    if has_output_file:
+        playable = True
+        if public_status in ("failed", "processing"):
+            public_status = "completed"
+    else:
+        playable = public_status == "completed" or job.progress >= 100.0
+
+    v_title = str(meta.get("title") or job.job_id).strip()
+    source_text = meta.get("source_text") or meta.get("prompt") or ""
+    if not source_text:
+        try:
+            for vid in (job.job_id, job.job_id.replace("vf-", ""), f"vf-{job.job_id}"):
+                src_file = data_dir() / "v3_projects" / vid / "source.txt"
+                if src_file.is_file():
+                    source_text = src_file.read_text(encoding="utf-8", errors="replace")
+                    break
+        except Exception:
+            pass
+
+    from voice_flow.audio_summary_player import clean_media_title, safe_media_filename, get_user_downloads_dir
+    cleaned_display_title = clean_media_title(
+        v_title,
+        source_text=source_text,
+        prompt=meta.get("prompt"),
+        default=f"video_{job.job_id[:8]}",
+    )
+
+    downloaded = bool(meta.get("downloaded", False))
+    if not downloaded and playable:
+        try:
+            cand_name = safe_media_filename(
+                cleaned_display_title,
+                default=f"video_{job.job_id[:8]}",
+                ext=".mp4",
+                source_text=source_text,
+                prompt=meta.get("prompt"),
+            )
+            if (get_user_downloads_dir() / cand_name).is_file():
+                downloaded = True
+        except Exception:
+            pass
+
     provenance = meta.get("provenance") if isinstance(meta.get("provenance"), dict) else None
     final_engine = provenance.get("final_engine") if provenance else None
     return {
         "id": job.job_id,
-        "title": meta.get("title") or job.job_id,
+        "title": cleaned_display_title,
         "status": public_status,
         "stage": job.message or public_status,
         "progress": int(job.progress),
         "playable": playable,
+        "downloaded": downloaded,
         "mode": meta.get("mode", "summary"),
         "engine_version": final_engine or "v3-code2video",
         "created_at": getattr(job, "created_at", None) or 0.0,
@@ -8276,7 +8516,7 @@ def _shim_video(job) -> dict:
         "fallback_error": meta.get("fallback_error"),
         "meta": {key: meta.get(key) for key in ("timings", "timing") if meta.get(key) is not None},
         "view_url": f"/api/video-flow/videos/file?id={job.job_id}",
-        "download_url": f"/api/video-flow/videos/file?id={job.job_id}&download=1" + (f"&title={urllib.parse.quote(str(meta.get('title') or ''))}" if meta.get("title") else ""),
+        "download_url": f"/api/video-flow/videos/file?id={job.job_id}&download=1" + f"&title={urllib.parse.quote(cleaned_display_title)}",
         "export_status": "exported" if playable else "not_requested",
         "error": meta.get("error_code", "") if public_status == "failed" else "",
     }

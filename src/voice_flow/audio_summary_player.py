@@ -45,26 +45,83 @@ _media: dict[str, tuple[Path, float, str]] = {}
 _player_processes: dict[str, subprocess.Popen] = {}
 
 
-def safe_media_filename(title: str | None, default: str = "Audio_Summary", ext: str = ".mp3", max_length: int = 120) -> str:
-    """Format and sanitize a media title into a clean OS-safe download filename."""
-    name = str(title or "").strip()
-    if not name:
-        name = default
+def clean_media_title(
+    title: str | None,
+    source_text: str | None = None,
+    prompt: str | None = None,
+    default: str = "Media",
+    max_length: int = 120,
+) -> str:
+    """Recover and sanitize a media title, handling truncation, replacement characters, and illegal symbols."""
+    raw = str(title or "").strip()
+
+    # If title is truncated with '...' or contains replacement chars '\ufffd', attempt recovery
+    is_truncated = raw.endswith("...") or raw.endswith("…") or (len(raw) > 20 and raw.endswith(".."))
+    has_replacement = "\ufffd" in raw or "\ufffe" in raw
+
+    if (is_truncated or has_replacement or not raw) and (source_text or prompt):
+        text_source = str(source_text or prompt or "").strip()
+        lines = [ln.strip() for ln in text_source.splitlines() if ln.strip()]
+        if lines:
+            first_line = re.sub(r"^#+\s*", "", lines[0]).strip()
+            if first_line and len(first_line) >= 4:
+                raw_prefix = re.sub(r"[^a-zA-Z0-9]", "", raw[:25]).lower()
+                cand_prefix = re.sub(r"[^a-zA-Z0-9]", "", first_line[:25]).lower()
+                if not raw or not raw_prefix or raw_prefix in cand_prefix or cand_prefix in raw_prefix:
+                    raw = first_line
+
+    # Clean Unicode replacement characters and dashes
+    raw = raw.replace("\ufffd", " - ").replace("\ufffe", " ")
+    raw = re.sub(r"[\u2010-\u2015]", "-", raw)  # normalize Unicode dashes/hyphens
+    raw = re.sub(r"[\u2018\u2019]", "'", raw)  # smart quotes
+    raw = re.sub(r'[\u201c\u201d]', '"', raw)
+
     # Remove characters illegal across Windows / macOS / Linux filesystems
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", raw)
+    # Remove trailing ellipsis or dots
+    cleaned = re.sub(r"\.{2,}$", "", cleaned).strip(" .")
+    # Clean whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-")
+    # Clean redundant dashes
+    cleaned = re.sub(r"\s*-\s*", " - ", cleaned)
+    cleaned = re.sub(r"(\s*-\s*)+", " - ", cleaned)
+    cleaned = cleaned.strip(" -_.")
+
     if not cleaned:
         cleaned = default
+
     # Windows reserved filenames (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     base_upper = cleaned.upper()
     if base_upper in {"CON", "PRN", "AUX", "NUL"} or re.match(r"^(COM|LPT)[1-9]$", base_upper):
         cleaned = f"{cleaned}_file"
+
     if len(cleaned) > max_length:
-        cleaned = cleaned[:max_length].rstrip(" .")
+        cleaned = cleaned[:max_length].rstrip(" ._-")
+
+    return cleaned or default
+
+
+def safe_media_filename(
+    title: str | None,
+    default: str = "Audio_Summary",
+    ext: str = ".mp3",
+    max_length: int = 120,
+    source_text: str | None = None,
+    prompt: str | None = None,
+) -> str:
+    """Format and sanitize a media title into a clean OS-safe download filename."""
+    cleaned = clean_media_title(
+        title,
+        source_text=source_text,
+        prompt=prompt,
+        default=default,
+        max_length=max_length,
+    )
     clean_ext = ext if ext.startswith(".") else f".{ext}"
     if not cleaned.lower().endswith(clean_ext.lower()):
         cleaned = f"{cleaned}{clean_ext}"
     return cleaned
+
 
 
 def ensure_mp3_audio(audio_path: Path | str) -> Path:
@@ -93,6 +150,77 @@ def ensure_mp3_audio(audio_path: Path | str) -> Path:
     except Exception:
         pass
     return p
+
+
+def get_user_downloads_dir() -> Path:
+    """Return the user's primary Downloads directory across Windows / macOS / Linux.
+    
+    On Windows, accurately respects user-redirected Downloads folders (e.g. D:\\Downloads)
+    via Windows Shell Known Folder API (FOLDERID_Downloads) and Registry User Shell Folders.
+    """
+    if sys.platform.startswith("win"):
+        try:
+            from ctypes import wintypes
+            import uuid
+            # FOLDERID_Downloads = {374DE290-123F-4565-9164-39C4925E467B}
+            folderid = uuid.UUID("{374DE290-123F-4565-9164-39C4925E467B}").bytes_le
+            buf = wintypes.LPWSTR()
+            res = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.c_char_p(folderid), 0, None, ctypes.byref(buf))
+            if res == 0 and buf.value:
+                p = Path(buf.value)
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+            val, _ = winreg.QueryValueEx(k, "{374DE290-123F-4565-9164-39C4925E467B}")
+            if val:
+                p = Path(os.path.expandvars(val))
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+        try:
+            profile = os.environ.get("USERPROFILE")
+            if profile:
+                p = Path(profile) / "Downloads"
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+    dl = Path.home() / "Downloads"
+    if dl.is_dir():
+        return dl
+    return Path.home()
+
+
+def save_media_to_downloads(source_path: Path | str, filename: str) -> tuple[Path, str]:
+    """Copy source_path into the user's Downloads folder with collision handling."""
+    src = Path(source_path).expanduser().resolve()
+    if not src.is_file():
+        raise FileNotFoundError(f"Source media file not found: {source_path}")
+    dl_dir = get_user_downloads_dir()
+    dl_dir.mkdir(parents=True, exist_ok=True)
+    clean_name = safe_media_filename(filename, default="media", ext=src.suffix)
+    target = dl_dir / clean_name
+    stem = target.stem
+    ext = target.suffix
+    counter = 1
+    while target.is_file():
+        try:
+            if target.stat().st_size == src.stat().st_size:
+                break
+        except Exception:
+            pass
+        target = dl_dir / f"{stem} ({counter}){ext}"
+        counter += 1
+    import shutil
+    shutil.copy2(src, target)
+    return target, target.name
 
 
 def register_summary_audio(audio_path: str | Path, *, depth: str = "balanced", token: str | None = None) -> str:
@@ -125,11 +253,13 @@ def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
         from voice_flow.storage import storage
         hist = storage.get_audio_summary_history_by_id(str(token or ""))
         if hist:
+            if hist.get("status") in ("failed", "cancelled") and not hist.get("audio_path"):
+                return None
             media_root = (data_dir() / "audio_summaries").resolve()
             audio_cand: Path | None = None
             if hist.get("audio_path"):
                 cand = Path(hist["audio_path"]).expanduser().resolve()
-                if cand.is_file() and (media_root in cand.parents or data_dir().resolve() in cand.parents):
+                if cand.is_file():
                     audio_cand = cand
                 elif (media_root / cand.name).is_file():
                     audio_cand = media_root / cand.name
@@ -145,11 +275,16 @@ def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
                     if audio_cand:
                         break
             if not audio_cand or not audio_cand.is_file():
-                # Fallback to any existing .m4a or .mp3 in audio_summaries
-                existing = [f for f in media_root.glob("*.m4a")] + [f for f in media_root.glob("*.mp3")]
-                if existing:
-                    existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                    audio_cand = existing[0]
+                # Check candidate filenames matching snippet text hash
+                snippet = (hist.get("text_snippet") or hist.get("full_text") or "").strip()
+                if snippet:
+                    import hashlib
+                    h = hashlib.md5(snippet.encode("utf-8")).hexdigest()
+                    for ext in (".mp3", ".m4a"):
+                        test_p = media_root / f"{h}{ext}"
+                        if test_p.is_file():
+                            audio_cand = test_p
+                            break
             if audio_cand and audio_cand.is_file():
                 # Self-heal history record if path had differed
                 try:
@@ -185,12 +320,21 @@ def _purge_expired_locked() -> None:
             _media.pop(token, None)
 
 
-def player_url(token: str, *, base_url: str = "http://127.0.0.1:8991", depth: str = "balanced", title: str = "", style: str = "") -> str:
+def player_url(token: str, *, base_url: str = "http://127.0.0.1:8991", depth: str = "balanced", title: str = "", style: str = "", autoplay: bool = True) -> str:
     params = {"id": token, "depth": depth}
     if title:
         params["title"] = title
     if style:
         params["style"] = style
+    if autoplay:
+        params["autoplay"] = "1"
+    try:
+        from voice_flow.storage import storage
+        theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+        if theme in ("dark", "light"):
+            params["theme"] = theme
+    except Exception:
+        pass
     page = "audio-summary-player.classic.html" if style == "classic" else "audio-summary-player.html"
     return f"{base_url.rstrip('/')}/{page}?{urllib.parse.urlencode(params)}"
 
@@ -203,11 +347,12 @@ def launch_summary_audio_player(
     base_url: str = "http://127.0.0.1:8991",
     token: str | None = None,
     style: str = "",
+    autoplay: bool = True,
 ) -> str:
     """Open the dedicated summary player and return its opaque media ID."""
     close_summary_audio_player()
     token = register_summary_audio(audio_path, depth=depth, token=token)
-    url = player_url(token, base_url=base_url, depth=depth, title=title, style=style)
+    url = player_url(token, base_url=base_url, depth=depth, title=title, style=style, autoplay=autoplay)
     env = os.environ.copy()
     env["VOICE_FLOW_API_BASE"] = base_url.rstrip("/")
 
@@ -220,17 +365,25 @@ def launch_summary_audio_player(
 
     python_bin = sys.executable
     if sys.platform.startswith("win"):
-        venv_pyw = Path(_project_root) / ".venv" / "Scripts" / "pythonw.exe"
-        if venv_pyw.is_file():
-            python_bin = str(venv_pyw)
-        else:
-            pyw = Path(sys.executable).with_name("pythonw.exe")
-            if pyw.is_file():
-                python_bin = str(pyw)
+        candidates = [
+            Path(_project_root) / ".venv" / "Scripts" / "pythonw.exe",
+            Path(_project_root) / ".venv" / "Scripts" / "python.exe",
+            Path(r"C:\Users\Asus\.gemini\antigravity\scratch\voice-flow\.venv\Scripts\pythonw.exe"),
+            Path(r"C:\Users\Asus\.gemini\antigravity\scratch\voice-flow\.venv\Scripts\python.exe"),
+            Path(r"C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow\.venv\Scripts\pythonw.exe"),
+            Path(r"C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow\.venv\Scripts\python.exe"),
+            Path(sys.executable).with_name("pythonw.exe"),
+            Path(sys.executable),
+        ]
+        for cand in candidates:
+            if cand.is_file():
+                python_bin = str(cand)
+                break
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         proc = subprocess.Popen(
             [python_bin, "-m", "voice_flow.audio_summary_player", token, depth, title],
+            cwd=_src_dir,
             creationflags=flags,
             close_fds=True,
             env=env,
@@ -238,8 +391,12 @@ def launch_summary_audio_player(
         with _media_lock:
             _player_processes[token] = proc
         return token
-    except OSError:
-        webbrowser.open(url)
+    except OSError as exc:
+        try:
+            log_file = Path(data_dir()) / "audio_player_error.log"
+            log_file.write_text(f"Failed to spawn audio player: {exc}\n", encoding="utf-8")
+        except Exception:
+            pass
         return token
 
 
@@ -1382,6 +1539,15 @@ def main() -> None:
         import webview
 
         api = AudioSummaryPlayerApi()
+        bg_color = "#0c0d12"
+        try:
+            from voice_flow.storage import storage
+            theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
+            if theme == "light":
+                bg_color = "#FFFFFF"
+        except Exception:
+            pass
+
         # Compact, sleek dimensions: 430 x 310 (min 360 x 260)
         win = webview.create_window(
             "Audio Flow Summary",
@@ -1391,7 +1557,7 @@ def main() -> None:
             min_size=(360, 260),
             resizable=True,
             on_top=True,
-            background_color="#0c0d12",
+            background_color=bg_color,
             js_api=api,
         )
 
@@ -1407,8 +1573,13 @@ def main() -> None:
             webview.start(icon=ico_str, debug=False, private_mode=False)
         else:
             webview.start(debug=False, private_mode=False)
-    except Exception:
-        webbrowser.open(url)
+    except Exception as exc:
+        try:
+            import traceback
+            log_file = Path(data_dir()) / "audio_player_error.log"
+            log_file.write_text(f"Audio summary player error: {exc}\n{traceback.format_exc()}\n", encoding="utf-8")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ _SECRET_VALUE = re.compile(
 _BEARER_VALUE = re.compile(r"(?i)(\bbearer\s+)[^\s,;]+")
 _QUERY_SECRET = re.compile(r"(?ix)([?&](?:api[_-]?key|token|access[_-]?token|cookie|sid|psid(?:ts)?)=)[^&#\s]+")
 MAX_SOURCE_TEXT_BYTES = 100_000
+AUTH_EXPIRED_MESSAGE = "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
 
 
 class NotebookLMAudioSummaryError(RuntimeError):
@@ -277,7 +278,12 @@ class NotebookLMAudioSummaryService:
                 if sync_res.get("success"):
                     if hasattr(bridge, "sync_storage_state"):
                         bridge.sync_storage_state(force=True)
-                    return True
+                    try:
+                        verified = bridge.check_auth(raise_on_error=True)
+                        if getattr(verified, "authenticated", True):
+                            return True
+                    except Exception as verify_err:
+                        logger.debug("Audio summary auth verification failed after auto_sync_from_browser: %s", verify_err)
             except Exception as b_err:
                 logger.debug("Audio summary auto_sync_from_browser attempt failed: %s", b_err)
             allow_pw = not os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("VOICE_FLOW_TEST_PLAYWRIGHT_HEAL")
@@ -288,7 +294,12 @@ class NotebookLMAudioSummaryService:
                     if pw_sync.get("success"):
                         if hasattr(bridge, "sync_storage_state"):
                             bridge.sync_storage_state(force=True)
-                        return True
+                        try:
+                            verified = bridge.check_auth(raise_on_error=True)
+                            if getattr(verified, "authenticated", True):
+                                return True
+                        except Exception as verify_err:
+                            logger.debug("Audio summary auth verification failed after playwright sync: %s", verify_err)
                 except Exception as pw_err:
                     logger.debug("Audio summary sync_cookies_with_playwright attempt failed: %s", pw_err)
             return False
@@ -331,28 +342,37 @@ class NotebookLMAudioSummaryService:
                     if isinstance(retry_exc, NotebookLMVideoError):
                         err_code = "auth_expired" if _is_auth_error(retry_exc) else retry_exc.code
                         err_msg = (
-                            "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+                            AUTH_EXPIRED_MESSAGE
                             if err_code == "auth_expired"
                             else retry_exc.message
                         )
                         raise NotebookLMAudioSummaryError(err_code, err_msg, payload=retry_exc.payload) from retry_exc
+                    if _is_auth_error(retry_exc):
+                        raise NotebookLMAudioSummaryError("auth_expired", AUTH_EXPIRED_MESSAGE) from retry_exc
                     raise
             else:
                 if isinstance(auth_exc, NotebookLMVideoError):
                     err_code = "auth_expired" if _is_auth_error(auth_exc) else auth_exc.code
                     err_msg = (
-                        "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+                        AUTH_EXPIRED_MESSAGE
                         if err_code == "auth_expired"
                         else auth_exc.message
                     )
                     raise NotebookLMAudioSummaryError(err_code, err_msg, payload=auth_exc.payload) from auth_exc
+                if _is_auth_error(auth_exc):
+                    raise NotebookLMAudioSummaryError("auth_expired", AUTH_EXPIRED_MESSAGE) from auth_exc
                 raise
 
         if not getattr(auth, "authenticated", True):
             if _try_heal():
-                auth = bridge.check_auth(raise_on_error=True)
+                try:
+                    auth = bridge.check_auth(raise_on_error=True)
+                except Exception as post_heal_exc:
+                    if _is_auth_error(post_heal_exc):
+                        raise NotebookLMAudioSummaryError("auth_expired", AUTH_EXPIRED_MESSAGE) from post_heal_exc
+                    raise
             if not getattr(auth, "authenticated", True):
-                raise NotebookLMAudioSummaryError("auth_expired", "Google account login expired. Please sign in to NotebookLM in Video Flow settings.")
+                raise NotebookLMAudioSummaryError("auth_expired", AUTH_EXPIRED_MESSAGE)
 
         for attempt in range(2):
             try:
@@ -417,14 +437,47 @@ class NotebookLMAudioSummaryService:
                 if isinstance(exc, NotebookLMVideoError):
                     err_code = "auth_expired" if _is_auth_error(exc) else exc.code
                     err_msg = (
-                        "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+                        AUTH_EXPIRED_MESSAGE
                         if err_code == "auth_expired"
                         else exc.message
                     )
                     raise NotebookLMAudioSummaryError(err_code, err_msg, payload=exc.payload) from exc
+                if _is_auth_error(exc):
+                    raise NotebookLMAudioSummaryError("auth_expired", AUTH_EXPIRED_MESSAGE) from exc
                 if isinstance(exc, (OSError, ValueError)):
                     raise NotebookLMAudioSummaryError("NOTEBOOKLM_AUDIO_ERROR", _safe_error(exc)) from exc
                 raise
+
+
+def check_notebooklm_auth_status(profile: str | None = None) -> dict[str, Any]:
+    """Check NotebookLM authentication status safely for Audio Flow."""
+    try:
+        from voice_flow.video_flow_engine.notebooklm import login_flow
+        state = login_flow.get_login_state(profile=profile)
+        logged_in = bool(state.get("logged_in") or state.get("authenticated"))
+        return {
+            "authenticated": logged_in,
+            "email": str(state.get("email") or ""),
+            "profile": str(state.get("profile") or ""),
+            "status": "connected" if logged_in else "auth_expired",
+        }
+    except Exception as exc:
+        return {
+            "authenticated": False,
+            "email": "",
+            "profile": "",
+            "status": "error",
+            "error": str(exc),
+        }
+
+
+def start_notebooklm_login(profile: str | None = None) -> dict[str, Any]:
+    """Trigger the official NotebookLM sign-in flow for Audio Flow."""
+    try:
+        from voice_flow.video_flow_engine.notebooklm import login_flow
+        return login_flow.start_login(profile=profile)
+    except Exception as exc:
+        return {"launched": False, "error": str(exc)}
 
 
 audio_notebooklm_service = NotebookLMAudioSummaryService()
@@ -436,4 +489,6 @@ __all__ = [
     "audio_notebooklm_service",
     "normalize_audio_depth",
     "MAX_SOURCE_TEXT_BYTES",
+    "check_notebooklm_auth_status",
+    "start_notebooklm_login",
 ]

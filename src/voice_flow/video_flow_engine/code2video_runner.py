@@ -112,7 +112,7 @@ class Code2VideoRunner:
                 "sections": storyboard["sections"],
             }
         except EngineError:
-            if not bool(options.get("allow_fallback")):
+            if not bool(options.get("allow_fallback") or options.get("allow_local_fallback")):
                 raise
             import logging
             logging.getLogger(__name__).warning("Model planning failed; using deterministic storyboard")
@@ -124,7 +124,7 @@ class Code2VideoRunner:
             }
             _write_json(project_dir / "plan" / "outline.json", outline)
         except Exception as exc:
-            if not bool(options.get("allow_fallback")):
+            if not bool(options.get("allow_fallback") or options.get("allow_local_fallback")):
                 raise
             import logging
             logging.getLogger(__name__).warning("Model planning unavailable or failed (%s); using deterministic storyboard", exc)
@@ -350,58 +350,140 @@ def _extract_json_object(content: str) -> dict:
     """Extract the storyboard JSON object from a planner response.
 
     Planners differ: some return bare JSON, others wrap it in markdown
-    fences or surrounding prose, and some emit several objects. Prefer the
-    largest balanced JSON object found.
+    fences or surrounding prose, some wrap keys/values in bold/italic formatting,
+    and some emit relaxed JSON or several objects. Prefer the largest balanced
+    JSON object found with comprehensive repair.
     """
     import re as _re
+    import ast as _ast
+
+    def _clean_json_candidate(raw: str) -> str:
+        s = str(raw).strip()
+        # 1. Strip outer code fences if candidate still has them
+        s = _re.sub(r"^(?:```+|~~~+)[a-zA-Z0-9_-]*\s*", "", s)
+        s = _re.sub(r"\s*(?:```+|~~~+)$", "", s)
+        # 2. Strip single-line comments // ... or # ... outside strings (line-anchored)
+        s = _re.sub(r"(?m)^\s*(?://|#)[^\n]*$", "", s)
+        # 3. Strip markdown bold / italics across entire lines:
+        # e.g. **"key": "val"**, or **"key": "val"**
+        s = _re.sub(r"(?m)^\s*\*\*(.*?)\*\*\s*(,?)$", r"\1\2", s)
+        s = _re.sub(r"(?m)^\s*__(.*?)__\s*(,?)$", r"\1\2", s)
+        # 4. Strip markdown bold or italics around keys (quoted and unquoted):
+        # e.g. **"key"**: -> "key":  and  **key**: -> "key":
+        s = _re.sub(r'\*\*"([^"]+)"\*\*\s*:', r'"\1":', s)
+        s = _re.sub(r'\*\*([a-zA-Z_][a-zA-Z0-9_-]*)\*\*\s*:', r'"\1":', s)
+        s = _re.sub(r'__"([^"]+)"__\s*:', r'"\1":', s)
+        s = _re.sub(r'__([a-zA-Z_][a-zA-Z0-9_-]*)__\s*:', r'"\1":', s)
+        # 5. Strip markdown italics around keys:
+        # e.g. *"key"*: or *key*: or _"key"_:
+        s = _re.sub(r'\*"([^"]+)"\*\s*:', r'"\1":', s)
+        s = _re.sub(r'\*([a-zA-Z_][a-zA-Z0-9_-]*)\*\s*:', r'"\1":', s)
+        s = _re.sub(r'_"([^"]+)"_\s*:', r'"\1":', s)
+        s = _re.sub(r'_([a-zA-Z_][a-zA-Z0-9_-]*)_\s*:', r'"\1":', s)
+        # 6. Strip bold around values:
+        s = _re.sub(r':\s*\*\*([^*]+)\*\*', r': \1', s)
+        s = _re.sub(r':\s*__([^_]+)__', r': \1', s)
+        # 7. General non-greedy bold/italic cleanup:
+        s = _re.sub(r'\*\*(.+?)\*\*', r'\1', s)
+        s = _re.sub(r'__(.+?)__', r'\1', s)
+        # 8. Strip markdown list bullets preceding keys or object items:
+        s = _re.sub(r'(?m)^\s*[\*\-]\s*(["{])', r'\1', s)
+        # 9. Strip trailing commas before closing braces/brackets (repeatedly)
+        for _ in range(3):
+            s = _re.sub(r",\s*([\]}])", r"\1", s)
+        # 10. Fix unquoted keys in objects: e.g. { topic: "foo" } -> { "topic": "foo" }
+        s = _re.sub(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_-]*)\s*:', r' "\1":', s)
+        # 11. Fix single-quoted keys in objects: e.g. { 'topic': "foo" } -> { "topic": "foo" }
+        s = _re.sub(r"(?<=[{,])\s*'([^']+)'\s*:", r' "\1":', s)
+        return s.strip()
+
+    def _try_parse_json(candidate: str) -> dict | None:
+        if not candidate or not candidate.strip():
+            return None
+        # 1. Direct json.loads with strict=False (allows unescaped control chars)
+        try:
+            obj = json.loads(candidate, strict=False)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        # 2. Clean candidate and retry json.loads
+        cleaned = _clean_json_candidate(candidate)
+        try:
+            obj = json.loads(cleaned, strict=False)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        # 3. Python literal eval fallback for dicts emitted with single quotes or python booleans
+        try:
+            py_cand = cleaned
+            py_cand = _re.sub(r':\s*true\b', ': True', py_cand)
+            py_cand = _re.sub(r':\s*false\b', ': False', py_cand)
+            py_cand = _re.sub(r':\s*null\b', ': None', py_cand)
+            obj = _ast.literal_eval(py_cand)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+        return None
 
     text = str(content).strip()
-    fence = _re.search(r"```(?:json)?\s*(.*?)```", text, _re.DOTALL)
+    fence = _re.search(r"(?:```+|~~~+)[a-zA-Z0-9_-]*\s*(.*?)(?:```+|~~~+)", text, _re.DOTALL)
     if fence:
-        text = fence.group(1).strip()
-    try:
-        payload = json.loads(text)
-        if isinstance(payload, dict):
-            return payload
-    except json.JSONDecodeError:
-        pass
+        parsed = _try_parse_json(fence.group(1))
+        if parsed is not None:
+            return parsed
+
+    parsed = _try_parse_json(text)
+    if parsed is not None:
+        return parsed
 
     best_text: str | None = None
     best_obj: dict | None = None
-    depth = 0
-    start = -1
-    in_string = False
-    escaped = False
-    for index, char in enumerate(text):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\":
-            escaped = True
-            continue
-        if char == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == "}":
-            if depth > 0:
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    candidate = text[start : index + 1]
-                    if best_text is None or len(candidate) > len(best_text):
-                        try:
-                            obj = json.loads(candidate)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(obj, dict):
+
+    # Scan for balanced JSON objects on both raw and cleaned text
+    for scan_text in (text, _clean_json_candidate(text)):
+        depth = 0
+        start = -1
+        in_string = False
+        escaped = False
+        for index, char in enumerate(scan_text):
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == "{":
+                if depth == 0:
+                    start = index
+                depth += 1
+            elif char == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        candidate = scan_text[start : index + 1]
+                        obj = _try_parse_json(candidate)
+                        if obj is not None and (best_text is None or len(candidate) > len(best_text)):
                             best_text, best_obj = candidate, obj
-    if best_obj is not None:
-        return best_obj
+        if best_obj is not None:
+            return best_obj
+
+    # Global first '{' to last '}' fallback
+    for target in (_clean_json_candidate(text), text):
+        first_b = target.find("{")
+        last_b = target.rfind("}")
+        if first_b >= 0 and last_b > first_b:
+            obj = _try_parse_json(target[first_b : last_b + 1])
+            if obj is not None:
+                return obj
+
     raise ValueError("No JSON object found in planner response")
 
 
@@ -481,11 +563,12 @@ def _deterministic_storyboard(source_text: str, duration_seconds: float, options
     else:
         target_count = max(2, min(12, int(duration_seconds / 15.0)))
     target_count = min(target_count, max(2, len(lines)))
-    chunk_size = max(1, len(lines) // target_count)
+    target_count = min(target_count, 12)
+    chunk_size = max(1, min(4, len(lines) // target_count or 1))
 
     sections: list[dict[str, Any]] = []
     for i in range(0, len(lines), chunk_size):
-        chunk = lines[i:i + chunk_size]
+        chunk = [line[:250] for line in lines[i:i + chunk_size][:4]]
         if not chunk:
             continue
         sec_num = len(sections) + 1
@@ -497,18 +580,21 @@ def _deterministic_storyboard(source_text: str, duration_seconds: float, options
             "animations": [f"Illustrate {sec_title}"],
         })
         if len(sections) >= target_count:
-            remaining = lines[i + chunk_size:]
-            if remaining:
-                sections[-1]["lecture_lines"].extend(remaining)
             break
 
     if not sections:
         sections = [{
             "id": "section_1",
-            "title": topic,
-            "lecture_lines": [source_text],
+            "title": topic[:50],
+            "lecture_lines": [lines[0][:250] if lines else "Core concept overview."],
             "animations": ["Illustrate key concept"],
         }]
+
+    for s in sections:
+        if len(s["lecture_lines"]) > 6:
+            s["lecture_lines"] = s["lecture_lines"][:6]
+        if not s["lecture_lines"]:
+            s["lecture_lines"] = [s["title"]]
 
     return {
         "topic": topic,

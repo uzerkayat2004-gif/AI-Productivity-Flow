@@ -240,18 +240,26 @@ class AudioFlowFloatingWidget:
         except Exception:
             pass
 
-        # Swap background colors: circle stages use border color, card stages use white
+        # Swap background colors: circle stages use border color, card stages use white/dark card
         try:
             if self._stage == self.STAGE_MINIMAL:
                 self.win.config(bg=ORANGE_DEEP)
                 if self.canvas:
                     self.canvas.config(bg=ORANGE_DEEP)
             else:
-                self.win.config(bg=WHITE)
+                card_bg = "#20201f" if self._is_theme_dark() else WHITE
+                self.win.config(bg=card_bg)
                 if self.canvas:
-                    self.canvas.config(bg=WHITE)
+                    self.canvas.config(bg=card_bg)
         except Exception:
             pass
+
+    def _is_theme_dark(self) -> bool:
+        try:
+            from voice_flow.storage import storage
+            return str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
+        except Exception:
+            return False
 
     def _get_current_dimensions(self) -> tuple[int, int]:
         if self._stage == self.STAGE_MODE_SELECT:
@@ -578,7 +586,11 @@ class AudioFlowFloatingWidget:
     def _render_mode_select_image(self, w: int, h: int, hover: int | None) -> ImageTk.PhotoImage:
         scale = 4
         W, H = w * scale, h * scale
-        img = Image.new("RGB", (W, H), (255, 255, 255))
+        is_dark = self._is_theme_dark()
+
+        card_bg = (32, 32, 31) if is_dark else (255, 255, 255)
+        card_border = (59, 56, 52) if is_dark else (255, 214, 186)
+        img = Image.new("RGB", (W, H), card_bg)
         draw = ImageDraw.Draw(img)
 
         # 1. Outer rounded card
@@ -586,8 +598,8 @@ class AudioFlowFloatingWidget:
         draw.rounded_rectangle(
             [card_margin, card_margin, W - card_margin - 1, H - card_margin - 1],
             radius=7.5 * scale,
-            fill=(255, 255, 255),
-            outline=(255, 214, 186),
+            fill=card_bg,
+            outline=card_border,
             width=int(1.2 * scale),
         )
 
@@ -606,18 +618,32 @@ class AudioFlowFloatingWidget:
             py1, py2 = 3.5 * scale, (h - 3.5) * scale
             r = 5.0 * scale
 
-            if is_h:
-                fill = (255, 106, 0)
-                border = (232, 93, 4)
-                text_col = (255, 255, 255)
-            elif idx == 0:
-                fill = (255, 246, 240)
-                border = (255, 195, 160)
-                text_col = (232, 93, 4)
+            if is_dark:
+                if is_h:
+                    fill = (55, 44, 37)          # Warm dark tint
+                    border = (230, 176, 146)     # Warm peach accent
+                    text_col = (230, 176, 146)
+                elif idx == 0:
+                    fill = (43, 37, 32)          # Read default elevated card
+                    border = (82, 64, 53)
+                    text_col = (230, 176, 146)
+                else:
+                    fill = (40, 39, 37)          # Surface well
+                    border = (59, 56, 52)
+                    text_col = (245, 241, 234)   # Warm text
             else:
-                fill = (255, 255, 255)
-                border = (255, 224, 204)
-                text_col = (36, 23, 8)
+                if is_h:
+                    fill = (255, 106, 0)
+                    border = (232, 93, 4)
+                    text_col = (255, 255, 255)
+                elif idx == 0:
+                    fill = (255, 246, 240)
+                    border = (255, 195, 160)
+                    text_col = (232, 93, 4)
+                else:
+                    fill = (255, 255, 255)
+                    border = (255, 224, 204)
+                    text_col = (36, 23, 8)
 
             draw.rounded_rectangle([px1, py1, px2, py2], radius=r, fill=fill, outline=border, width=int(1.1 * scale))
 
@@ -626,7 +652,7 @@ class AudioFlowFloatingWidget:
                 bx1, by1, bx2, by2 = 20 * scale, 11 * scale, 31 * scale, 20.5 * scale
                 draw.rounded_rectangle([bx1, by1, bx2, by2], radius=3.0 * scale, fill=text_col)
                 draw.polygon([(23 * scale, 20.5 * scale), (26 * scale, 20.5 * scale), (21 * scale, 23 * scale)], fill=text_col)
-                dot_c = (255, 106, 0) if is_h else (255, 246, 240)
+                dot_c = ((55, 44, 37) if is_h else (43, 37, 32)) if is_dark else ((255, 106, 0) if is_h else (255, 246, 240))
                 draw.ellipse([23 * scale, 14.5 * scale, 25 * scale, 16.5 * scale], fill=dot_c)
                 draw.ellipse([26.5 * scale, 14.5 * scale, 28.5 * scale, 16.5 * scale], fill=dot_c)
                 draw.text((35 * scale, 9.5 * scale), "Read", fill=text_col, font=font)
@@ -640,8 +666,12 @@ class AudioFlowFloatingWidget:
         gcx = 239.0 * scale
         gcy = (h / 2.0) * scale
         gr = 4.8 * scale
-        gear_col = (255, 255, 255) if is_set_h else (90, 78, 70)
-        gear_bg = (255, 106, 0) if is_set_h else (255, 255, 255)
+        if is_dark:
+            gear_col = (230, 176, 146) if is_set_h else (182, 174, 162)
+            gear_bg = (55, 44, 37) if is_set_h else (40, 39, 37)
+        else:
+            gear_col = (255, 255, 255) if is_set_h else (90, 78, 70)
+            gear_bg = (255, 106, 0) if is_set_h else (255, 255, 255)
         for i in range(8):
             ang = i * (math.pi / 4.0)
             gx1 = gcx + (gr - 1.0 * scale) * math.cos(ang)
@@ -655,7 +685,10 @@ class AudioFlowFloatingWidget:
 
         # Dot grid / grip handle (275, 279) - glowing highlight on hover
         is_grip_h = (hover == 3)
-        dot_col = (255, 106, 0) if is_grip_h else (255, 190, 150)
+        if is_dark:
+            dot_col = (230, 176, 146) if is_grip_h else (113, 108, 100)
+        else:
+            dot_col = (255, 106, 0) if is_grip_h else (255, 190, 150)
         dot_r = 1.3 * scale
         for col_x in (265, 269):
             for row_y in (10, 16, 22):
@@ -669,7 +702,10 @@ class AudioFlowFloatingWidget:
     def _render_short_warning_image(self, w: int, h: int, hover: int | None, anim_frame: int = 0) -> ImageTk.PhotoImage:
         scale = 4
         W, H = w * scale, h * scale
-        img = Image.new("RGB", (W, H), (255, 255, 255))
+        is_dark = self._is_theme_dark()
+        card_bg = (32, 32, 31) if is_dark else (255, 255, 255)
+        card_border = (59, 56, 52) if is_dark else (255, 214, 186)
+        img = Image.new("RGB", (W, H), card_bg)
         draw = ImageDraw.Draw(img)
 
         # 1. Outer rounded card
@@ -677,19 +713,22 @@ class AudioFlowFloatingWidget:
         draw.rounded_rectangle(
             [card_margin, card_margin, W - card_margin - 1, H - card_margin - 1],
             radius=11.0 * scale,
-            fill=(255, 255, 255),
-            outline=(255, 214, 186),
+            fill=card_bg,
+            outline=card_border,
             width=int(1.2 * scale),
         )
 
         # Row 1: Warning Notice Banner (y: 6 to 46, height 40 base)
         ny1 = 6.0 * scale
         ny2 = 46.0 * scale
+        banner_bg = (43, 37, 32) if is_dark else (255, 248, 240)
+        banner_border = (82, 64, 53) if is_dark else (255, 222, 198)
+        banner_text = (230, 176, 146) if is_dark else (125, 60, 15)
         draw.rounded_rectangle(
             [6.0 * scale, ny1, (w - 6.0) * scale, ny2],
             radius=6.5 * scale,
-            fill=(255, 248, 240),
-            outline=(255, 222, 198),
+            fill=banner_bg,
+            outline=banner_border,
             width=int(1.1 * scale),
         )
 
@@ -701,11 +740,17 @@ class AudioFlowFloatingWidget:
         cy_n = (ny1 + ny2) / 2.0
         avail_w = (w - 48.0) * scale
         start_nx = 6.0 * scale + max(6.0 * scale, (avail_w - tw_n) / 2.0)
-        draw.text((start_nx, cy_n - th_n / 2.0 - bbox_n[1]), notice_text, fill=(125, 60, 15), font=font_notice)
+        draw.text((start_nx, cy_n - th_n / 2.0 - bbox_n[1]), notice_text, fill=banner_text, font=font_notice)
 
         # Animated wave dots on Row 1 (at right: 356, 365; y: 20, 26, 32)
         dot_r = 1.55 * scale
         wave_rgb = [
+            (55, 44, 37),
+            (82, 64, 53),
+            (182, 123, 94),
+            (212, 148, 116),
+            (230, 176, 146),
+        ] if is_dark else [
             (255, 227, 208),
             (255, 194, 158),
             (255, 158, 102),
@@ -728,9 +773,14 @@ class AudioFlowFloatingWidget:
 
         # Button 0: "⚡ Use Read" (6..186)
         is_read_h = (hover == 0)
-        p0_fill = (255, 106, 0) if is_read_h else (255, 246, 240)
-        p0_border = (232, 93, 4) if is_read_h else (255, 185, 145)
-        p0_text_col = (255, 255, 255) if is_read_h else (232, 93, 4)
+        if is_dark:
+            p0_fill = (55, 44, 37) if is_read_h else (43, 37, 32)
+            p0_border = (230, 176, 146) if is_read_h else (82, 64, 53)
+            p0_text_col = (230, 176, 146)
+        else:
+            p0_fill = (255, 106, 0) if is_read_h else (255, 246, 240)
+            p0_border = (232, 93, 4) if is_read_h else (255, 185, 145)
+            p0_text_col = (255, 255, 255) if is_read_h else (232, 93, 4)
         draw.rounded_rectangle(
             [6.0 * scale, by1, 186.0 * scale, by2],
             radius=r_pill,
@@ -749,9 +799,14 @@ class AudioFlowFloatingWidget:
 
         # Button 1: "Make Anyway →" (192..w - 6)
         is_make_h = (hover == 1)
-        p1_fill = (255, 106, 0) if is_make_h else (255, 255, 255)
-        p1_border = (232, 93, 4) if is_make_h else (255, 214, 186)
-        p1_text_col = (255, 255, 255) if is_make_h else (45, 30, 15)
+        if is_dark:
+            p1_fill = (55, 44, 37) if is_make_h else (40, 39, 37)
+            p1_border = (230, 176, 146) if is_make_h else (59, 56, 52)
+            p1_text_col = (230, 176, 146) if is_make_h else (245, 241, 234)
+        else:
+            p1_fill = (255, 106, 0) if is_make_h else (255, 255, 255)
+            p1_border = (232, 93, 4) if is_make_h else (255, 214, 186)
+            p1_text_col = (255, 255, 255) if is_make_h else (45, 30, 15)
         draw.rounded_rectangle(
             [192.0 * scale, by1, (w - 6.0) * scale, by2],
             radius=r_pill,
@@ -773,7 +828,10 @@ class AudioFlowFloatingWidget:
     def _render_depth_select_image(self, w: int, h: int, hover: int | None, anim_frame: int) -> ImageTk.PhotoImage:
         scale = 4
         W, H = w * scale, h * scale
-        img = Image.new("RGB", (W, H), (255, 255, 255))
+        is_dark = self._is_theme_dark()
+        card_bg = (32, 32, 31) if is_dark else (255, 255, 255)
+        card_border = (59, 56, 52) if is_dark else (255, 214, 186)
+        img = Image.new("RGB", (W, H), card_bg)
         draw = ImageDraw.Draw(img)
 
         # 1. Outer rounded card with subtle warm Sunrise border
@@ -781,8 +839,8 @@ class AudioFlowFloatingWidget:
         draw.rounded_rectangle(
             [card_margin, card_margin, W - card_margin - 1, H - card_margin - 1],
             radius=7.5 * scale,
-            fill=(255, 255, 255),
-            outline=(255, 214, 186),
+            fill=card_bg,
+            outline=card_border,
             width=int(1.2 * scale),
         )
 
@@ -802,23 +860,41 @@ class AudioFlowFloatingWidget:
             is_h = (hover == idx)
             px1, px2 = x1 * scale, x2 * scale
 
-            if is_h:
-                fill = (255, 106, 0)
-                border = (232, 93, 4)
-                text_col = (255, 255, 255)
-                icon_col = (255, 255, 255)
-            elif idx == 1:
-                # Balanced: subtle warm ivory glow as default balance
-                fill = (255, 250, 246)
-                border = (255, 205, 175)
-                text_col = (36, 23, 8)
-                icon_col = (232, 93, 4)
+            if is_dark:
+                if is_h:
+                    fill = (55, 44, 37)
+                    border = (230, 176, 146)
+                    text_col = (230, 176, 146)
+                    icon_col = (230, 176, 146)
+                elif idx == 1:
+                    # Balanced: elevated warm card
+                    fill = (43, 37, 32)
+                    border = (82, 64, 53)
+                    text_col = (230, 176, 146)
+                    icon_col = (230, 176, 146)
+                else:
+                    fill = (40, 39, 37)
+                    border = (59, 56, 52)
+                    text_col = (245, 241, 234)
+                    icon_col = (182, 174, 162)
             else:
-                # Short & Deep Dive: pristine ceramic white
-                fill = (255, 255, 255)
-                border = (255, 224, 204)
-                text_col = (36, 23, 8)
-                icon_col = (245, 90, 0)
+                if is_h:
+                    fill = (255, 106, 0)
+                    border = (232, 93, 4)
+                    text_col = (255, 255, 255)
+                    icon_col = (255, 255, 255)
+                elif idx == 1:
+                    # Balanced: subtle warm ivory glow as default balance
+                    fill = (255, 250, 246)
+                    border = (255, 205, 175)
+                    text_col = (36, 23, 8)
+                    icon_col = (232, 93, 4)
+                else:
+                    # Short & Deep Dive: pristine ceramic white
+                    fill = (255, 255, 255)
+                    border = (255, 224, 204)
+                    text_col = (36, 23, 8)
+                    icon_col = (245, 90, 0)
 
             draw.rounded_rectangle([px1, py1, px2, py2], radius=r, fill=fill, outline=border, width=int(1.1 * scale))
 
@@ -911,23 +987,30 @@ class AudioFlowFloatingWidget:
     def _render_summarizing_image(self, w: int, h: int, anim_frame: int) -> ImageTk.PhotoImage:
         scale = 4
         W, H = w * scale, h * scale
-        img = Image.new("RGB", (W, H), (255, 255, 255))
+        is_dark = self._is_theme_dark()
+        card_bg = (32, 32, 31) if is_dark else (255, 255, 255)
+        card_border = (59, 56, 52) if is_dark else (255, 214, 186)
+        img = Image.new("RGB", (W, H), card_bg)
         draw = ImageDraw.Draw(img)
 
         card_margin = 0.5 * scale
         draw.rounded_rectangle(
             [card_margin, card_margin, W - card_margin - 1, H - card_margin - 1],
             radius=7.5 * scale,
-            fill=(255, 255, 255),
-            outline=(255, 214, 186),
+            fill=card_bg,
+            outline=card_border,
             width=int(1.2 * scale),
         )
+
+        pill_bg = (43, 37, 32) if is_dark else (255, 106, 0)
+        pill_border = (82, 64, 53) if is_dark else (232, 93, 4)
+        pill_text = (230, 176, 146) if is_dark else (255, 255, 255)
 
         draw.rounded_rectangle(
             [4 * scale, 3.5 * scale, 126 * scale, (h - 3.5) * scale],
             radius=5.0 * scale,
-            fill=(255, 106, 0),
-            outline=(232, 93, 4),
+            fill=pill_bg,
+            outline=pill_border,
             width=int(1.1 * scale),
         )
 
@@ -940,11 +1023,17 @@ class AudioFlowFloatingWidget:
             (20 * scale, 15 * scale),
             (17.5 * scale, 15 * scale),
         ]
-        draw.polygon(pts, fill=(255, 255, 255))
-        draw.text((24 * scale, 9.5 * scale), "Summarizing…", fill=(255, 255, 255), font=font)
+        draw.polygon(pts, fill=pill_text)
+        draw.text((24 * scale, 9.5 * scale), "Summarizing…", fill=pill_text, font=font)
 
         dot_r = 1.35 * scale
         wave_rgb = [
+            (55, 44, 37),
+            (82, 64, 53),
+            (182, 123, 94),
+            (212, 148, 116),
+            (230, 176, 146),
+        ] if is_dark else [
             (255, 227, 208),
             (255, 194, 158),
             (255, 158, 102),
@@ -965,15 +1054,18 @@ class AudioFlowFloatingWidget:
     def _render_playback_image(self, w: int, h: int, hover: int | None) -> ImageTk.PhotoImage:
         scale = 4
         W, H = w * scale, h * scale
-        img = Image.new("RGB", (W, H), (255, 255, 255))
+        is_dark = self._is_theme_dark()
+        card_bg = (32, 32, 31) if is_dark else (255, 255, 255)
+        card_border = (59, 56, 52) if is_dark else (255, 214, 186)
+        img = Image.new("RGB", (W, H), card_bg)
         draw = ImageDraw.Draw(img)
 
         card_margin = 0.5 * scale
         draw.rounded_rectangle(
             [card_margin, card_margin, W - card_margin - 1, H - card_margin - 1],
             radius=7.5 * scale,
-            fill=(255, 255, 255),
-            outline=(255, 214, 186),
+            fill=card_bg,
+            outline=card_border,
             width=int(1.2 * scale),
         )
 
@@ -981,10 +1073,15 @@ class AudioFlowFloatingWidget:
         spd_disp = self._get_display_speed()
 
         # 0: Pause/Play (4..42, center = 23)
-        p0_fill = (255, 242, 235) if hover == 0 else (255, 255, 255)
-        p0_border = (255, 106, 0) if hover == 0 else (255, 214, 186)
+        if is_dark:
+            p0_fill = (55, 44, 37) if hover == 0 else (40, 39, 37)
+            p0_border = (230, 176, 146) if hover == 0 else (59, 56, 52)
+            p0_glyph_col = (230, 176, 146) if hover == 0 else (245, 241, 234)
+        else:
+            p0_fill = (255, 242, 235) if hover == 0 else (255, 255, 255)
+            p0_border = (255, 106, 0) if hover == 0 else (255, 214, 186)
+            p0_glyph_col = (232, 93, 4) if hover == 0 else (255, 106, 0)
         draw.rounded_rectangle([4 * scale, 3.5 * scale, 42 * scale, (h - 3.5) * scale], radius=5.0 * scale, fill=p0_fill, outline=p0_border, width=int(1.1 * scale))
-        p0_glyph_col = (232, 93, 4) if hover == 0 else (255, 106, 0)
         if self._is_paused:
             pts = [(20.5 * scale, 11.5 * scale), (20.5 * scale, 20.5 * scale), (27.5 * scale, 16 * scale)]
             draw.polygon(pts, fill=p0_glyph_col)
@@ -993,15 +1090,27 @@ class AudioFlowFloatingWidget:
             draw.rounded_rectangle([24.5 * scale, 11.5 * scale, 27 * scale, 20.5 * scale], radius=0.8 * scale, fill=p0_glyph_col)
 
         # 1: Stop (46..82, center = 64)
-        p1_fill = (255, 238, 238) if hover == 1 else (255, 255, 255)
-        p1_border = (240, 68, 56) if hover == 1 else (255, 214, 186)
+        if is_dark:
+            p1_fill = (60, 25, 25) if hover == 1 else (40, 39, 37)
+            p1_border = (248, 113, 113) if hover == 1 else (59, 56, 52)
+            p1_col = (248, 113, 113) if hover == 1 else (245, 241, 234)
+        else:
+            p1_fill = (255, 238, 238) if hover == 1 else (255, 255, 255)
+            p1_border = (240, 68, 56) if hover == 1 else (255, 214, 186)
+            p1_col = (240, 68, 56) if hover == 1 else (36, 23, 8)
         draw.rounded_rectangle([46 * scale, 3.5 * scale, 82 * scale, (h - 3.5) * scale], radius=5.0 * scale, fill=p1_fill, outline=p1_border, width=int(1.1 * scale))
-        p1_col = (240, 68, 56) if hover == 1 else (36, 23, 8)
         draw.rounded_rectangle([60 * scale, 12 * scale, 68 * scale, 20 * scale], radius=1.5 * scale, fill=p1_col)
 
         # 2: Speed (86..140, center = 113)
-        p2_fill = (255, 133, 51) if hover == 2 else (255, 106, 0)
-        draw.rounded_rectangle([86 * scale, 3.5 * scale, 140 * scale, (h - 3.5) * scale], radius=5.0 * scale, fill=p2_fill, outline=(232, 93, 4), width=int(1.1 * scale))
+        if is_dark:
+            p2_fill = (55, 44, 37) if hover == 2 else (43, 37, 32)
+            p2_border = (230, 176, 146) if hover == 2 else (82, 64, 53)
+            p2_fg = (230, 176, 146)
+        else:
+            p2_fill = (255, 133, 51) if hover == 2 else (255, 106, 0)
+            p2_border = (232, 93, 4)
+            p2_fg = (255, 255, 255)
+        draw.rounded_rectangle([86 * scale, 3.5 * scale, 140 * scale, (h - 3.5) * scale], radius=5.0 * scale, fill=p2_fill, outline=p2_border, width=int(1.1 * scale))
         pts = [
             (96 * scale, 11 * scale),
             (92.5 * scale, 15.5 * scale),
@@ -1010,8 +1119,8 @@ class AudioFlowFloatingWidget:
             (97.5 * scale, 15 * scale),
             (95.5 * scale, 15 * scale),
         ]
-        draw.polygon(pts, fill=(255, 255, 255))
-        draw.text((99 * scale, 9.5 * scale), f"{spd_disp}x", fill=(255, 255, 255), font=font)
+        draw.polygon(pts, fill=p2_fg)
+        draw.text((99 * scale, 9.5 * scale), f"{spd_disp}x", fill=p2_fg, font=font)
 
         res = img.resize((w, h), Image.Resampling.LANCZOS)
         return ImageTk.PhotoImage(res)
@@ -1023,6 +1132,7 @@ class AudioFlowFloatingWidget:
         c = self.canvas
         c.delete("all")
         w, h = self._get_current_dimensions()
+        is_dark = self._is_theme_dark()
 
         try:
             if self._stage == self.STAGE_MINIMAL:
@@ -1034,28 +1144,28 @@ class AudioFlowFloatingWidget:
                 c.create_image(0, 0, image=photo, anchor="nw")
 
             elif self._stage == self.STAGE_MODE_SELECT:
-                key = ("mode_select", self._hover)
+                key = ("mode_select", self._hover, is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_mode_select_image(w, h, self._hover)
                 photo = self._image_cache[key]
                 c.create_image(0, 0, image=photo, anchor="nw")
 
             elif self._stage == self.STAGE_SHORT_WARNING:
-                key = ("short_warning", self._hover, self._anim_frame % len(WAVE_TONES))
+                key = ("short_warning", self._hover, self._anim_frame % len(WAVE_TONES), is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_short_warning_image(w, h, self._hover, self._anim_frame)
                 photo = self._image_cache[key]
                 c.create_image(0, 0, image=photo, anchor="nw")
 
             elif self._stage == self.STAGE_DEPTH_SELECT:
-                key = ("depth_select", self._hover, self._anim_frame % len(WAVE_TONES))
+                key = ("depth_select", self._hover, self._anim_frame % len(WAVE_TONES), is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_depth_select_image(w, h, self._hover, self._anim_frame)
                 photo = self._image_cache[key]
                 c.create_image(0, 0, image=photo, anchor="nw")
 
             elif self._stage == self.STAGE_SUMMARIZING:
-                key = ("summarizing", self._anim_frame % len(WAVE_TONES))
+                key = ("summarizing", self._anim_frame % len(WAVE_TONES), is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_summarizing_image(w, h, self._anim_frame)
                 photo = self._image_cache[key]
@@ -1063,7 +1173,7 @@ class AudioFlowFloatingWidget:
 
             elif self._stage == self.STAGE_PLAYBACK_CONTROL:
                 spd_disp = self._get_display_speed()
-                key = ("playback", self._hover, self._is_paused, spd_disp)
+                key = ("playback", self._hover, self._is_paused, spd_disp, is_dark)
                 if key not in self._image_cache:
                     self._image_cache[key] = self._render_playback_image(w, h, self._hover)
                 photo = self._image_cache[key]
@@ -1074,6 +1184,13 @@ class AudioFlowFloatingWidget:
 
     def _draw_fallback(self, c: tk.Canvas, w: int, h: int) -> None:
         """Pure canvas geometry fallback for headless or mock test environments."""
+        is_dark = self._is_theme_dark()
+        ink_col = "#f5f1ea" if is_dark else INK
+        border_col = "#3b3834" if is_dark else BORDER
+        pill_bg = "#282725" if is_dark else WHITE
+        btn_txt = "#20201f" if is_dark else WHITE
+        accent_col = "#e6b092" if is_dark else ORANGE
+
         if self._stage == self.STAGE_MINIMAL:
             pad = 1
             fill = "#FFF8F2" if (self._hover is not None or self._is_playing) else WHITE
@@ -1085,47 +1202,52 @@ class AudioFlowFloatingWidget:
         elif self._stage == self.STAGE_MODE_SELECT:
             self._draw_card(c, w, h)
             self._draw_pill(c, 4, 106, h, active=True, hovered=self._hover == 0)
-            c.create_text(55, h / 2, text="🔊 Read", fill=WHITE, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(55, h / 2, text="🔊 Read", fill=btn_txt, font=("Segoe UI", 8, "bold"), anchor="center")
             self._draw_pill(c, 110, 222, h, hovered=self._hover == 1)
-            c.create_text(166, h / 2, text="⚡ Summary", fill=WHITE if self._hover == 1 else INK, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(166, h / 2, text="⚡ Summary", fill=accent_col if self._hover == 1 else ink_col, font=("Segoe UI", 8, "bold"), anchor="center")
             self._draw_pill(c, 226, 252, h, hovered=self._hover == 2)
-            c.create_text(239, h / 2, text="⚙", fill=WHITE if self._hover == 2 else INK, font=("Segoe UI Symbol", 8), anchor="center")
+            c.create_text(239, h / 2, text="⚙", fill=accent_col if self._hover == 2 else ink_col, font=("Segoe UI Symbol", 8), anchor="center")
             self._draw_grid(c, 266)
         elif self._stage == self.STAGE_SHORT_WARNING:
             self._draw_card(c, w, h)
-            self._rrect(c, 6, 6, w - 6, 46, 6, "#FFF8F0")
-            c.create_text(w / 2, 26, text="💡 Summary is for long docs · Use Read for short text", fill="#7D3C0F", font=("Segoe UI", 11, "bold"), anchor="center")
-            self._draw_pill(c, 6, 186, 90, hovered=self._hover == 0, base_color="#FFB482", hover_color=ORANGE)
-            c.create_text(96, 71, text="⚡ Use Read", fill=WHITE if self._hover == 0 else ORANGE_DEEP, font=("Segoe UI", 10, "bold"), anchor="center")
-            self._draw_pill(c, 192, w - 6, 90, hovered=self._hover == 1, base_color=BORDER, hover_color=ORANGE)
-            c.create_text(285, 71, text="Make Anyway →", fill=WHITE if self._hover == 1 else INK, font=("Segoe UI", 10, "bold"), anchor="center")
+            banner_bg = "#372c25" if is_dark else "#FFF8F0"
+            banner_fg = "#e6b092" if is_dark else "#7D3C0F"
+            self._rrect(c, 6, 6, w - 6, 46, 6, banner_bg)
+            c.create_text(w / 2, 26, text="💡 Summary is for long docs · Use Read for short text", fill=banner_fg, font=("Segoe UI", 11, "bold"), anchor="center")
+            self._draw_pill(c, 6, 186, 90, hovered=self._hover == 0, base_color="#d49474" if is_dark else "#FFB482", hover_color=accent_col)
+            c.create_text(96, 71, text="⚡ Use Read", fill=btn_txt if self._hover == 0 else accent_col, font=("Segoe UI", 10, "bold"), anchor="center")
+            self._draw_pill(c, 192, w - 6, 90, hovered=self._hover == 1, base_color=border_col, hover_color=accent_col)
+            c.create_text(285, 71, text="Make Anyway →", fill=accent_col if self._hover == 1 else ink_col, font=("Segoe UI", 10, "bold"), anchor="center")
         elif self._stage == self.STAGE_DEPTH_SELECT:
             self._draw_card(c, w, h)
             self._draw_pill(c, 4, 78, h, hovered=self._hover == 0)
-            c.create_text(41, h / 2, text="⚡ Short", fill=WHITE if self._hover == 0 else INK, font=("Segoe UI", 8, "bold"), anchor="center")
-            self._draw_pill(c, 82, 170, h, hovered=self._hover == 1, base_color="#FFC59E")
-            c.create_text(126, h / 2, text="✨ Balanced", fill=WHITE if self._hover == 1 else INK, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(41, h / 2, text="⚡ Short", fill=accent_col if self._hover == 0 else ink_col, font=("Segoe UI", 8, "bold"), anchor="center")
+            self._draw_pill(c, 82, 170, h, hovered=self._hover == 1, base_color="#d49474" if is_dark else "#FFC59E")
+            c.create_text(126, h / 2, text="✨ Balanced", fill=accent_col if self._hover == 1 else ink_col, font=("Segoe UI", 8, "bold"), anchor="center")
             self._draw_pill(c, 174, 246, h, hovered=self._hover == 2)
-            c.create_text(210, h / 2, text="📚 Deep Dive", fill=WHITE if self._hover == 2 else INK, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(210, h / 2, text="📚 Deep Dive", fill=accent_col if self._hover == 2 else ink_col, font=("Segoe UI", 8, "bold"), anchor="center")
             self._draw_grid(c, 253, animated=True)
         elif self._stage == self.STAGE_SUMMARIZING:
             self._draw_card(c, w, h)
             self._draw_pill(c, 4, 126, h, active=True)
-            c.create_text(65, h / 2, text="⚡ Summarizing…", fill=WHITE, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(65, h / 2, text="⚡ Summarizing…", fill=btn_txt, font=("Segoe UI", 8, "bold"), anchor="center")
             self._draw_grid(c, 138, animated=True)
         elif self._stage == self.STAGE_PLAYBACK_CONTROL:
             self._draw_card(c, w, h)
             self._draw_pill(c, 4, 42, h, hovered=self._hover == 0)
-            c.create_text(23, h / 2, text="▶" if self._is_paused else "⏸", fill=ORANGE_DEEP if self._hover == 0 else ORANGE, font=("Segoe UI Symbol", 9, "bold"), anchor="center")
+            c.create_text(23, h / 2, text="▶" if self._is_paused else "⏸", fill=accent_col, font=("Segoe UI Symbol", 9, "bold"), anchor="center")
             self._draw_pill(c, 46, 82, h, hovered=self._hover == 1)
-            c.create_text(64, h / 2, text="⏹", fill=RED if self._hover == 1 else INK, font=("Segoe UI Symbol", 9, "bold"), anchor="center")
+            c.create_text(64, h / 2, text="⏹", fill=RED if self._hover == 1 else ink_col, font=("Segoe UI Symbol", 9, "bold"), anchor="center")
             self._draw_pill(c, 86, 140, h, active=True, hovered=self._hover == 2)
-            c.create_text(113, h / 2, text=f"⚡ {self._get_display_speed()}x", fill=WHITE, font=("Segoe UI", 8, "bold"), anchor="center")
+            c.create_text(113, h / 2, text=f"⚡ {self._get_display_speed()}x", fill=btn_txt, font=("Segoe UI", 8, "bold"), anchor="center")
 
     def _draw_card(self, c: tk.Canvas, w: int, h: int) -> None:
-        """White glass card: WHITE fill with a 1px BORDER outline, rounded corners."""
-        self._rrect(c, 1, 1, w - 1, h - 1, 6, BORDER)
-        self._rrect(c, 2, 2, w - 2, h - 2, 5, WHITE)
+        """Card background: dark studio paper (#20201f) with border (#3b3834) or white glass."""
+        is_dark = self._is_theme_dark()
+        border_col = "#3b3834" if is_dark else BORDER
+        card_col = "#20201f" if is_dark else WHITE
+        self._rrect(c, 1, 1, w - 1, h - 1, 6, border_col)
+        self._rrect(c, 2, 2, w - 2, h - 2, 5, card_col)
 
     def _draw_pill(
         self,
@@ -1135,17 +1257,26 @@ class AudioFlowFloatingWidget:
         h: int,
         active: bool = False,
         hovered: bool = False,
-        base_color: str = BORDER,
-        hover_color: str = ORANGE,
+        base_color: str | None = None,
+        hover_color: str | None = None,
     ) -> None:
-        """White pill with a 1px outline; active selection = ORANGE fill."""
+        """Pill outline/fill with dark/light mode awareness."""
+        is_dark = self._is_theme_dark()
+        if base_color is None:
+            base_color = "#3b3834" if is_dark else BORDER
+        if hover_color is None:
+            hover_color = "#e6b092" if is_dark else ORANGE
+
         if active:
-            self._rrect(c, x1, 4, x2, h - 4, 5, ORANGE_DEEP)
-            self._rrect(c, x1 + 1, 5, x2 - 1, h - 5, 4, ORANGE)
+            active_outline = "#d49474" if is_dark else ORANGE_DEEP
+            active_fill = "#e6b092" if is_dark else ORANGE
+            self._rrect(c, x1, 4, x2, h - 4, 5, active_outline)
+            self._rrect(c, x1 + 1, 5, x2 - 1, h - 5, 4, active_fill)
         else:
             outline = hover_color if hovered else base_color
+            fill = ("#372c25" if hovered else "#282725") if is_dark else WHITE
             self._rrect(c, x1, 4, x2, h - 4, 5, outline)
-            self._rrect(c, x1 + 1, 5, x2 - 1, h - 5, 4, WHITE)
+            self._rrect(c, x1 + 1, 5, x2 - 1, h - 5, 4, fill)
 
     def _draw_grid(self, c: tk.Canvas, x0: float, animated: bool = False) -> None:
         """Chic 3x2 dot grid beside the labels; cascading orange wave when animating."""

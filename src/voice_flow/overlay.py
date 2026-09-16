@@ -85,23 +85,45 @@ def _get_cursor_pos() -> tuple[int, int] | None:
     return None
 
 
+class _ThemeColor:
+    """Descriptor providing dynamic color tokens based on on_screen_ui_theme."""
+
+    def __init__(self, light_val: str, dark_val: str) -> None:
+        self.light_val = light_val
+        self.dark_val = dark_val
+
+    def __get__(self, instance: Any, owner: Any = None) -> str:
+        if instance is None:
+            return self.light_val
+        if getattr(instance, "_is_theme_dark", lambda: False)():
+            return self.dark_val
+        return self.light_val
+
+
 class FloatingOverlayBar:
     """Always-on-top, non-activating floating pill bar that mirrors Wispr Flow's UI."""
 
-    # Colors — "Sunrise" design system
-    ORANGE = "#FF6A00"
-    ORANGE_DEEP = "#E85D04"
-    ORANGE_SOFT = "#FFE3D0"
-    ORANGE_FAINT = "#FFF3EA"
-    WHITE = "#FFFFFF"
-    OFFWHITE = "#FFF8F3"
-    INK = "#241708"
-    GRAY = "#8A8A93"
-    GREEN = "#12B76A"
-    RED = "#F04438"
-    BORDER = "#FFD0B0"
+    def _is_theme_dark(self) -> bool:
+        try:
+            from voice_flow.storage import storage
+            return str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
+        except Exception:
+            return False
 
-    # Dark rest state (idle, no mouse, no active feature)
+    # Colors — "Sunrise" design system with dark studio mode support matching studio-polish & design-system tokens
+    ORANGE = _ThemeColor("#FF6A00", "#e6b092")        # Warm secondary peach accent (--polish-accent)
+    ORANGE_DEEP = _ThemeColor("#E85D04", "#d49474")   # Active accent
+    ORANGE_SOFT = _ThemeColor("#FFE3D0", "#372c25")   # Row tint (--polish-tint)
+    ORANGE_FAINT = _ThemeColor("#FFF3EA", "#282725")  # Well container bg (--polish-well)
+    WHITE = _ThemeColor("#FFFFFF", "#20201f")         # Card surface (--polish-paper)
+    OFFWHITE = _ThemeColor("#FFF8F3", "#20201f")
+    INK = _ThemeColor("#241708", "#f5f1ea")           # Primary text ink (--polish-ink)
+    GRAY = _ThemeColor("#8A8A93", "#b6aea2")          # Muted text (--polish-muted)
+    GREEN = _ThemeColor("#12B76A", "#34d399")
+    RED = _ThemeColor("#F04438", "#f87171")
+    BORDER = _ThemeColor("#FFD0B0", "#3b3834")        # Subtle border line (--polish-line)
+
+    # Dark rest state (idle, no mouse, no active feature) — strictly preserved untouched
     BG_REST = "#17171C"
     BORDER_REST = "#2C2C36"
     GRIP_REST = "#55555F"  # subtle gray grip dots on the dark rest pill
@@ -126,9 +148,9 @@ class FloatingOverlayBar:
     PROCESSING_ACCENT = ORANGE
     DONE_GREEN = GREEN
     BORDER_COLOR = BORDER
-    ORANGE_ACCENT = "#FF6A00"  # single design-system orange  # hover pill outline (legacy accent, visually identical to ORANGE)
+    ORANGE_ACCENT = ORANGE
     ACCENT_ORANGE = ORANGE
-    TEXT_WHITE = INK  # legacy name; the light theme renders primary text as ink
+    TEXT_WHITE = INK  # in dark mode this will be INK (#f5f1ea), in light mode INK (#241708)
 
     def __init__(
         self,
@@ -1235,6 +1257,7 @@ class FloatingOverlayBar:
             self.width,
             self.height,
             getattr(self, "dock", "bottom"),
+            self._is_theme_dark(),
         )
 
     def _draw(self) -> None:

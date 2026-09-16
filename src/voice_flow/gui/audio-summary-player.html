@@ -806,7 +806,7 @@
         <button class="btn-speed" data-rate="2">2×</button>
       </div>
 
-      <a id="download" class="btn-dl" href="#" download title="Download summary audio as MP3">
+      <a id="download" class="btn-dl" href="#" onclick="downloadCurrentAudio(this); return false;" title="Save summary audio to Downloads folder as MP3">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <span>MP3</span>
       </a>
@@ -832,6 +832,10 @@
     const audioId = params.get('id') || '';
     const depthParam = params.get('depth') || 'balanced';
     const titleParam = params.get('title') || '';
+    const autoplayParam = params.get('autoplay') !== '0';
+
+    window.currentAudioId = audioId;
+    window.currentAudioTitle = titleParam || 'Audio Summary';
 
     const audio = new Audio();
     audio.preload = 'metadata';
@@ -980,7 +984,16 @@
 
     if (audioSrc) {
       audio.src = audioSrc;
-      audio.load();
+      if (autoplayParam) {
+        const p = audio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            statusEl.textContent = 'Ready';
+            statusDot.className = 'status-dot';
+            setPlayButtonIcon(false);
+          });
+        }
+      }
     } else {
       statusEl.textContent = 'Audio unavailable';
       statusDot.className = 'status-dot';
@@ -1135,6 +1148,64 @@
       } catch (_) {}
     }
 
+    async function downloadCurrentAudio(btn) {
+      const id = window.currentAudioId || audioId;
+      const title = window.currentAudioTitle || titleParam || 'Audio Summary';
+      return downloadSummaryAudio(id, title, btn);
+    }
+    window.downloadCurrentAudio = downloadCurrentAudio;
+
+    async function downloadSummaryAudio(id, title, btn) {
+      if (!id) return;
+      if (btn && btn.classList.contains('is-downloading')) return;
+      const origHtml = btn ? btn.innerHTML : '<span>MP3</span>';
+      if (btn) {
+        btn.classList.add('is-downloading');
+        btn.disabled = true;
+        btn.innerHTML = '<span>Saving…</span>';
+      }
+      try {
+        const res = await fetch(`${apiBase}/api/audio-flow/summary/save-to-downloads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, title: title || 'Audio Summary', format: 'mp3' })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.filename) {
+            if (btn) {
+              btn.classList.remove('is-downloading');
+              btn.classList.add('is-success');
+              btn.innerHTML = '<span>✓ Saved!</span>';
+            }
+            statusEl.textContent = `Saved to Downloads: "${data.filename}" (${data.path || 'Downloads'})`;
+            setTimeout(() => {
+              if (btn) {
+                btn.classList.remove('is-success');
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+              }
+              if (statusEl.textContent.includes('Saved')) {
+                statusEl.textContent = audio.paused ? (audio.currentTime > 0 ? 'Paused' : 'Ready') : 'Playing';
+              }
+            }, 3000);
+            return;
+          }
+        }
+        throw new Error('Save failed');
+      } catch (err) {
+        console.warn('Direct download error:', err);
+        const dlName = encodeURIComponent(title || 'Audio Summary');
+        window.location.href = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(id)}&download=1&format=mp3&title=${dlName}`;
+        if (btn) {
+          btn.classList.remove('is-downloading');
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+      }
+    }
+    window.downloadSummaryAudio = downloadSummaryAudio;
+
     function renderHistoryList() {
       const count = historyRecords.length;
       histCountEl.textContent = count;
@@ -1163,7 +1234,18 @@
         const snippetSafe = (item.text_snippet || 'Audio summary').replace(/"/g, '&quot;');
         const itemTitle = item.title || item.text_snippet || 'Audio summary';
         const titleSafe = itemTitle.replace(/"/g, '&quot;');
-        const dlUrl = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(item.id)}&download=1&format=mp3&title=${encodeURIComponent(itemTitle)}`;
+        const isFailed = item.status === 'failed' || item.status === 'cancelled';
+        const isActionable = !isFailed && (item.audio_path || item.status === 'ready');
+
+        const actionHtml = isActionable ? `
+          <div class="af-card-actions-left">
+            <button class="af-btn-action play-btn" onclick="playHistoryItem('${item.id}', '${titleSafe}', '${item.depth || 'balanced'}')">▶ Play</button>
+            <button class="af-btn-action" onclick="downloadSummaryAudio('${item.id}', '${titleSafe}', this)">⬇ MP3</button>
+          </div>` : `
+          <div class="af-card-actions-left">
+            <span class="af-failed-label" style="font-size:11px;color:#ef4444;font-weight:600;">⚠ ${item.status === 'cancelled' ? 'Cancelled' : 'Failed'}</span>
+          </div>`;
+
         return `
           <div class="af-card" data-id="${item.id}">
             <div class="af-card-header">
@@ -1172,10 +1254,7 @@
             </div>
             <div class="af-card-snippet" title="${titleSafe}">${snippetSafe}</div>
             <div class="af-card-actions">
-              <div class="af-card-actions-left">
-                <button class="af-btn-action play-btn" onclick="playHistoryItem('${item.id}', '${titleSafe}', '${item.depth || 'balanced'}')">▶ Play</button>
-                <a class="af-btn-action" href="${dlUrl}" download="${safeMediaFilename(itemTitle, 'Audio_Summary', '.mp3')}">⬇ MP3</a>
-              </div>
+              ${actionHtml}
               <button class="af-btn-action danger" onclick="deleteHistoryItem('${item.id}')">✕</button>
             </div>
           </div>`;
@@ -1184,6 +1263,8 @@
 
     window.playHistoryItem = (id, title, depth) => {
       toggleHistoryDrawer(false);
+      window.currentAudioId = id;
+      window.currentAudioTitle = title || 'Audio Summary';
       titleEl.textContent = title || 'Audio Summary';
       document.title = `${title || 'Audio Summary'} — Audio Flow`;
       depthText.textContent = formatDepth(depth);
@@ -1194,10 +1275,21 @@
       audio.currentTime = 0;
       seek.value = 0;
       updateWaveformProgress(0);
-      statusEl.textContent = 'Loading audio…';
-      statusDot.className = 'status-dot loading';
-      audio.load();
-      audio.play().catch(() => {});
+      statusEl.textContent = 'Playing';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(true);
+      visualizer.classList.add('playing');
+      const p = audio.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(err => {
+          console.warn('Playback error or interrupted:', err);
+          if (audio.paused) {
+            statusEl.textContent = 'Ready';
+            setPlayButtonIcon(false);
+            visualizer.classList.remove('playing');
+          }
+        });
+      }
     };
 
     window.deleteHistoryItem = async (id) => {

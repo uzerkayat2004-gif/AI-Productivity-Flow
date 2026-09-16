@@ -56,14 +56,70 @@ def sh(*args: str) -> None:
         creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0))
 
 
+def _resolve_ffprobe_bin() -> str | None:
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    candidates = [
+        Path(r"C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin\ffprobe.exe"),
+        Path(r"C:\ProgramData\chocolatey\bin\ffprobe.exe"),
+        Path.home() / ".narova" / "bin" / "ffprobe.exe",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
 def probe(path: Path) -> float:
     """Measured media duration in seconds. Long-form -of flag (LEARNINGS #19)."""
-    out = subprocess.check_output(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        text=True,
+    p = Path(path)
+    # 1. Built-in wave module: instant, accurate, zero subprocess for wav files
+    if p.suffix.lower() == ".wav" or str(p).lower().endswith(".wav"):
+        try:
+            import wave
+            with wave.open(str(p), "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return float(frames) / float(rate)
+        except Exception:
+            pass
+
+    # 2. ffprobe
+    ffprobe_bin = _resolve_ffprobe_bin()
+    if ffprobe_bin:
+        try:
+            out = subprocess.check_output(
+                [ffprobe_bin, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+                text=True,
+                creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
+            )
+            return float(out.strip())
+        except Exception:
+            pass
+
+    # 3. Fallback to ffmpeg -i
+    ffmpeg_bin = shutil.which("ffmpeg") or (
+        r"C:\ProgramData\chocolatey\bin\ffmpeg.exe" if Path(r"C:\ProgramData\chocolatey\bin\ffmpeg.exe").is_file() else None
     )
-    return float(out.strip())
+    if ffmpeg_bin:
+        try:
+            res = subprocess.run(
+                [ffmpeg_bin, "-i", str(p)],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
+            )
+            m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr)
+            if m:
+                return float(m.group(1)) * 3600.0 + float(m.group(2)) * 60.0 + float(m.group(3))
+        except Exception:
+            pass
+
+    raise RuntimeError(f"Unable to probe media duration for: {p}")
 
 
 def make_silence(dur: float, out: Path) -> None:

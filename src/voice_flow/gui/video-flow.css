@@ -3270,4 +3270,33 @@ html[data-theme="dark"] .vf-platform-chip {
   border-color: rgba(255, 106, 0, 0.35);
 }
 
+/* Downloaded State for Video and Audio Action Buttons */
+.vf-download-btn.is-downloaded,
+.af-download-btn.is-downloaded {
+  color: #10b981 !important;
+  background: rgba(16, 185, 129, 0.1) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  font-weight: 600 !important;
+}
+
+.vf-download-btn.is-downloaded:hover,
+.af-download-btn.is-downloaded:hover {
+  background: rgba(16, 185, 129, 0.18) !important;
+  border-color: rgba(16, 185, 129, 0.6) !important;
+}
+
+html[data-theme="dark"] .vf-download-btn.is-downloaded,
+html[data-theme="dark"] .af-download-btn.is-downloaded {
+  color: #34d399 !important;
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.45) !important;
+}
+
+html[data-theme="dark"] .vf-download-btn.is-downloaded:hover,
+html[data-theme="dark"] .af-download-btn.is-downloaded:hover {
+  background: rgba(16, 185, 129, 0.25) !important;
+  border-color: rgba(16, 185, 129, 0.7) !important;
+}
+
+
 

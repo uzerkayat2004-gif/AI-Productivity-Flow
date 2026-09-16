@@ -240,6 +240,21 @@ class VideoFlowStore:
                 )
             return JobV3(job_id, state, progress, _redact(message), merged_meta)
 
+    def update_meta(self, job_id: str, meta_updates: dict[str, Any]) -> JobV3 | None:
+        """Update metadata on a job regardless of its lifecycle state (e.g. downloaded status)."""
+        with self._lock:
+            current = self.get(job_id)
+            if current is None:
+                return None
+            merged_meta = {**current.meta, **(meta_updates or {})}
+            with contextlib.closing(self._connection()) as conn, conn:
+                conn.execute(
+                    "UPDATE video_flow_jobs SET meta_json = ?, updated_at = ? WHERE job_id = ?",
+                    (_json(merged_meta), time.time(), job_id),
+                )
+            return JobV3(job_id, current.state, current.progress, current.message, merged_meta)
+
+
 
 class ProviderModelGateway:
     """Explicit, per-request adapter for the app's configured provider storage.
@@ -765,6 +780,9 @@ class VideoFlowService:
 
     def list(self, limit: int = 100) -> list[JobV3]:
         return self.store.list(limit)
+
+    def update_meta(self, job_id: str, meta_updates: dict[str, Any]) -> JobV3 | None:
+        return self.store.update_meta(job_id, meta_updates)
 
     def cancel(self, job_id: str) -> JobV3 | None:
         job = self.store.get(job_id)

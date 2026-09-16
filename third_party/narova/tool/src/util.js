@@ -13,13 +13,60 @@ function sh(cmd, args, opts = {}) {
   return r;
 }
 
-/* Media duration in seconds via ffprobe (long-form flags — LEARNINGS #19). */
+function resolveFfprobe() {
+  const candidates = [
+    'ffprobe',
+    'C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\tools\\ffmpeg\\bin\\ffprobe.exe',
+    'C:\\ProgramData\\chocolatey\\bin\\ffprobe.exe',
+    path.join(os.homedir(), '.narova', 'bin', 'ffprobe.exe'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (c === 'ffprobe' || fs.existsSync(c)) return c;
+    } catch (_) {}
+  }
+  return 'ffprobe';
+}
+
+/* Media duration in seconds via ffprobe (long-form flags — LEARNINGS #19) or wave inspection. */
 function probe(p) {
-  const out = execFileSync('ffprobe', [
-    '-v', 'error', '-show_entries', 'format=duration',
-    '-of', 'default=noprint_wrappers=1:nokey=1', String(p),
-  ], { encoding: 'utf8' });
-  return parseFloat(out.trim());
+  const pStr = String(p);
+  // 1. WAV files: read duration directly from header/size (0 subprocess, 0ms)
+  if (pStr.toLowerCase().endsWith('.wav')) {
+    try {
+      const fd = fs.openSync(pStr, 'r');
+      const buf = Buffer.alloc(44);
+      fs.readSync(fd, buf, 0, 44, 0);
+      fs.closeSync(fd);
+      if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') {
+        const byteRate = buf.readUInt32LE(28);
+        const stats = fs.statSync(pStr);
+        if (byteRate > 0 && stats.size > 44) {
+          return (stats.size - 44) / byteRate;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. ffprobe with candidate paths
+  const ffprobeBin = resolveFfprobe();
+  try {
+    const out = execFileSync(ffprobeBin, [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', pStr,
+    ], { encoding: 'utf8', windowsHide: true });
+    return parseFloat(out.trim());
+  } catch (err) {
+    // 3. Fallback: ffmpeg -i
+    try {
+      const r = spawnSync('ffmpeg', ['-i', pStr], { encoding: 'utf8', windowsHide: true });
+      const m = (r.stderr || '').match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      if (m) {
+        return parseFloat(m[1]) * 3600 + parseFloat(m[2]) * 60 + parseFloat(m[3]);
+      }
+    } catch (_) {}
+    throw err;
+  }
 }
 
 function which(bin) {

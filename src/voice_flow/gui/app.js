@@ -2678,6 +2678,10 @@ function openSettings(tab = "general") {
   }
 }
 
+function toggleOnScreenUITheme(checked) {
+  setOnScreenUITheme(checked ? "dark" : "light");
+}
+
 async function setOnScreenUITheme(theme) {
   theme = theme === "dark" ? "dark" : "light";
   try {
@@ -2689,7 +2693,7 @@ async function setOnScreenUITheme(theme) {
       body: JSON.stringify({ key: "on_screen_ui_theme", value: theme })
     });
     if (typeof vfToast === "function") {
-      vfToast(`On-screen UI color set to ${theme === "dark" ? "Dark Mode" : "Light Mode"}.`);
+      vfToast(`On-screen UI set to ${theme === "dark" ? "Dark Mode" : "Light Mode"}.`);
     }
   } catch (err) {
     console.warn("Could not save on-screen UI theme:", err);
@@ -2697,11 +2701,21 @@ async function setOnScreenUITheme(theme) {
 }
 
 function updateOnScreenUIThemeButtons(theme) {
+  const isDark = (theme === "dark");
+  const toggle = document.getElementById("toggle-on-screen-ui-theme");
+  const label = document.getElementById("on-screen-ui-theme-label");
+  if (toggle) {
+    toggle.checked = isDark;
+  }
+  if (label) {
+    label.textContent = isDark ? "Dark Mode" : "Light Mode";
+    label.style.color = isDark ? "var(--accent-primary, #6366f1)" : "var(--text-secondary, #94a3b8)";
+  }
   const btnLight = document.getElementById("btn-on-screen-light");
   const btnDark = document.getElementById("btn-on-screen-dark");
   if (btnLight && btnDark) {
-    btnLight.classList.toggle("active", theme === "light");
-    btnDark.classList.toggle("active", theme === "dark");
+    btnLight.classList.toggle("active", !isDark);
+    btnDark.classList.toggle("active", isDark);
   }
 }
 
@@ -5438,7 +5452,7 @@ function afFormatDuration(seconds) {
 function afLibraryBucket(summary) {
   const status = String(summary.status || "ready").toLowerCase().trim();
   if (status === "cancelled") return "cancelled";
-  if (status === "failed" || summary.error) return "needs_attention";
+  if (status === "failed" || summary.error || summary.has_audio === false) return "needs_attention";
   if (status === "in_progress" || status === "generating") return "in_progress";
   return "ready";
 }
@@ -5680,10 +5694,13 @@ function renderAudioSummaryHistory() {
     }
 
     let actionButtons = "";
-    if (isReady) {
+    if (isReady && s.has_audio !== false) {
+      const isDownloaded = !!s.downloaded;
+      const dlText = isDownloaded ? "✓ Downloaded" : "↓ MP3";
+      const dlTitle = isDownloaded ? "Downloaded to your Downloads folder (Click to download again)" : "Download MP3 audio";
       actionButtons += `
         <button type="button" class="af-icon-btn" onclick="playAudioSummary('${afEscape(s.id)}', '${afEscape(title)}', '${afEscape(s.depth || 'balanced')}')">▶ Play</button>
-        <button type="button" class="af-icon-btn af-download-btn" onclick="downloadAudioSummary('${afEscape(s.id)}', this, '${afEscape(title)}')" title="Download MP3 audio">↓ MP3</button>`;
+        <button type="button" class="af-icon-btn af-download-btn ${isDownloaded ? 'is-downloaded' : ''}" onclick="downloadAudioSummary('${afEscape(s.id)}', this, '${afEscape(title)}')" title="${dlTitle}">${dlText}</button>`;
     }
 
     actionButtons += `
@@ -5745,23 +5762,23 @@ async function playAudioSummary(id, title, depth) {
       }),
     });
     const data = await res.json();
-    if (data.success) {
+    if (data && data.success) {
       if (typeof showToast === "function") {
-        showToast("Opening floating player...", "🎧");
+        showToast("Opening dedicated audio player...", "🎧");
       }
       return;
     }
-    console.warn("API playAudioSummary notice:", data.error);
+    const errMsg = (data && data.error) ? data.error : "Failed to open audio player";
+    console.warn("API playAudioSummary notice:", errMsg);
+    if (typeof showToast === "function") {
+      showToast(errMsg, "⚠️");
+    }
   } catch (err) {
     console.warn("Could not launch native floating audio player via API:", err);
+    if (typeof showToast === "function") {
+      showToast("Could not open audio player: " + (err.message || "Network error"), "⚠️");
+    }
   }
-  // Fallback: only if native launch fails, open small popup window (not full blank tab)
-  const url = `/audio-summary-player.html?id=${encodeURIComponent(id)}&title=${encodeURIComponent(title || "Audio Summary")}&depth=${encodeURIComponent(depth || "balanced")}`;
-  const w = 390;
-  const h = 270;
-  const left = Math.max(0, Math.round((window.screen.width - w) / 2));
-  const top = Math.max(0, Math.round((window.screen.height - h) / 2));
-  window.open(url, `af_player_${id}`, `width=${w},height=${h},top=${top},left=${left},resizable=yes,scrollbars=no,status=no`);
 }
 
 function afSafeMediaFilename(title, defaultName = "Audio Summary", ext = ".mp3") {
@@ -5793,10 +5810,58 @@ async function downloadAudioSummary(id, btn, customTitle) {
   }
 
   try {
-    const summary = (typeof afHistorySummaries !== "undefined" && Array.isArray(afHistorySummaries))
-      ? afHistorySummaries.find(s => String(s.id) === String(id))
-      : null;
+    const summary = (typeof afSummaries !== "undefined" && Array.isArray(afSummaries))
+      ? afSummaries.find(s => String(s.id) === String(id))
+      : ((typeof afHistorySummaries !== "undefined" && Array.isArray(afHistorySummaries)) ? afHistorySummaries.find(s => String(s.id) === String(id)) : null);
+
+    if (summary && summary.has_audio === false) {
+      throw new Error("Audio summary file is no longer available on disk");
+    }
+
     const title = (customTitle || (summary ? (summary.title || summary.text_snippet) : "") || "Audio Summary").trim();
+
+    // 1. Direct native save to user's Downloads folder with exact title
+    let directSavedFilename = "";
+    try {
+      const saveRes = await fetch("/api/audio-flow/summary/save-to-downloads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id, title: title, format: "mp3" })
+      });
+      if (saveRes.ok) {
+        const sData = await saveRes.json();
+        if (sData && sData.success && sData.filename) {
+          directSavedFilename = sData.filename;
+          if (summary) {
+            summary.downloaded = true;
+          }
+          if (btn) {
+            btn.classList.remove("is-downloading");
+            btn.classList.remove("is-success");
+            btn.classList.add("is-downloaded");
+            btn.innerHTML = `✓ Downloaded`;
+            btn.title = "Downloaded to your Downloads folder (Click to download again)";
+            btn.disabled = false;
+          }
+          if (typeof showToast === "function") {
+            const destPath = sData.path || `Downloads/${directSavedFilename}`;
+            showToast(`Saved to Downloads: "${directSavedFilename}" (${destPath})`, "🎵");
+          }
+          return;
+        }
+      } else {
+        const errJson = await saveRes.json().catch(() => ({}));
+        if (errJson && errJson.error) {
+          throw new Error(errJson.error);
+        }
+      }
+    } catch (saveErr) {
+      if (saveErr && saveErr.message && !saveErr.message.includes("fetch")) {
+        throw saveErr;
+      }
+      console.warn("Direct save to Downloads attempt:", saveErr);
+    }
+
     const mediaUrl = `/api/audio-flow/summary/media?id=${encodeURIComponent(id)}&download=1&format=mp3&title=${encodeURIComponent(title)}`;
     const response = await fetch(mediaUrl);
     if (!response.ok) {
@@ -5853,22 +5918,20 @@ async function downloadAudioSummary(id, btn, customTitle) {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
 
+    if (summary) {
+      summary.downloaded = true;
+    }
     if (btn) {
       btn.classList.remove("is-downloading");
-      btn.classList.add("is-success");
-      btn.innerHTML = `✓ Downloaded!`;
+      btn.classList.remove("is-success");
+      btn.classList.add("is-downloaded");
+      btn.innerHTML = `✓ Downloaded`;
+      btn.title = "Downloaded to your Downloads folder (Click to download again)";
+      btn.disabled = false;
     }
     if (typeof showToast === "function") {
       showToast(`Downloaded "${filename}"`, "🎵");
     }
-
-    setTimeout(() => {
-      if (btn) {
-        btn.classList.remove("is-success");
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-      }
-    }, 2500);
   } catch (err) {
     console.error("Audio summary download failed:", err);
     if (btn) {

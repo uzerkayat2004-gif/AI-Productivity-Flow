@@ -4461,3 +4461,22 @@ html[data-theme="light"] .heatmap-cell.level-4 {
   color: #ffffff !important;
   border-color: #ef4444 !important;
 }
+
+.af-icon-btn.is-downloaded,
+.af-download-btn.is-downloaded,
+.vf-icon-button.is-downloaded,
+.vf-download-btn.is-downloaded {
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: #10b981 !important;
+  border-color: rgba(16, 185, 129, 0.45) !important;
+  font-weight: 600 !important;
+}
+
+.af-icon-btn.is-downloaded:hover,
+.af-download-btn.is-downloaded:hover,
+.vf-icon-button.is-downloaded:hover,
+.vf-download-btn.is-downloaded:hover {
+  background: rgba(16, 185, 129, 0.22) !important;
+  border-color: rgba(16, 185, 129, 0.7) !important;
+}
+

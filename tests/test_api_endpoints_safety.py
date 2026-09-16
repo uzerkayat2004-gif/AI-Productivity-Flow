@@ -21,6 +21,7 @@ def test_server(monkeypatch, tmp_path):
     db_path = str(tmp_path / 'voice_flow_api_safety_test.db')
     test_storage = StorageEngine(db_path)
     monkeypatch.setattr(api_server, 'storage', test_storage)
+    monkeypatch.setattr('voice_flow.storage.storage', test_storage)
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), api_server.VoiceFlowApiHandler)
     server.daemon_threads = True
