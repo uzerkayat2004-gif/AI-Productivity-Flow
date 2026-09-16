@@ -27,7 +27,12 @@ class TestAudioProviderManagement(unittest.TestCase):
         p1 = patch.object(storage_module, "storage", self._engine)
         p1.start()
         self.addCleanup(p1.stop)
+        # tts_engine holds its own module-level binding. Restore it on cleanup:
+        # leaving the temp engine installed (and then deleting its database)
+        # leaked a dead storage reference into every later test in the session.
+        self._orig_tts_storage = tts_module.storage
         tts_module.storage = self._engine
+        self.addCleanup(setattr, tts_module, "storage", self._orig_tts_storage)
 
     def tearDown(self):
         try:

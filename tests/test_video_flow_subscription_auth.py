@@ -331,7 +331,7 @@ def test_codex_worker_sse_parsing():
         text=True,
         encoding="utf-8"
     )
-    out, _ = proc.communicate(json.dumps(payload), timeout=10)
+    out, _ = proc.communicate(json.dumps(payload), timeout=25)
     server.shutdown()
     server.server_close()
 

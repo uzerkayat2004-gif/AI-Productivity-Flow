@@ -1837,6 +1837,50 @@ class StorageEngine:
     # --- Custom Providers (user-defined OpenAI, Anthropic, Gemini, etc. endpoints) ---
 
     @staticmethod
+    def _stable_connection_ids(api_keys: list) -> list[dict[str, Any]]:
+        """Normalize connections while keeping their ids stable.
+
+        A connection keeps the id it was created with (``c-0``, ``c-1``,
+        ...), even after other connections are deleted. Renumbering on
+        delete would make a surviving connection unreachable under the id
+        the UI already holds; preserving ids keeps every survivor
+        addressable.
+        """
+        cleaned: list[dict[str, Any]] = []
+        used: set[str] = set()
+        next_pos = 0
+        for k in api_keys:
+            if isinstance(k, dict):
+                raw_id = str(k.get("id") or "").strip()
+            else:
+                raw_id = ""
+            if not raw_id or raw_id in used:
+                while f"c-{next_pos}" in used:
+                    next_pos += 1
+                raw_id = f"c-{next_pos}"
+                next_pos += 1
+            used.add(raw_id)
+            if isinstance(k, dict):
+                cleaned.append({
+                    "id": raw_id,
+                    "name": str((k.get("name") if isinstance(k, dict) else "Key") or "Key")[:100],
+                    "key": str((k.get("key") if isinstance(k, dict) else k) or ""),
+                    "priority": int(k.get("priority") or (len(cleaned) + 1)) if isinstance(k, dict) else (len(cleaned) + 1),
+                    "is_active": bool(k.get("is_active", True)) if isinstance(k, dict) else True,
+                    "status": str(k.get("status") or "untested") if isinstance(k, dict) else "untested",
+                })
+            else:
+                cleaned.append({
+                    "id": raw_id,
+                    "name": "Key",
+                    "key": str(k or ""),
+                    "priority": len(cleaned) + 1,
+                    "is_active": True,
+                    "status": "untested",
+                })
+        return cleaned
+
+    @staticmethod
     def _clean_custom_provider_entry(entry: dict[str, Any]) -> dict[str, Any]:
         entry = dict(entry)
         name = str(entry.get("name") or "").strip()
@@ -1877,18 +1921,10 @@ class StorageEngine:
             "name": name,
             "base_url": base_url,
             "api_key": str(entry.get("api_key") or ""),
-            "api_keys": [
-                {
-                    "id": str(k.get("id") if isinstance(k, dict) and k.get("id") else f"c-{i}"),
-                    "name": str((k.get("name") if isinstance(k, dict) else "Key") or "Key")[:100],
-                    "key": str((k.get("key") if isinstance(k, dict) else k) or ""),
-                    "priority": int(k.get("priority") or (i + 1)) if isinstance(k, dict) else (i + 1),
-                    "is_active": bool(k.get("is_active", True)) if isinstance(k, dict) else True,
-                    "status": str(k.get("status") or "untested") if isinstance(k, dict) else "untested",
-                }
-                for i, k in enumerate(api_keys)
+            "api_keys": StorageEngine._stable_connection_ids([
+                k for k in api_keys
                 if (isinstance(k, dict) and str(k.get("key") or "").strip()) or (isinstance(k, str) and k.strip())
-            ],
+            ]),
             "api_format": str(entry.get("api_format") or "openai"),
             "headers": headers,
             "load_balance_mode": str(entry.get("load_balance_mode") or "priority"),
@@ -2198,7 +2234,15 @@ class StorageEngine:
                 "grouped_models": list(grouped_models.values())
             }
 
-    def get_exec_audio_policy_options(self) -> dict[str, Any]:
+    def get_exec_audio_policy_options(self, include_all_catalog: bool = False) -> dict[str, Any]:
+        """Return the Audio Flow voice catalog.
+
+        By default only providers with a saved credential (plus the built-in
+        Edge and Offline voices) are listed, which is what model *selection*
+        should offer. The settings dialog passes ``include_all_catalog=True``
+        so a user can browse the complete voice catalog — including providers
+        they have not connected yet — instead of seeing only two groups.
+        """
         with self._get_conn() as conn:
             # Use all connections from both audio_provider_connections and provider_connections
             # so models from any saved provider appear in the model selector.
@@ -2212,6 +2256,12 @@ class StorageEngine:
 
             connected_providers.add("edge")
             connected_providers.add("offline")
+            if include_all_catalog:
+                catalog_providers = {
+                    str(r["provider"]).lower()
+                    for r in conn.execute("SELECT DISTINCT provider FROM tts_models").fetchall()
+                }
+                connected_providers.update(catalog_providers)
 
             provider_names = {
                 "edge": "Microsoft Edge Neural",

@@ -531,7 +531,7 @@ class AudioFlowSettingsDialog:
         for w in self._list_inner.winfo_children():
             w.destroy()
 
-        policy = storage.get_exec_audio_policy_options()
+        policy = storage.get_exec_audio_policy_options(include_all_catalog=True)
         all_models = policy.get("models", [])
         active_voice = self._get_active_voice()
         search_term = self._search_var.get().lower().strip()

@@ -44,8 +44,12 @@ SAMPLE_WEIGHT = 0.35
 # gives it more room. This is what lets a genuinely slow model eventually
 # succeed instead of being cancelled at the same ceiling forever.
 TIMEOUT_GROWTH = 1.5
-_SETTING_KEY = "voice_flow_polish_latency_profile"
 _MAX_TRACKED = 40
+# The profile is kept in its own small JSON sidecar, NOT in the settings table.
+# Every polishing timeout records here, and writing that into the shared SQLite
+# database contended with the app's own writes for the same rows; sidecar
+# storage keeps this telemetry off the user's database entirely.
+_PROFILE_FILENAME = "polish_latency_profile.json"
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, float] | None = None
@@ -53,10 +57,12 @@ _CACHE_STAMP = 0.0
 _CACHE_TTL = 30.0
 
 
-def _storage():
-    from voice_flow.storage import storage
+def _profile_path():
+    from pathlib import Path
 
-    return storage
+    from voice_flow import paths
+
+    return Path(paths.data_dir()) / _PROFILE_FILENAME
 
 
 def _load_profile() -> dict[str, float]:
@@ -67,9 +73,9 @@ def _load_profile() -> dict[str, float]:
             return dict(_CACHE)
     profile: dict[str, float] = {}
     try:
-        raw = _storage().get_setting(_SETTING_KEY, "")
-        if isinstance(raw, str) and raw.strip():
-            parsed = json.loads(raw)
+        target = _profile_path()
+        if target.is_file():
+            parsed = json.loads(target.read_text(encoding="utf-8"))
             if isinstance(parsed, dict):
                 for key, value in parsed.items():
                     try:
@@ -87,8 +93,13 @@ def _load_profile() -> dict[str, float]:
 
 
 def _save_profile(profile: dict[str, float]) -> None:
+    """Persist the sidecar atomically so a crash cannot leave a partial file."""
     try:
-        _storage().save_setting(_SETTING_KEY, json.dumps(profile, separators=(",", ":")))
+        target = _profile_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(profile, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(target)
     except Exception as exc:
         log.debug("[POLISH LATENCY] Could not persist latency profile: %s", exc)
 

@@ -215,7 +215,11 @@ class TestPolisherFastLaneLongText(unittest.TestCase):
                     return_value={}),
               patch.object(pol, "_try_provider_call", side_effect=fake_call)):
             out = pol.polish("um please polish this much longer dictation text with plenty of words")
-        self.assertEqual(calls[0], "gemini-3.5-flash-lite")
+        # The model the user selected is tried first and must not be skipped
+        # for the Lite lane; Lite is still reached as the speed fallback once
+        # the selection produced nothing.
+        self.assertEqual(calls[0], "gemini-3.7-flash")
+        self.assertEqual(calls[1], "gemini-3.5-flash-lite")
         self.assertTrue(out)
 
 

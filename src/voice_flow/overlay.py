@@ -447,20 +447,20 @@ class FloatingOverlayBar:
 
             # When docked at bottom and collapsed, expansion moves upper boundary UPWARDS
             if getattr(self, "dock", "bottom") == "bottom" and not is_expanded:
-                y_min = cur_y - (self.hover_height - self.height) - 10
-                y_max = cur_y + self.height + 10
+                y_min = cur_y - (self.hover_height - self.height) - 4
+                y_max = cur_y + self.height + 4
             else:
-                y_min = cur_y - 10
-                y_max = cur_y + h + 10
+                y_min = cur_y - 4
+                y_max = cur_y + h + 4
 
             if is_expanded:
                 anchor_cx = cur_x + w // 2
                 exp_w = max(w, self.ready_actions_width)
-                x_min = anchor_cx - exp_w // 2 - 12
-                x_max = anchor_cx + exp_w // 2 + 12
+                x_min = anchor_cx - exp_w // 2 - 4
+                x_max = anchor_cx + exp_w // 2 + 4
             else:
-                x_min = cur_x - 12
-                x_max = cur_x + w + 12
+                x_min = cur_x - 4
+                x_max = cur_x + w + 4
 
             return (x_min <= x <= x_max) and (y_min <= y <= y_max)
         except Exception:

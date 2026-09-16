@@ -798,7 +798,12 @@ class TTSEngine:
                     pass
         return None
 
-    def _synthesize_edge_tts(self, text: str, voice_name: str) -> bytes | None:
+    def _synthesize_edge_tts(self, text: str, voice_name: str | None = None) -> bytes | None:
+        # Every cloud-provider fallback calls this with only the text. Resolve
+        # the user's configured Edge voice here so the fallback speaks with the
+        # right voice instead of raising a missing-argument TypeError.
+        if not voice_name:
+            voice_name = self._get_fallback_edge_voice()
         try:
             import edge_tts
 
@@ -921,7 +926,7 @@ class TTSEngine:
         active_keys = self._get_active_keys_for_provider("elevenlabs")
         if not active_keys:
             log.warning("ElevenLabs TTS: No active API key configured, falling back to Edge TTS")
-            return None
+            return self._synthesize_edge_tts(text)
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         model_family = "eleven_multilingual_v2"
@@ -973,7 +978,7 @@ class TTSEngine:
         active_keys = self._get_active_keys_for_provider("deepgram")
         if not active_keys:
             log.warning("Deepgram TTS: No active API key configured, falling back to Edge TTS")
-            return None
+            return self._synthesize_edge_tts(text)
 
         endpoint = "/v2/speak" if model_name.lower().startswith("flux") else "/v1/speak"
         url = f"https://api.deepgram.com{endpoint}?model={model_name}"

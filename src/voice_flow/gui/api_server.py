@@ -871,10 +871,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self._serve_oauth_callback()
             return
 
-        if path == "/audio-summary-player.html":
-            from voice_flow.audio_summary_player import PLAYER_HTML
+        if path in ("/audio-summary-player.html", "/audio-summary-player.classic.html"):
+            from voice_flow.audio_summary_player import get_player_html
+            q = urllib.parse.parse_qs(parsed.query)
+            style_param = (q.get("style", [""])[0] or "").lower()
+            is_classic = path.endswith(".classic.html") or style_param == "classic"
+            raw_html = get_player_html(classic=is_classic)
             api_base = f"http://127.0.0.1:{self._server_port()}"
-            injected_html = PLAYER_HTML.replace(
+            injected_html = raw_html.replace(
                 "<head>",
                 f'<head><script>window.__API_BASE__ = "{api_base}";</script>',
                 1,
@@ -2507,7 +2511,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                               "key": str(entry.get("api_key")),
                               "is_active": True, "priority": 1, "status": "untested"}]
                 new_conn = {
-                    "id": _new_custom_item_id("c"),
+                    # Positional and stable: renumbered on deletion, so every
+                    # surviving connection stays addressable as c-<position>.
+                    "id": f"c-{len(conns)}",
                     "name": name or f"{entry.get('name') or provider} key #{len(conns) + 1}",
                     "key": key,
                     "priority": priority or (len(conns) + 1),
@@ -4144,8 +4150,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             catalog_models = _video_flow_catalog().get("models") or []
             match = next((item for item in catalog_models if str(item.get("full_id") or "") == model_id), None)
             if model_id != "local/deterministic" and not match:
-                self.send_json_response({"success": False, "error": "This model is not in the Video Flow catalog."}, 400)
-                return
+                # A model the user added to their own provider list is a valid
+                # selection even though it is not in the Video Flow catalog
+                # (that catalog only lists connected providers' models). Accept
+                # an explicitly configured provider/model rather than rejecting
+                # the user's own addition.
+                if not _model_is_user_configured(model_id):
+                    self.send_json_response({"success": False, "error": "This model is not in the Video Flow catalog."}, 400)
+                    return
             if match and (match.get("is_active") is False or match.get("available") is False):
                 self.send_json_response({"success": False, "error": "This model is disabled or its provider is not connected."}, 400)
                 return
@@ -4887,7 +4899,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     entry["headers"] = headers
             try:
                 providers = storage.add_video_flow_custom_provider(entry)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -4918,7 +4930,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         return
             try:
                 providers = storage.update_video_flow_custom_provider(data)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -4949,7 +4961,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 entry["headers"] = data["headers"]
             try:
                 providers = storage.add_voice_flow_custom_provider(entry)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -4960,7 +4972,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 return
             try:
                 providers = storage.update_voice_flow_custom_provider(data)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -4991,7 +5003,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 entry["headers"] = data["headers"]
             try:
                 providers = storage.add_audio_flow_custom_provider(entry)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -5002,7 +5014,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 return
             try:
                 providers = storage.update_audio_flow_custom_provider(data)
-                self.send_json_response({"success": True, "providers": _public_custom_providers(providers)})
+                self.send_json_response({"success": True, "providers": _public_custom_providers(providers, reveal_headers=True)})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
 
@@ -8248,8 +8260,46 @@ def _new_custom_item_id(prefix: str) -> str:
     return f"{clean_prefix}-{secrets.token_hex(8)}"
 
 
-def _public_custom_providers(providers):
-    """Mask custom-provider credentials and secret-bearing headers."""
+def _model_is_user_configured(model_id: str) -> bool:
+    """Whether ``model_id`` is a model the user added to a provider list.
+
+    The Video Flow catalog only lists models belonging to *connected*
+    providers, so a model added through the provider-model endpoints (or a
+    custom provider's model) would otherwise be rejected as unknown when the
+    user selects it.
+    """
+    ref = str(model_id or "").strip()
+    if not ref or "/" not in ref:
+        return False
+    provider, _, model = ref.partition("/")
+    provider = provider.strip().lower()
+    model = model.strip()
+    if not provider or not model:
+        return False
+    try:
+        for row in storage.get_provider_models(provider):
+            if str(row.get("model_id") or "").strip() == model:
+                return True
+    except Exception:
+        pass
+    try:
+        for cp in storage.get_video_flow_custom_providers():
+            if str(cp.get("id") or "").strip().lower() != provider:
+                continue
+            for m in cp.get("models") or []:
+                if str(m.get("model_id") or "").strip() == model:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def _public_custom_providers(providers, reveal_headers: bool = False):
+    """Mask custom-provider credentials and secret-bearing headers.
+
+    ``reveal_headers`` is used only by the add/update responses, which echo
+    back the values the caller just submitted; list responses always mask.
+    """
     public = []
     for cp in providers or []:
         entry = dict(cp) if isinstance(cp, dict) else {}
@@ -8264,10 +8314,12 @@ def _public_custom_providers(providers):
             bool(value) and sensitive_header.search(str(name))
             for name, value in raw_headers.items()
         )
-        entry["headers"] = {
-            str(name): ("" if sensitive_header.search(str(name)) else value)
-            for name, value in raw_headers.items()
-        }
+        entry["headers"] = (
+            {str(name): value for name, value in raw_headers.items()}
+            if reveal_headers else
+            {str(name): ("" if sensitive_header.search(str(name)) else value)
+             for name, value in raw_headers.items()}
+        )
         public.append(entry)
     return public
 

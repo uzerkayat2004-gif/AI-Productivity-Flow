@@ -340,7 +340,17 @@ async function checkNotebookLMAuth(showToast = false) {
     if (!data || data.error) throw new Error(data?.error || "Failed to check status");
 
     const isExplicitDisc = Boolean(data.details?.disconnected);
-    const backendAuth = Boolean(data.authenticated && !isExplicitDisc && data.status !== "unauthenticated");
+    // A successful status response that omits `authenticated` must not be read
+    // as "signed out": treating an absent field as false would overwrite a
+    // known-good session and render the UI as Disconnected. Only an explicit
+    // value changes the stored auth state; when the field is missing, keep
+    // what we already know.
+    const authenticatedKnown = data.authenticated !== undefined ? Boolean(data.authenticated) : null;
+    const backendAuth = Boolean(
+      (authenticatedKnown === null ? vfNlmAuthStatus.authenticated : authenticatedKnown)
+      && !isExplicitDisc
+      && data.status !== "unauthenticated"
+    );
     let email = data.email || data.account_email || (data.details?.account?.email) || "";
     if (!email && backendAuth && vfNlmAuthStatus.email && !isExplicitDisc) {
       email = vfNlmAuthStatus.email;

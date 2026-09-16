@@ -459,6 +459,14 @@ class NemotronGGUFEngine:
 
         load_ms = (time.perf_counter() - t0) * 1000
         self._is_warm = True
+        # Run one short silent pass so the first real dictation does not pay
+        # first-inference cost (weight paging, graph/allocator setup) inside its
+        # release drain. This is what made the very first stream of a session
+        # noticeably slower than every later one.
+        try:
+            self._warm_inference_pass()
+        except Exception as exc:
+            log.debug("[NEMOTRON] Warm inference pass skipped: %s", exc)
         log.info(
             "[NEMOTRON] Loaded & warmed model '%s' (%d tensors, %d vocab, %.1fMB) in %.1fms (c_abi=%s)",
             self.model_name,
@@ -468,6 +476,37 @@ class NemotronGGUFEngine:
             load_ms,
             bool(self.rec_handle.value),
         )
+
+    def _warm_inference_pass(self) -> None:
+        """Push a brief silent utterance through the recognizer to warm it up."""
+        dll = get_nemo_dll()
+        if dll is None or not getattr(self, "rec_handle", None) or not self.rec_handle.value:
+            return
+        stream = ctypes.c_void_p()
+        with self.lock:
+            opts = dll.nemo_speech_asr_recognition_options_default()
+            opts.enable_automatic_punctuation = True
+            opts.interim_results = False
+            st = dll.nemo_speech_asr_streaming_recognize(
+                self.rec_handle, ctypes.byref(opts), ctypes.byref(stream)
+            )
+        if st != 0 or not stream.value:
+            return
+        try:
+            silence = np.zeros(16000, dtype=np.float32)
+            ptr = silence.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+            if dll.nemo_speech_asr_stream_push_f32(stream, ptr, len(silence), 16000) == 0:
+                res = ctypes.c_void_p()
+                while True:
+                    nxt = dll.nemo_speech_asr_stream_next(stream, ctypes.byref(res))
+                    if nxt != 0 or not res.value:
+                        break
+                    dll.nemo_speech_asr_result_destroy(res)
+        finally:
+            try:
+                dll.nemo_speech_asr_stream_close(stream)
+            except Exception:
+                pass
 
     def close(self) -> None:
         """Destroy native recognizer handle and release RAM."""
@@ -818,6 +857,8 @@ class NemotronStreamTranscriber:
         self._deadline: float | None = None
         self._model_ref: str = ""
         self._worker_thread: threading.Thread | None = None
+        # Native streaming context, opened by start_session.
+        self._stream: Any = ctypes.c_void_p()
 
     def start_session(self, model_ref: str | None = None, deadline: float | None = None) -> None:
         self._model_ref = str(model_ref or "")
@@ -837,8 +878,55 @@ class NemotronStreamTranscriber:
             self._done.set()
             return
 
+        # Open the streaming recognition context here, before any microphone
+        # frame arrives. Creating it lazily inside the worker meant the first
+        # frames queued up during setup, and every dictation then paid for that
+        # backlog when the user released (measured up to ~1s of drain on a
+        # release budget of 0.85s). Opening it up front moves that cost off the
+        # release path.
+        self._stream = ctypes.c_void_p()
+        if not self._open_stream(dll):
+            self._failed = True
+            self._done.set()
+            return
+
         self._worker_thread = threading.Thread(target=self._run, name="vf-nemotron-stream", daemon=True)
         self._worker_thread.start()
+
+    def _open_stream(self, dll: Any) -> bool:
+        """Create the native streaming recognizer for this session."""
+        eng = self._engine
+        try:
+            opts = dll.nemo_speech_asr_recognition_options_default()
+            opts.enable_automatic_punctuation = True
+            opts.interim_results = False
+
+            lang = None
+            if eng is not None and eng.spec:
+                lang = eng.spec.get("default_language")
+            if not lang or lang == "multilingual":
+                try:
+                    from voice_flow.config import config
+
+                    lang = getattr(config, "language", "en") or "en"
+                except Exception:
+                    lang = "en"
+            if lang and lang != "multilingual":
+                opts.language_code = lang.encode("utf-8")
+
+            with eng.lock:
+                st = dll.nemo_speech_asr_streaming_recognize(
+                    eng.rec_handle, ctypes.byref(opts), ctypes.byref(self._stream)
+                )
+            if st != 0 or not self._stream.value:
+                err = dll.nemo_speech_asr_last_error()
+                err_msg = err.decode("utf-8", errors="replace") if err else f"code {st}"
+                log.warning("[NEMOTRON STREAM] streaming_recognize failed: %s", err_msg)
+                return False
+            return True
+        except Exception as exc:
+            log.warning("[NEMOTRON STREAM] Could not open stream: %s", exc)
+            return False
 
     def submit_frame(self, frame: np.ndarray, native_sr: int) -> None:
         if self._finish.is_set() or self._cancel.is_set() or self._done.is_set():
@@ -901,32 +989,18 @@ class NemotronStreamTranscriber:
             self._done.set()
             return
 
-        stream = ctypes.c_void_p()
+        # The stream is opened by start_session so frames never queue behind
+        # context setup. Fall back to opening it here only if that did not
+        # happen (defensive: keeps direct _run callers working).
+        stream = getattr(self, "_stream", None) or ctypes.c_void_p()
         t0 = time.perf_counter()
         try:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
-            opts.interim_results = False
-
-            lang = None
-            if eng.spec:
-                lang = eng.spec.get("default_language")
-            if not lang or lang == "multilingual":
-                try:
-                    from voice_flow.config import config
-
-                    lang = getattr(config, "language", "en") or "en"
-                except Exception:
-                    lang = "en"
-            if lang and lang != "multilingual":
-                opts.language_code = lang.encode("utf-8")
-
-            with eng.lock:
-                st = dll.nemo_speech_asr_streaming_recognize(eng.rec_handle, ctypes.byref(opts), ctypes.byref(stream))
-            if st != 0 or not stream.value:
-                err = dll.nemo_speech_asr_last_error()
-                err_msg = err.decode("utf-8", errors="replace") if err else f"code {st}"
-                raise RuntimeError(f"nemo_speech_asr_streaming_recognize failed: {err_msg}")
+            if not stream.value:
+                if not self._open_stream(dll):
+                    self._failed = True
+                    self._done.set()
+                    return
+                stream = self._stream
 
             committed_transcripts: list[str] = []
             interim_latest = ""

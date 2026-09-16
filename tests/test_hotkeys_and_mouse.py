@@ -678,6 +678,10 @@ def test_ctrl_win_release_ctrl_first_arms_suppression_and_triggers_finish(monkey
         on_finish=lambda: setattr(listener, "_finish_called", True),
         on_cancel=lambda: None,
     )
+    # This test covers push-to-talk: releasing Ctrl finishes immediately. A
+    # saved 'toggle_only' preference intentionally suppresses that, so pin the
+    # mode under test instead of inheriting the machine's setting.
+    listener.reload_config({"hotkey_trigger": "ctrl_win", "dictation_trigger_mode": "ptt_only"})
     listener._start_called = False
     listener._finish_called = False
 
@@ -731,6 +735,10 @@ def test_native_hook_ctrl_win_instant_finish_and_start_menu_suppression(monkeypa
         on_finish=lambda: setattr(listener, "_finish_called", True),
         on_cancel=lambda: None,
     )
+    # Push-to-talk semantics: releasing Ctrl dispatches an instant finish.
+    # Pin the mode so a saved 'toggle_only' preference cannot change what this
+    # test is exercising.
+    listener.reload_config({"hotkey_trigger": "ctrl_win", "dictation_trigger_mode": "ptt_only"})
     listener._start_called = False
     listener._finish_called = False
 

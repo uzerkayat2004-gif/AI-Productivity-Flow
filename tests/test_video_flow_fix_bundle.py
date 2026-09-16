@@ -547,7 +547,11 @@ def test_watch_login_master_token_success(monkeypatch, tmp_path):
     assert len(commands) == 1 and "--master-token" in commands[0]
     state = login_flow.get_login_state()
     assert state["success"] is True and state["durable"] is True
-    assert state["note"] is None
+    # A successful, identified sign-in is labelled with the account so the UI
+    # can show "Signed in as <email>" (video-flow.js reads login.note and also
+    # derives the email from it).
+    assert state["email"] == "stored@gmail.com"
+    assert state["note"] == "Signed in as stored@gmail.com"
 
 
 def test_watch_login_falls_back_to_plain_on_mint_failure(monkeypatch, tmp_path):

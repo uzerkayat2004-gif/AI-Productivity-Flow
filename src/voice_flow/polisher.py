@@ -933,6 +933,10 @@ class TextPolisher:
                     if not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
                         raw_text, sanitized, task=task, allow_compression=allow_compression,
                     ):
+                        # A local model does not honour the requested register on
+                        # its own, so apply the style the deterministic path
+                        # would (e.g. very-casual lowercase, no trailing period).
+                        sanitized = self._apply_style_register(sanitized, instruction)
                         log.info("[POLISH] Local model cleaned successfully: '%s' -> '%s'", raw_text, sanitized)
                         self._record_polish_latency(
                             lfm_engine.LFM_MODEL_ID, lfm_started, is_local=True,
@@ -947,6 +951,28 @@ class TextPolisher:
         log.info("Polished cleanup (%s): '%s' -> '%s'", level, raw_text, cleaned)
         self._notify_outcome(outcome_callback, attempt_outcome)
         return _apply_dictionary_safely(cleaned)
+
+    @staticmethod
+    def _apply_style_register(text: str, style_instruction: Any) -> str:
+        """Apply the requested register to already-cleaned text.
+
+        Used for the local model path, which cleans wording but does not
+        reliably follow a register instruction such as "very casual".
+        """
+        if not text:
+            return text
+        try:
+            instruction = (
+                style_instruction.instruction
+                if hasattr(style_instruction, "instruction")
+                else str(style_instruction or "")
+            )
+        except Exception:
+            instruction = ""
+        style = instruction.lower()
+        if "very_casual" in style or "lowercase" in style:
+            return text.lower().rstrip(".")
+        return text
 
     @staticmethod
     def _remaining_budget(deadline: float | None) -> float:
@@ -1357,37 +1383,47 @@ class TextPolisher:
         fast_provider = "gemini"
         fast_key = api_keys.get("gemini", "")
         fast_cooldown = (fast_provider, fast_key, AI_POLISH_FAST_MODEL)
-        fast_result = None
-        if use_fast_lane and fast_key and not self._cooldown_active(fast_cooldown) \
-                and not self._cooldown_active(fast_key):
+        def try_fast_lane() -> str | None:
+            """One bounded attempt at the Gemini Lite model. Returns its text or None."""
+            nonlocal attempts
+            if not (use_fast_lane and fast_key):
+                return None
+            if self._cooldown_active(fast_cooldown) or self._cooldown_active(fast_key):
+                return None
             remaining = remaining_provider_budget()
-            if remaining >= AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS and attempts < AI_POLISH_MAX_ATTEMPTS:
-                attempts += 1
-                fast_result = call_provider(
-                    fast_provider,
-                    fast_key,
-                    system_prompt,
-                    user_content,
-                    model=AI_POLISH_FAST_MODEL,
-                    timeout=min(AI_POLISH_FAST_TIMEOUT_SECONDS, remaining),
-                )
-                if fast_result:
-                    self._note_success(fast_cooldown)
-                    log.info("[AI POLISH - Fast Lane] Polished via %s in pool.", AI_POLISH_FAST_MODEL)
-                else:
-                    status = getattr(self, "_last_attempt_status", "")
-                    if status in ("http_401", "http_403"):
-                        self._note_failure(fast_key)
-                    elif status == "timeout":
-                        # Interactive: teach the model's ceiling instead of
-                        # benching it, so a slow-but-working model is not
-                        # disabled for the next dictation.
-                        self._note_timeout(fast_cooldown, model_ref=AI_POLISH_FAST_MODEL)
-                    elif status == "busy":
-                        pass
-                    else:
-                        self._note_failure(fast_cooldown)
-                    log.info("[AI POLISH - Fast Lane] %s unavailable; falling through to preferred model.", AI_POLISH_FAST_MODEL)
+            if remaining < AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS or attempts >= AI_POLISH_MAX_ATTEMPTS:
+                return None
+            attempts += 1
+            result = call_provider(
+                fast_provider,
+                fast_key,
+                system_prompt,
+                user_content,
+                model=AI_POLISH_FAST_MODEL,
+                timeout=min(AI_POLISH_FAST_TIMEOUT_SECONDS, remaining),
+            )
+            if result:
+                self._note_success(fast_cooldown)
+                log.info("[AI POLISH - Fast Lane] Polished via %s in pool.", AI_POLISH_FAST_MODEL)
+                return result
+            status = getattr(self, "_last_attempt_status", "")
+            if status in ("http_401", "http_403"):
+                self._note_failure(fast_key)
+            elif status == "timeout":
+                # Teach the model's ceiling instead of benching it, so a
+                # slow-but-working model is not disabled for the next dictation.
+                self._note_timeout(fast_cooldown, model_ref=AI_POLISH_FAST_MODEL)
+            elif status == "busy":
+                pass
+            else:
+                self._note_failure(fast_cooldown)
+            log.info("[AI POLISH - Fast Lane] %s unavailable.", AI_POLISH_FAST_MODEL)
+            return None
+
+        # In automatic mode (no concrete model chosen) the Lite lane is the
+        # fast path and runs first. With an explicit selection it must not
+        # preempt that model, so it is deferred to the fallback below.
+        fast_result = try_fast_lane() if preferred_model is None else None
 
         if fast_result is not None and not long_text:
             return fast_result
@@ -1494,6 +1530,19 @@ class TextPolisher:
                 # fallback model.
                 if status in {"timeout", "busy"}:
                     break
+
+        # Fallback fast lane: the selected model (and any failover provider)
+        # produced nothing, so try the Lite model now. This keeps the
+        # speed-first option available without ever overriding the model the
+        # user chose while it still had a chance to answer.
+        #
+        # A timeout or a busy lane is excluded: that request may still be
+        # running, so issuing another one could duplicate work or spend money
+        # twice. Only a definitive failure makes the fallback safe.
+        if preferred_model is not None and getattr(self, "_last_attempt_status", "") not in {"timeout", "busy"}:
+            fast_result = try_fast_lane()
+            if fast_result:
+                return fast_result
 
         if not getattr(self, "_last_attempt_status", ""):
             self._last_attempt_status = "unsupported_provider"

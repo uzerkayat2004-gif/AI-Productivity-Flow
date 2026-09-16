@@ -257,8 +257,14 @@ def is_internal_window(hwnd: int | None, overlay_hwnd: int | None = None) -> boo
             t_lower = t.lower()
             if t_lower in ("start", "search", "windows input experience", "startmenuexperiencehost"):
                 return True
-            if (t_lower in _INTERNAL_EXACT_TITLES or t_lower.startswith("ai productivity flow") or t_lower.startswith("productivity flow")) and pid.value == os.getpid():
-                return True
+            if t_lower in _INTERNAL_EXACT_TITLES or t_lower.startswith("ai productivity flow") or t_lower.startswith("productivity flow"):
+                # An exact internal title is decisive on its own: no external
+                # application is ever titled exactly "AI Productivity Flow".
+                # The pid check is a second opinion only when the owner is
+                # known; a pid of 0 means the owner could not be determined,
+                # not that the window is external.
+                if not pid.value or pid.value == os.getpid():
+                    return True
 
         # Check Tkinter overlay class and Windows Shell/Start menu classes
         # Note: 'windows.ui.core.corewindow' and 'xamlexplorerhostislandwindow' are used by both
@@ -328,7 +334,7 @@ def is_same_window_hierarchy(hwnd1: int | None, hwnd2: int | None) -> bool:
     if hwnd1 == hwnd2:
         return True
     try:
-        user32 = windll.user32
+        user32 = getattr(ctypes, "windll", windll).user32
         if user32.IsChild(hwnd1, hwnd2) or user32.IsChild(hwnd2, hwnd1):
             return True
         root1 = user32.GetAncestor(hwnd1, 2) or hwnd1  # GA_ROOT = 2
