@@ -4,8 +4,8 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows_10_%2F_11-blue.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-47%20Passed%20(100%25)-success.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-blue.svg)]()
+[![CI & Multi-Platform Build](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/actions/workflows/ci.yml/badge.svg)](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/actions/workflows/ci.yml)
 
 ---
 
@@ -110,16 +110,18 @@ Flow is built so that **no user is ever blocked by a paywall**.
 ## 📦 Installation & Setup
 
 ### Prerequisites
-* **Operating System:** Windows 10 or 11 (64-bit)
-* **Python:** Version 3.10+ (tested on Python 3.14)
+* **Operating System:**
+  * **Windows:** Windows 10 or 11 (64-bit)
+  * **macOS:** macOS 12+ (Monterey, Ventura, Sonoma, Sequoia) on Apple Silicon (M1/M2/M3/M4) or Intel
+* **Python:** Version 3.10+ (tested on Python 3.11, 3.13, 3.14)
 * **Node.js:** Version 18+ (for Remotion video renderer)
 
 ### Quick Setup
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/uzerkayat2004-gif/Voice-Flow.git
-   cd Voice-Flow
+   git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
+   cd AI-Productivity-Flow
    ```
 
 2. **Install Python dependencies:**
@@ -134,16 +136,15 @@ Flow is built so that **no user is ever blocked by a paywall**.
    cd ..
    ```
 
-4. **One-Click Desktop & Auto-Startup Installation:**
-   ```bat
-   setup_desktop_app.bat
-   ```
-   *Registers Flow in Windows Startup and creates Desktop shortcuts for silent background startup on boot.*
+4. **Desktop App & Startup Setup:**
+   * **Windows:** Run `setup_desktop_app.bat` to register startup entries and create shortcuts.
+   * **macOS:** Build the standalone app bundle with `python scripts/build_macos_app.py` or run directly.
 
 ---
 
 ## 🚀 Running Flow
 
+### On Windows
 * **Silent Background Mode (Recommended):**
   Double-click `VoiceFlowLauncher.vbs` or run:
   ```bat
@@ -157,17 +158,35 @@ Flow is built so that **no user is ever blocked by a paywall**.
   ```bash
   python -m voice_flow.watchdog --status
   ```
-* **Open Web Dashboard:**
+
+### On macOS
+* **Using the Pre-built `.app` Bundle:**
+  1. Download `VoiceFlow-macOS-unsigned.zip` from GitHub Releases or GitHub Actions build artifacts.
+  2. Extract `Voice Flow.app` and move it to `/Applications`.
+  3. Clear the macOS Gatekeeper quarantine flag (for unsigned open-source apps):
+     ```bash
+     xattr -cr "/Applications/Voice Flow.app"
+     ```
+  4. Launch `Voice Flow.app`. Follow the in-app onboarding prompt to grant **Microphone**, **Accessibility**, and **Input Monitoring** permissions.
+* **Running Directly from Terminal:**
+  ```bash
+  python3 -m voice_flow.main
+  ```
+
+* **Web Dashboard (All Platforms):**
   Navigate to `http://127.0.0.1:8991` in your browser.
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the comprehensive automated test suite (all tests execute offline with zero paid API calls):
+Run the comprehensive offline test suite across platforms:
 
 ```bash
-# Run all core tests
+# Platform Abstraction & Cross-Platform Contract Tests (Windows & macOS)
+pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py -v
+
+# Core Feature & Subsystem Tests
 python -m pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py tests/test_style_system.py tests/test_provider_management.py tests/test_watchdog_and_startup.py tests/test_hybrid_render_routing.py tests/test_video_flow_benchmarks.py -s
 
 # Run Video Flow engine tests
