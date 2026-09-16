@@ -278,8 +278,8 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
     badge.classList.add("disconnected");
     dot.classList.add("disconnected");
     if (cookieHealth && cookieHealth.status === "expired") {
-      text.textContent = "Session Expired";
-      if (desc) desc.textContent = "Your Google session has expired. Click 'Sync Browser' to reconnect seamlessly.";
+      text.textContent = email ? `Session Expired (${email})` : "Session Expired";
+      if (desc) desc.textContent = "Your Google session has expired. Click 'Log in to NotebookLM' to reconnect.";
     } else {
       text.textContent = "Disconnected";
       if (desc) desc.textContent = "Connect your Google account to enable cloud video rendering with NotebookLM.";
@@ -352,10 +352,10 @@ async function checkNotebookLMAuth(showToast = false) {
       && data.status !== "unauthenticated"
     );
     let email = data.email || data.account_email || (data.details?.account?.email) || "";
-    if (!email && backendAuth && vfNlmAuthStatus.email && !isExplicitDisc) {
+    if (!email && vfNlmAuthStatus.email && !isExplicitDisc) {
       email = vfNlmAuthStatus.email;
     }
-    if (isExplicitDisc || !backendAuth || !email) {
+    if (isExplicitDisc) {
       email = null;
     }
     const isAuth = Boolean(backendAuth && email);
@@ -363,10 +363,10 @@ async function checkNotebookLMAuth(showToast = false) {
     vfNlmAuthStatus = {
       authenticated: isAuth,
       status: isAuth ? "ok" : "unauthenticated",
-      email: email,
+      email: isExplicitDisc ? null : (email || vfNlmAuthStatus.email || null),
       profile: data.profile || vfNlmAuthStatus.profile || "video-flow-experiment",
       available: data.available !== false,
-      cookie_health: isAuth ? (data.cookie_health || null) : null,
+      cookie_health: data.cookie_health || null,
       online_verified: isAuth ? data.online_verified : false,
     };
 
@@ -457,8 +457,16 @@ async function syncNotebookLMBrowser() {
       }
       vfToast(emailSynced ? `Synced session for ${emailSynced} successfully!` : `Synced ${data.cookies_count || ""} NotebookLM session cookies successfully!`);
       await checkNotebookLMAuth(false);
+    } else if (data && (data.needs_interactive || data.chrome_v20_detected)) {
+      vfToast("Chrome security requires browser sign-in to refresh your session. Opening sign-in window…", false);
+      await startNotebookLMAuth(false, true);
     } else {
-      vfToast(data?.error || "Could not sync cookies directly. Try 'Log in to NotebookLM'.", true);
+      vfToast(data?.error || "Could not sync cookies directly. Click 'Log in to NotebookLM'.", true);
+      vfNlmAuthStatus.authenticated = false;
+      vfNlmAuthStatus.status = "unauthenticated";
+      if (!vfNlmAuthStatus.cookie_health) vfNlmAuthStatus.cookie_health = {};
+      vfNlmAuthStatus.cookie_health.status = "expired";
+      vfNlmAuthStatus.cookie_health.message = "Session expired — click Log in to NotebookLM to reconnect";
       renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
     }
   } catch (err) {
@@ -476,7 +484,7 @@ async function syncNotebookLMBrowser() {
   }
 }
 
-async function startNotebookLMAuth(switchAccount = false) {
+async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = false) {
   clearNlmAuthPollTimer();
 
   const previousEmail = (vfNlmAuthStatus && vfNlmAuthStatus.email) || "";
@@ -491,8 +499,8 @@ async function startNotebookLMAuth(switchAccount = false) {
     renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
   }
 
-  // If not switching accounts, first check if browser sync can seamlessly authenticate
-  if (!switchAccount) {
+  // If not switching accounts and not skipping browser sync, first check if browser sync can seamlessly authenticate
+  if (!switchAccount && !skipBrowserSync) {
     try {
       const syncCheck = await safeFetchJson("/api/video-flow/notebooklm/auth/sync-browser", {
         method: "POST",

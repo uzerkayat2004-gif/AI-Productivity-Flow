@@ -1058,21 +1058,37 @@ def auto_sync_from_browser(
         err_msg = f"No active Google session cookies found matching account '{expected_email}' in installed browsers."
         if chrome_v20_detected:
             err_msg += " (Chrome 127+ App-Bound Encryption prevents direct cookie extraction; interactive login required)."
+        if is_expired or recent_auth_error:
+            try:
+                from voice_flow.storage import storage
+                storage.save_setting("video_flow_notebooklm_authenticated", False)
+                storage.save_setting("video_flow_notebooklm_auth_error", err_msg)
+            except Exception:
+                pass
         return {
             "success": False,
             "error": err_msg,
             "profile": profile_name,
             "chrome_v20_detected": chrome_v20_detected,
+            "needs_interactive": True,
         }
 
     err_msg = "No active Google session cookies could be read directly from browser databases."
     if chrome_v20_detected:
         err_msg += " Chrome 127+ App-Bound Encryption (v20) was detected; interactive sign-in or cookie import is required."
+    if is_expired or recent_auth_error:
+        try:
+            from voice_flow.storage import storage
+            storage.save_setting("video_flow_notebooklm_authenticated", False)
+            storage.save_setting("video_flow_notebooklm_auth_error", err_msg)
+        except Exception:
+            pass
     return {
         "success": False,
         "error": err_msg,
         "profile": profile_name,
         "chrome_v20_detected": chrome_v20_detected,
+        "needs_interactive": True,
     }
 
 

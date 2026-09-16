@@ -113,7 +113,7 @@ is_short_text_for_summary = _is_short_text
 class AudioFlowFloatingWidget:
     """Crisp Sunrise White circular audio button anchored strictly at selected text end."""
 
-    SIZE = 30  # 30x30px circle button
+    SIZE = 26  # 26x26px sleek floating audio circle button
     STAGE_MINIMAL = "minimal"
     STAGE_MODE_SELECT = "mode_select"
     STAGE_SHORT_WARNING = "short_warning"
@@ -157,7 +157,7 @@ class AudioFlowFloatingWidget:
         self._drag_root_y = 0
         self._press_root_x = 0
         self._press_root_y = 0
-        self._prev_dimensions = (30, 30)
+        self._prev_dimensions = (26, 26)
         self._last_stage_change_time = 0.0
 
     def attach_root(self, root: tk.Tk) -> None:
@@ -178,7 +178,12 @@ class AudioFlowFloatingWidget:
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
 
-        self.win.config(bg=ORANGE_DEEP)
+        self._trans_color = "#010101"
+        self.win.config(bg=self._trans_color)
+        try:
+            self.win.attributes("-transparentcolor", self._trans_color)
+        except Exception:
+            pass
 
         try:
             from voice_flow.installer import get_icon_path
@@ -196,7 +201,7 @@ class AudioFlowFloatingWidget:
             self.win,
             width=self.SIZE,
             height=self.SIZE,
-            bg=ORANGE_DEEP,
+            bg=self._trans_color,
             highlightthickness=0,
             bd=0,
             cursor="hand2",
@@ -224,7 +229,7 @@ class AudioFlowFloatingWidget:
             pass
 
     def _apply_window_shape(self, w: int, h: int) -> None:
-        """Natively clip the window boundary via Win32 SetWindowRgn for smooth, fringe-free edges."""
+        """Natively clip the window boundary via Win32 SetWindowRgn for cards, or clear for transparent circle."""
         if sys.platform != "win32" or not self.win:
             return
         try:
@@ -232,21 +237,23 @@ class AudioFlowFloatingWidget:
             if not hwnd:
                 hwnd = self.win.winfo_id()
             if self._stage == self.STAGE_MINIMAL:
-                # Smooth elliptic region — border-color canvas bg eliminates white fringe
-                rgn = ctypes.windll.gdi32.CreateEllipticRgn(0, 0, w + 1, h + 1)
+                # Remove 1-bit region clipping: DWM handles transparency cleanly without saw-tooth edges
+                ctypes.windll.user32.SetWindowRgn(hwnd, None, True)
             else:
                 rgn = ctypes.windll.gdi32.CreateRoundRectRgn(0, 0, w + 1, h + 1, 14, 14)
-            ctypes.windll.user32.SetWindowRgn(hwnd, rgn, True)
+                ctypes.windll.user32.SetWindowRgn(hwnd, rgn, True)
         except Exception:
             pass
 
-        # Swap background colors: circle stages use border color, card stages use white/dark card
+        # Set window and canvas background:
+        # Minimal circle uses transparent color so only the smooth antialiased vector renders
+        # Card stages use paper card background
         try:
             if self._stage == self.STAGE_MINIMAL:
-                min_bg = "#3b3834" if self._is_theme_dark() else ORANGE_DEEP
-                self.win.config(bg=min_bg)
+                trans_bg = getattr(self, "_trans_color", "#010101")
+                self.win.config(bg=trans_bg)
                 if self.canvas:
-                    self.canvas.config(bg=min_bg)
+                    self.canvas.config(bg=trans_bg)
             else:
                 card_bg = "#20201f" if self._is_theme_dark() else WHITE
                 self.win.config(bg=card_bg)
@@ -1142,6 +1149,81 @@ class AudioFlowFloatingWidget:
         res = img.resize((w, h), Image.Resampling.LANCZOS)
         return ImageTk.PhotoImage(res)
 
+    def _draw_minimal_vector(self, c: tk.Canvas, w: int, h: int) -> None:
+        """Render sleek, organic antialiased floating audio button with zero 1-bit clipping jaggies."""
+        is_dark = self._is_theme_dark()
+        is_hover = (self._hover is not None)
+        is_playing = self._is_playing
+        is_paused = self._is_paused
+
+        cx = w / 2.0
+        cy = h / 2.0
+        pad = 1.0
+
+        if is_dark:
+            fill_col = "#282725" if (is_hover or is_playing) else "#20201f"
+            outline_col = "#e6b092" if (is_hover or is_playing) else "#3b3834"
+            outline_w = 1.5 if (is_hover or is_playing) else 1.2
+            c_deep = "#f5c3a8" if is_hover else "#e6b092"
+            c_mid = "#e6b092" if is_hover else "#d49474"
+            c_dot = "#ffd7c3" if is_hover else "#e6b092"
+            glyph_col = "#f5f1ea" if is_hover else "#e6b092"
+            track_col = "#3b3834"
+            arc_col = "#e6b092"
+        else:
+            fill_col = "#FFF8F2" if (is_hover or is_playing) else "#FFFFFF"
+            outline_col = "#FF5F0A" if (is_hover or is_playing) else "#E85D04"
+            outline_w = 1.5 if (is_hover or is_playing) else 1.2
+            c_deep = "#D23C00" if is_hover else "#E85D04"
+            c_mid = "#E85D04" if is_hover else "#FF6A00"
+            c_dot = "#FF8C38"
+            glyph_col = "#D23C00" if is_hover else "#E85D04"
+            track_col = "#FFD0B0"
+            arc_col = "#FF5F0A"
+
+        # Base floating disc: 1px transparent cushion eliminates window-edge clipping
+        c.create_oval(pad, pad, w - pad, h - pad, fill=fill_col, outline=outline_col, width=outline_w)
+
+        if is_playing:
+            # Progress ring track
+            arc_m = 3.5
+            c.create_oval(arc_m, arc_m, w - arc_m, h - arc_m, outline=track_col, width=1.4)
+            start = (self._anim_frame * 30) % 360
+            c.create_arc(
+                arc_m, arc_m, w - arc_m, h - arc_m,
+                start=start, extent=90, style="arc", outline=arc_col, width=1.8
+            )
+
+            if is_paused:
+                # Play triangle
+                tri_r = 3.0
+                pts = [
+                    cx - tri_r * 0.7, cy - tri_r,
+                    cx - tri_r * 0.7, cy + tri_r,
+                    cx + tri_r * 1.1, cy,
+                ]
+                c.create_polygon(pts, fill=glyph_col, outline="")
+            else:
+                # Pause bars with rounded caps
+                gap = 2.0
+                bar_h = 3.6
+                c.create_line(cx - gap, cy - bar_h, cx - gap, cy + bar_h, fill=glyph_col, width=1.8, capstyle="round")
+                c.create_line(cx + gap, cy - bar_h, cx + gap, cy + bar_h, fill=glyph_col, width=1.8, capstyle="round")
+        else:
+            # Organic acoustic soundwave: center pillar, flanking bars with round caps, satellite dots
+            h_center = 4.8
+            c.create_line(cx, cy - h_center, cx, cy + h_center, fill=c_deep, width=2.4, capstyle="round")
+
+            h_side = 3.0
+            gap = 4.0
+            c.create_line(cx - gap, cy - h_side, cx - gap, cy + h_side, fill=c_mid, width=1.8, capstyle="round")
+            c.create_line(cx + gap, cy - h_side, cx + gap, cy + h_side, fill=c_mid, width=1.8, capstyle="round")
+
+            r_dot = 0.85
+            gap_dot = 7.0
+            c.create_oval(cx - gap_dot - r_dot, cy - r_dot, cx - gap_dot + r_dot, cy + r_dot, fill=c_dot, outline="")
+            c.create_oval(cx + gap_dot - r_dot, cy - r_dot, cx + gap_dot + r_dot, cy + r_dot, fill=c_dot, outline="")
+
     def _draw(self) -> None:
         if not self.canvas:
             return
@@ -1153,12 +1235,7 @@ class AudioFlowFloatingWidget:
 
         try:
             if self._stage == self.STAGE_MINIMAL:
-                is_h = self._hover is not None
-                key = ("minimal", is_h, self._is_playing, self._is_paused, (self._anim_frame % 12) if self._is_playing else 0, is_dark)
-                if key not in self._image_cache:
-                    self._image_cache[key] = self._render_minimal_image(is_h, self._is_playing, self._is_paused, self._anim_frame)
-                photo = self._image_cache[key]
-                c.create_image(0, 0, image=photo, anchor="nw")
+                self._draw_minimal_vector(c, w, h)
 
             elif self._stage == self.STAGE_MODE_SELECT:
                 key = ("mode_select", self._hover, is_dark)
@@ -1209,18 +1286,7 @@ class AudioFlowFloatingWidget:
         accent_col = "#e6b092" if is_dark else ORANGE
 
         if self._stage == self.STAGE_MINIMAL:
-            pad = 1
-            if is_dark:
-                fill = "#282725" if (self._hover is not None or self._is_playing) else "#20201f"
-                outline = "#e6b092" if (self._hover is not None or self._is_playing) else "#3b3834"
-                glyph_col = "#e6b092" if (self._hover is not None or self._is_playing) else "#d49474"
-            else:
-                fill = "#FFF8F2" if (self._hover is not None or self._is_playing) else WHITE
-                outline = "#FF5F0A" if (self._hover is not None or self._is_playing) else ORANGE_DEEP
-                glyph_col = ORANGE_DEEP if not (self._hover is not None or self._is_playing) else "#D63C00"
-            c.create_oval(pad, pad, w - pad, h - pad, fill=fill, outline=outline, width=2)
-            glyph = "⏸" if self._is_playing and not self._is_paused else ("▶" if self._is_playing else "♫")
-            c.create_text(w / 2, h / 2, text=glyph, fill=glyph_col, font=("Segoe UI", 9, "bold"), anchor="center")
+            self._draw_minimal_vector(c, w, h)
         elif self._stage == self.STAGE_MODE_SELECT:
             self._draw_card(c, w, h)
             self._draw_pill(c, 4, 106, h, active=True, hovered=self._hover == 0)
@@ -1302,7 +1368,7 @@ class AudioFlowFloatingWidget:
 
     def _draw_grid(self, c: tk.Canvas, x0: float, animated: bool = False) -> None:
         """Chic 3x2 dot grid beside the labels; cascading orange wave when animating."""
-        cy = self.SIZE / 2
+        cy = 16.0
         for row in range(2):
             for col in range(3):
                 idx = row * 3 + col

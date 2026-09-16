@@ -713,3 +713,69 @@ class TestDeadCookieLoopPrevention:
         assert res.get("source") != "browser_profile"
         assert res["success"] is False
 
+
+class TestChromeV20InteractiveFallback:
+    def test_auto_sync_chrome_v20_returns_needs_interactive(self, tmp_path, monkeypatch):
+        """When Chrome 127+ App-Bound Encryption prevents direct cookie extraction,
+        auto_sync_from_browser must return needs_interactive: True.
+        """
+        target = tmp_path / "storage_state.json"
+        target.write_text(json.dumps({"cookies": []}), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_state_path",
+            lambda p: target,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.get_storage_backup_path",
+            lambda p: tmp_path / "backup.json",
+        )
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.discover_browser_user_data_dirs",
+            lambda: {"chrome": tmp_path / "chrome_user_data"},
+        )
+        chrome_default = tmp_path / "chrome_user_data" / "Default"
+        chrome_default.mkdir(parents=True, exist_ok=True)
+        (chrome_default / "Cookies").write_text("dummy", encoding="utf-8")
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.extract_cookies_from_sqlite",
+            lambda c, u: [],
+        )
+
+        res = auto_sync_from_browser(profile="test-profile", expected_email="user@gmail.com")
+        assert res["success"] is False
+        assert res.get("chrome_v20_detected") is True
+        assert res.get("needs_interactive") is True
+        assert "Chrome 127+ App-Bound Encryption" in res.get("error", "")
+
+    def test_api_server_storage_read_marks_expired_on_online_failure(self, tmp_path, monkeypatch):
+        """When online verification caches an auth failure, _read_notebooklm_storage_state
+        must report authenticated=False with expired=True even if local cookies exist.
+        """
+        db_path = str(tmp_path / "vf_storage.db")
+        test_storage = StorageEngine(db_path)
+        monkeypatch.setattr(api_server, "storage", test_storage)
+
+        prof_dir = tmp_path / "test-prof"
+        prof_dir.mkdir(parents=True, exist_ok=True)
+        st_file = prof_dir / "storage_state.json"
+        st_file.write_text(
+            json.dumps({"cookies": _sample_valid_cookies(), "account": {"email": "exp@gmail.com"}}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_state_path", lambda p: st_file)
+        monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path", lambda p: prof_dir / "backup.json")
+
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.login_flow.get_online_verification_cache",
+            lambda p: {"authenticated": False, "status": "error", "message": "Google session expired", "checked_at": time.time()},
+        )
+
+        auth, email, path, details = api_server._read_notebooklm_storage_state("test-prof")
+        assert auth is False
+        assert email == "exp@gmail.com"
+        assert details.get("expired") is True
+
+

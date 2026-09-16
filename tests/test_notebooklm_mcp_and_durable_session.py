@@ -662,6 +662,10 @@ def test_playwright_sync_skips_expired_cookies_during_seeding(tmp_path, monkeypa
         "voice_flow.video_flow_engine.notebooklm.config.get_profile_dir",
         lambda prof=None: tmp_path,
     )
+    monkeypatch.setattr(
+        "voice_flow.storage.storage.get_setting",
+        lambda k, default=None: None,
+    )
 
     added_cookies = []
 

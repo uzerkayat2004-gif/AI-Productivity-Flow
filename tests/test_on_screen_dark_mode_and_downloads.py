@@ -87,17 +87,56 @@ def test_video_flow_composer_dark_mode_tokens(monkeypatch):
 
 
 def test_audio_flow_widget_minimal_circle_dark_mode(monkeypatch):
+    from unittest.mock import MagicMock
     from voice_flow.storage import storage
     from voice_flow.audio_flow_widget import AudioFlowFloatingWidget
 
+    assert AudioFlowFloatingWidget.SIZE == 26
+
     widget = AudioFlowFloatingWidget.__new__(AudioFlowFloatingWidget)
     widget._image_cache = {}
+    widget._hover = None
+    widget._is_playing = False
+    widget._is_paused = False
+    widget._anim_frame = 0
 
     # Light mode
     monkeypatch.setattr(storage, "get_setting", lambda k, default=None: "light" if k == "on_screen_ui_theme" else default)
     assert not widget._is_theme_dark()
 
-    # Dark mode
+    mock_canvas = MagicMock()
+    widget._draw_minimal_vector(mock_canvas, 26, 26)
+    assert mock_canvas.create_oval.called
+    assert mock_canvas.create_line.called
+
+    # Dark mode idle
     monkeypatch.setattr(storage, "get_setting", lambda k, default=None: "dark" if k == "on_screen_ui_theme" else default)
     assert widget._is_theme_dark()
+
+    mock_canvas.reset_mock()
+    widget._draw_minimal_vector(mock_canvas, 26, 26)
+    assert mock_canvas.create_oval.called
+    # Check that dark fill and outline were passed to base circle oval
+    base_oval_kwargs = mock_canvas.create_oval.call_args_list[0][1]
+    assert base_oval_kwargs.get("fill") == "#20201f"
+    assert base_oval_kwargs.get("outline") == "#3b3834"
+
+    # Dark mode hover
+    widget._hover = 0
+    mock_canvas.reset_mock()
+    widget._draw_minimal_vector(mock_canvas, 26, 26)
+    base_oval_kwargs_hover = mock_canvas.create_oval.call_args_list[0][1]
+    assert base_oval_kwargs_hover.get("outline") == "#e6b092"
+
+    # Dark mode playing & paused
+    widget._is_playing = True
+    widget._is_paused = False
+    mock_canvas.reset_mock()
+    widget._draw_minimal_vector(mock_canvas, 26, 26)
+    assert mock_canvas.create_arc.called
+
+    widget._is_paused = True
+    mock_canvas.reset_mock()
+    widget._draw_minimal_vector(mock_canvas, 26, 26)
+    assert mock_canvas.create_polygon.called
 

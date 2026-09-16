@@ -1295,6 +1295,19 @@ def get_login_state() -> dict[str, Any]:
         return {k: v for k, v in _STATE.items() if k != "running"} | {"running": bool(_STATE.get("running"))}
 
 
+def get_online_verification_cache(profile: str | None = None) -> dict[str, Any] | None:
+    """Return the cached online verification result if still valid, or None."""
+    with _STATE_LOCK:
+        cached = _ONLINE_CACHE.get("result")
+        checked_at = float(_ONLINE_CACHE.get("checked_at") or 0)
+        if cached and (time.time() - checked_at) < _ONLINE_CACHE_SECONDS:
+            if not profile or cached.get("profile") == profile:
+                res = dict(cached)
+                res["checked_at"] = checked_at
+                return res
+    return None
+
+
 def verify_online(
     *,
     profile: str | None = None,
@@ -1388,6 +1401,7 @@ def verify_online(
             storage.save_setting("video_flow_notebooklm_authenticated", True)
             storage.save_setting("video_flow_notebooklm_disconnected", False)
             storage.save_setting("video_flow_notebooklm_switched_from", "")
+            storage.save_setting("video_flow_notebooklm_auth_error", "")
         except Exception:
             pass
         try:
@@ -1396,6 +1410,7 @@ def verify_online(
             api_server.storage.save_setting("video_flow_notebooklm_authenticated", True)
             api_server.storage.save_setting("video_flow_notebooklm_disconnected", False)
             api_server.storage.save_setting("video_flow_notebooklm_switched_from", "")
+            api_server.storage.save_setting("video_flow_notebooklm_auth_error", "")
         except Exception:
             pass
         try:
@@ -1429,6 +1444,28 @@ def verify_online(
                         )
         except Exception:
             pass
+    elif not authenticated:
+        try:
+            from voice_flow.storage import storage
+            storage.save_setting("video_flow_notebooklm_authenticated", False)
+            storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+        except Exception:
+            pass
+        try:
+            from voice_flow.gui import api_server
+            api_server.storage.save_setting("video_flow_notebooklm_authenticated", False)
+            api_server.storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+        except Exception:
+            pass
+
+    if not email:
+        try:
+            from voice_flow.storage import storage
+            stored_e = storage.get_setting("video_flow_notebooklm_email")
+            if stored_e:
+                email = str(stored_e).strip()
+        except Exception:
+            pass
 
     verified = {
         "status": "ok" if authenticated else "error",
@@ -1440,6 +1477,6 @@ def verify_online(
         "details_message": str(payload.get("message") or payload.get("error") or "")[:300],
     }
     with _STATE_LOCK:
-        cache_ts = time.time() if authenticated else (time.time() - (_ONLINE_CACHE_SECONDS - 10.0))
+        cache_ts = time.time() if authenticated else (time.time() - (_ONLINE_CACHE_SECONDS - 45.0))
         _ONLINE_CACHE.update(checked_at=cache_ts, result=verified)
     return dict(verified)

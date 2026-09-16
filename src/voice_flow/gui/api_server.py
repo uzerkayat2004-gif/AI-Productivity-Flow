@@ -490,6 +490,42 @@ def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str 
                 except Exception:
                     has_master = False
 
+                recent_cached = None
+                try:
+                    from voice_flow.video_flow_engine.notebooklm.login_flow import get_online_verification_cache
+                    recent_cached = get_online_verification_cache(profile)
+                except Exception:
+                    pass
+
+                # If online verification recently confirmed that this profile's session is expired / invalid,
+                # and storage_state.json hasn't been modified since that check, treat it as unauthenticated/expired!
+                is_expired_online = False
+                if recent_cached and recent_cached.get("authenticated") is False:
+                    checked_at = float(recent_cached.get("checked_at") or time.time())
+                    try:
+                        mtime = storage_path.stat().st_mtime
+                    except Exception:
+                        mtime = 0
+                    if mtime <= checked_at + 1.0:
+                        is_expired_online = True
+
+                auth_error_recorded = storage.get_setting("video_flow_notebooklm_auth_error")
+                is_explicit_unauth = (
+                    is_expired_online
+                    or (auth_setting in (False, "false", "False", 0, "0") and bool(auth_error_recorded))
+                )
+                if is_explicit_unauth:
+                    details = {
+                        "account": {"email": email} if email else {},
+                        "cookies_count": len(cookies) if isinstance(cookies, list) else 0,
+                        "storage_path": str(storage_path),
+                        "master_token_present": has_master,
+                        "psidts_expired": True,
+                        "expired": True,
+                        "reason": (recent_cached and recent_cached.get("message")) or auth_error_recorded or "Google session is no longer valid — sign in again",
+                    }
+                    return False, email, str(storage_path), details
+
                 if has_auth_cookies or has_master or (email and auth_setting in (True, "true", "True", 1, "1")) or (email and auth_setting not in (False, "false", "False", 0, "0") and cookies):
                     # Auto-heal primary storage_state.json if reading from backup or safe copy
                     try:
@@ -1407,7 +1443,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     online_verified = None
                     if details.get("disconnected") or not authenticated:
                         authenticated = False
-                        email = None
+                        if details.get("disconnected"):
+                            email = None
                         online_verified = False
                     elif params.get("verify", ["0"])[0] in ("1", "true"):
                         try:
@@ -1490,6 +1527,23 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         except Exception:
                             online_verified = None
 
+                    if params.get("verify", ["0"])[0] not in ("1", "true") and online_verified is None and authenticated:
+                        try:
+                            from voice_flow.video_flow_engine.notebooklm.login_flow import get_online_verification_cache
+                            recent_cached = get_online_verification_cache(profile)
+                            if recent_cached:
+                                c_auth = recent_cached.get("authenticated")
+                                if c_auth is True:
+                                    online_verified = True
+                                elif c_auth is False:
+                                    c_msg = str(recent_cached.get("message") or "").lower()
+                                    is_net = any(t in c_msg for t in ("timeout", "timed out", "connection", "network", "socket", "unreachable"))
+                                    if not is_net:
+                                        online_verified = False
+                                        authenticated = False
+                        except Exception:
+                            pass
+
                     # Calculate cookie health and expiration
                     cookie_health = {"status": "healthy", "expires_in_seconds": None, "message": "Session healthy"}
                     if authenticated and storage_path and Path(storage_path).is_file():
@@ -1517,14 +1571,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                     cookie_health["message"] = f"Session expiring in {mins}m — click Sync Browser to refresh"
                         except Exception:
                             pass
-                    if online_verified is False and not authenticated:
-                        cookie_health["status"] = "expired"
-                        cookie_health["message"] = "Session disconnected — click Sync Browser or Log in to connect"
+                    if not authenticated:
+                        cookie_health["status"] = "expired" if (online_verified is False or details.get("expired")) else "disconnected"
+                        cookie_health["message"] = "Google session expired — click Log in to NotebookLM to reconnect" if (online_verified is False or details.get("expired")) else "NotebookLM is not connected — please log in"
 
                     message = (
                         "Authenticated successfully" if authenticated
                         else ("Session disconnected — click Log in to NotebookLM" if details.get("disconnected")
-                              else ("Google session is no longer valid — sign in again" if online_verified is False
+                              else ("Google session is no longer valid — sign in again" if (online_verified is False or details.get("expired"))
                                     else "NotebookLM is not connected — please log in"))
                     )
                     try:
@@ -3994,10 +4048,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         try:
                             storage.save_setting("video_flow_notebooklm_disconnected", False)
                             storage.save_setting("video_flow_notebooklm_authenticated", True)
+                            storage.save_setting("video_flow_notebooklm_auth_error", "")
                             if res.get("email"):
                                 storage.save_setting("video_flow_notebooklm_email", res.get("email"))
                         except Exception:
                             pass
+                    else:
+                        if res.get("chrome_v20_detected"):
+                            res["needs_interactive"] = True
                     self.send_json_response(res, 200 if res.get("success") else 400)
                 elif path == "/api/video-flow/notebooklm/auth/import-cookies":
                     from voice_flow.video_flow_engine.notebooklm import browser_sync

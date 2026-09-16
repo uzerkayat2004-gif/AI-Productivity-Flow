@@ -303,9 +303,9 @@ def test_audio_summary_widget_geometry_and_attached_stages():
     assert widget.STAGE_MODE_SELECT == "mode_select"
     assert widget.STAGE_DEPTH_SELECT == "depth_select"
 
-    # Test dimension calculations (Sunrise spacious geometry)
+    # Test dimension calculations (Sunrise sleek geometry)
     widget._stage = widget.STAGE_MINIMAL
-    assert widget._get_current_dimensions() == (30, 30)
+    assert widget._get_current_dimensions() == (26, 26)
 
     widget._stage = widget.STAGE_MODE_SELECT
     assert widget._get_current_dimensions() == (286, 32)
