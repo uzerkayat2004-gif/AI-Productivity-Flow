@@ -821,6 +821,27 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             report = get_backend().permission_report()
             self.send_json_response({"success": True, **report.to_dict()})
             return
+        if path == "/api/platform/info":
+            import platform as _stdlib_plat
+            from voice_flow.platform import get_backend
+            backend = get_backend()
+            is_mac = sys.platform == "darwin"
+            arch = _stdlib_plat.machine()
+            self.send_json_response({
+                "success": True,
+                "platform": backend.name,
+                "is_macos": is_mac,
+                "is_windows": sys.platform == "win32",
+                "os_name": "macOS" if is_mac else "Windows",
+                "arch": arch,
+                "hotkey_default": "Cmd + Option" if is_mac else "Ctrl + Win",
+                "taskbar_label": "Show in Dock" if is_mac else "Show in Taskbar",
+                "taskbar_tip": "Shows Voice Flow in the macOS Dock while running." if is_mac else "Shows Voice Flow in the Windows taskbar while the window is open. Turn off to keep it tray-only.",
+                "autostart_tip": "Launches Voice Flow silently on macOS login via LaunchAgent." if is_mac else "Launches Voice Flow silently on Windows boot via the Registry Run key.",
+                "runtime_tip": f"Local API server with local speech-to-text on {'macOS' if is_mac else 'Windows 10/11 x64'}.",
+                "runtime_badge": f"macOS ({arch})" if is_mac else "Win x64",
+            })
+            return
         if path == "/api/auth/status":
             _sync_active_storage()
             from voice_flow.account_manager import get_account_manager
@@ -1002,13 +1023,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "message": "Floating bar shown and position reset"})
         elif path == "/api/settings/autostart/status":
             try:
-                from voice_flow.installer import is_autostart_enabled
-                stored = storage.get_setting("autostart_enabled", None)
-                if stored is None:
-                    enabled = is_autostart_enabled()
-                    storage.save_setting("autostart_enabled", enabled)
-                else:
-                    enabled = bool(stored)
+                from voice_flow.platform import get_backend
+                enabled = get_backend().get_launch_at_login()
+                storage.save_setting("autostart_enabled", enabled)
                 self.send_json_response({"success": True, "enabled": enabled})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc), "enabled": False}, 500)
@@ -1053,12 +1070,18 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "voice_flow_polish_model": "local/deterministic",
                 "voice_flow_polish_speed_mode": "balanced",
                 "audio_flow_speed": 1.0,
+                "on_screen_ui_theme": "light",
             }
             default_val = defaults.get(key, None)
             val = storage.get_setting(key, default_val)
             self.send_json_response({"success": True, "key": key, "value": val})
         elif path == "/api/settings/theme":
             theme = str(storage.get_setting("vf_theme", "light") or "light").strip().lower()
+            if theme not in ("dark", "light"):
+                theme = "light"
+            self.send_json_response({"success": True, "theme": theme})
+        elif path == "/api/settings/on-screen-ui-theme":
+            theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
             if theme not in ("dark", "light"):
                 theme = "light"
             self.send_json_response({"success": True, "theme": theme})
@@ -3754,10 +3777,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif path == "/api/settings/autostart/toggle":
             try:
                 enabled = bool(data.get("enabled", False))
-                from voice_flow.installer import set_autostart
-                ok = set_autostart(enabled)
+                from voice_flow.platform import get_backend
+                backend = get_backend()
+                ok = backend.set_launch_at_login(enabled)
                 storage.save_setting("autostart_enabled", enabled)
-                msg = "Auto-startup enabled (Windows boot)." if enabled else "Auto-startup disabled."
+                os_label = "macOS login" if backend.name == "macos" else "Windows boot"
+                msg = f"Auto-startup {'enabled' if enabled else 'disabled'} ({os_label})."
                 self.send_json_response({"success": ok, "enabled": enabled, "message": msg})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
@@ -5032,6 +5057,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Theme must be light or dark"}, 400)
             else:
                 storage.save_setting("vf_theme", theme)
+                self.send_json_response({"success": True, "theme": theme})
+
+        elif path == "/api/settings/on-screen-ui-theme":
+            theme = str(data.get("theme", "") or data.get("value", "") or "").strip().lower()
+            if theme not in ("light", "dark"):
+                self.send_json_response({"success": False, "error": "Theme must be light or dark"}, 400)
+            else:
+                storage.save_setting("on_screen_ui_theme", theme)
                 self.send_json_response({"success": True, "theme": theme})
 
         elif path == "/api/voice-flow-stt/update":

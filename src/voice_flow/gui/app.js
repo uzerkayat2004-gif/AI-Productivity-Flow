@@ -2668,8 +2668,40 @@ function openSettings(tab = "general") {
       const toggle = document.getElementById("toggle-show-in-taskbar");
       if (toggle) toggle.checked = res ? res.value !== false : true;
     }).catch(() => {});
+    // Sync On-Screen UI Color theme
+    safeFetchJson("/api/settings/get?key=on_screen_ui_theme").then(res => {
+      const theme = (res && res.value) || localStorage.getItem("on_screen_ui_theme") || "light";
+      updateOnScreenUIThemeButtons(theme);
+    }).catch(() => {});
     // Sync Auto-Startup status
     checkAutoStartStatus();
+  }
+}
+
+async function setOnScreenUITheme(theme) {
+  theme = theme === "dark" ? "dark" : "light";
+  try {
+    updateOnScreenUIThemeButtons(theme);
+    try { localStorage.setItem("on_screen_ui_theme", theme); } catch (_) {}
+    await safeFetchJson("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "on_screen_ui_theme", value: theme })
+    });
+    if (typeof vfToast === "function") {
+      vfToast(`On-screen UI color set to ${theme === "dark" ? "Dark Mode" : "Light Mode"}.`);
+    }
+  } catch (err) {
+    console.warn("Could not save on-screen UI theme:", err);
+  }
+}
+
+function updateOnScreenUIThemeButtons(theme) {
+  const btnLight = document.getElementById("btn-on-screen-light");
+  const btnDark = document.getElementById("btn-on-screen-dark");
+  if (btnLight && btnDark) {
+    btnLight.classList.toggle("active", theme === "light");
+    btnDark.classList.toggle("active", theme === "dark");
   }
 }
 
@@ -2685,7 +2717,9 @@ async function checkAutoStartStatus() {
         if (toggle.parentElement) {
           toggle.parentElement.style.opacity = "1";
           toggle.parentElement.style.cursor = "pointer";
-          toggle.parentElement.title = "Toggle Windows Auto-Startup";
+          toggle.parentElement.title = (window.vfPlatformInfo && window.vfPlatformInfo.is_macos)
+            ? "Toggle macOS Auto-Startup"
+            : "Toggle Windows Auto-Startup";
         }
       }
       if (badge) {
@@ -9503,7 +9537,97 @@ async function initMacOSPermissionsOnboarding() {
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => setTimeout(initMacOSPermissionsOnboarding, 600));
+  document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(initMacOSPermissionsOnboarding, 600);
+    initPlatformAdaptation();
+  });
 } else {
   setTimeout(initMacOSPermissionsOnboarding, 600);
+  initPlatformAdaptation();
 }
+
+// =============================================================================
+// Cross-Platform UI Adaptation (macOS vs Windows)
+// =============================================================================
+window.vfPlatformInfo = null;
+
+async function initPlatformAdaptation() {
+  try {
+    const res = await fetch("/api/platform/info");
+    if (!res.ok) return;
+    const info = await res.json();
+    if (!info || !info.success) return;
+    window.vfPlatformInfo = info;
+
+    const isMac = !!info.is_macos;
+
+    // 1. Runtime badge in Settings > System
+    const runtimeBadge = document.getElementById("runtime-os-badge");
+    if (runtimeBadge && info.runtime_badge) {
+      runtimeBadge.textContent = info.runtime_badge;
+    }
+
+    // 2. Runtime tooltip
+    const runtimeTip = document.getElementById("runtime-tip-span");
+    if (runtimeTip && info.runtime_tip) {
+      runtimeTip.setAttribute("data-tip", info.runtime_tip);
+    }
+
+    // 3. Auto-Startup tooltip
+    const autostartTip = document.getElementById("autostart-tip-span");
+    if (autostartTip && info.autostart_tip) {
+      autostartTip.setAttribute("data-tip", info.autostart_tip);
+    }
+
+    // 4. Show in Taskbar / Dock title & tooltip
+    const taskbarTitle = document.getElementById("show-in-taskbar-title");
+    if (taskbarTitle && info.taskbar_label) {
+      const tipSpan = document.getElementById("show-in-taskbar-tip");
+      const tipAttr = tipSpan ? tipSpan.outerHTML : "";
+      taskbarTitle.innerHTML = `${info.taskbar_label} ${tipAttr}`;
+      const updatedTip = document.getElementById("show-in-taskbar-tip");
+      if (updatedTip && info.taskbar_tip) {
+        updatedTip.setAttribute("data-tip", info.taskbar_tip);
+      }
+    }
+
+    // 5. Onboarding tagline & dictation description
+    const obTagline = document.getElementById("onboarding-tagline");
+    if (obTagline) {
+      obTagline.textContent = isMac
+        ? "Your complete voice-driven productivity suite for macOS."
+        : "Your complete voice-driven productivity suite for Windows.";
+    }
+
+    const obDictate = document.getElementById("onboarding-dictate-desc");
+    if (obDictate) {
+      obDictate.textContent = isMac
+        ? "Speak your thoughts & dictate across any Mac application"
+        : "Speak your thoughts & dictate across any Windows application";
+    }
+
+    // 6. Hotkey select options and pill
+    if (isMac) {
+      const pttKbd = document.getElementById("ptt-current-kbd");
+      if (pttKbd && pttKbd.textContent.includes("Ctrl+Win")) {
+        pttKbd.textContent = "Cmd+Opt";
+      }
+
+      const hotkeySelects = document.querySelectorAll("#hotkey-trigger-select, #settings-hotkey-select");
+      hotkeySelects.forEach((sel) => {
+        const opt = sel.querySelector('option[value="ctrl_win"]');
+        if (opt) {
+          opt.textContent = "Cmd + Option (Default)";
+        }
+      });
+
+      const hotkeyHint = document.getElementById("record-hotkey-hint");
+      if (hotkeyHint) {
+        hotkeyHint.innerHTML = "Click <b>Record Any Key</b>, then press any single key (e.g. F8, Space) or combination (Cmd+Opt, Option+Space, Cmd+Shift+D).";
+      }
+    }
+  } catch (err) {
+    console.debug("[PLATFORM] Platform adaptation check skipped:", err);
+  }
+}
+

@@ -383,3 +383,50 @@ def test_wincompat_monkeypatches_ctypes():
     assert hasattr(ctypes, "wintypes")
 
 
+def test_api_server_platform_info_endpoint():
+    from http.server import ThreadingHTTPServer
+    import json
+    import threading
+    import urllib.request
+    from voice_flow.gui.api_server import VoiceFlowApiHandler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
+    server.daemon_threads = True
+    server.block_on_close = False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/api/platform/info"
+        req = urllib.request.Request(url, headers={"Connection": "close"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.load(resp)
+        assert data["success"] is True
+        assert data["platform"] in ("windows", "macos", "null")
+        assert "is_macos" in data
+        assert "is_windows" in data
+        assert "os_name" in data
+        assert "runtime_badge" in data
+        assert "taskbar_label" in data
+        assert "autostart_tip" in data
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_mouse_hook_cursor_pos_safe():
+    from voice_flow import mouse_hook
+
+    pos = mouse_hook._get_cursor_pos()
+    assert pos is None or (isinstance(pos, tuple) and len(pos) == 2)
+
+
+def test_nemo_speech_dylib_candidate_included():
+    import inspect
+    from voice_flow import nemotron_engine
+
+    src = inspect.getsource(nemotron_engine._find_nemo_speech_dll)
+    assert "libnemo_speech_asr_c.dylib" in src
+
+
+

@@ -73,6 +73,17 @@ if IS_WINDOWS:
     user32.CallNextHookEx.restype = LRESULT
 
 
+def _get_cursor_pos() -> tuple[int, int] | None:
+    if IS_WINDOWS and user32:
+        try:
+            pt = wintypes.POINT()
+            if user32.GetCursorPos(ctypes.byref(pt)):
+                return (int(pt.x), int(pt.y))
+        except Exception:
+            pass
+    return None
+
+
 class Win32MouseHook:
     """Robust Win32 Low-Level Mouse Hook with auto-recovery and thread safety."""
 

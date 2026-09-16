@@ -9,7 +9,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <title>AI Productivity Flow</title>
-  <meta name="description" content="Voice Flow — voice dictation, selected-text audio, and visual explainer videos on Windows.">
+  <meta name="description" content="Voice Flow — voice dictation, selected-text audio, and visual explainer videos across all your apps.">
 
   <link rel="manifest" href="manifest.json">
 
@@ -2270,7 +2270,7 @@
         </div>
         <div class="onboarding-logo"><img src="assets/logo.png" alt="AI Productivity Flow" class="onboarding-logo-img"></div>
         <h1 class="onboarding-title">Welcome to AI Productivity Flow</h1>
-        <p class="onboarding-tagline">Your complete voice-driven productivity suite for Windows.</p>
+        <p class="onboarding-tagline" id="onboarding-tagline">Your complete voice-driven productivity suite.</p>
         <div class="onboarding-features">
           <div class="onboarding-feature-card">
             <span class="onboarding-feature-icon">🔊</span>
@@ -2359,7 +2359,7 @@
         <ul class="onboarding-tools">
           <li><span>🔊</span><div><strong>1. Audio Summary</strong><small>Convert long articles &amp; text into spoken summaries</small></div></li>
           <li><span>🎬</span><div><strong>2. Visual Summary</strong><small>Transform documents into animated visual explainer videos</small></div></li>
-          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small>Speak your thoughts &amp; dictate across any Windows application</small></div></li>
+          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small id="onboarding-dictate-desc">Speak your thoughts &amp; dictate across any application</small></div></li>
           <li><span>📄</span><div><strong>4. Article Conversion</strong><small>Convert articles into audio or visual formats</small></div></li>
           <li><span>📊</span><div><strong>5. Insights &amp; History</strong><small>Track telemetry, speaking velocity, streaks, and dictionary</small></div></li>
         </ul>
@@ -2478,6 +2478,17 @@
 <button class="action-btn" onclick="showFloatingOverlay()">Show Bar</button>
 <button class="action-btn" onclick="resetFloatingOverlayPosition()">Reset Position</button>
 </div>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">On-Screen UI &amp; Appearance</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">On-Screen UI Color <span aria-label="About On-Screen UI Color" class="info-tip" data-tip="Choose light mode or dark mode for on-screen popups and player windows. Resting floating bar remains unchanged." tabindex="0">i</span></div>
+<div class="setting-desc" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 2px;">Color type for on-screen summary players and dialogs (resting floating bar stays in resting design)</div>
+</div>
+<div class="vf-row-control">
+<div class="button-group" id="on-screen-ui-theme-group" style="display: inline-flex; gap: 4px;">
+<button type="button" class="action-btn active" id="btn-on-screen-light" onclick="setOnScreenUITheme('light')">Light Mode</button>
+<button type="button" class="action-btn" id="btn-on-screen-dark" onclick="setOnScreenUITheme('dark')">Dark Mode</button>
+</div>
+</div>
 </div></div></section>
 </div>
 <!-- TAB: ACCOUNT -->
@@ -2568,7 +2579,7 @@
 </div>
 <section class="preference-section"><h4 class="preference-section-title">Startup &amp; visibility</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Auto-Startup <span aria-label="About Auto-Startup" class="info-tip" data-tip="Launches Voice Flow silently on Windows boot via the Registry Run key." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
+<div class="setting-title">Auto-Startup <span aria-label="About Auto-Startup" class="info-tip" id="autostart-tip-span" data-tip="Launches Voice Flow silently on system boot." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
 </div>
 <label class="toggle-switch">
 <input id="toggle-autostart" onchange="toggleAutoStartSetting(this.checked)" type="checkbox"/>
@@ -2576,7 +2587,7 @@
 </label>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Show in Taskbar <span aria-label="About Show in Taskbar" class="info-tip" data-tip="Shows Voice Flow in the Windows taskbar while the window is open. Turn off to keep it tray-only." tabindex="0">i</span></div>
+<div class="setting-title" id="show-in-taskbar-title">Show in Taskbar <span aria-label="About Show in Taskbar" class="info-tip" id="show-in-taskbar-tip" data-tip="Shows Voice Flow in the system dock / taskbar while the window is open. Turn off to keep it tray-only." tabindex="0">i</span></div>
 </div>
 <label class="toggle-switch">
 <input checked="" id="toggle-show-in-taskbar" onchange="toggleShowInTaskbarSetting(this.checked)" type="checkbox"/>
@@ -2594,9 +2605,9 @@
 <button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">App information &amp; help</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" data-tip="Local API server with local speech-to-text on Windows 10/11 x64." tabindex="0">i</span></div>
+<div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" id="runtime-tip-span" data-tip="Local API server with local speech-to-text." tabindex="0">i</span></div>
 </div>
-<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Local STT</span><span aria-hidden="true">·</span><span>Win x64</span></div>
+<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Local STT</span><span aria-hidden="true">·</span><span id="runtime-os-badge">Win x64</span></div>
 </div><div class="setting-row" style="border-bottom: none;">
 <div class="setting-info">
 <div class="setting-title">Onboarding <span aria-label="About Onboarding" class="info-tip" data-tip="Replays the voice-narrated welcome tour and product introduction." tabindex="0">i</span></div>

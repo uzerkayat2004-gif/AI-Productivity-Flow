@@ -99,11 +99,13 @@ class _RecognitionOptions(ctypes.Structure):
 
 
 def _find_nemo_speech_dll() -> Path | None:
-    """Find native NeMo-Speech C ABI DLL (nemo_speech_asr_c.dll) if available."""
+    """Find native NeMo-Speech C ABI DLL/dylib (nemo_speech_asr_c) if available."""
     candidates = [
         paths.data_dir() / "bin" / "nemo_speech_asr_c.dll",
+        paths.data_dir() / "bin" / "libnemo_speech_asr_c.dylib",
         paths.data_dir() / "bin" / "libnemo_speech_asr_c.so",
         paths.data_dir() / "models" / "nemo_speech_asr_c.dll",
+        paths.data_dir() / "models" / "libnemo_speech_asr_c.dylib",
     ]
     try:
         from voice_flow import runtime_env
@@ -112,7 +114,9 @@ def _find_nemo_speech_dll() -> Path | None:
         if r_root:
             candidates.extend([
                 r_root / "bin" / "nemo_speech_asr_c.dll",
+                r_root / "bin" / "libnemo_speech_asr_c.dylib",
                 r_root / "nemo" / "nemo_speech_asr_c.dll",
+                r_root / "nemo" / "libnemo_speech_asr_c.dylib",
             ])
     except Exception:
         pass
@@ -121,9 +125,10 @@ def _find_nemo_speech_dll() -> Path | None:
         if c.is_file():
             return c
 
-    exe_on_path = shutil.which("nemo_speech_asr_c.dll")
-    if exe_on_path:
-        return Path(exe_on_path)
+    for name in ("nemo_speech_asr_c.dll", "libnemo_speech_asr_c.dylib", "libnemo_speech_asr_c.so"):
+        exe_on_path = shutil.which(name)
+        if exe_on_path:
+            return Path(exe_on_path)
     return None
 
 
