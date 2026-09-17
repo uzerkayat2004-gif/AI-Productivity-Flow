@@ -190,6 +190,13 @@ def _sync_active_storage() -> None:
             return
         if storage.repoint_if_needed():
             invalidate_history_cache()
+        try:
+            from voice_flow.video_flow_service import get_video_flow_service
+            vf_srv = get_video_flow_service()
+            if hasattr(vf_srv, "store") and hasattr(vf_srv.store, "repoint_if_needed"):
+                vf_srv.store.repoint_if_needed()
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -5186,9 +5193,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         except Exception:
                             pass
 
-            video_title = req_title or meta_title or f"video_{video_id}"
-            if meta_title and len(meta_title) > len(req_title):
-                video_title = meta_title
+            video_title = (req_title or meta_title or f"video_{video_id}").strip()
 
             path_cand = None
             if job is not None and meta.get("output_path"):
@@ -5245,8 +5250,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 video_title,
                 default=f"video_{video_id[:8]}",
                 ext=".mp4",
-                source_text=source_text,
-                prompt=meta.get("prompt"),
+                source_text=source_text if not req_title else None,
+                prompt=meta.get("prompt") if not req_title else None,
             )
             try:
                 saved_path, final_name = save_media_to_downloads(path_cand, clean_filename)
@@ -5304,7 +5309,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 audio_title or audio_path.stem,
                 default="Audio_Summary",
                 ext=format_ext,
-                source_text=source_snippet,
+                source_text=source_snippet if not req_title else None,
             )
             try:
                 saved_path, final_name = save_media_to_downloads(audio_path, clean_filename)

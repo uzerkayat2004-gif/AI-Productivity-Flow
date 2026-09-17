@@ -1512,21 +1512,54 @@ async function loadHistory() {
 function renderDictationCardHtml(r) {
   const timeStr = r.timestamp && r.timestamp.includes(" ") ? r.timestamp.split(" ")[1].substring(0, 5) : "";
   const isPinned = Boolean(r.is_pinned);
+  const isVideo = r.app_name === "Video Flow" || r.style_mode === "video_flow";
+  const isAudio = r.app_name === "Audio Flow" || r.style_mode === "audio_flow" || r.style_mode === "audio_summary";
+  const mediaId = r.insertion_status || r.audio_path || "";
+  const titleText = r.polished_text || (isVideo ? "Video Flow Project" : (isAudio ? "Audio Summary" : ""));
+
+  let badgeHtml = `<span class="app-badge">${escapeHtml(r.app_name || "General")}</span>`;
+  let metaDetails = `<span style="font-size: 12px; color: var(--text-muted);">• ${r.word_count || 0} words (${r.wpm_speed || 0} wpm)</span>`;
+  let mediaActions = "";
+
+  if (isVideo) {
+    badgeHtml = `<span class="app-badge video-flow-badge" style="background: rgba(99, 102, 241, 0.16); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); font-weight: 600;"><svg class="lucide" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg> Video Flow</span>`;
+    const durStr = r.duration_sec ? `${Math.round(r.duration_sec)}s • ` : "";
+    metaDetails = `<span style="font-size: 12px; color: var(--text-muted);">• ${durStr}${escapeHtml(r.status || "complete")}</span>`;
+    mediaActions = `
+      <button type="button" onclick="playVideoFromChatCard('${escapeJs(mediaId)}', '${escapeJs(titleText)}')" class="action-btn watch-btn" title="Watch video"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Watch</button>
+      <button type="button" onclick="downloadVideoFromChatCard('${escapeJs(mediaId)}', '${escapeJs(titleText)}', this)" class="action-btn download-btn" title="Download video to Videos and Downloads"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download</button>
+    `;
+  } else if (isAudio) {
+    badgeHtml = `<span class="app-badge audio-flow-badge" style="background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 600;"><svg class="lucide" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg> Audio Flow</span>`;
+    const durStr = r.duration_sec ? `${Math.round(r.duration_sec)}s • ` : "";
+    metaDetails = `<span style="font-size: 12px; color: var(--text-muted);">• ${durStr}${r.word_count || 0} words</span>`;
+    mediaActions = `
+      <button type="button" onclick="playAudioFromChatCard('${escapeJs(mediaId)}', '${escapeJs(titleText)}')" class="action-btn listen-btn" title="Listen to audio"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Listen</button>
+      <button type="button" onclick="downloadAudioFromChatCard('${escapeJs(mediaId)}', '${escapeJs(titleText)}', this)" class="action-btn download-btn" title="Download audio to Music and Downloads"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download</button>
+    `;
+  }
+
+  const promptSubtitle = (isVideo || isAudio) && r.raw_text && r.raw_text !== r.polished_text
+    ? `<div style="font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.4; max-height: 2.8em; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.raw_text)}</div>`
+    : "";
+
   return `
-    <div class="dictation-card ${isPinned ? "is-pinned" : ""}" id="dictation-card-${r.id}">
+    <div class="dictation-card ${isPinned ? "is-pinned" : ""} ${isVideo ? "is-video-flow" : ""} ${isAudio ? "is-audio-flow" : ""}" id="dictation-card-${r.id}">
       <div class="dictation-time">${timeStr}</div>
       <div class="dictation-body">
         <div class="dictation-meta">
-          <span class="app-badge">${escapeHtml(r.app_name || "General")}</span>
+          ${badgeHtml}
           ${isPinned ? `<span class="pinned-badge"><svg class="lucide" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg> Pinned</span>` : ""}
-          <span style="font-size: 12px; color: var(--text-muted);">• ${r.word_count || 0} words (${r.wpm_speed || 0} wpm)</span>
+          ${metaDetails}
         </div>
-        <div class="dictation-text">${escapeHtml(r.polished_text || "")}</div>
+        <div class="dictation-text" style="${(isVideo || isAudio) ? "font-weight: 600;" : ""}">${escapeHtml(titleText)}</div>
+        ${promptSubtitle}
       </div>
       <div class="dictation-actions">
-        <button type="button" onclick="copyToClipboard('${escapeJs(r.polished_text || "")}', this)" class="action-btn" title="Copy transcript to clipboard"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg> Copy</button>
+        ${mediaActions}
+        <button type="button" onclick="copyToClipboard('${escapeJs(r.polished_text || "")}', this)" class="action-btn" title="Copy text to clipboard"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg> Copy</button>
         <button type="button" onclick="toggleHistoryPin(${r.id})" class="action-btn ${isPinned ? "pinned" : ""}" title="${isPinned ? "Unpin — remove from top" : "Pin — keep at top"}">${isPinned ? '<svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg> Pinned' : '<svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg> Pin'}</button>
-        <button type="button" onclick="deleteHistoryRecord(${r.id})" class="action-btn delete-btn" title="Delete this dictation"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Delete</button>
+        <button type="button" onclick="deleteHistoryRecord(${r.id})" class="action-btn delete-btn" title="Delete this entry"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg> Delete</button>
       </div>
     </div>
   `;
@@ -1633,11 +1666,138 @@ function filterHistory() {
     return;
   }
   const filtered = allHistoryRecords.filter(r =>
-    r.polished_text.toLowerCase().includes(query) ||
-    r.app_name.toLowerCase().includes(query)
+    (r.polished_text || "").toLowerCase().includes(query) ||
+    (r.raw_text || "").toLowerCase().includes(query) ||
+    (r.app_name || "").toLowerCase().includes(query)
   );
   renderHistoryFeed(filtered);
 }
+
+async function playVideoFromChatCard(videoId, title) {
+  if (!videoId) return;
+  if (typeof previewVideoFlow === "function") {
+    if (typeof vfVideos !== "undefined" && Array.isArray(vfVideos)) {
+      const vid = vfVideos.find(v => String(v.id) === String(videoId) || String(v.job_id) === String(videoId));
+      if (vid) {
+        previewVideoFlow(vid.id);
+        return;
+      }
+    }
+  }
+  const player = document.getElementById("vf-preview-player");
+  const modalTitle = document.getElementById("vf-preview-title");
+  const previewModal = document.getElementById("vf-preview-modal");
+  if (player && previewModal) {
+    const viewUrl = `/api/video-flow/videos/file?id=${encodeURIComponent(videoId)}`;
+    player.src = viewUrl;
+    player.load();
+    player.play().catch(() => {});
+    if (modalTitle) modalTitle.textContent = title || "Video Preview";
+    previewModal.classList.remove("hidden");
+    return;
+  }
+  if (typeof switchTab === "function") {
+    switchTab("video-flow");
+    if (typeof vfFlowShowTab === "function") {
+      vfFlowShowTab("library");
+    }
+  }
+}
+
+async function downloadVideoFromChatCard(videoId, title, btn) {
+  if (!videoId) return;
+  const originalHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="lucide spin" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg> Saving...`;
+  }
+  try {
+    const res = await fetch("/api/video-flow/videos/save-to-downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_id: videoId, title: title || "" })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (btn) {
+        btn.innerHTML = `<svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved`;
+        btn.classList.add("is-downloaded");
+        btn.disabled = false;
+      }
+      showToast(`Saved "${data.filename}" to Videos & Downloads`, "✓");
+    } else {
+      throw new Error(data.error || "Save failed");
+    }
+  } catch (err) {
+    if (btn) {
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+    }
+    showToast(`Download error: ${err.message}`, "⚠️");
+  }
+}
+
+async function playAudioFromChatCard(audioId, title) {
+  if (!audioId) return;
+  if (typeof playSummaryAudio === "function") {
+    try {
+      playSummaryAudio(audioId);
+      return;
+    } catch (_) {}
+  }
+  const streamUrl = `/api/audio-flow/summary/stream?id=${encodeURIComponent(audioId)}`;
+  let audioEl = document.getElementById("chat-card-audio-player");
+  if (!audioEl) {
+    audioEl = document.createElement("audio");
+    audioEl.id = "chat-card-audio-player";
+    audioEl.style.display = "none";
+    document.body.appendChild(audioEl);
+  }
+  audioEl.src = streamUrl;
+  audioEl.play().then(() => {
+    showToast(`Playing audio: "${title || 'Audio Summary'}"`, "▶");
+  }).catch(e => {
+    showToast(`Could not play audio: ${e.message}`, "⚠️");
+  });
+}
+
+async function downloadAudioFromChatCard(audioId, title, btn) {
+  if (!audioId) return;
+  const originalHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="lucide spin" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg> Saving...`;
+  }
+  try {
+    const res = await fetch("/api/audio-flow/summary/save-to-downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: audioId, title: title || "" })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (btn) {
+        btn.innerHTML = `<svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved`;
+        btn.classList.add("is-downloaded");
+        btn.disabled = false;
+      }
+      showToast(`Saved "${data.filename}" to Music & Downloads`, "✓");
+    } else {
+      throw new Error(data.error || "Save failed");
+    }
+  } catch (err) {
+    if (btn) {
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+    }
+    showToast(`Download error: ${err.message}`, "⚠️");
+  }
+}
+
+window.playVideoFromChatCard = playVideoFromChatCard;
+window.downloadVideoFromChatCard = downloadVideoFromChatCard;
+window.playAudioFromChatCard = playAudioFromChatCard;
+window.downloadAudioFromChatCard = downloadAudioFromChatCard;
 
 function _localDateKey(date) {
   // Storage serves local-naive dates; toISOString() would shift them to UTC.

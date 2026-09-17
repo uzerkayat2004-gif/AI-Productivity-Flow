@@ -2141,6 +2141,14 @@ class VoiceFlowApp:
                             duration_sec=duration_sec,
                             title=title_param,
                         )
+                        storage.record_audio_summary_to_history(
+                            audio_id=history_id,
+                            title=title_param,
+                            text_snippet=text_to_read,
+                            audio_path=audio_path,
+                            duration_sec=duration_sec,
+                            status="success",
+                        )
                     except Exception as hexc:
                         log.debug("Failed to update audio summary history: %s", hexc)
 
@@ -2160,6 +2168,13 @@ class VoiceFlowApp:
                 except Exception as exc:
                     try:
                         storage.update_audio_summary_history(history_id, status="failed", error=str(exc))
+                        storage.record_audio_summary_to_history(
+                            audio_id=history_id,
+                            title=summary_title,
+                            text_snippet=text_to_read,
+                            status="error",
+                            error_message=str(exc),
+                        )
                     except Exception:
                         pass
                     if self._audio_summary_generation != gen_token:

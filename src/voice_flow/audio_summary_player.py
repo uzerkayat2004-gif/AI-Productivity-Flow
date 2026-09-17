@@ -198,8 +198,113 @@ def get_user_downloads_dir() -> Path:
     return Path.home()
 
 
-def save_media_to_downloads(source_path: Path | str, filename: str) -> tuple[Path, str]:
-    """Copy source_path into the user's Downloads folder with collision handling."""
+def get_user_videos_dir() -> Path:
+    """Return the user's primary Videos directory across Windows / macOS / Linux.
+
+    On Windows, accurately respects user-redirected Videos folders (e.g. D:\\Videos)
+    via Windows Shell Known Folder API and Registry User Shell Folders.
+    """
+    if sys.platform.startswith("win"):
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+            for key_name in ("My Video", "{352481E8-33BE-4251-BA85-6007CAEDCF9D}", "{1898EB52-7CD9-451B-AD22-04E9C05B4737}"):
+                try:
+                    val, _ = winreg.QueryValueEx(k, key_name)
+                    if val:
+                        p = Path(os.path.expandvars(val))
+                        if p.is_dir():
+                            return p
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            from ctypes import wintypes
+            import uuid
+            folderid = uuid.UUID("{1898EB52-7CD9-451B-AD22-04E9C05B4737}").bytes_le
+            buf = wintypes.LPWSTR()
+            res = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.c_char_p(folderid), 0, None, ctypes.byref(buf))
+            if res == 0 and buf.value:
+                p = Path(buf.value)
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+        try:
+            profile = os.environ.get("USERPROFILE")
+            if profile:
+                p = Path(profile) / "Videos"
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+    vid = Path.home() / "Videos"
+    if vid.is_dir():
+        return vid
+    return get_user_downloads_dir()
+
+
+def get_user_music_dir() -> Path:
+    """Return the user's primary Music directory across Windows / macOS / Linux.
+
+    On Windows, accurately respects user-redirected Music folders (e.g. D:\\Music)
+    via Registry User Shell Folders and Windows Shell Known Folder API.
+    """
+    if sys.platform.startswith("win"):
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+            for key_name in ("My Music", "{4BD8D570-50BA-4FF6-A5EE-3821B30E4027}", "{A0C69A7B-04C8-4E47-9B0E-6B3BA0E80138}"):
+                try:
+                    val, _ = winreg.QueryValueEx(k, key_name)
+                    if val:
+                        p = Path(os.path.expandvars(val))
+                        if p.is_dir():
+                            return p
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            from ctypes import wintypes
+            import uuid
+            folderid = uuid.UUID("{4BD8D570-50BA-4FF6-A5EE-3821B30E4027}").bytes_le
+            buf = wintypes.LPWSTR()
+            res = ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.c_char_p(folderid), 0, None, ctypes.byref(buf))
+            if res == 0 and buf.value:
+                p = Path(buf.value)
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+        try:
+            profile = os.environ.get("USERPROFILE")
+            if profile:
+                p = Path(profile) / "Music"
+                if p.is_dir():
+                    return p
+        except Exception:
+            pass
+
+    mus = Path.home() / "Music"
+    if mus.is_dir():
+        return mus
+    return get_user_downloads_dir()
+
+
+def save_media_to_downloads(
+    source_path: Path | str,
+    filename: str,
+    copy_to_media_folder: bool = True,
+) -> tuple[Path, str]:
+    """Copy source_path into the user's Downloads folder with collision handling.
+    Also copies video files to the user's Videos folder and audio files to the Music folder."""
     src = Path(source_path).expanduser().resolve()
     if not src.is_file():
         raise FileNotFoundError(f"Source media file not found: {source_path}")
@@ -220,6 +325,22 @@ def save_media_to_downloads(source_path: Path | str, filename: str) -> tuple[Pat
         counter += 1
     import shutil
     shutil.copy2(src, target)
+
+    if copy_to_media_folder:
+        try:
+            ext_lower = src.suffix.lower()
+            media_dir: Path | None = None
+            if ext_lower in {".mp4", ".mov", ".mkv", ".webm", ".avi"}:
+                media_dir = get_user_videos_dir()
+            elif ext_lower in {".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac"}:
+                media_dir = get_user_music_dir()
+            if media_dir and media_dir.resolve() != dl_dir.resolve():
+                media_dir.mkdir(parents=True, exist_ok=True)
+                media_target = media_dir / target.name
+                shutil.copy2(src, media_target)
+        except Exception:
+            pass
+
     return target, target.name
 
 

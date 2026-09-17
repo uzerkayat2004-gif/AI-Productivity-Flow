@@ -1389,6 +1389,10 @@ function vfLibraryCardHtml(video) {
 }
 
 function renderVideoHistory() {
+  const histBody = document.getElementById("vf-history-body");
+  if (histBody && histBody.style.display === "none") {
+    histBody.style.display = "";
+  }
   vfUpdateLibraryBadge(vfVideos.length);
   const libraryGrid = document.getElementById("vf-library-grid");
   if (!libraryGrid) {

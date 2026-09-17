@@ -135,6 +135,8 @@ _APP_ATTRIBUTION_NOISE_APPS = (
     "Workbuddyai",
     "YouTube",
     "Grok",
+    "Video Flow",
+    "Audio Flow",
 )
 
 
@@ -621,6 +623,10 @@ class StorageEngine:
         self._migrate_audio_summary_history()
         self._seed_default_models()
         self._seed_tts_models()
+        try:
+            self.sync_media_to_history()
+        except Exception:
+            log.debug("Failed to sync media to history during init_db", exc_info=True)
 
     _SEED_VERSION = "5"  # Bump to re-seed after adding new default models
 
@@ -3909,6 +3915,232 @@ class StorageEngine:
         with self._get_conn_ctx() as conn:
             cursor = conn.execute("DELETE FROM audio_summary_history WHERE id = ?", (str(item_id or ""),))
             return cursor.rowcount > 0
+
+    def record_video_history(
+        self,
+        job_id: str,
+        title: str,
+        prompt: str = "",
+        output_path: str | None = None,
+        duration_sec: float = 0.0,
+        status: str = "success",
+        error_message: str | None = None,
+        created_at: float | None = None,
+    ) -> int | None:
+        """Record or update a Video Flow job in the unified history feed."""
+        if not job_id and not title and not prompt:
+            return None
+        now_dt = datetime.datetime.fromtimestamp(created_at) if created_at else datetime.datetime.now()
+        timestamp_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        clean_title = str(title or prompt or f"Video {job_id[:8]}").strip()
+        clean_prompt = str(prompt or clean_title).strip()
+        word_count = len(clean_prompt.split())
+
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, timestamp FROM history WHERE app_name = 'Video Flow' AND (insertion_status = ? OR (audio_path IS NOT NULL AND audio_path = ? AND audio_path != '') OR (raw_text = ? AND style_mode = 'video_flow')) LIMIT 1",
+                (job_id, str(output_path or ""), clean_prompt),
+            ).fetchone()
+
+            if row:
+                rec_id = row["id"]
+                conn.execute(
+                    """
+                    UPDATE history
+                    SET polished_text = ?, raw_text = ?, duration_sec = ?, word_count = ?,
+                        status = ?, error_message = ?, audio_path = COALESCE(?, audio_path),
+                        insertion_status = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        clean_title,
+                        clean_prompt,
+                        max(0.0, float(duration_sec or 0.0)),
+                        word_count,
+                        status,
+                        error_message,
+                        str(output_path) if output_path else None,
+                        job_id,
+                        timestamp_str,
+                        rec_id,
+                    ),
+                )
+                conn.commit()
+                return rec_id
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO history (
+                        timestamp, raw_text, polished_text, app_name,
+                        duration_sec, word_count, wpm_speed, style_mode,
+                        status, error_message, audio_path, insertion_status,
+                        updated_at, retry_count
+                    )
+                    VALUES (?, ?, ?, 'Video Flow', ?, ?, 0, 'video_flow', ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        timestamp_str,
+                        clean_prompt,
+                        clean_title,
+                        max(0.0, float(duration_sec or 0.0)),
+                        word_count,
+                        status,
+                        error_message,
+                        str(output_path) if output_path else None,
+                        job_id,
+                        timestamp_str,
+                    ),
+                )
+                conn.commit()
+                return cursor.lastrowid
+
+    def record_audio_summary_to_history(
+        self,
+        audio_id: str,
+        title: str,
+        text_snippet: str = "",
+        audio_path: str | None = None,
+        duration_sec: float = 0.0,
+        status: str = "success",
+        error_message: str | None = None,
+        created_at: str | float | None = None,
+    ) -> int | None:
+        """Record or update an Audio Flow summary in the unified history feed."""
+        if not audio_id and not title and not text_snippet:
+            return None
+        if isinstance(created_at, (int, float)):
+            now_dt = datetime.datetime.fromtimestamp(created_at)
+        elif isinstance(created_at, str) and created_at.strip():
+            try:
+                now_dt = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except Exception:
+                now_dt = datetime.datetime.now()
+        else:
+            now_dt = datetime.datetime.now()
+        timestamp_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        clean_title = str(title or text_snippet[:50] or f"Audio Summary {audio_id[:8]}").strip()
+        clean_text = str(text_snippet or clean_title).strip()
+        word_count = len(clean_text.split())
+
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, timestamp FROM history WHERE app_name = 'Audio Flow' AND (insertion_status = ? OR (audio_path IS NOT NULL AND audio_path = ? AND audio_path != '') OR (raw_text = ? AND style_mode = 'audio_flow')) LIMIT 1",
+                (audio_id, str(audio_path or ""), clean_text),
+            ).fetchone()
+
+            if row:
+                rec_id = row["id"]
+                conn.execute(
+                    """
+                    UPDATE history
+                    SET polished_text = ?, raw_text = ?, duration_sec = ?, word_count = ?,
+                        status = ?, error_message = ?, audio_path = COALESCE(?, audio_path),
+                        insertion_status = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        clean_title,
+                        clean_text,
+                        max(0.0, float(duration_sec or 0.0)),
+                        word_count,
+                        status,
+                        error_message,
+                        str(audio_path) if audio_path else None,
+                        audio_id,
+                        timestamp_str,
+                        rec_id,
+                    ),
+                )
+                conn.commit()
+                return rec_id
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO history (
+                        timestamp, raw_text, polished_text, app_name,
+                        duration_sec, word_count, wpm_speed, style_mode,
+                        status, error_message, audio_path, insertion_status,
+                        updated_at, retry_count
+                    )
+                    VALUES (?, ?, ?, 'Audio Flow', ?, ?, 0, 'audio_flow', ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        timestamp_str,
+                        clean_text,
+                        clean_title,
+                        max(0.0, float(duration_sec or 0.0)),
+                        word_count,
+                        status,
+                        error_message,
+                        str(audio_path) if audio_path else None,
+                        audio_id,
+                        timestamp_str,
+                    ),
+                )
+                conn.commit()
+                return cursor.lastrowid
+
+    def sync_media_to_history(self) -> dict[str, int]:
+        """Backfill existing Video Flow jobs and Audio Flow summaries into history table."""
+        synced_videos = 0
+        synced_audios = 0
+        with self._get_conn() as conn:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "video_flow_jobs" in tables:
+                cursor = conn.execute("SELECT job_id, state, message, meta_json, created_at FROM video_flow_jobs")
+                for row in cursor.fetchall():
+                    job_id = row["job_id"]
+                    state = row["state"]
+                    msg = row["message"]
+                    created_at = row["created_at"]
+                    meta = {}
+                    if row["meta_json"]:
+                        try:
+                            meta = json.loads(row["meta_json"])
+                        except Exception:
+                            meta = {}
+                    title = meta.get("title") or meta.get("prompt") or f"Video {job_id[:8]}"
+                    prompt = meta.get("prompt") or meta.get("source_text") or title
+                    out_p = meta.get("output_path") or meta.get("video_path")
+                    dur = float(meta.get("duration") or 0.0)
+                    status = "success" if state == "complete" else ("processing" if state in ("generating", "processing", "pending") else "error")
+                    err = msg if state in ("failed", "cancelled") else None
+                    self.record_video_history(
+                        job_id=job_id,
+                        title=title,
+                        prompt=prompt,
+                        output_path=str(out_p) if out_p else None,
+                        duration_sec=dur,
+                        status=status,
+                        error_message=err,
+                        created_at=created_at,
+                    )
+                    synced_videos += 1
+
+            if "audio_summary_history" in tables:
+                cursor = conn.execute("SELECT id, title, text_snippet, full_text, audio_path, duration_sec, status, error, created_at FROM audio_summary_history")
+                for row in cursor.fetchall():
+                    audio_id = row["id"]
+                    title = row["title"] or row["text_snippet"] or f"Audio Summary {audio_id[:8]}"
+                    snippet = row["full_text"] or row["text_snippet"] or title
+                    out_p = row["audio_path"]
+                    dur = float(row["duration_sec"] or 0.0)
+                    st = "success" if row["status"] == "ready" else ("processing" if row["status"] in ("in_progress", "generating") else "error")
+                    err = row["error"]
+                    self.record_audio_summary_to_history(
+                        audio_id=audio_id,
+                        title=title,
+                        text_snippet=snippet,
+                        audio_path=str(out_p) if out_p else None,
+                        duration_sec=dur,
+                        status=st,
+                        error_message=err,
+                        created_at=row["created_at"],
+                    )
+                    synced_audios += 1
+
+        return {"videos": synced_videos, "audios": synced_audios}
 
     def export_vault_data(self) -> dict[str, Any]:
         """Extract all portable user configurations, connections, dictionary, and styles."""

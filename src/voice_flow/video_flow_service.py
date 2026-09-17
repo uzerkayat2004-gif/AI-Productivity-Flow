@@ -107,6 +107,7 @@ class VideoFlowStore:
     """Tiny SQLite store for Video Flow jobs, independent of dictation history."""
 
     def __init__(self, db_path: Path | str | None = None) -> None:
+        self._custom_db = db_path is not None
         if db_path is None:
             try:
                 from voice_flow.storage import resolve_active_db_path
@@ -141,7 +142,28 @@ class VideoFlowStore:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_db()
 
+    def repoint_if_needed(self) -> bool:
+        """Repoint video flow store to active account database if changed."""
+        if getattr(self, "_custom_db", False):
+            return False
+        try:
+            from voice_flow.storage import resolve_active_db_path
+            target = resolve_active_db_path()
+        except Exception:
+            target = None
+        if not target:
+            return False
+        try:
+            target_path = Path(target).resolve()
+            if target_path == self.db_path.resolve():
+                return False
+            self.switch_account(target_path)
+            return True
+        except Exception:
+            return False
+
     def _connection(self) -> sqlite3.Connection:
+        self.repoint_if_needed()
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
@@ -154,6 +176,27 @@ class VideoFlowStore:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (job.job_id, job.state, job.progress, job.message, _json(job.meta), now, now),
             )
+        try:
+            from voice_flow.storage import storage, StorageEngine
+            target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
+            title = str((job.meta or {}).get("title") or (job.meta or {}).get("prompt") or f"Video {job.job_id[:8]}").strip()
+            prompt = str((job.meta or {}).get("prompt") or (job.meta or {}).get("source_text") or title).strip()
+            out_p = (job.meta or {}).get("output_path") or (job.meta or {}).get("video_path")
+            dur = float((job.meta or {}).get("duration") or 0.0)
+            status = "success" if job.state == "complete" else ("processing" if job.state not in _TERMINAL_STATES else "error")
+            err = job.message if job.state in ("failed", "cancelled") else None
+            target_engine.record_video_history(
+                job_id=job.job_id,
+                title=title,
+                prompt=prompt,
+                output_path=str(out_p) if out_p else None,
+                duration_sec=dur,
+                status=status,
+                error_message=err,
+                created_at=now,
+            )
+        except Exception:
+            pass
         return job
 
     def get(self, job_id: str) -> JobV3 | None:
@@ -238,7 +281,26 @@ class VideoFlowStore:
                     "WHERE job_id = ?",
                     (state, progress, _redact(message), _json(merged_meta), time.time(), job_id),
                 )
-            return JobV3(job_id, state, progress, _redact(message), merged_meta)
+            job = JobV3(job_id, state, progress, _redact(message), merged_meta)
+            try:
+                from voice_flow.storage import storage, StorageEngine
+                target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
+                title = str((merged_meta or {}).get("title") or (merged_meta or {}).get("prompt") or f"Video {job_id[:8]}").strip()
+                prompt = str((merged_meta or {}).get("prompt") or (merged_meta or {}).get("source_text") or title).strip()
+                out_p = (merged_meta or {}).get("output_path") or (merged_meta or {}).get("video_path")
+                dur = float((merged_meta or {}).get("duration") or 0.0)
+                target_engine.record_video_history(
+                    job_id=job_id,
+                    title=title,
+                    prompt=prompt,
+                    output_path=str(out_p) if out_p else None,
+                    duration_sec=dur,
+                    status="success" if state == "complete" else "error",
+                    error_message=message if state != "complete" else None,
+                )
+            except Exception:
+                pass
+            return job
 
     def update_meta(self, job_id: str, meta_updates: dict[str, Any]) -> JobV3 | None:
         """Update metadata on a job regardless of its lifecycle state (e.g. downloaded status)."""
