@@ -1442,6 +1442,12 @@ try:
                 pass
             print(json.dumps({"ok": False, "error_type": "HTTP %s" % exc.code, "detail": detail}))
             sys.exit(1)
+        except (ConnectionResetError, urllib.error.URLError) as exc:
+            if attempt < 5:
+                time.sleep(1 * (attempt + 1))
+                continue
+            print(json.dumps({"ok": False, "error_type": type(exc).__name__, "detail": str(exc)[:400]}))
+            sys.exit(1)
         except Exception as exc:
             print(json.dumps({"ok": False, "error_type": type(exc).__name__, "detail": str(exc)[:400]}))
             sys.exit(1)

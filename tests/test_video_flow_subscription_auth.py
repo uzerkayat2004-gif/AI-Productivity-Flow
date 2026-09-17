@@ -301,6 +301,9 @@ def test_codex_worker_sse_parsing():
 
     class MockSSEHandler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            if length > 0:
+                self.rfile.read(length)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
