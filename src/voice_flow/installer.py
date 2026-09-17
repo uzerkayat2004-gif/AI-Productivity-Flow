@@ -47,17 +47,9 @@ def _installed_watchdog_command() -> tuple[str, str, str] | None:
 
 
 def get_vbs_launcher_path() -> Path:
-    """Prefer the stable installed copy so dev checkouts never hijack the
-    boot autorun: a dev-tree run must keep the Run key pointed at the
-    installed launcher, not at its own (changing) project root."""
-    stable_root = Path.home() / ".gemini" / "antigravity" / "scratch" / "voice-flow"
-    stable_vbs = stable_root / "VoiceFlowLauncher.vbs"
-    try:
-        if stable_vbs.exists() and get_project_root().resolve() != stable_root.resolve():
-            return stable_vbs
-    except Exception:
-        pass
+    """Return the VoiceFlowLauncher.vbs path for the active project/installation root."""
     return get_project_root() / "VoiceFlowLauncher.vbs"
+
 
 
 def get_icon_path() -> Path:

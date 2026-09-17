@@ -88,12 +88,12 @@ ARCH="$(uname -m)"
 echo -e "${GREEN}==>${NC} Detected macOS on ${BOLD}${ARCH}${NC}"
 
 # ------------------------------------------------------------------------------
-# 2. Python 3.10+ Detection
+# 2. Python 3.10+ Detection (Prefer 3.11 / 3.12 for ML wheels)
 # ------------------------------------------------------------------------------
 echo -e "${GREEN}==>${NC} Checking Python 3 environment..."
 PYTHON_BIN=""
 
-for cand in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+for cand in python3.12 python3.11 python3.10 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3.12 /usr/local/bin/python3.11 /usr/local/bin/python3 python3 /usr/bin/python3; do
     if command -v "$cand" >/dev/null 2>&1; then
         if "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
             PYTHON_BIN="$cand"
@@ -107,7 +107,7 @@ done
 if [ -z "$PYTHON_BIN" ]; then
     echo -e "${RED}[X] Python 3.10+ is required but was not found.${NC}"
     echo -e "Please install Python 3.10+ using Homebrew:"
-    echo -e "  ${CYAN}brew install python${NC}"
+    echo -e "  ${CYAN}brew install python@3.12${NC}"
     echo -e "Or download from: https://www.python.org/downloads/"
     exit 1
 fi
@@ -128,8 +128,14 @@ else
             echo -e "${GREEN}==>${NC} Updating existing Git repository in ${INSTALL_DIR}..."
             (cd "${INSTALL_DIR}" && git fetch origin "${BRANCH}" && git checkout "${BRANCH}" && git pull origin "${BRANCH}")
         else
-            echo -e "${GREEN}==>${NC} Cloning AI-Productivity-Flow via Git..."
-            git clone -b "${BRANCH}" https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git "${INSTALL_DIR}"
+            if [ ! -d "${INSTALL_DIR}" ] || [ -z "$(ls -A "${INSTALL_DIR}" 2>/dev/null)" ]; then
+                echo -e "${GREEN}==>${NC} Cloning AI-Productivity-Flow via Git..."
+                git clone -b "${BRANCH}" https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git "${INSTALL_DIR}"
+            else
+                echo -e "${GREEN}==>${NC} Re-syncing AI-Productivity-Flow repository in ${INSTALL_DIR}..."
+                (cd "${INSTALL_DIR}" && git init && git remote add origin https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git 2>/dev/null || true)
+                (cd "${INSTALL_DIR}" && git fetch origin "${BRANCH}" && git checkout -f -B "${BRANCH}" "origin/${BRANCH}")
+            fi
         fi
     else
         echo -e "${YELLOW}  [!] Git not detected. Downloading source archive via curl...${NC}"
@@ -160,9 +166,20 @@ fi
 VENV_PYTHON="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
 
+# Ensure pip is available inside virtual environment
+if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
+    echo -e "${GREEN}==>${NC} Bootstrapping pip into virtual environment..."
+    "${VENV_PYTHON}" -m ensurepip --default-pip >/dev/null 2>&1 || true
+fi
+
 echo -e "${GREEN}==>${NC} Installing AI Productivity Flow and dependencies..."
-"${VENV_PIP}" install --upgrade pip --quiet
-"${VENV_PIP}" install -e .
+if command -v uv >/dev/null 2>&1; then
+    echo -e "${GREEN}==>${NC} Accelerating package installation using uv..."
+    uv pip install -e . --python "${VENV_PYTHON}"
+else
+    "${VENV_PIP}" install --upgrade pip --quiet 2>/dev/null || true
+    "${VENV_PIP}" install -e .
+fi
 
 # ------------------------------------------------------------------------------
 # 5. Video Flow Renderer Dependencies (Optional Node.js)

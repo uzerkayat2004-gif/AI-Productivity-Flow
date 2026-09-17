@@ -151,7 +151,9 @@
   function commandText(pre) {
     var clone = pre.cloneNode(true);
     Array.prototype.slice.call(clone.querySelectorAll('.p')).forEach(function (p) {
-      p.parentNode.removeChild(p);
+      if (/^[\s\$>%\#]+$/.test(p.textContent)) {
+        p.parentNode.removeChild(p);
+      }
     });
     return clone.textContent.replace(/[ \t]+$/gm, '').trim() + '\n';
   }
@@ -202,11 +204,13 @@
   /* Generic copy handler for all code blocks */
   document.querySelectorAll('.code__copy').forEach(function (btn) {
     btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
       var container = btn.closest('.code');
-      if (!container) return;
-      var pre = container.querySelector('pre');
-      if (!pre) return;
-      var text = commandText(pre);
+      var pre = container ? container.querySelector('pre') : null;
+      if (!text && pre) {
+        text = pre.getAttribute('data-copy') || commandText(pre);
+      }
+      if (!text) return;
 
       var fallback = function () {
         if (legacyCopy(text)) {

@@ -141,7 +141,7 @@ User selects text anywhere (Browser / IDE / Document / Chat)
 | :--- | :--- | :---: | :--- |
 | **Voice Flow** | Local Speech-to-Text | ✅ Verified | Bundled Faster-Whisper `base.en`, CPU int8, zero cloud leaks |
 | **Voice Flow** | Active Window Style Engine | ✅ Verified | Automatic application sensing (VS Code, Slack, Email, Browser) |
-| **Voice Flow** | Auto-Startup & Watchdog | ✅ Verified | Dual-layer autostart (Registry + Startup Folder), silent watchdog supervisor |
+| **Voice Flow** | Auto-Startup & Watchdog | ✅ Verified | Resilient single-instance Registry autostart (HKCU Run), background watchdog supervisor |
 | **Audio Flow** | Highlight Screen Reader | ✅ Verified | Cursor-tracking floating player bar with synchronized yellow tracking |
 | **Audio Flow** | Multi-Provider TTS | ✅ Verified | Free Edge Neural, Google, Gemini Audio, ElevenLabs, Deepgram, NVIDIA |
 | **Video Flow** | Pedagogical Scene Brain | ✅ Verified | Evidence grounding, concept extraction, 15 visual treatments |

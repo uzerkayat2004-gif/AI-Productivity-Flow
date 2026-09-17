@@ -348,7 +348,7 @@
     grid-template-columns: 1fr 1fr !important;
   }
 
-  /* Pinned Sticky Media Column - Centered in viewport to match focused card */
+  /* Pinned Sticky Media Column - Starts flush at top, pins centered, unpins with last card */
   .split-story__media-col {
     position: sticky !important;
     top: calc(50vh - 245px) !important;
@@ -356,22 +356,28 @@
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
   .split-story__media-sticky {
     width: 100% !important;
     max-width: 530px !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
-  /* Cards Stream: Vertically Scrolling cards that travel up/down */
+  /* Cards Stream: Starts flush at top with video, ends flush at bottom with video */
   .split-story__cards-stream {
     display: flex !important;
     flex-direction: column !important;
-    gap: 26vh !important;
-    padding: calc(50vh - 245px) 0 40vh 0 !important;
+    gap: 34vh !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
   .problem-card, .solution-card {
     position: relative !important;
+    margin: 0 !important;
     width: 100% !important;
     max-width: 530px !important;
     height: 490px !important;
@@ -1511,10 +1517,10 @@
       <div class="code rv">
         <div class="code__bar">
           <span>PowerShell (Run as User — No Admin Required)</span>
-          <button class="code__copy" type="button">Copy</button>
+          <button class="code__copy" type="button" data-copy="irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex">Copy</button>
         </div>
-<pre><span class="c"># One-liner automated installation for Windows 10/11 x64</span>
-<span class="p">irm </span>https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex</pre>
+<pre data-copy="irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex"><span class="c"># One-liner automated installation for Windows 10/11 x64</span>
+<span class="cmd">irm </span>https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex</pre>
       </div>
     </div>
 
@@ -1523,10 +1529,10 @@
       <div class="code rv">
         <div class="code__bar">
           <span>Terminal (macOS 12+ Apple Silicon &amp; Intel)</span>
-          <button class="code__copy" type="button">Copy</button>
+          <button class="code__copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash">Copy</button>
         </div>
-<pre><span class="c"># One-liner automated installation for macOS</span>
-<span class="p">curl </span>-fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash</pre>
+<pre data-copy="curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash"><span class="c"># One-liner automated installation for macOS</span>
+<span class="cmd">curl </span>-fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash</pre>
       </div>
 
       <div class="mac-warning-card rv">

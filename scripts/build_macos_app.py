@@ -49,21 +49,34 @@ def create_info_plist() -> None:
 
 def create_launcher_script() -> None:
     launcher = MACOS_DIR / "voice-flow-launcher"
-    script = """#!/usr/bin/env bash
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    current_python = sys.executable
+    script = f"""#!/usr/bin/env bash
+DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
 export PYTHONPATH="$DIR/Resources/src:$PYTHONPATH"
 
-# Prefer python3 in PATH or common installation locations
+# Prefer virtual environment python where dependencies were installed
 PYTHON=""
-for candidate in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        PYTHON="$candidate"
-        break
+for candidate in \\
+    "{current_python}" \\
+    "$DIR/../../.venv/bin/python" \\
+    "$DIR/../../.venv/bin/python3" \\
+    "$HOME/AI-Productivity-Flow/.venv/bin/python" \\
+    "$HOME/AI-Productivity-Flow/.venv/bin/python3" \\
+    "$VIRTUAL_ENV/bin/python" \\
+    /opt/homebrew/bin/python3 \\
+    /usr/local/bin/python3 \\
+    python3 \\
+    /usr/bin/python3; do
+    if [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1; then
+        if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            PYTHON="$candidate"
+            break
+        fi
     fi
 done
 
 if [ -z "$PYTHON" ]; then
-    osascript -e 'display dialog "Python 3 is required to run Voice Flow. Please install Python 3." buttons {"OK"} default button 1 with icon stop'
+    osascript -e 'display dialog "Python 3.10+ is required to run Voice Flow. Please install Python 3.10 or newer." buttons {{"OK"}} default button 1 with icon stop'
     exit 1
 fi
 

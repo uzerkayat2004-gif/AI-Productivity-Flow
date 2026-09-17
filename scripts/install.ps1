@@ -75,21 +75,21 @@ if (-not $IsWindows -and $env:OS -notmatch "Windows") {
 }
 
 # ------------------------------------------------------------------------------
-# 2. Python 3.10+ Detection
+# 2. Python 3.10+ Detection (Prefer 3.11 / 3.12 for ML wheels)
 # ------------------------------------------------------------------------------
 Write-Step "Checking Python environment..."
 
 $pythonExe = $null
 $candidates = @(
-    "python.exe",
-    "py.exe",
-    "C:\Python314\python.exe",
-    "C:\Python313\python.exe",
     "C:\Python312\python.exe",
     "C:\Python311\python.exe",
-    "C:\Python310\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
+    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+    "python.exe",
+    "py.exe",
+    "C:\Python313\python.exe",
+    "C:\Python310\python.exe",
+    "C:\Python314\python.exe"
 )
 
 foreach ($cand in $candidates) {
@@ -122,7 +122,7 @@ if (-not $pythonExe) {
 # ------------------------------------------------------------------------------
 # Check if already running from inside an existing cloned repo
 $isInsideRepo = $false
-if (Test-Path ".\src\voice_flow\main.py" -and (Test-Path ".\pyproject.toml")) {
+if ((Test-Path ".\src\voice_flow\main.py") -and (Test-Path ".\pyproject.toml")) {
     $InstallDir = (Get-Item ".").FullName
     $isInsideRepo = $true
     Write-Step "Running directly inside existing AI-Productivity-Flow directory: $InstallDir"
@@ -148,9 +148,19 @@ if (-not $isInsideRepo) {
                 Pop-Location
             }
         } else {
-            Write-Step "Cloning AI-Productivity-Flow via Git..."
-            git clone -b $Branch https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git $InstallDir
-            Write-Success "Cloned into $InstallDir"
+            $isDirEmpty = (-not (Test-Path $InstallDir)) -or ((Get-ChildItem -Force $InstallDir).Count -eq 0)
+            if ($isDirEmpty) {
+                Write-Step "Cloning AI-Productivity-Flow via Git..."
+                git clone -b $Branch https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git $InstallDir
+                Write-Success "Cloned into $InstallDir"
+            } else {
+                Write-Step "Re-syncing AI-Productivity-Flow repository in $InstallDir..."
+                git -C $InstallDir init | Out-Null
+                git -C $InstallDir remote add origin https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git 2>$null
+                git -C $InstallDir fetch origin $Branch
+                git -C $InstallDir checkout -f -B $Branch "origin/$Branch"
+                Write-Success "Synchronized repository in $InstallDir"
+            }
         }
     } else {
         Write-Warn "Git command not detected. Downloading source archive from GitHub..."
@@ -164,7 +174,7 @@ if (-not $isInsideRepo) {
         Expand-Archive -Path $zipDest -DestinationPath $extractTemp -Force
         
         $innerDir = Join-Path $extractTemp "AI-Productivity-Flow-$Branch"
-        Copy-Item -Path "$innerDir\*" -Destination $InstallDir -Recurse -Force
+        Get-ChildItem -Force -Path $innerDir | Copy-Item -Destination $InstallDir -Recurse -Force
         Remove-Item -Path $extractTemp -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path $zipDest -Force -ErrorAction SilentlyContinue
         Write-Success "Extracted source to $InstallDir"
@@ -185,9 +195,22 @@ try {
         Write-Success "Virtual environment created."
     }
 
+    # Ensure pip is available inside virtual environment
+    $hasPip = (& $venvPython -m pip --version 2>$null) -ne $null
+    if (-not $hasPip) {
+        Write-Step "Bootstrapping pip into virtual environment..."
+        & $venvPython -m ensurepip --default-pip 2>$null
+    }
+
     Write-Step "Installing AI-Productivity-Flow and core dependencies (editable)..."
-    & $venvPython -m pip install --upgrade pip --quiet
-    & $venvPython -m pip install -e .
+    $hasUv = (Get-Command uv -ErrorAction SilentlyContinue) -ne $null
+    if ($hasUv) {
+        Write-Step "Accelerating package installation using uv..."
+        & uv pip install -e . --python $venvPython
+    } else {
+        & $venvPython -m pip install --upgrade pip --quiet
+        & $venvPython -m pip install -e .
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Failed to install Python dependencies. Please review error messages above."
         exit $LASTEXITCODE
@@ -219,11 +242,6 @@ try {
     # --------------------------------------------------------------------------
     # 6. Desktop Setup & Auto-Startup Registration
     # --------------------------------------------------------------------------
-    Write-Step "Generating Silent Background Launcher & Watchdog Supervisor..."
-    if (Test-Path "scratch\generate_launcher.py") {
-        & $venvPython scratch\generate_launcher.py
-    }
-
     Write-Step "Registering resilient Windows auto-startup and Start Menu shortcuts..."
     try {
         & $venvPython -m voice_flow.installer --install
@@ -244,9 +262,10 @@ try {
     Write-Host ""
     Write-Host "How to Run Flow:" -ForegroundColor Yellow
     Write-Host "  1. Silent Background Mode (Recommended):"
-    Write-Host "     Double-click VoiceFlowLauncher.vbs or run: .\run_voice_flow.bat" -ForegroundColor Cyan
+    Write-Host "     Double-click VoiceFlowLauncher.vbs in the installation directory, or run:"
+    Write-Host "     wscript.exe `"$InstallDir\VoiceFlowLauncher.vbs`"" -ForegroundColor Cyan
     Write-Host "  2. Interactive Console Mode:"
-    Write-Host "     .\run_voice_flow.bat --console" -ForegroundColor Cyan
+    Write-Host "     & `"$InstallDir\run_voice_flow.bat`" --console" -ForegroundColor Cyan
     Write-Host "  3. Open Web Dashboard:"
     Write-Host "     http://127.0.0.1:8991" -ForegroundColor Cyan
     Write-Host ""
@@ -258,10 +277,12 @@ try {
 
     if ($Launch) {
         Write-Step "Launching AI Productivity Flow in silent background mode..."
-        if (Test-Path "VoiceFlowLauncher.vbs") {
-            Start-Process "wscript.exe" -ArgumentList "VoiceFlowLauncher.vbs"
-        } else {
-            Start-Process ".\run_voice_flow.bat"
+        $vbsTarget = Join-Path $InstallDir "VoiceFlowLauncher.vbs"
+        $batTarget = Join-Path $InstallDir "run_voice_flow.bat"
+        if (Test-Path $vbsTarget) {
+            Start-Process "wscript.exe" -ArgumentList "`"$vbsTarget`""
+        } elseif (Test-Path $batTarget) {
+            Start-Process $batTarget
         }
         Write-Success "AI Productivity Flow launched!"
     }
