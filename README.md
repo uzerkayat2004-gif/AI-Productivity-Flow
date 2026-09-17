@@ -1,8 +1,8 @@
 <h1 align="center">🌊 AI Productivity Flow</h1>
 
 <p align="center">
-  <b>Turn speech into text, text into audio, and notes into videos — anywhere on your computer.</b><br>
-  <i>A lightweight, free, and privacy-focused desktop AI assistant that operates seamlessly inside every app you already use.</i>
+  <b>Turn notes and documents into videos, text into audio, and speech into text — directly from your desktop.</b><br>
+  <i>A free, lightweight, privacy-focused desktop AI assistant that operates seamlessly inside every app you already use.</i>
 </p>
 
 <p align="center">
@@ -21,14 +21,14 @@
 
 ## ⚡ What is AI Productivity Flow?
 
-**AI Productivity Flow** is built around one core principle:
+**AI Productivity Flow** is built around one core philosophy:
 > **You shouldn't have to leave the app you're working in just to use AI.**
 
-Forget switching tabs to ChatGPT, copy-pasting back and forth, or typing long emails by hand. Flow runs quietly in the background on your desktop. Whenever you need it, a single mouse click or text selection unleashes instant transformation:
+Forget switching browser tabs to ChatGPT, copy-pasting back and forth, or reading through grueling walls of text. Flow runs quietly in the background on your desktop. Whenever you need it, a simple mouse gesture or text selection unleashes instant transformation:
 
-* 🎙️ **Voice Flow** — Speak naturally. It transcribes locally on your PC and types clean, polished text directly into whatever app is open (Slack, Word, Gmail, VS Code, or your browser).
-* 🎧 **Audio Flow** — Tired of reading? Highlight any text or article, and a sleek floating bar reads it out loud in warm, natural human voices with synchronized word tracking.
-* 🎬 **Video Flow** — Turn dense text, notes, or PDFs into beautiful 1080p animated explainer videos with narration, dynamic visual scenes, and captions in seconds.
+* 🎬 **Video Flow (Flagship Feature)** — Turn dense text, notes, or documents into polished, animated 1080p explainer videos with narration, dynamic visual scenes, and synchronized captions in seconds.
+* 🎧 **Audio Flow** — Tired of reading? Highlight any text or article, and a sleek floating bar reads it out loud in warm, natural human voices with real-time yellow word tracking.
+* 🎙️ **Voice Flow** — Speak naturally. It transcribes locally on your PC and types clean, formatted text directly into whatever app is open (Slack, Word, Gmail, VS Code, or your browser).
 * 📓 **NotebookLM Magic** — Connect your Google research notebooks for instant access to your study guides, deep summaries, and audio discussions.
 * 🔒 **Local & Private Dictation** — Core speech recognition runs entirely on your computer's CPU/GPU. Your microphone audio is never uploaded to cloud servers.
 
@@ -71,17 +71,58 @@ curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-F
 
 | What you want to do | How Flow makes it effortless |
 | :--- | :--- |
+| **Turn dense notes or a PDF into an explainer video** | Highlight text or drop a file (`.pdf`, `.docx`, `.txt`, `.md`). Click **Video**, and Flow writes a storyboard, designs animated visual scenes, narrates, and renders a 1080p MP4. |
+| **Rest your eyes and listen to any text** | Highlight any paragraph on your screen. The **Audio Bar** appears immediately at your cursor, reading aloud in natural human voices with synchronized word tracking. |
 | **Write an email or document without typing** | Hold your **Middle Mouse Button** (or press `Ctrl + Win`), speak naturally, and release. Flow transcribes locally and pastes formatted sentences directly into your active window. |
-| **Rest your eyes and listen to an article** | Highlight any paragraph on your screen. The **Audio Bar** appears immediately at your cursor, reading aloud in natural human voices with synchronized word tracking. |
-| **Turn complex notes or a PDF into a video** | Highlight text or drag-and-drop a document (`.pdf`, `.docx`, `.txt`, `.md`). Click **Video**, and Flow automatically generates a 1080p MP4 explainer video with animated scenes and narration. |
 | **Access research from Google NotebookLM** | Sign in securely to sync your Google NotebookLM research notebooks directly into your desktop workflow. |
 
 ---
 
 ## 🌟 The Core Superpowers
 
-### 1. 🎙️ Voice Flow — Talk Instead of Typing
-Stop typing thousands of words every day. Speak naturally, and Flow will transcribe and type for you anywhere your cursor is placed.
+### 1. 🎬 Video Flow — Turn Notes & Documents into 1080p Explainer Videos
+Why struggle through dry walls of text when you can watch a concise, visually captivating explainer video? Video Flow is our flagship multimodal capability that bridges the gap between static text and rich educational video.
+
+<p align="center">
+  <img src="docs/assets/videoflow_demo.gif" alt="Video Flow Animated Demo" width="820" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+  <br>
+  <sub>🎬 <i>Live animated demo playing above. You can also <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/videoflow_demo.mp4"><b>watch or download the full 1080p Video Flow MP4</b></a>.</i></sub>
+</p>
+
+* **Input Versatility**: Highlight any text on screen, paste notes, or drag-and-drop documents (`.txt`, `.md`, `.csv`, `.json`, `.html`, `.htm`, `.xml`, `.rtf`, `.docx`, `.pdf` up to 8 MB) directly into the composer.
+* **Two Intelligent Pedagogical Modes**:
+  * **Summary Mode**: Generates a fast, high-impact executive briefing capturing key takeaways and core concepts.
+  * **Full Mode**: Constructs an in-depth, structured educational breakdown with detailed conceptual exploration.
+* **Creative Director (15 Dynamic Visual Treatments)**: Avoids monotonous slides by dynamically varying scenes with:
+  * Dynamic title cards and concept highlight cards
+  * Animated process flowcharts and sequence timelines
+  * Data metrics and animated quantitative counters
+  * 3D WebGL scenes and spatial visualizations
+  * Waveform displays, comparative tables, and recap grids
+* **100% Free Deterministic Motion Renderer**: You do **not** need expensive paid generative video subscriptions. Video Flow uses bundled browser-based motion modules (HyperFrames/Narova/Code2Video) and FFmpeg to render finished 1080p H.264 MP4 videos locally with synchronized narration and captions.
+* **Integrated Player & MP4 Export**: Watch directly inside the on-screen player with speed controls, timeline scrubber, subtitle toggles, and instant local MP4 file saving.
+
+---
+
+### 2. 🎧 Audio Flow — Turn Any Text Into Speech & Screen Reader
+Transform any web page, research paper, code documentation, or email into an instant personal audio track.
+
+<p align="center">
+  <img src="docs/assets/audioflow_demo.gif" alt="Audio Flow Animated Demo" width="820" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+  <br>
+  <sub>🎧 <i>Live animated demo playing above. You can also <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/audioflow_demo.mp4"><b>watch or download the full Audio Flow MP4</b></a>.</i></sub>
+</p>
+
+* **Highlight & Listen**: Simply select any text on your screen (drag >= 6px). A floating player bar appears right next to your cursor.
+* **Synchronized Yellow Word Tracking**: Words illuminate in real-time as they are spoken, making it effortless to follow along with dense documents.
+* **Full Playback Control**: Adjust playback speed from 0.75x to 2.0x, scrub through the waveform bar, jump backward/forward, or save the synthesized speech as an MP3 file with one click.
+* **Spoken AI Summaries**: Pressed for time? Choose between **Quick**, **Standard**, or **Detailed** AI summaries and have the essence synthesized and read aloud to you.
+* **Free Natural Human Voices**: Ships with high-fidelity Microsoft Edge Neural voices out of the box with zero configuration or API keys required. Also supports cloud voices from Google, Gemini Audio, ElevenLabs, Deepgram, OpenAI, and NVIDIA if you connect your own keys.
+
+---
+
+### 3. 🎙️ Voice Flow — Talk Instead of Typing
+Stop typing thousands of words every day. Speak naturally, and Flow will transcribe and type for you anywhere your cursor is placed. *(Note: Voice Flow focuses purely on text dictation inside your active applications).*
 
 * **Effortless Triggers**:
   * **Push-to-Talk**: Hold down your **Middle Mouse Button** (scroll wheel) or press `Ctrl + Win` (`Cmd + Ctrl` on Mac) while speaking (>0.30s). Release when finished, and watch your words appear instantly.
@@ -93,45 +134,6 @@ Stop typing thousands of words every day. Speak naturally, and Flow will transcr
   * **VS Code / IDEs**: Detects code contexts and formats programming identifiers (`snake_case`, `camelCase`) and Markdown blocks.
 * **Personal Dictionary & Custom Shortcuts**: Teach Flow your name, specialized technical jargon, or custom abbreviations (e.g. typing or saying `myzoom` instantly expands to your full Zoom meeting link).
 * **100% Local Speech Engine**: Transcribes directly on your processor using offline Faster-Whisper (`base.en` CPU int8). Your microphone audio never leaves your computer.
-
----
-
-### 2. 🎧 Audio Flow — Turn Any Text Into Speech
-Turn any web page, document, code comment, or email into an instant personal audio track.
-
-<p align="center">
-  <video src="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/audioflow_demo.mp4" controls="controls" width="100%" style="max-height: 520px; border-radius: 12px;"></video>
-  <br>
-  <sub>🎧 <b><a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/audioflow_demo.mp4">Click here to watch or download the full Audio Flow Demo (MP4)</a></b></sub>
-</p>
-
-* **Highlight & Listen**: Simply select any text on your screen (drag >= 6px). A floating player bar appears right next to your cursor.
-* **Synchronized Yellow Word Tracking**: Words illuminate in real-time as they are spoken, making it effortless to follow along with dense documents.
-* **Full Playback Control**: Adjust playback speed from 0.75x to 2.0x, scrub through the waveform bar, jump backward/forward, or save the synthesized speech as an MP3 file with one click.
-* **Spoken AI Summaries**: Pressed for time? Choose between **Quick**, **Standard**, or **Detailed** AI summaries and have the essence read aloud to you.
-* **Free Natural Human Voices**: Ships with high-fidelity Microsoft Edge Neural voices out of the box with zero configuration or API keys required. Also supports cloud voices from Google, Gemini Audio, ElevenLabs, Deepgram, OpenAI, and NVIDIA if you connect your own keys.
-
----
-
-### 3. 🎬 Video Flow — Turn Notes into 1080p Explainer Videos
-Why struggle through dry walls of text when you can watch a concise, visually rich explainer video?
-
-<p align="center">
-  <video src="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/videoflow_demo.mp4" controls="controls" width="100%" style="max-height: 520px; border-radius: 12px;"></video>
-  <br>
-  <sub>🎬 <b><a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/raw/main/website/assets/video/videoflow_demo.mp4">Click here to watch or download the full Video Flow Demo (MP4)</a></b></sub>
-</p>
-
-* **Drag-and-Drop Any Document**: Highlight text or drop files (`.pdf`, `.docx`, `.txt`, `.md`, `.csv`, `.json`, `.html`, `.xml`, `.rtf` up to 8 MB) directly into the composer.
-* **Two Tailored Modes**: Choose **Summary Mode** for concise overviews or **Full Mode** for comprehensive walkthroughs.
-* **Creative Director (15 Dynamic Visual Treatments)**: Keeps viewers engaged by intelligently mixing scene types:
-  * Title cards and concept highlights
-  * Animated process flowcharts and timelines
-  * Data metrics and animated counters
-  * 3D WebGL scenes and spatial visualizations
-  * Waveform displays and recap grids
-* **100% Free Deterministic Motion Renderer**: You don't need expensive paid video generation APIs. Video Flow uses bundled browser-based motion modules and FFmpeg to render finished 1080p H.264 MP4 videos locally with synchronized voiceover and captions.
-* **Built-in Player & Export**: Preview videos directly in the on-screen player with speed controls, scrubber, captions toggle, and local MP4 saving.
 
 ---
 
@@ -165,8 +167,8 @@ Whether you prefer a sleek dark aesthetic or a clean paper parchment theme, Flow
 
 | Action | Shortcut / Gesture | What it does |
 | :--- | :--- | :--- |
+| **Explainer Video & Audio Reader (Flow Bar)** | **Select / Highlight text** on screen | A sleek floating bar appears with **🎬 Video**, **🎧 Audio**, and **🎙️ Voice** buttons. |
 | **Talk to Type (Voice Flow)** | **Middle Mouse Button** (Hold & Release)<br>or `Ctrl + Win` (`Cmd + Ctrl` on Mac) | Hold down to speak freely; release to paste formatted text into your active app. |
-| **Screen Reader & Video (Flow Bar)** | **Select / Highlight text** on screen | A sleek floating bar appears with **🎙️ Voice**, **🎧 Audio**, and **🎬 Video** buttons. |
 | **Settings & History Dashboard** | Open **`http://127.0.0.1:8991`** in your browser | Configure AI providers, manage personal dictionary entries, choose voices, and view insights. |
 
 ---
