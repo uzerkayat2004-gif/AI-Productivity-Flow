@@ -1514,7 +1514,7 @@ function renderDictationCardHtml(r) {
   const isPinned = Boolean(r.is_pinned);
   const isVideo = r.app_name === "Video Flow" || r.style_mode === "video_flow";
   const isAudio = r.app_name === "Audio Flow" || r.style_mode === "audio_flow" || r.style_mode === "audio_summary";
-  const mediaId = r.insertion_status || r.audio_path || "";
+  const mediaId = r.insertion_status || (r.audio_path ? r.audio_path : String(r.id || ""));
   const titleText = r.polished_text || (isVideo ? "Video Flow Project" : (isAudio ? "Audio Summary" : ""));
 
   let badgeHtml = `<span class="app-badge">${escapeHtml(r.app_name || "General")}</span>`;
@@ -1725,6 +1725,14 @@ async function downloadVideoFromChatCard(videoId, title, btn) {
         btn.disabled = false;
       }
       showToast(`Saved "${data.filename}" to Videos & Downloads`, "✓");
+      try {
+        const link = document.createElement("a");
+        link.href = `/api/video-flow/videos/stream?id=${encodeURIComponent(videoId)}&download=1&title=${encodeURIComponent(title || data.filename || '')}`;
+        link.download = data.filename || `${title || 'video'}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (_) {}
     } else {
       throw new Error(data.error || "Save failed");
     }
@@ -1782,6 +1790,14 @@ async function downloadAudioFromChatCard(audioId, title, btn) {
         btn.disabled = false;
       }
       showToast(`Saved "${data.filename}" to Music & Downloads`, "✓");
+      try {
+        const link = document.createElement("a");
+        link.href = `/api/audio-flow/summary/stream?id=${encodeURIComponent(audioId)}&download=1&title=${encodeURIComponent(title || data.filename || '')}`;
+        link.download = data.filename || `${title || 'audio_summary'}.mp3`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (_) {}
     } else {
       throw new Error(data.error || "Save failed");
     }
@@ -6006,8 +6022,16 @@ async function downloadAudioSummary(id, btn, customTitle) {
           }
           if (typeof showToast === "function") {
             const destPath = sData.path || `Downloads/${directSavedFilename}`;
-            showToast(`Saved to Downloads: "${directSavedFilename}" (${destPath})`, "🎵");
+            showToast(`Saved to Music & Downloads: "${directSavedFilename}"`, "🎵");
           }
+          try {
+            const link = document.createElement("a");
+            link.href = `/api/audio-flow/summary/stream?id=${encodeURIComponent(id)}&download=1&title=${encodeURIComponent(title || directSavedFilename)}`;
+            link.download = directSavedFilename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          } catch (_) {}
           return;
         }
       } else {

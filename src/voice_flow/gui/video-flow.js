@@ -3951,6 +3951,9 @@ async function generateVideoFlow() {
       vfActiveVideoId = data.video?.id || data.job_id || null;
       vfVideos.unshift(data.video);
       renderVideoHistory();
+      if (typeof loadHistory === "function") {
+        try { loadHistory(); } catch (_) {}
+      }
       vfSetCancelButtonVisibility(true);
       vfStartLiveStopwatch(data.video, "Generating in Cloud AI...");
       scheduleVideoFlowPolling(true);
@@ -4071,6 +4074,9 @@ async function generateVideoFlow() {
       vfActiveVideoId = data.video?.id || data.job_id || null;
       vfVideos.unshift(data.video);
       renderVideoHistory();
+      if (typeof loadHistory === "function") {
+        try { loadHistory(); } catch (_) {}
+      }
       vfSetCancelButtonVisibility(true);
       vfStartLiveStopwatch(data.video);
       scheduleVideoFlowPolling(true);
@@ -4118,6 +4124,9 @@ function scheduleVideoFlowPolling(immediate = false) {
           if (["completed", "complete", "ready"].includes(trackedVideo.status) || trackedVideo.playable) {
             updateGenerationStepper(trackedVideo);
             vfToast("Video generation complete! Ready to watch.");
+            if (typeof loadHistory === "function") {
+              try { loadHistory(); } catch (_) {}
+            }
           } else if (trackedVideo.status === "failed") {
             updateGenerationStepper(trackedVideo);
           } else if (trackedVideo.status === "cancelled") {
@@ -6417,8 +6426,17 @@ async function downloadVideoFlow(videoId, btn) {
           }
           if (typeof vfToast === "function") {
             const destPath = sData.path || `Downloads/${directSavedFilename}`;
-            vfToast(`Saved to Downloads: "${directSavedFilename}" (${destPath})`, false);
+            vfToast(`Saved to Videos & Downloads: "${directSavedFilename}"`, false);
           }
+          try {
+            const titleParam = videoTitle ? `&title=${encodeURIComponent(videoTitle)}` : "";
+            const dlLink = document.createElement("a");
+            dlLink.href = `/api/video-flow/videos/stream?id=${encodeURIComponent(videoId)}&download=1${titleParam}`;
+            dlLink.download = directSavedFilename;
+            document.body.appendChild(dlLink);
+            dlLink.click();
+            dlLink.remove();
+          } catch (_) {}
           return;
         }
       } else {

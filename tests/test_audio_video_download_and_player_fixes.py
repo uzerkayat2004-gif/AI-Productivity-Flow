@@ -250,3 +250,117 @@ def test_vf_history_body_no_inline_display_none():
     assert '<div id="vf-history-body">' in content
 
 
+def test_multiple_videos_and_audios_same_prompt_persist_distinct(tmp_path):
+    from voice_flow.storage import StorageEngine
+    db_file = tmp_path / "test_distinct.db"
+    store = StorageEngine(str(db_file))
+
+    # Record two videos with identical prompt and title but different job_ids
+    v1 = store.record_video_history(
+        job_id="vf-job-1",
+        title="Same Video Title",
+        prompt="Identical prompt for testing",
+        output_path="C:/videos/v1.mp4",
+        duration_sec=10.0,
+    )
+    v2 = store.record_video_history(
+        job_id="vf-job-2",
+        title="Same Video Title",
+        prompt="Identical prompt for testing",
+        output_path="C:/videos/v2.mp4",
+        duration_sec=12.0,
+    )
+    assert v1 != v2
+
+    recent = store.get_recent_history(limit=10)
+    video_rows = [r for r in recent if r["app_name"] == "Video Flow"]
+    assert len(video_rows) == 2, "Both videos must persist distinct and not collapse in history"
+    job_ids = {r["insertion_status"] for r in video_rows}
+    assert job_ids == {"vf-job-1", "vf-job-2"}
+
+    # Record two audios with identical snippet and title but different audio_ids
+    a1 = store.record_audio_summary_to_history(
+        audio_id="ash_job_1",
+        title="Same Audio Title",
+        text_snippet="Identical audio text snippet",
+        audio_path="C:/audio/a1.mp3",
+        duration_sec=20.0,
+    )
+    a2 = store.record_audio_summary_to_history(
+        audio_id="ash_job_2",
+        title="Same Audio Title",
+        text_snippet="Identical audio text snippet",
+        audio_path="C:/audio/a2.mp3",
+        duration_sec=25.0,
+    )
+    assert a1 != a2
+
+    recent_all = store.get_recent_history(limit=10)
+    audio_rows = [r for r in recent_all if r["app_name"] == "Audio Flow"]
+    assert len(audio_rows) == 2, "Both audios must persist distinct and not collapse in history"
+    a_ids = {r["insertion_status"] for r in audio_rows}
+    assert a_ids == {"ash_job_1", "ash_job_2"}
+
+
+def test_cascading_delete_video_and_audio(tmp_path):
+    from voice_flow.storage import StorageEngine
+    from voice_flow.video_flow_service import VideoFlowStore, JobV3
+    db_file = tmp_path / "test_delete.db"
+    store = StorageEngine(str(db_file))
+    vf_store = VideoFlowStore(db_file)
+
+    # 1. Video Flow cascade
+    job = JobV3("vf-del-1", "complete", 100.0, "Ready", {"title": "Delete Me", "prompt": "del"})
+    vf_store.create(job)
+    # Check history has it
+    h1 = store.get_recent_history(limit=5)
+    assert any(r["insertion_status"] == "vf-del-1" for r in h1)
+
+    # Delete via store.delete_history_record
+    row = next(r for r in h1 if r["insertion_status"] == "vf-del-1")
+    del_res = store.delete_history_record(row["id"])
+    assert del_res is not None
+    # Verify gone from history
+    h2 = store.get_recent_history(limit=5)
+    assert not any(r["insertion_status"] == "vf-del-1" for r in h2)
+    # Verify cascaded to video_flow_jobs
+    assert vf_store.get("vf-del-1") is None
+
+    # 2. Audio Flow cascade
+    item = store.add_audio_summary_history("Delete Audio Text", depth="balanced", title="Del Audio")
+    item_id = item["id"]
+    h3 = store.get_recent_history(limit=5)
+    assert any(r["insertion_status"] == item_id for r in h3)
+    # Delete from history
+    row_a = next(r for r in h3 if r["insertion_status"] == item_id)
+    store.delete_history_record(row_a["id"])
+    assert store.get_audio_summary_history_by_id(item_id) is None
+
+
+def test_resolve_summary_audio_direct_path_and_history(tmp_path, monkeypatch):
+    from voice_flow.audio_summary_player import resolve_summary_audio
+    from voice_flow.storage import StorageEngine
+    db_file = tmp_path / "test_resolve.db"
+    store = StorageEngine(str(db_file))
+    monkeypatch.setattr("voice_flow.storage.storage", store)
+
+    # 1. Direct path check
+    f = tmp_path / "actual_audio.mp3"
+    f.write_bytes(b"DATA123")
+    res = resolve_summary_audio(str(f))
+    assert res is not None
+    assert res[0].resolve() == f.resolve()
+
+    # 2. History record fallback by id
+    rec_id = store.record_audio_summary_to_history(
+        audio_id="ash_hist_resolve",
+        title="Hist Title",
+        text_snippet="Hist Snippet",
+        audio_path=str(f),
+    )
+    res_by_id = resolve_summary_audio(str(rec_id))
+    assert res_by_id is not None
+    assert res_by_id[0].resolve() == f.resolve()
+
+
+

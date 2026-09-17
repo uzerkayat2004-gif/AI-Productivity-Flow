@@ -243,8 +243,12 @@ def get_user_videos_dir() -> Path:
             pass
 
     vid = Path.home() / "Videos"
-    if vid.is_dir():
-        return vid
+    try:
+        vid.mkdir(parents=True, exist_ok=True)
+        if vid.is_dir():
+            return vid
+    except Exception:
+        pass
     return get_user_downloads_dir()
 
 
@@ -293,8 +297,12 @@ def get_user_music_dir() -> Path:
             pass
 
     mus = Path.home() / "Music"
-    if mus.is_dir():
-        return mus
+    try:
+        mus.mkdir(parents=True, exist_ok=True)
+        if mus.is_dir():
+            return mus
+    except Exception:
+        pass
     return get_user_downloads_dir()
 
 
@@ -361,9 +369,21 @@ def register_summary_audio(audio_path: str | Path, *, depth: str = "balanced", t
 
 def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
     """Resolve a previously registered token, refusing expired or deleted files."""
+    tok_str = str(token or "").strip()
+    if not tok_str:
+        return None
+
+    # Check if token is directly an existing audio file path
+    try:
+        cand_p = Path(tok_str).expanduser().resolve()
+        if cand_p.is_file() and cand_p.stat().st_size > 0:
+            return (cand_p, "balanced")
+    except Exception:
+        pass
+
     with _media_lock:
         _purge_expired_locked()
-        item = _media.get(str(token or ""))
+        item = _media.get(tok_str)
         if item:
             path, _expires, depth = item
             if path.is_file():
@@ -372,7 +392,7 @@ def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
     # Check persisted audio summary history so past summaries remain playable
     try:
         from voice_flow.storage import storage
-        hist = storage.get_audio_summary_history_by_id(str(token or ""))
+        hist = storage.get_audio_summary_history_by_id(tok_str)
         if hist:
             if hist.get("status") in ("failed", "cancelled") and not hist.get("audio_path"):
                 return None
@@ -386,9 +406,9 @@ def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
                     audio_cand = media_root / cand.name
             if not audio_cand or not audio_cand.is_file():
                 # Check candidate filenames matching the token or ID
-                tok_clean = str(token or "").replace("ash_", "").strip()
+                tok_clean = tok_str.replace("ash_", "").strip()
                 for ext in (".m4a", ".mp3", ".wav", ".ogg", ".webm", ".mp4"):
-                    for test_name in (f"{token}{ext}", f"{tok_clean}{ext}"):
+                    for test_name in (f"{tok_str}{ext}", f"{tok_clean}{ext}"):
                         test_p = media_root / test_name
                         if test_p.is_file():
                             audio_cand = test_p
@@ -415,6 +435,23 @@ def resolve_summary_audio(token: str) -> tuple[Path, str] | None:
                 return (audio_cand, hist.get("depth", "balanced"))
     except Exception:
         pass
+
+    # Check unified history table by id or insertion_status
+    try:
+        from voice_flow.storage import storage
+        with storage._get_conn() as conn:
+            row = None
+            if tok_str.isdigit():
+                row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE id = ?", (int(tok_str),)).fetchone()
+            if not row:
+                row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE app_name = 'Audio Flow' AND insertion_status = ? LIMIT 1", (tok_str,)).fetchone()
+            if row and row["audio_path"]:
+                cand = Path(row["audio_path"]).expanduser().resolve()
+                if cand.is_file() and cand.stat().st_size > 0:
+                    return (cand, "balanced")
+    except Exception:
+        pass
+
     return None
 
 

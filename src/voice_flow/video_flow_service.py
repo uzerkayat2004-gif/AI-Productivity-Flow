@@ -179,10 +179,12 @@ class VideoFlowStore:
         try:
             from voice_flow.storage import storage, StorageEngine
             target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
+            if hasattr(target_engine, "repoint_if_needed"):
+                target_engine.repoint_if_needed()
             title = str((job.meta or {}).get("title") or (job.meta or {}).get("prompt") or f"Video {job.job_id[:8]}").strip()
             prompt = str((job.meta or {}).get("prompt") or (job.meta or {}).get("source_text") or title).strip()
             out_p = (job.meta or {}).get("output_path") or (job.meta or {}).get("video_path")
-            dur = float((job.meta or {}).get("duration") or 0.0)
+            dur = float((job.meta or {}).get("duration") or (job.meta or {}).get("duration_seconds") or 0.0)
             status = "success" if job.state == "complete" else ("processing" if job.state not in _TERMINAL_STATES else "error")
             err = job.message if job.state in ("failed", "cancelled") else None
             target_engine.record_video_history(
@@ -195,6 +197,11 @@ class VideoFlowStore:
                 error_message=err,
                 created_at=now,
             )
+            try:
+                from voice_flow.gui.api_server import invalidate_history_cache
+                invalidate_history_cache()
+            except Exception:
+                pass
         except Exception:
             pass
         return job
@@ -229,7 +236,18 @@ class VideoFlowStore:
     def delete(self, job_id: str) -> bool:
         with self._lock, self._connection() as conn:
             cursor = conn.execute("DELETE FROM video_flow_jobs WHERE job_id = ?", (job_id,))
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+            if deleted:
+                try:
+                    conn.execute("DELETE FROM history WHERE app_name = 'Video Flow' AND insertion_status = ?", (job_id,))
+                except Exception:
+                    pass
+                try:
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
+            return deleted
 
     def update(
         self,
@@ -275,20 +293,23 @@ class VideoFlowStore:
                 return current
             merged_meta = {**current.meta, **(meta_updates or {})}
             progress = 100.0 if state == "complete" else current.progress
+            now = time.time()
             with contextlib.closing(self._connection()) as conn, conn:
                 conn.execute(
                     "UPDATE video_flow_jobs SET state = ?, progress = ?, message = ?, meta_json = ?, updated_at = ? "
                     "WHERE job_id = ?",
-                    (state, progress, _redact(message), _json(merged_meta), time.time(), job_id),
+                    (state, progress, _redact(message), _json(merged_meta), now, job_id),
                 )
             job = JobV3(job_id, state, progress, _redact(message), merged_meta)
             try:
                 from voice_flow.storage import storage, StorageEngine
                 target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
+                if hasattr(target_engine, "repoint_if_needed"):
+                    target_engine.repoint_if_needed()
                 title = str((merged_meta or {}).get("title") or (merged_meta or {}).get("prompt") or f"Video {job_id[:8]}").strip()
                 prompt = str((merged_meta or {}).get("prompt") or (merged_meta or {}).get("source_text") or title).strip()
                 out_p = (merged_meta or {}).get("output_path") or (merged_meta or {}).get("video_path")
-                dur = float((merged_meta or {}).get("duration") or 0.0)
+                dur = float((merged_meta or {}).get("duration") or (merged_meta or {}).get("duration_seconds") or 0.0)
                 target_engine.record_video_history(
                     job_id=job_id,
                     title=title,
@@ -297,7 +318,13 @@ class VideoFlowStore:
                     duration_sec=dur,
                     status="success" if state == "complete" else "error",
                     error_message=message if state != "complete" else None,
+                    created_at=now,
                 )
+                try:
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
             except Exception:
                 pass
             return job
@@ -314,6 +341,24 @@ class VideoFlowStore:
                     "UPDATE video_flow_jobs SET meta_json = ?, updated_at = ? WHERE job_id = ?",
                     (_json(merged_meta), time.time(), job_id),
                 )
+            if meta_updates and any(k in meta_updates for k in ("title", "output_path", "video_path", "duration", "duration_seconds")):
+                try:
+                    from voice_flow.storage import storage, StorageEngine
+                    target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
+                    title = str(merged_meta.get("title") or merged_meta.get("prompt") or f"Video {job_id[:8]}").strip()
+                    prompt = str(merged_meta.get("prompt") or merged_meta.get("source_text") or title).strip()
+                    out_p = merged_meta.get("output_path") or merged_meta.get("video_path")
+                    dur = float(merged_meta.get("duration") or merged_meta.get("duration_seconds") or 0.0)
+                    target_engine.record_video_history(
+                        job_id=job_id,
+                        title=title,
+                        prompt=prompt,
+                        output_path=str(out_p) if out_p else None,
+                        duration_sec=dur,
+                        status="success" if current.state == "complete" else ("processing" if current.state not in _TERMINAL_STATES else "error"),
+                    )
+                except Exception:
+                    pass
             return JobV3(job_id, current.state, current.progress, current.message, merged_meta)
 
 

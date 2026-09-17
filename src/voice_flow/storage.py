@@ -92,7 +92,7 @@ SELECT
         MAX(app_name)
     ) AS app_name
 FROM main.history
-GROUP BY timestamp, raw_text, polished_text
+GROUP BY timestamp, raw_text, polished_text, (CASE WHEN app_name IN ('Video Flow', 'Audio Flow') OR style_mode IN ('video_flow', 'audio_flow', 'audio_summary') THEN id ELSE 0 END)
 """
 
 # Matches one physical dictation across all of its duplicate rows. `IS` rather
@@ -3143,14 +3143,29 @@ class StorageEngine:
             row = conn.execute("SELECT * FROM history WHERE id = ?", (record_id,)).fetchone()
             if not row:
                 return None
-            # Remove every copy, otherwise the delete looks like a no-op.
-            conn.execute(
-                f"DELETE FROM history WHERE {_DEDUP_KEY_WHERE}",
-                (row["timestamp"], row["raw_text"], row["polished_text"]),
-            )
+            row_dict = dict(row)
+            # For Video Flow and Audio Flow, delete this specific record and clean up side tables
+            if row_dict.get("app_name") in ("Video Flow", "Audio Flow") or row_dict.get("style_mode") in ("video_flow", "audio_flow"):
+                conn.execute("DELETE FROM history WHERE id = ?", (record_id,))
+                if row_dict.get("app_name") == "Video Flow" and row_dict.get("insertion_status"):
+                    try:
+                        conn.execute("DELETE FROM video_flow_jobs WHERE job_id = ?", (row_dict["insertion_status"],))
+                    except Exception:
+                        pass
+                elif row_dict.get("app_name") == "Audio Flow" and row_dict.get("insertion_status"):
+                    try:
+                        conn.execute("DELETE FROM audio_summary_history WHERE id = ?", (row_dict["insertion_status"],))
+                    except Exception:
+                        pass
+            else:
+                # Remove every copy, otherwise the delete looks like a no-op.
+                conn.execute(
+                    f"DELETE FROM history WHERE {_DEDUP_KEY_WHERE}",
+                    (row["timestamp"], row["raw_text"], row["polished_text"]),
+                )
             conn.commit()
         self._remove_stale_auto_captured_words()
-        return dict(row)
+        return row_dict
 
     # --- Explicit Dictionary Corrections (CURRENT-only feature) ---
 
@@ -3799,6 +3814,20 @@ class StorageEngine:
                 1 if downloaded else 0,
             ))
             conn.commit()
+        try:
+            st = "success" if status_val == "ready" else ("processing" if status_val in ("in_progress", "generating") else "error")
+            self.record_audio_summary_to_history(
+                audio_id=uid,
+                title=summary_title,
+                text_snippet=snippet,
+                audio_path=str(audio_path or "") if audio_path else None,
+                duration_sec=float(duration_sec or 0.0),
+                status=st,
+                error_message=str(error) if error else None,
+                created_at=now,
+            )
+        except Exception:
+            pass
         return {
             "id": uid,
             "title": summary_title,
@@ -3856,7 +3885,25 @@ class StorageEngine:
         with self._get_conn_ctx() as conn:
             cur = conn.execute(f"UPDATE audio_summary_history SET {', '.join(updates)} WHERE id = ?", tuple(vals))
             conn.commit()
-            return cur.rowcount > 0
+            updated = cur.rowcount > 0
+        if updated:
+            try:
+                hist = self.get_audio_summary_history_by_id(item_id)
+                if hist:
+                    st = "success" if hist.get("status") == "ready" else ("processing" if hist.get("status") in ("in_progress", "generating") else "error")
+                    self.record_audio_summary_to_history(
+                        audio_id=item_id,
+                        title=hist.get("title") or "",
+                        text_snippet=hist.get("full_text") or hist.get("text_snippet") or "",
+                        audio_path=hist.get("audio_path"),
+                        duration_sec=float(hist.get("duration_sec") or 0.0),
+                        status=st,
+                        error_message=hist.get("error"),
+                        created_at=hist.get("created_at"),
+                    )
+            except Exception:
+                pass
+        return updated
 
     def get_audio_summary_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """Retrieve recent audio summary history records."""
@@ -3914,7 +3961,14 @@ class StorageEngine:
         """Delete an audio summary entry from history."""
         with self._get_conn_ctx() as conn:
             cursor = conn.execute("DELETE FROM audio_summary_history WHERE id = ?", (str(item_id or ""),))
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+            if deleted:
+                try:
+                    conn.execute("DELETE FROM history WHERE app_name = 'Audio Flow' AND (insertion_status = ? OR (audio_path IS NOT NULL AND audio_path = ?))", (str(item_id or ""), str(item_id or "")))
+                    conn.commit()
+                except Exception:
+                    pass
+            return deleted
 
     def record_video_history(
         self,
@@ -3937,10 +3991,17 @@ class StorageEngine:
         word_count = len(clean_prompt.split())
 
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, timestamp FROM history WHERE app_name = 'Video Flow' AND (insertion_status = ? OR (audio_path IS NOT NULL AND audio_path = ? AND audio_path != '') OR (raw_text = ? AND style_mode = 'video_flow')) LIMIT 1",
-                (job_id, str(output_path or ""), clean_prompt),
-            ).fetchone()
+            row = None
+            if job_id:
+                row = conn.execute(
+                    "SELECT id, timestamp FROM history WHERE app_name = 'Video Flow' AND insertion_status = ? LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+            if not row and output_path:
+                row = conn.execute(
+                    "SELECT id, timestamp FROM history WHERE app_name = 'Video Flow' AND audio_path IS NOT NULL AND audio_path = ? AND audio_path != '' LIMIT 1",
+                    (str(output_path),),
+                ).fetchone()
 
             if row:
                 rec_id = row["id"]
@@ -4024,10 +4085,17 @@ class StorageEngine:
         word_count = len(clean_text.split())
 
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT id, timestamp FROM history WHERE app_name = 'Audio Flow' AND (insertion_status = ? OR (audio_path IS NOT NULL AND audio_path = ? AND audio_path != '') OR (raw_text = ? AND style_mode = 'audio_flow')) LIMIT 1",
-                (audio_id, str(audio_path or ""), clean_text),
-            ).fetchone()
+            row = None
+            if audio_id:
+                row = conn.execute(
+                    "SELECT id, timestamp FROM history WHERE app_name = 'Audio Flow' AND insertion_status = ? LIMIT 1",
+                    (audio_id,),
+                ).fetchone()
+            if not row and audio_path:
+                row = conn.execute(
+                    "SELECT id, timestamp FROM history WHERE app_name = 'Audio Flow' AND audio_path IS NOT NULL AND audio_path = ? AND audio_path != '' LIMIT 1",
+                    (str(audio_path),),
+                ).fetchone()
 
             if row:
                 rec_id = row["id"]
@@ -4103,7 +4171,7 @@ class StorageEngine:
                     title = meta.get("title") or meta.get("prompt") or f"Video {job_id[:8]}"
                     prompt = meta.get("prompt") or meta.get("source_text") or title
                     out_p = meta.get("output_path") or meta.get("video_path")
-                    dur = float(meta.get("duration") or 0.0)
+                    dur = float(meta.get("duration") or meta.get("duration_seconds") or 0.0)
                     status = "success" if state == "complete" else ("processing" if state in ("generating", "processing", "pending") else "error")
                     err = msg if state in ("failed", "cancelled") else None
                     self.record_video_history(

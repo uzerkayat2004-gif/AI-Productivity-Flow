@@ -1178,7 +1178,15 @@
               btn.classList.add('is-success');
               btn.innerHTML = '<span>✓ Saved!</span>';
             }
-            statusEl.textContent = `Saved to Downloads: "${data.filename}" (${data.path || 'Downloads'})`;
+            statusEl.textContent = `Saved to Music & Downloads: "${data.filename}"`;
+            try {
+              const link = document.createElement("a");
+              link.href = `${apiBase}/api/audio-flow/summary/stream?id=${encodeURIComponent(id)}&download=1&title=${encodeURIComponent(title || data.filename || 'Audio Summary')}`;
+              link.download = data.filename;
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+            } catch (_) {}
             setTimeout(() => {
               if (btn) {
                 btn.classList.remove('is-success');

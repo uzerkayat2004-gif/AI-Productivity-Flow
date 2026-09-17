@@ -3843,6 +3843,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 data.setdefault("video_engine", "notebooklm")
                 service = get_video_flow_service()
                 job = service.queue(**data)
+                invalidate_history_cache()
                 self.send_json_response({"success": True, "job_id": job.job_id, "video": _shim_video(job)}, 202)
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
@@ -4123,6 +4124,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         service.cancel(video_id)
                     if hasattr(service, "delete"):
                         service.delete(video_id)
+                    invalidate_history_cache()
                     self.send_json_response({"success": True, "id": video_id})
                 except Exception as exc:
                     self.send_json_response({"success": False, "error": str(exc)}, 500)
@@ -5237,6 +5239,28 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             path_cand = found[0]
                             break
 
+            if (not path_cand or not path_cand.is_file()) and video_id:
+                try:
+                    with storage._get_conn() as conn:
+                        row = None
+                        if video_id.isdigit():
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text, insertion_status FROM history WHERE id = ?", (int(video_id),)).fetchone()
+                        if not row:
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text, insertion_status FROM history WHERE app_name = 'Video Flow' AND insertion_status = ? LIMIT 1", (video_id,)).fetchone()
+                        if not row and Path(video_id).is_file():
+                            p_direct = Path(video_id).resolve()
+                            if p_direct.stat().st_size > 1000:
+                                path_cand = p_direct
+                        elif row:
+                            if not req_title and (row["polished_text"] or row["raw_text"]):
+                                video_title = (row["polished_text"] or row["raw_text"]).strip()
+                            if row["audio_path"]:
+                                cand = Path(row["audio_path"]).expanduser().resolve()
+                                if cand.is_file() and cand.stat().st_size > 1000:
+                                    path_cand = cand
+                except Exception:
+                    pass
+
             if not path_cand or not path_cand.is_file():
                 err_msg = "Video file is not ready or not found on disk"
                 if job is not None and job.state in ("failed", "cancelled"):
@@ -5260,6 +5284,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         get_video_flow_service().update_meta(job.job_id, {"downloaded": True})
                     except Exception:
                         pass
+                try:
+                    invalidate_history_cache()
+                except Exception:
+                    pass
                 self.send_json_response({
                     "success": True,
                     "filename": final_name,
@@ -5298,6 +5326,23 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except Exception:
                 pass
 
+            if not hist_entry:
+                try:
+                    with storage._get_conn() as conn:
+                        row = None
+                        if audio_id.isdigit():
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE id = ?", (int(audio_id),)).fetchone()
+                        if not row:
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE app_name = 'Audio Flow' AND insertion_status = ? LIMIT 1", (audio_id,)).fetchone()
+                        if row:
+                            hist_entry = {
+                                "title": row["polished_text"] or row["raw_text"],
+                                "text_snippet": row["raw_text"] or row["polished_text"],
+                                "audio_path": row["audio_path"],
+                            }
+                except Exception:
+                    pass
+
             audio_title = req_title
             source_snippet = ""
             if hist_entry:
@@ -5315,6 +5360,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 saved_path, final_name = save_media_to_downloads(audio_path, clean_filename)
                 try:
                     storage.update_audio_summary_history(audio_id, downloaded=1)
+                except Exception:
+                    pass
+                try:
+                    invalidate_history_cache()
                 except Exception:
                     pass
                 self.send_json_response({
@@ -5532,6 +5581,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             else:
                 try:
                     res = storage.delete_audio_summary_history(summary_id)
+                    invalidate_history_cache()
                     self.send_json_response({"success": bool(res), "id": summary_id})
                 except Exception as e:
                     self.send_json_response({"success": False, "error": str(e)}, 500)
@@ -6179,11 +6229,30 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     found = list(proj_dir.rglob("video.mp4")) or list(proj_dir.rglob("concat.mp4"))
                     if found:
                         path = found[0]
+
+            if not path or not path.is_file():
+                try:
+                    with storage._get_conn() as conn:
+                        row = None
+                        if video_id.isdigit():
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE id = ?", (int(video_id),)).fetchone()
+                        if not row:
+                            row = conn.execute("SELECT audio_path, raw_text, polished_text FROM history WHERE app_name = 'Video Flow' AND insertion_status = ? LIMIT 1", (video_id,)).fetchone()
+                        if row and row["audio_path"]:
+                            cand = Path(row["audio_path"]).expanduser().resolve()
+                            if cand.is_file() and cand.stat().st_size > 0:
+                                path = cand
+                            if not title and (row["polished_text"] or row["raw_text"]):
+                                title = (row["polished_text"] or row["raw_text"]).strip()
+                except Exception:
+                    pass
+
         try:
-            data_root = data_dir().resolve()
+            from voice_flow.audio_summary_player import get_user_videos_dir, get_user_downloads_dir
+            allowed_roots = [data_dir().resolve(), get_user_videos_dir().resolve(), get_user_downloads_dir().resolve()]
             if path is not None:
                 resolved = path.resolve()
-                if data_root != resolved and data_root not in resolved.parents:
+                if not any(r == resolved or r in resolved.parents for r in allowed_roots):
                     path = None
         except OSError:
             path = None
