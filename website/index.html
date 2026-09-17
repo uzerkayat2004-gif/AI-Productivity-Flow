@@ -1,0 +1,1865 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Productivity Flow — Voice, Audio and Video intelligence for your desktop</title>
+<meta name="description" content="A native Windows app that turns speech into text, selected text into audio, and any document into an explainer video — without ever opening the app. Local-first, bring your own key, Apache-2.0.">
+<meta name="theme-color" content="#ebe0cc">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="AI Productivity Flow — Voice, Audio and Video intelligence">
+<meta property="og:description" content="Dictate at 145 wpm anywhere on Windows, hear any selection read aloud, and turn documents into explainer videos. Local-first and free to run.">
+<meta property="og:image" content="assets/img/icon-512.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="assets/img/favicon.ico">
+<link rel="apple-touch-icon" href="assets/img/icon-256.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/styles.css?v=20260917_10_fix">
+
+<style id="critical-flow-styles">
+  /* Unconditional layout rules: bulletproof against browser cache mismatch */
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    font-weight: 800;
+    font-size: 15.5px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .brand img {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    transition: transform .35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .brand:hover img { transform: scale(1.08) rotate(3deg); }
+
+  .brand__morph {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    height: 28px;
+    line-height: 28px;
+  }
+  .brand__letter-a {
+    display: inline-block;
+    color: var(--ink);
+    font-weight: 800;
+    font-size: 15.5px;
+    letter-spacing: -0.01em;
+    transition: color 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+                text-shadow 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .brand__mid {
+    display: inline-block;
+    white-space: pre;
+    overflow: hidden;
+    max-width: 140px;
+    opacity: 1;
+    color: var(--ink);
+    transition: max-width 0.68s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.48s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: max-width, opacity;
+  }
+  .brand__letter-f {
+    display: inline-block;
+    color: var(--ink);
+    font-weight: 800;
+    font-size: 15.5px;
+    letter-spacing: -0.01em;
+    transition: color 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+                text-shadow 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .brand__end {
+    display: inline-block;
+    white-space: pre;
+    overflow: hidden;
+    max-width: 40px;
+    opacity: 1;
+    color: var(--ink);
+    transition: max-width 0.68s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.48s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: max-width, opacity;
+  }
+
+  /* Scrolled state: accordion collapse directly into AF with fluid deceleration */
+  .nav.is-scrolled .brand__mid {
+    max-width: 0 !important;
+    opacity: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none;
+  }
+  .nav.is-scrolled .brand__end {
+    max-width: 0 !important;
+    opacity: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none;
+  }
+  .nav.is-scrolled .brand__letter-a,
+  .nav.is-scrolled .brand__letter-f {
+    color: #efa464 !important;
+    text-shadow: 0 0 14px rgba(239, 164, 100, 0.45) !important;
+  }
+  html[data-theme="light"] .nav.is-scrolled .brand__letter-a,
+  html[data-theme="light"] .nav.is-scrolled .brand__letter-f {
+    color: #c24e10 !important;
+    text-shadow: 0 0 10px rgba(194, 78, 16, 0.25) !important;
+  }
+
+  /* Centered Glowing Hero Logo - 100% centered on its own row */
+  .hero__logo {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    margin: 0 auto 16px !important;
+  }
+  .hero__logo img {
+    width: 62px !important;
+    height: 62px !important;
+    display: block !important;
+    margin: 0 auto !important;
+    filter: drop-shadow(0 10px 28px rgba(239, 164, 100, 0.45)) drop-shadow(0 2px 8px rgba(201, 106, 42, 0.35)) !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease !important;
+  }
+  .hero__logo:hover img {
+    transform: scale(1.08) rotate(3deg) !important;
+    filter: drop-shadow(0 14px 34px rgba(239, 164, 100, 0.60)) drop-shadow(0 4px 12px rgba(201, 106, 42, 0.45)) !important;
+  }
+
+  /* Single CTA button */
+  .hero__cta {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin-bottom: 22px !important;
+  }
+  .btn--hero-download {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    padding: 13px 34px !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    border-radius: 999px !important;
+    color: #161512 !important;
+    background: linear-gradient(135deg, #efa464, #e06222) !important;
+    box-shadow: 0 4px 22px rgba(201, 106, 42, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+    text-decoration: none !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  }
+  .btn--hero-download:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 30px rgba(201, 106, 42, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.30) !important;
+  }
+  .btn--hero-download svg {
+    width: 18px !important;
+    height: 18px !important;
+    stroke: currentColor !important;
+  }
+
+  /* Perfectly Centered Window Titlebar Tabs */
+  .window-bar {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    height: 46px !important;
+    padding: 0 18px !important;
+  }
+  .window-dots {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    z-index: 2 !important;
+  }
+  .window-tabs {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    z-index: 1 !important;
+  }
+  .win-tab {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 7px 18px !important;
+    border-radius: 999px !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+  }
+
+  @media (max-width: 680px) {
+    .hero__flows { flex-wrap: wrap !important; gap: 6px !important; border-radius: 20px !important; }
+  }
+
+  /* ---------- Hero Showcase Scroll Track & Sticky Frame (Unconditional) ---------- */
+  .hero {
+    position: relative !important;
+    height: 180vh !important;
+    background: var(--h-bg) !important;
+    color: var(--h-ink) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-bottom: 1px solid var(--h-line) !important;
+    overflow: visible !important;
+  }
+  .hero__sticky {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    z-index: 20 !important;
+  }
+  .hero__ambient-glow {
+    position: absolute !important;
+    inset: 0 !important;
+    pointer-events: none !important;
+    z-index: 1 !important;
+    background:
+      radial-gradient(820px 480px at 50% 4%, rgba(239, 170, 115, 0.22), transparent 66%),
+      radial-gradient(560px 360px at 50% 0%, rgba(201, 106, 42, 0.26), transparent 70%) !important;
+  }
+  .hero__ambient-glow::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    pointer-events: none !important;
+    opacity: .35 !important;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px) !important;
+    background-size: 46px 46px !important;
+    mask-image: radial-gradient(circle at 50% 30%, #000 0%, transparent 68%) !important;
+    -webkit-mask-image: radial-gradient(circle at 50% 30%, #000 0%, transparent 68%) !important;
+  }
+  #heroHeader {
+    position: relative !important;
+    z-index: 5 !important;
+    text-align: center !important;
+    padding-top: calc(var(--nav-h, 68px) + 8px) !important;
+    width: 100% !important;
+    flex-shrink: 0 !important;
+    transition: opacity 0.05s linear, transform 0.05s linear !important;
+    will-change: opacity, transform !important;
+  }
+
+  /* Showcase stage & window */
+  .hero__showcase {
+    position: relative !important;
+    z-index: 30 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    flex: 1 !important;
+  }
+  .showcase-window {
+    position: relative !important;
+    width: var(--sc-w, 980px) !important;
+    max-width: var(--sc-maxw, min(980px, calc(100vw - 32px))) !important;
+    height: var(--sc-h, auto) !important;
+    border-radius: var(--sc-rad, 16px) !important;
+    transform: translate3d(0, var(--sc-y, 0px), 0) !important;
+    background: var(--h-bar-bg) !important;
+    border: 1.5px solid var(--h-line) !important;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset, 0 28px 75px -12px rgba(0, 0, 0, 0.72), 0 0 50px var(--h-glow) !important;
+    overflow: hidden !important;
+    will-change: transform, width, height, border-radius !important;
+    display: flex !important;
+    flex-direction: column !important;
+    transition: border-color .28s ease, background-color .28s ease !important;
+  }
+  .showcase-panel {
+    display: none !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+  }
+  .showcase-panel.is-active {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+  }
+  .panel-screen {
+    position: relative !important;
+    background: var(--paper) !important;
+    overflow: hidden !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+    aspect-ratio: 16 / 9 !important;
+    border-radius: 0 0 14px 14px !important;
+  }
+  .hero-showcase-video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    object-position: center center !important;
+    display: block !important;
+    border-radius: 0 0 14px 14px !important;
+  }
+
+  /* ---------- Split Story Layout (Problems & Solutions: True Scrolling Stream) ---------- */
+  .split-story {
+    position: relative !important;
+    padding: 50px 0 140px !important;
+    margin: 0 !important;
+    border-bottom: 1px solid var(--line) !important;
+    overflow: visible !important;
+  }
+  .split-story--problem {
+    background: radial-gradient(circle at 80% 25%, rgba(220, 38, 38, 0.05), transparent 60%) !important;
+  }
+  .split-story--solution {
+    background: radial-gradient(circle at 20% 25%, rgba(239, 164, 100, 0.06), transparent 60%) !important;
+  }
+  .split-story__grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 48px !important;
+    align-items: start !important;
+    position: relative !important;
+    margin-top: 40px !important;
+    max-width: 1140px !important;
+    margin-inline: auto !important;
+  }
+  .split-story__grid--inverted {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* Pinned Sticky Media Column - Centered in viewport to match focused card */
+  .split-story__media-col {
+    position: sticky !important;
+    top: calc(50vh - 245px) !important;
+    z-index: 15 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+  .split-story__media-sticky {
+    width: 100% !important;
+    max-width: 530px !important;
+  }
+
+  /* Cards Stream: Vertically Scrolling cards that travel up/down */
+  .split-story__cards-stream {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 26vh !important;
+    padding: calc(50vh - 245px) 0 40vh 0 !important;
+  }
+
+  .problem-card, .solution-card {
+    position: relative !important;
+    width: 100% !important;
+    max-width: 530px !important;
+    height: 490px !important;
+    box-sizing: border-box !important;
+    padding: 36px 38px !important;
+    border-radius: 22px !important;
+    background: var(--paper) !important;
+    border: 1px solid var(--line) !important;
+    box-shadow: var(--shadow-sm) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.4s ease,
+                box-shadow 0.4s ease !important;
+    opacity: 0.32 !important;
+    transform: scale(0.96) !important;
+  }
+
+  .problem-card.is-focused, .solution-card.is-focused {
+    opacity: 1 !important;
+    transform: scale(1) !important;
+    box-shadow: var(--shadow-lg), 0 20px 48px rgba(0, 0, 0, 0.16) !important;
+  }
+  .problem-card.is-focused {
+    border-color: rgba(239, 68, 68, 0.5) !important;
+  }
+  .solution-card.is-focused {
+    border-color: rgba(239, 164, 100, 0.55) !important;
+  }
+
+  .media-frame__media {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    display: block !important;
+  }
+
+  /* Media Frames (Problem & Solution Visuals) - Exact 530px x 490px */
+  .media-frame {
+    position: relative !important;
+    width: 100% !important;
+    max-width: 530px !important;
+    height: 490px !important;
+    box-sizing: border-box !important;
+    border-radius: 22px !important;
+    background: var(--paper) !important;
+    border: 1px solid var(--line) !important;
+    box-shadow: var(--shadow-lg), 0 0 50px rgba(0, 0, 0, 0.45) !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease !important;
+  }
+  .media-frame:hover {
+    transform: translateY(-3px) !important;
+  }
+  .media-frame--problem {
+    border-color: rgba(224, 98, 34, 0.3) !important;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 45px rgba(224, 98, 34, 0.14) !important;
+  }
+  .media-frame--solution {
+    border-color: rgba(239, 164, 100, 0.4) !important;
+    box-shadow: 0 26px 70px rgba(0, 0, 0, 0.60), 0 0 55px rgba(239, 164, 100, 0.22) !important;
+  }
+  .media-frame__header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 13px 20px !important;
+    background: var(--well) !important;
+    border-bottom: 1px solid var(--line) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.03em !important;
+    text-transform: uppercase !important;
+    flex-shrink: 0 !important;
+  }
+  .media-frame__status-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 50% !important;
+  }
+  .media-frame__status-dot--alert {
+    background: #f87171 !important;
+    box-shadow: 0 0 10px rgba(248, 113, 113, 0.8) !important;
+  }
+  .media-frame__status-dot--success {
+    background: #4ade80 !important;
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.8) !important;
+  }
+  .media-frame__img-wrap {
+    position: relative !important;
+    width: 100% !important;
+    flex: 1 1 auto !important;
+    height: 382px !important;
+    overflow: hidden !important;
+    background: #111 !important;
+  }
+  .media-frame__img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    display: block !important;
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  .media-frame:hover .media-frame__img {
+    transform: scale(1.025) !important;
+  }
+  .media-frame__caption {
+    padding: 14px 18px !important;
+    background: var(--paper) !important;
+    border-top: 1px solid var(--line) !important;
+  }
+  .caption-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 6px 14px !important;
+    border-radius: 999px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+  }
+  .caption-pill--alert {
+    background: rgba(239, 68, 68, 0.14) !important;
+    color: #fca5a5 !important;
+    border: 1px solid rgba(239, 68, 68, 0.28) !important;
+  }
+  html[data-theme="light"] .caption-pill--alert {
+    background: rgba(220, 38, 38, 0.08) !important;
+    color: #b91c1c !important;
+    border-color: rgba(220, 38, 38, 0.22) !important;
+  }
+  .caption-pill--success {
+    background: rgba(239, 164, 100, 0.16) !important;
+    color: #efa464 !important;
+    border: 1px solid rgba(239, 164, 100, 0.32) !important;
+  }
+  html[data-theme="light"] .caption-pill--success {
+    background: rgba(194, 78, 16, 0.10) !important;
+    color: #c24e10 !important;
+    border-color: rgba(194, 78, 16, 0.24) !important;
+  }
+
+  /* Story Cards (Problem & Solution) */
+  .problem-card, .solution-card {
+    position: relative !important;
+    padding: 32px 34px !important;
+    border-radius: 18px !important;
+    background: var(--paper) !important;
+    border: 1px solid var(--line) !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: transform 0.28s ease, border-color 0.28s ease, box-shadow 0.28s ease !important;
+  }
+  .problem-card:hover, .solution-card:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: var(--shadow-md) !important;
+  }
+  .problem-card:hover {
+    border-color: rgba(248, 113, 113, 0.45) !important;
+  }
+  .solution-card:hover {
+    border-color: rgba(239, 164, 100, 0.45) !important;
+  }
+  .problem-card__badge, .solution-card__badge {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    margin-bottom: 14px !important;
+  }
+  .problem-card__num {
+    font-family: var(--mono) !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    color: var(--muted) !important;
+    background: var(--well) !important;
+    padding: 3px 10px !important;
+    border-radius: 6px !important;
+    border: 1px solid var(--line) !important;
+  }
+  .problem-card__tag {
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    color: #f87171 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+  html[data-theme="light"] .problem-card__tag {
+    color: #dc2626 !important;
+  }
+  .solution-card__ico {
+    font-size: 18px !important;
+  }
+  .solution-card__num {
+    font-family: var(--mono) !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    color: #16a34a !important;
+    background: rgba(34, 197, 94, 0.12) !important;
+    padding: 3px 10px !important;
+    border-radius: 6px !important;
+    border: 1px solid rgba(34, 197, 94, 0.28) !important;
+  }
+  .solution-card__tag {
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    color: #16a34a !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+  html[data-theme="light"] .solution-card__tag {
+    color: #15803d !important;
+  }
+  .solution-card__flow {
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    color: #efa464 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.04em !important;
+  }
+  html[data-theme="light"] .solution-card__flow {
+    color: #c24e10 !important;
+  }
+  .problem-card__title, .solution-card__title {
+    font-size: 21px !important;
+    font-weight: 800 !important;
+    line-height: 1.3 !important;
+    margin-bottom: 12px !important;
+    color: var(--ink) !important;
+    letter-spacing: -0.015em !important;
+  }
+  .problem-card__desc, .solution-card__desc {
+    font-size: 14.5px !important;
+    line-height: 1.6 !important;
+    color: var(--muted) !important;
+    margin-bottom: 0 !important;
+  }
+  .problem-card__body, .solution-card__body {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    margin: 10px 0 16px 0 !important;
+  }
+  .problem-card__metric, .solution-card__metric {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 13px 18px !important;
+    border-radius: 12px !important;
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+    color: var(--ink) !important;
+  }
+  .problem-card__metric {
+    background: var(--well) !important;
+    border: 1px solid var(--line) !important;
+  }
+  .problem-card__metric svg {
+    width: 18px !important;
+    height: 18px !important;
+    stroke: #f87171 !important;
+    flex-shrink: 0 !important;
+  }
+  html[data-theme="light"] .problem-card__metric svg {
+    stroke: #dc2626 !important;
+  }
+  .solution-card__metric {
+    background: rgba(34, 197, 94, 0.08) !important;
+    border: 1px solid rgba(34, 197, 94, 0.24) !important;
+    margin-bottom: 14px !important;
+  }
+  .solution-card__metric svg {
+    width: 18px !important;
+    height: 18px !important;
+    stroke: #16a34a !important;
+    flex-shrink: 0 !important;
+  }
+  html[data-theme="light"] .solution-card__metric svg {
+    stroke: #15803d !important;
+  }
+  .solution-card__footer {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+  }
+  .solution-card__chips {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  .solution-card__chips .chip {
+    padding: 5px 12px !important;
+    border-radius: 999px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    background: var(--well) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--ink) !important;
+  }
+  .eyebrow--alert {
+    color: #f87171 !important;
+    border-color: rgba(248, 113, 113, 0.3) !important;
+    background: rgba(248, 113, 113, 0.1) !important;
+  }
+  html[data-theme="light"] .eyebrow--alert {
+    color: #dc2626 !important;
+    border-color: rgba(220, 38, 38, 0.25) !important;
+    background: rgba(220, 38, 38, 0.08) !important;
+  }
+  .eyebrow--gold {
+    color: #efa464 !important;
+    border-color: rgba(239, 164, 100, 0.3) !important;
+    background: rgba(239, 164, 100, 0.1) !important;
+  }
+  html[data-theme="light"] .eyebrow--gold {
+    color: #c24e10 !important;
+    border-color: rgba(194, 78, 16, 0.25) !important;
+    background: rgba(194, 78, 16, 0.08) !important;
+  }
+
+  @media (max-width: 960px) {
+    .split-story {
+      height: auto !important;
+      padding: 60px 0 !important;
+    }
+    .split-story__sticky {
+      position: static !important;
+      height: auto !important;
+      padding: 0 !important;
+      overflow: visible !important;
+    }
+    .split-story__grid,
+    .split-story__grid--inverted {
+      grid-template-columns: 1fr !important;
+      gap: 32px !important;
+    }
+    .split-story__media-col {
+      position: static !important;
+      order: -1 !important;
+    }
+    .split-story__step-nav {
+      display: none !important;
+    }
+    .split-story__cards-viewport {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 20px !important;
+      min-height: 0 !important;
+    }
+    .split-story__cards-viewport .problem-card,
+    .split-story__cards-viewport .solution-card {
+      position: static !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: none !important;
+      pointer-events: auto !important;
+    }
+  }
+</style>
+
+<script>
+/* Applied before first paint so the parchment theme never flashes charcoal.
+   The .js class also switches on the scroll-reveal styles — without it the
+   content is plainly visible, which is the correct no-JS fallback. */
+(function () {
+  document.documentElement.classList.add('js');
+  try {
+    var saved = localStorage.getItem('flow-site-theme');
+    if (saved !== 'dark') {
+      saved = 'light';
+    }
+    document.documentElement.setAttribute('data-theme', saved);
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', saved === 'dark' ? '#20211f' : '#ebe0cc');
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
+</head>
+<body>
+
+<!-- ============================ NAV ============================ -->
+<header class="nav" id="nav">
+  <div class="nav__in">
+    <a class="brand" href="#top" id="brandLink" aria-label="AI Productivity Flow">
+      <img src="assets/img/logo.svg" alt="" width="28" height="28">
+      <span class="brand__morph" id="brandMorph">
+        <span class="brand__letter-a">A</span><span class="brand__mid">I Productivity&nbsp;</span><span class="brand__letter-f">F</span><span class="brand__end">low</span>
+      </span>
+    </a>
+
+    <nav class="nav__links" aria-label="Sections">
+      <a href="#problems">Problems</a>
+      <a href="#solutions">Solutions</a>
+      <a href="#video">Video</a>
+      <a href="#audio">Audio</a>
+      <a href="#voice">Voice</a>
+      <a href="#download">Download</a>
+    </nav>
+
+    <div class="nav__actions">
+      <button class="icon-btn theme-toggle" id="themeBtn" type="button" aria-label="Switch between dark and light theme" title="Switch theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" rel="noopener" aria-label="View the source on GitHub" title="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.77-.24.77-.54v-1.9c-3.11.68-3.77-1.5-3.77-1.5-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.94.1-.73.39-1.22.71-1.5-2.48-.28-5.1-1.24-5.1-5.53 0-1.22.44-2.22 1.15-3-.11-.29-.5-1.43.11-2.98 0 0 .94-.3 3.07 1.15a10.6 10.6 0 0 1 5.6 0c2.12-1.45 3.06-1.15 3.06-1.15.62 1.55.23 2.7.11 2.98.72.78 1.15 1.78 1.15 3 0 4.3-2.62 5.25-5.11 5.52.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.2 11.2 0 0 0 12 .8Z"/></svg>
+      </a>
+      <a class="btn btn--primary" href="#download">Get Flow</a>
+
+      <button class="nav__burger" id="burger" type="button"
+              aria-label="Open the section menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<script>
+(function () {
+  var nav = document.getElementById('nav');
+  var isScrolled = false;
+  function syncBrandMorph() {
+    if (!nav) return;
+    var y = window.pageYOffset || document.documentElement.scrollTop || window.scrollY || 0;
+    if (!isScrolled && y > 28) {
+      isScrolled = true;
+      nav.classList.add('is-scrolled');
+      nav.classList.add('is-stuck');
+    } else if (isScrolled && y <= 14) {
+      isScrolled = false;
+      nav.classList.remove('is-scrolled');
+      nav.classList.remove('is-stuck');
+    }
+  }
+  window.addEventListener('scroll', syncBrandMorph, { passive: true });
+  window.addEventListener('resize', syncBrandMorph, { passive: true });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', syncBrandMorph);
+  } else {
+    syncBrandMorph();
+  }
+})();
+</script>
+
+<main id="top">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero" id="heroTrack">
+  <div class="hero__sticky" id="heroSticky">
+    <div class="hero__ambient-glow"></div>
+
+    <div class="wrap hero__in" id="heroHeader">
+      <div class="hero__logo">
+        <img src="assets/img/logo.svg" alt="AI Productivity Flow Logo" width="62" height="62">
+      </div>
+
+      <div class="hero__badge">
+        <span class="dot"></span>
+        <span><b>Desktop Intelligence</b> &bull; Video, Audio &amp; Voice</span>
+      </div>
+
+      <h1 class="hero__title">Turn any document into <span class="grad">video</span><br>And any text into <span class="grad">audio</span></h1>
+
+      <div class="hero__cta">
+        <a class="btn btn--hero-download" href="#download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13m0 0 4.5-4.5M12 16l-4.5-4.5"/><path d="M4 20h16"/></svg>
+          Download the Flow
+        </a>
+      </div>
+    </div>
+
+    <!-- Grand Desktop App Showcase (Scroll-Driven Interactive Zoom) -->
+    <div class="hero__showcase" id="heroShowcase">
+      <div class="showcase-window" id="showcaseWindow">
+        <!-- Window Titlebar with interactive feature tabs -->
+        <div class="window-bar" id="windowBar">
+          <div class="window-dots">
+            <span class="dot-red"></span>
+            <span class="dot-yellow"></span>
+            <span class="dot-green"></span>
+          </div>
+
+          <div class="window-tabs" role="tablist">
+            <button class="win-tab is-active" id="tabVideo" type="button" role="tab" aria-selected="true">
+              <span class="tab-badge-icon">🎬</span>
+              <span>Video Flow</span>
+            </button>
+            <button class="win-tab" id="tabAudio" type="button" role="tab" aria-selected="false">
+              <span class="tab-badge-icon">🎧</span>
+              <span>Audio Flow</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Panel 1: Video Flow Showcase (Default) -->
+        <div class="showcase-panel is-active" id="panelVideo">
+          <div class="panel-screen">
+            <video class="hero-showcase-video" autoplay loop muted playsinline preload="auto">
+              <source src="assets/video/videoflow_demo.mp4" type="video/mp4">
+            </video>
+          </div>
+        </div>
+
+        <!-- Panel 2: Audio Flow Showcase -->
+        <div class="showcase-panel" id="panelAudio">
+          <div class="panel-screen">
+            <video class="hero-showcase-video" loop muted playsinline preload="auto">
+              <source src="assets/video/audioflow_demo.mp4" type="video/mp4">
+            </video>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PROBLEMS ============================ -->
+<section class="section split-story split-story--problem" id="problems">
+  <div class="wrap">
+    <div class="s-head s-head--center rv">
+      <span class="eyebrow eyebrow--alert">The Modern Workflow Crisis</span>
+      <h2 class="s-title">Why work feels so exhausting</h2>
+      <p class="s-sub" style="margin-inline:auto">
+        Knowledge work wasn’t meant to be 40 open browser tabs, constant eye strain, and typing until your wrists ache.
+      </p>
+    </div>
+
+    <div class="split-story__grid">
+      <!-- Left Column: Vertically Scrolling Stream of Problem Cards -->
+      <div class="split-story__cards-stream" id="problemCardsStream">
+        <!-- Problem 01 -->
+        <article class="problem-card is-focused" data-step="0">
+          <div class="problem-card__badge">
+            <span class="problem-card__num">01</span>
+            <span class="problem-card__tag">Eye Strain &amp; Fatigue</span>
+          </div>
+          <div class="problem-card__body">
+            <h3 class="problem-card__title">The 15-Page Reading Wall</h3>
+            <p class="problem-card__desc">
+              You spend hours every day hunched forward, squinting two inches from your monitor at dense technical docs, Slack essays, research papers, and PRs. Skimming causes you to miss critical details; reading word-for-word causes intense headaches and mental burnout.
+            </p>
+          </div>
+          <div class="problem-card__metric">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span><b>74% of long documents</b> are abandoned or skimmed without full comprehension</span>
+          </div>
+        </article>
+
+        <!-- Problem 02 -->
+        <article class="problem-card" data-step="1">
+          <div class="problem-card__badge">
+            <span class="problem-card__num">02</span>
+            <span class="problem-card__tag">Context Switching</span>
+          </div>
+          <div class="problem-card__body">
+            <h3 class="problem-card__title">The Infinite Tab Labyrinth</h3>
+            <p class="problem-card__desc">
+              Every existing AI tool forces you to leave what you're doing. You highlight text, copy it, open a browser, switch to ChatGPT or Claude, write a prompt, wait, and copy the answer back. Doing this 15 times a day completely shatters deep focus.
+            </p>
+          </div>
+          <div class="problem-card__metric">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            <span><b>23 minutes</b> lost to regain deep focus after every single interruption</span>
+          </div>
+        </article>
+
+        <!-- Problem 03 -->
+        <article class="problem-card" data-step="2">
+          <div class="problem-card__badge">
+            <span class="problem-card__num">03</span>
+            <span class="problem-card__tag">Physical Bottleneck</span>
+          </div>
+          <div class="problem-card__body">
+            <h3 class="problem-card__title">Thinking at 150 WPM, Typing at 45</h3>
+            <p class="problem-card__desc">
+              Your ideas move at conversational speed, but your keyboard slows you to a crawl. Typing emails, reports, documentation, and chat replies creates wrist fatigue (RSI) and a frustrating lag between your spontaneous thoughts and the screen.
+            </p>
+          </div>
+          <div class="problem-card__metric">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span><b>3.6&times; slower</b> to type by hand than to speak thoughts freely</span>
+          </div>
+        </article>
+      </div>
+
+      <!-- Right Column: Pinned Sticky Problem Video Frame -->
+      <div class="split-story__media-col">
+        <div class="split-story__media-sticky">
+          <div class="media-frame media-frame--problem">
+            <div class="media-frame__header">
+              <span class="media-frame__status-dot media-frame__status-dot--alert"></span>
+              <span class="media-frame__label">Without Flow &bull; The Straining Loop</span>
+            </div>
+            <div class="media-frame__img-wrap">
+              <video class="media-frame__media" autoplay loop muted playsinline preload="auto" poster="assets/img/problem_reading_strain.jpg">
+                <source src="assets/video/problem_strain.mp4" type="video/mp4">
+                <img src="assets/img/problem_reading_strain.jpg" alt="Person intensely squinting at dense computer screen" class="media-frame__img">
+              </video>
+              <div class="media-frame__glare"></div>
+            </div>
+            <div class="media-frame__caption">
+              <div class="caption-pill caption-pill--alert" id="problemCaption">
+                <span>⚠️ Step 01 &bull; The 15-Page Reading Wall &amp; Eye Strain</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SOLUTIONS ============================ -->
+<section class="section split-story split-story--solution" id="solutions">
+  <div class="wrap">
+    <div class="s-head s-head--center rv">
+      <span class="eyebrow eyebrow--gold">The AI Productivity Flow</span>
+      <h2 class="s-title">Transform information without leaving your workflow</h2>
+      <p class="s-sub" style="margin-inline:auto">
+        Stay relaxed, sip your coffee, and let Flow turn text into video, speech into text, and documents into voice.
+      </p>
+    </div>
+
+    <div class="split-story__grid split-story__grid--inverted">
+      <!-- Left Column: Pinned Sticky Solution Video Frame -->
+      <div class="split-story__media-col">
+        <div class="split-story__media-sticky">
+          <div class="media-frame media-frame--solution">
+            <div class="media-frame__header">
+              <span class="media-frame__status-dot media-frame__status-dot--success"></span>
+              <span class="media-frame__label">With Flow &bull; Effortless Clarity</span>
+            </div>
+            <div class="media-frame__img-wrap">
+              <video class="media-frame__media" autoplay loop muted playsinline preload="auto" poster="assets/img/solution_relaxed_video.jpg" id="solutionVideo">
+                <source src="assets/video/solution_relaxed.mp4" type="video/mp4">
+                <img src="assets/img/solution_relaxed_video.jpg" alt="Relaxed professional enjoying coffee while watching Video Flow" class="media-frame__img">
+              </video>
+              <div class="media-frame__ambient-glow"></div>
+            </div>
+            <div class="media-frame__caption">
+              <div class="caption-pill caption-pill--success" id="solutionCaption">
+                <span>🎬 Step 01 &bull; Turn Any Document Into Video</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Vertically Scrolling Stream of Solution Cards -->
+      <div class="split-story__cards-stream" id="solutionCardsStream">
+        <!-- Solution 01 -->
+        <article class="solution-card is-focused" data-step="0">
+          <div class="solution-card__badge">
+            <span class="solution-card__num">01</span>
+            <span class="solution-card__tag">Video Flow &bull; Visual Synthesis</span>
+          </div>
+          <div class="solution-card__body">
+            <h3 class="solution-card__title">Turn Any Document Into Video</h3>
+            <p class="solution-card__desc">
+              Highlight an article, PDF, tweet, or code repository, and Video Flow creates a crisp, narrated visual explainer in seconds. No browser tabs, no prompt gymnastics—just sit back with your coffee and watch complex ideas unfold visually.
+            </p>
+          </div>
+          <div class="solution-card__footer">
+            <div class="solution-card__metric">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span><b>60-second visual explainers</b> replace 15-page reading sessions with 85% higher retention</span>
+            </div>
+            <div class="solution-card__chips">
+              <span class="chip">One-Click MP4</span>
+              <span class="chip">Motion Diagrams</span>
+              <span class="chip">NotebookLM Engine</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Solution 02 -->
+        <article class="solution-card" data-step="1">
+          <div class="solution-card__badge">
+            <span class="solution-card__num">02</span>
+            <span class="solution-card__tag">Audio Flow &bull; Eyes-Free Comprehension</span>
+          </div>
+          <div class="solution-card__body">
+            <h3 class="solution-card__title">Listen in Flow, Rest Your Eyes</h3>
+            <p class="solution-card__desc">
+              Rest your eyes and absorb knowledge effortlessly. Instant Read Mode narrates with expressive human prosody, while Summary Mode delivers Short, Balanced, or Deep Dive overviews with speed control (<span class="code">0.75&times; &ndash; 2&times;</span>) and seek controls.
+            </p>
+          </div>
+          <div class="solution-card__footer">
+            <div class="solution-card__metric">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+              <span><b>Zero eye fatigue</b> with natural human-like prosody and interactive multi-depth audio summaries</span>
+            </div>
+            <div class="solution-card__chips">
+              <span class="chip">Human-like TTS</span>
+              <span class="chip">Multi-Depth Summaries</span>
+              <span class="chip">Floating HUD</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Solution 03 -->
+        <article class="solution-card" data-step="2">
+          <div class="solution-card__badge">
+            <span class="solution-card__num">03</span>
+            <span class="solution-card__tag">Voice Flow &bull; Zero-Friction Dictation</span>
+          </div>
+          <div class="solution-card__body">
+            <h3 class="solution-card__title">Speak at 145 WPM in Any Window</h3>
+            <p class="solution-card__desc">
+              Press a shortcut in VS Code, Slack, Word, or Chrome and speak freely. Voice Flow cleans up filler words, structures sentences, and streams polished text straight to your active cursor. Completely private, running 100% locally on your machine.
+            </p>
+          </div>
+          <div class="solution-card__footer">
+            <div class="solution-card__metric">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+              <span><b>145 WPM speaking speed</b> — 3.6&times; faster than typing, streaming directly into any application</span>
+            </div>
+            <div class="solution-card__chips">
+              <span class="chip">145 Words / Min</span>
+              <span class="chip">Auto-Polishing</span>
+              <span class="chip">100% Local / BYOK</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ HOW IT WORKS ============================ -->
+<section class="section" id="how">
+  <div class="wrap">
+    <div class="s-head s-head--center rv">
+      <span class="eyebrow">How it works</span>
+      <h2 class="s-title">One gesture, three directions</h2>
+      <p class="s-sub" style="margin-inline:auto">
+        Flow watches for a single trigger — a held key, a double-tap, a middle click, or a
+        text selection. What happens next depends on which flow you invoke.
+      </p>
+    </div>
+
+    <div class="flow__trigger rv">
+      Select text or hold your shortcut &mdash; in <b>VS Code</b>, <b>Chrome</b>, <b>Slack</b>, <b>Word</b>, anywhere
+    </div>
+    <div class="flow__arrow rv" aria-hidden="true">
+      <svg viewBox="0 0 22 30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M11 1v22"/><path d="m4 18 7 7 7-7"/></svg>
+    </div>
+
+    <div class="flow">
+      <article class="pill-card rv">
+        <div class="pill-card__ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg>
+        </div>
+        <h3>Voice Flow</h3>
+        <p>Speak and your words appear in the window you were already using — punctuated, cleaned up and formatted to suit that app.</p>
+        <div class="pill-card__out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
+          Pasted straight into the app
+        </div>
+      </article>
+
+      <article class="pill-card rv">
+        <div class="pill-card__ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19.5 6.5a8 8 0 0 1 0 11"/></svg>
+        </div>
+        <h3>Audio Flow</h3>
+        <p>Hear a selection read aloud in a natural voice, or get a spoken summary of the key ideas when the text is too long to read.</p>
+        <div class="pill-card__out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
+          A small floating player
+        </div>
+      </article>
+
+      <article class="pill-card rv">
+        <div class="pill-card__ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="m16.5 12 5-3.5v11l-5-3.5Z"/></svg>
+        </div>
+        <h3>Video Flow</h3>
+        <p>Drop in a paper, a spec or a wall of code and get back a narrated, animated explainer that walks through it scene by scene.</p>
+        <div class="pill-card__out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
+          A finished MP4
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ VOICE FLOW ============================ -->
+<section class="section section--alt" id="voice">
+  <div class="wrap">
+    <div class="row">
+      <div class="row__copy rv">
+        <span class="eyebrow">Voice Flow</span>
+        <h2>Dictation that knows where you are</h2>
+        <p>
+          Flow detects the window in front of you and adapts. Dictating into VS Code gives you
+          code-shaped text; the same sentence in Slack comes out conversational. You pick the
+          tone once per category and forget about it.
+        </p>
+        <div class="ticks">
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Your choice of trigger.</b> Ctrl+Win, a double-tap of Ctrl, the middle mouse button, or any custom key you record yourself.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Hold or toggle.</b> Hold to speak and release to paste, or tap once to start and again to finish. Both behaviours coexist without misfiring.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Offline by default.</b> Whisper and Nemotron models run on your own CPU, so dictation keeps working on a plane.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Names spelled right.</b> A personal dictionary biases the model, and shortcuts expand as you speak them.</span>
+          </div>
+        </div>
+        <div class="chips">
+          <span class="chip chip--on">Ctrl + Win</span>
+          <span class="chip">Double-tap Ctrl</span>
+          <span class="chip">Middle click</span>
+          <span class="chip">Hold to speak</span>
+          <span class="chip">Tap to toggle</span>
+          <span class="chip">Custom key</span>
+        </div>
+      </div>
+
+      <figure class="row__media media-frame rv">
+        <img class="shot-dark" src="assets/img/shots/home_dark.png" alt="The workspace page listing recent dictations, each tagged with the app it was spoken into, its word count and words-per-minute." width="1440" height="1150" loading="lazy">
+        <img class="shot-light" src="assets/img/shots/home_light.png" alt="The workspace page in the light parchment theme." width="1440" height="1150" loading="lazy">
+        <figcaption>Every dictation is logged with its app, word count and speed</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ AUDIO FLOW ============================ -->
+<section class="section" id="audio">
+  <div class="wrap">
+    <div class="row row--flip">
+      <div class="row__copy rv">
+        <span class="eyebrow">Audio Flow</span>
+        <h2>Listen to anything you can highlight</h2>
+        <p>
+          Two modes from the same selection. <b>Read</b> speaks the words exactly as written,
+          tracking along as it goes. <b>Summary</b> hands the text to NotebookLM and gives you
+          a spoken overview of just the key ideas.
+        </p>
+        <div class="ticks">
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Pick your depth.</b> Short, Balanced or Deep Dive, depending on how much of the detail you actually need.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>A real player, not a browser tab.</b> A compact always-on-top window with a waveform, scrub bar and speed control.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Free voices included.</b> Microsoft Edge Neural and offline Windows SAPI5 work with no key at all.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Keep the audio.</b> Download any summary as an MP3, named after the card it came from.</span>
+          </div>
+        </div>
+        <div class="chips">
+          <span class="chip">0.75&times;</span>
+          <span class="chip">1&times;</span>
+          <span class="chip">1.25&times;</span>
+          <span class="chip chip--on">1.5&times;</span>
+          <span class="chip">1.75&times;</span>
+          <span class="chip">2&times;</span>
+        </div>
+      </div>
+
+      <figure class="row__media media-frame rv">
+        <img src="assets/img/shots/player.png" alt="The compact floating audio player, showing an Audio Overview card with a scrub bar, skip controls, playback speed chips and an MP3 download button." width="500" height="240" loading="lazy" style="width:100%">
+        <figcaption>The floating player — small enough to leave open while you work</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ VIDEO FLOW ============================ -->
+<section class="section section--alt" id="video">
+  <div class="wrap">
+    <div class="row">
+      <div class="row__copy rv">
+        <span class="eyebrow">Video Flow</span>
+        <h2>Turn dense material into a video you can follow</h2>
+        <p>
+          Paste text or drop in a PDF, DOCX, Markdown or CSV file. Flow reads it, plans a
+          sequence of scenes around the actual claims in the source, writes the narration and
+          renders the whole thing to MP4.
+        </p>
+        <div class="ticks">
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Grounded in your source.</b> Scenes are built from claims and entities found in the document, not invented around the topic.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Formats for the job.</b> Brief overview, full explainer, cinematic, or a 9:16 vertical cut for Shorts and Reels.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Never paywalled.</b> If no generative video API is configured, the renderer falls back to procedural 2D and 3D scenes that cost nothing.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Built-in or cloud.</b> Render locally with the bundled engine, or connect NotebookLM for one-click cloud generation.</span>
+          </div>
+        </div>
+        <div class="chips">
+          <span class="chip chip--on">Automatic</span>
+          <span class="chip">Brief</span>
+          <span class="chip">Explainer</span>
+          <span class="chip">Cinematic</span>
+          <span class="chip">Vertical 9:16</span>
+        </div>
+      </div>
+
+      <figure class="row__media media-frame rv">
+        <img class="shot-dark" src="assets/img/shots/videoflow_dark.png" alt="The Video Flow page, with a content panel for the title, document upload and source text on the left, and video settings on the right offering NotebookLM or the built-in engine plus format choices." width="1440" height="1340" loading="lazy">
+        <img class="shot-light" src="assets/img/shots/videoflow_light.png" alt="The Video Flow page in the light parchment theme." width="1440" height="1340" loading="lazy">
+        <figcaption>Add your content on the left, choose how it should look on the right</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ INSIGHTS ============================ -->
+<section class="section" id="insights">
+  <div class="wrap">
+    <div class="row row--flip">
+      <div class="row__copy rv">
+        <span class="eyebrow">Insights</span>
+        <h2>Numbers you can actually check</h2>
+        <p>
+          Flow measures your real speaking speed, the time you saved against typing, and where
+          you dictate most. Nothing is a guess — every figure traces back to a logged dictation,
+          and low-confidence detections are shown as unattributed rather than filled in.
+        </p>
+        <div class="ticks">
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Speaking speed</b> from a plausible measured band, so a stray one-second clip cannot skew it.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Time saved</b> compared against typing at 40 wpm, minus the time you actually spent speaking.</span>
+          </div>
+          <div class="tick">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            <span><b>Where you dictate,</b> broken down per application, plus a month heat map and your current streak.</span>
+          </div>
+        </div>
+      </div>
+
+      <figure class="row__media media-frame rv">
+        <img class="shot-dark" src="assets/img/shots/insights_dark.png" alt="The Insights dashboard showing 145 words per minute, 63 hours saved, 10,406 text cleanups and a 50 day streak, alongside a per-application breakdown and a monthly activity heat map." width="1440" height="1180" loading="lazy">
+        <img class="shot-light" src="assets/img/shots/insights_light.png" alt="The Insights dashboard in the light parchment theme." width="1440" height="1180" loading="lazy">
+        <figcaption>Speaking speed, time saved, app breakdown and a month heat map</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ STYLE + DICTIONARY ============================ -->
+<section class="section section--alt">
+  <div class="wrap">
+    <div class="s-head s-head--center rv">
+      <span class="eyebrow">Make it sound like you</span>
+      <h2 class="s-title">Tone and spelling, handled once</h2>
+      <p class="s-sub" style="margin-inline:auto">
+        Two small settings that quietly remove most of the editing you would otherwise do
+        after every dictation.
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <figure class="media-frame rv">
+        <img class="shot-dark" src="assets/img/shots/style_dark.png" alt="The Style page with category tabs and three tone preview cards — Formal, Casual and very casual — each previewing the same sentence." width="1440" height="880" loading="lazy">
+        <img class="shot-light" src="assets/img/shots/style_light.png" alt="The Style page in the light parchment theme." width="1440" height="880" loading="lazy">
+        <figcaption>Set a tone per app category and preview it before committing</figcaption>
+      </figure>
+
+      <figure class="media-frame rv">
+        <img class="shot-dark" src="assets/img/shots/dictionary_dark.png" alt="The Dictionary page listing custom terms with exact-spelling badges, plus a shortcut that expands to an email address." width="1440" height="840" loading="lazy">
+        <img class="shot-light" src="assets/img/shots/dictionary_light.png" alt="The Dictionary page in the light parchment theme." width="1440" height="840" loading="lazy">
+        <figcaption>Teach it names, jargon and shortcuts that expand as you speak</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PROVIDERS ============================ -->
+<section class="section" id="providers">
+  <div class="wrap">
+    <div class="s-head rv">
+      <span class="eyebrow">Providers</span>
+      <h2 class="s-title">Your keys, your choice of model</h2>
+      <p class="s-sub">
+        Flow ships working out of the box with free local engines. Add your own keys when you
+        want a better voice or a stronger model — they are stored locally and never sent
+        anywhere except the provider you picked.
+      </p>
+    </div>
+
+    <div class="prov-groups">
+      <div class="prov-group rv">
+        <h3>Speech to text</h3>
+        <div class="prov-list">
+          <span class="prov prov--free"><i></i>Local Whisper</span>
+          <span class="prov prov--free"><i></i>Nemotron on-device</span>
+          <span class="prov"><i></i>Google Gemini</span>
+          <span class="prov"><i></i>Groq</span>
+          <span class="prov"><i></i>Deepgram</span>
+          <span class="prov"><i></i>ElevenLabs</span>
+          <span class="prov"><i></i>OpenAI</span>
+          <span class="prov"><i></i>AssemblyAI</span>
+          <span class="prov"><i></i>Speechmatics</span>
+          <span class="prov"><i></i>NVIDIA NIM</span>
+        </div>
+      </div>
+
+      <div class="prov-group rv">
+        <h3>Text to speech</h3>
+        <div class="prov-list">
+          <span class="prov prov--free"><i></i>Microsoft Edge Neural</span>
+          <span class="prov prov--free"><i></i>Windows SAPI5 offline</span>
+          <span class="prov"><i></i>Google Cloud TTS</span>
+          <span class="prov"><i></i>Gemini AI TTS</span>
+          <span class="prov"><i></i>ElevenLabs</span>
+          <span class="prov"><i></i>Deepgram Aura</span>
+          <span class="prov"><i></i>OpenAI TTS</span>
+          <span class="prov"><i></i>NVIDIA Riva</span>
+          <span class="prov"><i></i>Fish Audio</span>
+        </div>
+      </div>
+
+      <div class="prov-group rv">
+        <h3>Language and video models</h3>
+        <div class="prov-list">
+          <span class="prov prov--free"><i></i>Built-in renderer</span>
+          <span class="prov"><i></i>Google NotebookLM</span>
+          <span class="prov"><i></i>Vertex AI</span>
+          <span class="prov"><i></i>Google Gemini</span>
+          <span class="prov"><i></i>Anthropic</span>
+          <span class="prov"><i></i>OpenAI</span>
+          <span class="prov"><i></i>OpenRouter</span>
+          <span class="prov"><i></i>Groq</span>
+          <span class="prov"><i></i>Together AI</span>
+          <span class="prov"><i></i>Cloudflare Workers AI</span>
+          <span class="prov"><i></i>NVIDIA NIM</span>
+          <span class="prov"><i></i>OpenCode Zen</span>
+        </div>
+      </div>
+    </div>
+
+    <figure class="media-frame rv" style="margin-top:44px">
+      <img class="shot-dark" src="assets/img/shots/providers_dark.png" alt="The Voice Flow providers page, showing speech recognition and text cleanup selectors, a grid of speech services with connection status, and offline model downloads." width="1440" height="1120" loading="lazy">
+      <img class="shot-light" src="assets/img/shots/providers_light.png" alt="The providers page in the light parchment theme." width="1440" height="1120" loading="lazy">
+      <figcaption>Connect a key, test it, and switch models without restarting</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================ PRIVACY ============================ -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="priv rv">
+      <span class="eyebrow">Privacy</span>
+      <h2 class="s-title" style="margin-bottom:10px">Local-first, and honest about it</h2>
+      <p class="s-sub">Flow is a desktop app, not a thin client for someone else's server.</p>
+
+      <div class="priv__grid">
+        <div class="priv__item">
+          <h4>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10.5" rx="2.4"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+            Audio stays on your machine
+          </h4>
+          <p>Transcription runs locally through Whisper unless you deliberately choose a cloud speech provider.</p>
+        </div>
+        <div class="priv__item">
+          <h4>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5 4 6v6c0 4.6 3.3 8.4 8 9.5 4.7-1.1 8-4.9 8-9.5V6l-8-3.5Z"/></svg>
+            Keys never leave your disk
+          </h4>
+          <p>Credentials are encrypted in a local SQLite database. There is no telemetry endpoint collecting them.</p>
+        </div>
+        <div class="priv__item">
+          <h4>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+            Nothing is sent without asking
+          </h4>
+          <p>Your text only reaches an external model when you pick that model and authorise the request.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DOWNLOAD ============================ -->
+<section class="section" id="download">
+  <div class="wrap dl">
+    <div class="s-head s-head--center rv" style="margin-bottom:8px">
+      <span class="eyebrow">Get started</span>
+      <h2 class="s-title">Install Flow</h2>
+      <p class="s-sub" style="margin-inline:auto">
+        Install Flow instantly using a single terminal command. Sets up an isolated environment,
+        configures speech models and rendering engines, and registers dual-layer background auto-startup.
+      </p>
+
+      <div class="os-tabs">
+        <button class="os-tab-btn is-active" data-target="panel-win" type="button">
+          Windows <span class="os-badge os-badge--tested">Verified</span>
+        </button>
+        <button class="os-tab-btn" data-target="panel-mac" type="button">
+          macOS <span class="os-badge os-badge--exp">Preview</span>
+        </button>
+        <button class="os-tab-btn" data-target="panel-manual" type="button">
+          Manual Setup
+        </button>
+      </div>
+    </div>
+
+    <!-- Windows Panel -->
+    <div class="os-panel" id="panel-win">
+      <div class="code rv">
+        <div class="code__bar">
+          <span>PowerShell (Run as User — No Admin Required)</span>
+          <button class="code__copy" type="button">Copy</button>
+        </div>
+<pre><span class="c"># One-liner automated installation for Windows 10/11 x64</span>
+<span class="p">irm </span>https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex</pre>
+      </div>
+    </div>
+
+    <!-- macOS Panel -->
+    <div class="os-panel is-hidden" id="panel-mac">
+      <div class="code rv">
+        <div class="code__bar">
+          <span>Terminal (macOS 12+ Apple Silicon &amp; Intel)</span>
+          <button class="code__copy" type="button">Copy</button>
+        </div>
+<pre><span class="c"># One-liner automated installation for macOS</span>
+<span class="p">curl </span>-fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash</pre>
+      </div>
+
+      <div class="mac-warning-card rv">
+        <div style="font-weight:700; color:#f59e0b; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          Important Note for macOS Users
+        </div>
+        <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--muted);">
+          macOS support is currently in <strong>Community Preview / Experimental</strong> mode and has not yet undergone comprehensive physical device QA. You might experience hotkey quirks, audio permissions dialogs, or minor bugs. <strong>Windows remains our fully verified production tier.</strong> If you encounter any issues on Mac, please help us improve by reporting them on GitHub!
+        </p>
+      </div>
+    </div>
+
+    <!-- Manual Git Clone Panel -->
+    <div class="os-panel is-hidden" id="panel-manual">
+      <div class="code rv">
+        <div class="code__bar">
+          <span>Git &amp; PowerShell / Bash</span>
+          <button class="code__copy" type="button">Copy</button>
+        </div>
+<pre><span class="c"># 1 — Clone the repository</span>
+<span class="p">$ </span>git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
+<span class="p">$ </span>cd AI-Productivity-Flow
+
+<span class="c"># 2 — Install Python packages &amp; Video Flow renderer</span>
+<span class="p">$ </span>pip install -e .
+<span class="p">$ </span>cd video_flow_renderer; npm install; cd ..
+
+<span class="c"># 3 — Register desktop app &amp; auto-startup</span>
+<span class="p">$ </span>.\setup_desktop_app.bat
+
+<span class="c"># 4 — Run Flow (silent background mode)</span>
+<span class="p">$ </span>.\run_voice_flow.bat</pre>
+      </div>
+    </div>
+
+    <div class="req rv">
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Windows 10/11 x64 (Primary) | macOS 12+ (Preview)</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Python 3.10+</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Node.js 18+ (Video Flow)</span>
+      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> No paid API key required</span>
+    </div>
+
+    <div class="hero__cta rv" style="margin-top:34px">
+      <a class="btn btn--primary btn--lg" href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.77-.24.77-.54v-1.9c-3.11.68-3.77-1.5-3.77-1.5-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.94.1-.73.39-1.22.71-1.5-2.48-.28-5.1-1.24-5.1-5.53 0-1.22.44-2.22 1.15-3-.11-.29-.5-1.43.11-2.98 0 0 .94-.3 3.07 1.15a10.6 10.6 0 0 1 5.6 0c2.12-1.45 3.06-1.15 3.06-1.15.62 1.55.23 2.7.11 2.98.72.78 1.15 1.78 1.15 3 0 4.3-2.62 5.25-5.11 5.52.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.2 11.2 0 0 0 12 .8Z"/></svg>
+        View on GitHub
+      </a>
+      <a class="btn btn--ghost btn--lg" href="#how">Read how it works</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================ FOOTER ============================ -->
+<footer class="foot">
+  <div class="wrap">
+    <div class="foot__top">
+      <div>
+        <div class="brand">
+          <img src="assets/img/logo.svg" alt="" width="28" height="28">
+          <span>AI Productivity Flow</span>
+        </div>
+        <p class="foot__blurb">
+          Zero-friction information transformation across speech, audio and video —
+          straight from your desktop workflow.
+        </p>
+      </div>
+
+      <div class="foot__cols">
+        <div class="foot__col">
+          <h5>Product</h5>
+          <a href="#voice">Voice Flow</a>
+          <a href="#audio">Audio Flow</a>
+          <a href="#video">Video Flow</a>
+          <a href="#insights">Insights</a>
+        </div>
+        <div class="foot__col">
+          <h5>Get it</h5>
+          <a href="#download">Install</a>
+          <a href="#providers">Providers</a>
+          <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" rel="noopener">Source code</a>
+          <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues" target="_blank" rel="noopener">Report an issue</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot__bot">
+      <span>&copy; <span id="year">2026</span> AI Productivity Flow &middot; Apache-2.0 licensed</span>
+      <span>Built for Windows &middot; Speech runs on-device</span>
+    </div>
+  </div>
+</footer>
+
+<script id="hero-showcase-zoom-controller">
+(function() {
+  var heroTrack = document.getElementById('heroTrack');
+  var heroSticky = document.getElementById('heroSticky');
+  var heroHeader = document.getElementById('heroHeader');
+  var showcaseWin = document.getElementById('showcaseWindow');
+  var nav = document.getElementById('nav');
+
+  if (!heroTrack || !heroSticky || !heroHeader || !showcaseWin) return;
+
+  // Ultra-smooth cubic easing (smooth acceleration & deceleration)
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  var restingOffset = 0;
+  function measureRestingOffset() {
+    var stickyRect = heroSticky.getBoundingClientRect();
+    var winRect = showcaseWin.getBoundingClientRect();
+    var currentY = parseFloat(showcaseWin.style.getPropertyValue('--sc-y')) || 0;
+    var offset = (winRect.top - currentY) - stickyRect.top;
+    if (offset > 0) restingOffset = offset;
+    else if (restingOffset <= 0) restingOffset = 380;
+  }
+
+  /* ---------- Focused Card Observer & Dynamic Caption for Problems and Solutions ---------- */
+  function updateCardFocus() {
+    var vh = window.innerHeight;
+    var centerY = vh * 0.48;
+
+    function updateGroup(cardSel, captionId, captionTexts) {
+      var cards = document.querySelectorAll(cardSel);
+      if (!cards.length) return;
+
+      var bestIdx = 0;
+      var bestDist = Infinity;
+
+      cards.forEach(function(card, idx) {
+        var rect = card.getBoundingClientRect();
+        var cardCenter = rect.top + rect.height / 2;
+        var dist = Math.abs(cardCenter - centerY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = idx;
+        }
+      });
+
+      cards.forEach(function(card, idx) {
+        if (idx === bestIdx) {
+          card.classList.add('is-focused');
+        } else {
+          card.classList.remove('is-focused');
+        }
+      });
+
+      var caption = document.getElementById(captionId);
+      if (caption && captionTexts && captionTexts[bestIdx]) {
+        caption.innerHTML = captionTexts[bestIdx];
+      }
+    }
+
+    updateGroup('.problem-card', 'problemCaption', [
+      '<span>⚠️ Step 01 &bull; The 15-Page Reading Wall &amp; Eye Strain</span>',
+      '<span>⚠️ Step 02 &bull; Context Switching: Lost in 40 browser tabs</span>',
+      '<span>⚠️ Step 03 &bull; Physical Bottleneck: 45 WPM vs 150 WPM</span>'
+    ]);
+
+    updateGroup('.solution-card', 'solutionCaption', [
+      '<span>🎬 Step 01 &bull; Turn Any Document Into Video</span>',
+      '<span>🎧 Step 02 &bull; Instant human-like speech &amp; multi-depth summaries</span>',
+      '<span>🎙️ Step 03 &bull; Speak at 145 WPM in any Windows application</span>'
+    ]);
+  }
+  window.updateCardFocus = updateCardFocus;
+
+  var targetProgress = 0;
+  var currentProgress = 0;
+  var isAnimating = false;
+  var initial = true;
+
+  function onScroll() {
+    updateCardFocus();
+
+    var vh = window.innerHeight;
+    var scrollDist = heroTrack.offsetHeight - vh;
+    if (scrollDist <= 0) return;
+
+    var scrollTop = window.pageYOffset || document.documentElement.scrollTop || window.scrollY || 0;
+    var heroStart = heroTrack.offsetTop;
+    var relScroll = Math.max(0, scrollTop - heroStart);
+    targetProgress = Math.min(1, Math.max(0, relScroll / scrollDist));
+
+    if (initial) {
+      currentProgress = targetProgress;
+      render(currentProgress);
+      initial = false;
+      return;
+    }
+
+    if (!isAnimating) {
+      isAnimating = true;
+      requestAnimationFrame(animationLoop);
+    }
+  }
+
+  function animationLoop() {
+    var diff = targetProgress - currentProgress;
+    if (Math.abs(diff) < 0.0004) {
+      currentProgress = targetProgress;
+      render(currentProgress);
+      isAnimating = false;
+      return;
+    }
+
+    // Inertial physics lerp damping (~180ms smooth deceleration curve)
+    currentProgress += diff * 0.13;
+    render(currentProgress);
+    requestAnimationFrame(animationLoop);
+  }
+
+  function render(prog) {
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+
+    var baseW = Math.min(980, vw - 32);
+    var baseH = Math.round(46 + (baseW * 9 / 16));
+
+    if (restingOffset <= 0) {
+      measureRestingOffset();
+    }
+
+    // Desktop computer screen peak zoom:
+    // Generous breathing room around the monitor bezel so the user clearly sees the floating desktop screen
+    var availW = vw - 64;
+    var availH = vh - 68;
+    var maxScreenH = availH - 46;
+    var peakW = Math.min(availW, Math.round(maxScreenH * 16 / 9));
+    peakW = Math.min(peakW, 1360); // elegant max width
+    var peakH = Math.round(46 + (peakW * 9 / 16));
+    if (peakH > availH) {
+      peakH = availH;
+      peakW = Math.round((peakH - 46) * 16 / 9);
+    }
+
+    // Centered vertical alignment
+    var peakTop = Math.max(16, Math.round((vh - peakH) / 2));
+    var targetY = -restingOffset + peakTop;
+
+    var topCenter = Math.max(16, Math.round((vh - baseH) / 2));
+    var yCenter = -restingOffset + topCenter;
+    var exitDist = topCenter + baseH + 60;
+
+    var z = 0;
+    var curY = 0;
+
+    if (prog < 0.35) {
+      // Phase 1: Smooth Zoom In to desktop computer frame
+      var pIn = prog / 0.35;
+      z = easeInOutCubic(pIn);
+      curY = targetY * z;
+    } else if (prog <= 0.68) {
+      // Phase 2: Computer Screen Hold
+      z = 1.0;
+      curY = targetY;
+    } else {
+      // Phase 3: Centered Zoom Out to resting card
+      var pOut = Math.min(1, (prog - 0.68) / 0.32);
+      var easeOut = easeInOutCubic(pOut);
+      z = 1.0 - easeOut;
+      curY = targetY + (yCenter - targetY) * easeOut;
+    }
+
+    // 1. Header fade & translate
+    var headerProgress = Math.min(1, prog / 0.16);
+    var headerOpacity = Math.max(0, 1 - headerProgress);
+    var headerY = -headerProgress * 60;
+    heroHeader.style.opacity = headerOpacity.toFixed(3);
+    heroHeader.style.transform = 'translateY(' + headerY.toFixed(1) + 'px)';
+    heroHeader.style.pointerEvents = headerOpacity < 0.2 ? 'none' : '';
+
+    // 2. Nav subtle fade during peak computer screen
+    if (nav) {
+      if (z > 0.1) {
+        nav.style.opacity = Math.max(0, 1 - z * 2.0).toFixed(3);
+        nav.style.pointerEvents = z > 0.4 ? 'none' : '';
+      } else {
+        nav.style.opacity = '';
+        nav.style.pointerEvents = '';
+      }
+    }
+
+    // 3. Showcase Window sizing & position
+    if (prog <= 0) {
+      showcaseWin.style.removeProperty('--sc-w');
+      showcaseWin.style.removeProperty('--sc-maxw');
+      showcaseWin.style.removeProperty('--sc-h');
+      showcaseWin.style.removeProperty('--sc-rad');
+      showcaseWin.style.removeProperty('--sc-y');
+      showcaseWin.style.zIndex = '';
+      showcaseWin.style.pointerEvents = '';
+    } else {
+      var curW = baseW + (peakW - baseW) * z;
+      var curH = baseH + (peakH - baseH) * z;
+      var curRad = Math.round(14 + (18 - 14) * z);
+
+      showcaseWin.style.setProperty('--sc-w', Math.round(curW) + 'px');
+      showcaseWin.style.setProperty('--sc-maxw', Math.round(curW) + 'px');
+      showcaseWin.style.setProperty('--sc-h', Math.round(curH) + 'px');
+      showcaseWin.style.setProperty('--sc-rad', curRad + 'px');
+      showcaseWin.style.setProperty('--sc-y', curY.toFixed(1) + 'px');
+      showcaseWin.style.zIndex = '20';
+      showcaseWin.style.pointerEvents = '';
+    }
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', function() {
+    measureRestingOffset();
+    onScroll();
+  }, { passive: true });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      measureRestingOffset();
+      updateCardFocus();
+      onScroll();
+    });
+  } else {
+    measureRestingOffset();
+    updateCardFocus();
+    onScroll();
+  }
+  window.__updateShowcaseZoom = function() {
+    measureRestingOffset();
+    onScroll();
+  };
+})();
+</script>
+<script src="assets/js/main.js?v=20260917_12_smooth"></script>
+</body>
+</html>

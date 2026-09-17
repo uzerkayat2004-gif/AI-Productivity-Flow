@@ -74,15 +74,15 @@ credentials.json
 token.json
 probe_temp_worker.txt
 
-# Repository-owned documentation images (hero) and GUI assets must survive the *.png rule
+# Repository-owned documentation images (hero), GUI assets, and website assets must survive media rules
 !docs/assets/**
 !src/voice_flow/gui/assets/**
+!website/**
 
 # Local audit, experiment, and scratch directories
 video-flow-*/
 storyboard/
 plan/
-website/
 nvmodels.json
 /test_*.txt
 /test_*.py
