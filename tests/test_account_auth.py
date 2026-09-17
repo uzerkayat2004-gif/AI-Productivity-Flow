@@ -578,3 +578,187 @@ def test_google_account_switching_and_client_config(temp_env, monkeypatch):
     assert am.get_active_account_id() == ""
 
 
+def test_settings_ui_order_and_switch_account_contract():
+    """Verify that settings tabs are ordered General -> System -> Account,
+    '+ Add Account' is replaced with 'Switch Account', and modal elements are wired.
+    """
+    root = Path(__file__).resolve().parent.parent
+    html = (root / "src" / "voice_flow" / "gui" / "index.html").read_text(encoding="utf-8")
+    js = (root / "src" / "voice_flow" / "gui" / "app.js").read_text(encoding="utf-8")
+    css = (root / "src" / "voice_flow" / "gui" / "usability.css").read_text(encoding="utf-8")
+
+    # 1. Check sidebar nav order: General -> System -> Account
+    nav_start = html.index('class="settings-side-nav"')
+    nav_end = html.index('</div>', nav_start)
+    nav_chunk = html[nav_start:nav_end]
+
+    idx_gen = nav_chunk.index("switchSettingsTab('general'")
+    idx_sys = nav_chunk.index("switchSettingsTab('system'")
+    idx_acc = nav_chunk.index("switchSettingsTab('account'")
+    assert idx_gen < idx_sys < idx_acc, f"Expected General -> System -> Account in nav, got indices {idx_gen}, {idx_sys}, {idx_acc}"
+
+    # 2. Check modal-body tab container order: General -> System -> Account
+    pos_tab_gen = html.index('id="set-tab-general"')
+    pos_tab_sys = html.index('id="set-tab-system"')
+    pos_tab_acc = html.index('id="set-tab-account"')
+    assert pos_tab_gen < pos_tab_sys < pos_tab_acc, "Expected set-tab-general before set-tab-system before set-tab-account in DOM"
+
+    # 3. Check that 'Add Account' button in profile actions is removed
+    account_tab = html[pos_tab_acc:html.index('<!-- SETTINGS SUB-MODAL', pos_tab_acc)]
+    assert "Add Account" not in account_tab, "Found 'Add Account' in account tab; expected replacement with 'Switch Account'"
+
+    # 4. Check that 'Switch Account' button is wired
+    assert 'onclick="handleSwitchAccountAction()"' in account_tab
+    assert 'Switch Account' in account_tab
+    assert 'account-switch-action-btn' in account_tab
+    assert '.account-switch-action-btn' in css
+
+    # 5. Check sub-modal and JS functions
+    assert 'id="account-switch-sub-modal"' in html
+    assert 'id="modal-account-switch-list"' in html
+    assert 'async function handleSwitchAccountAction()' in js
+    assert 'function openSwitchAccountModal(' in js
+    assert 'async function handleSwitchAccountFromModal(' in js
+
+
+def test_end_to_end_switch_account_and_signout_data_isolation(temp_env):
+    """End-to-end verification that Switch Account and Sign Out carry each account's
+    data (API keys, dictionary, styles, history, settings) completely intact and isolated.
+    """
+    am = AccountManager(base_dir=temp_env)
+    old_singleton = am_module._account_manager
+    am_module._account_manager = am
+
+    try:
+        # 1. Connect Account A (e.g. via Google sign in)
+        res_a = am.authenticate_or_register_google(
+            email="user_alpha@gmail.com",
+            username="Alpha User",
+            google_id="gid_alpha_123",
+        )
+        id_a = res_a["account"]["id"]
+        assert am.get_active_account_id() == id_a
+
+        # Write data to Account A
+        storage_a = StorageEngine(str(am.get_account_db_path(id_a)))
+        storage_a.save_setting("dictation_mode", "smart_hybrid")
+        storage_a.save_setting("theme_accent", "orange")
+        storage_a.add_dictionary_word("AlphaAlgorithm", "Technology")
+        storage_a.add_provider_connection(
+            provider="groq",
+            name="Alpha Groq",
+            api_key="gsk_alpha_secret_key_111",
+        )
+        with storage_a._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO history
+                   (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode)
+                   VALUES ('2026-09-17 10:00:00', 'Alpha test raw', 'Alpha test polished.', 'CodeEditor', 4.5, 4, 120, 'smart_clean')"""
+            )
+            conn.commit()
+
+        # Verify Account A storage has data
+        assert storage_a.get_setting("dictation_mode") == "smart_hybrid"
+        assert "AlphaAlgorithm" in storage_a.get_dictionary_words()
+        alpha_keys = [c["api_key"] for c in storage_a.get_provider_connections("groq")]
+        assert "gsk_alpha_secret_key_111" in alpha_keys
+        with storage_a._get_conn() as conn:
+            h_count = conn.execute("SELECT COUNT(*) FROM history WHERE raw_text = 'Alpha test raw'").fetchone()[0]
+            assert h_count == 1
+
+        # 2. Connect Account B
+        res_b = am.authenticate_or_register_google(
+            email="user_beta@gmail.com",
+            username="Beta User",
+            google_id="gid_beta_456",
+        )
+        id_b = res_b["account"]["id"]
+        assert id_b != id_a
+        assert am.get_active_account_id() == id_b
+
+        # Account B must start fresh - no Account A data leaked
+        storage_b = StorageEngine(str(am.get_account_db_path(id_b)))
+        assert storage_b.get_setting("dictation_mode") is None
+        assert "AlphaAlgorithm" not in storage_b.get_dictionary_words()
+        beta_groq_keys = [c["api_key"] for c in storage_b.get_provider_connections("groq")]
+        assert "gsk_alpha_secret_key_111" not in beta_groq_keys
+        with storage_b._get_conn() as conn:
+            h_count = conn.execute("SELECT COUNT(*) FROM history WHERE raw_text = 'Alpha test raw'").fetchone()[0]
+            assert h_count == 0
+
+        # Write Account B specific data
+        storage_b.save_setting("dictation_mode", "strict_ptt")
+        storage_b.save_setting("theme_accent", "emerald")
+        storage_b.add_dictionary_word("BetaBiophysics", "Science")
+        storage_b.add_provider_connection(
+            provider="openai",
+            name="Beta OpenAI",
+            api_key="sk_beta_secret_key_222",
+        )
+        with storage_b._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO history
+                   (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode)
+                   VALUES ('2026-09-17 11:00:00', 'Beta test raw', 'Beta test polished.', 'Browser', 3.0, 3, 90, 'casual')"""
+            )
+            conn.commit()
+
+        # 3. Switch back to Account A using am.switch_account()
+        switch_to_a = am.switch_account(id_a)
+        assert switch_to_a["success"] is True
+        assert am.get_active_account_id() == id_a
+
+        # Account A carries ALL its original data intact
+        assert storage_a.get_setting("dictation_mode") == "smart_hybrid"
+        assert storage_a.get_setting("theme_accent") == "orange"
+        assert "AlphaAlgorithm" in storage_a.get_dictionary_words()
+        assert "BetaBiophysics" not in storage_a.get_dictionary_words()
+        a_groq = [c["api_key"] for c in storage_a.get_provider_connections("groq")]
+        assert "gsk_alpha_secret_key_111" in a_groq
+        a_openai = [c["api_key"] for c in storage_a.get_provider_connections("openai")]
+        assert "sk_beta_secret_key_222" not in a_openai
+        with storage_a._get_conn() as conn:
+            h_count_a = conn.execute("SELECT COUNT(*) FROM history WHERE raw_text = 'Alpha test raw'").fetchone()[0]
+            assert h_count_a == 1
+            h_count_b = conn.execute("SELECT COUNT(*) FROM history WHERE raw_text = 'Beta test raw'").fetchone()[0]
+            assert h_count_b == 0
+
+        # 4. Switch back to Account B using am.switch_account()
+        switch_to_b = am.switch_account(id_b)
+        assert switch_to_b["success"] is True
+        assert am.get_active_account_id() == id_b
+
+        # Account B carries ALL its data intact
+        assert storage_b.get_setting("dictation_mode") == "strict_ptt"
+        assert storage_b.get_setting("theme_accent") == "emerald"
+        assert "BetaBiophysics" in storage_b.get_dictionary_words()
+        assert "AlphaAlgorithm" not in storage_b.get_dictionary_words()
+        b_openai = [c["api_key"] for c in storage_b.get_provider_connections("openai")]
+        assert "sk_beta_secret_key_222" in b_openai
+
+        # 5. Test Sign Out (am.logout_account)
+        logout_ok = am.logout_account()
+        assert logout_ok is True
+        assert am.get_active_account_id() == ""
+
+        # Global storage must repoint back to clean default DB, not Account B's DB
+        assert Path(storage.db_path) == temp_env / "voice_flow.db"
+        default_storage = StorageEngine(str(temp_env / "voice_flow.db"))
+        assert "AlphaAlgorithm" not in default_storage.get_dictionary_words()
+        assert "BetaBiophysics" not in default_storage.get_dictionary_words()
+        default_groq = [c["api_key"] for c in default_storage.get_provider_connections("groq")]
+        assert "gsk_alpha_secret_key_111" not in default_groq
+
+        # 6. Re-switch / log back into Account A: all data is immediately available again
+        relogin_a = am.switch_account(id_a)
+        assert relogin_a["success"] is True
+        assert am.get_active_account_id() == id_a
+        assert Path(storage.db_path) == am.get_account_db_path(id_a)
+        assert "AlphaAlgorithm" in storage.get_dictionary_words()
+        recheck_keys = [c["api_key"] for c in storage.get_provider_connections("groq")]
+        assert "gsk_alpha_secret_key_111" in recheck_keys
+    finally:
+        am_module._account_manager = old_singleton
+
+
+

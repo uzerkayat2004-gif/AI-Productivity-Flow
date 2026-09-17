@@ -525,6 +525,26 @@ class AccountManager:
             conn.execute("UPDATE accounts SET is_active = 0")
             conn.execute("INSERT OR REPLACE INTO account_state (key, value) VALUES ('active_account_id', '')")
             conn.commit()
+
+        # Repoint StorageEngine singleton back to default database
+        target_db_path = str(self.base_dir / "voice_flow.db")
+        try:
+            from voice_flow.storage import storage
+            storage.switch_account(target_db_path)
+        except Exception:
+            pass
+        try:
+            from voice_flow.video_flow_providers import video_flow_provider_service
+            if hasattr(video_flow_provider_service, "switch_account"):
+                video_flow_provider_service.switch_account(target_db_path)
+        except Exception:
+            pass
+        try:
+            from voice_flow.video_flow_service import video_flow_service
+            if hasattr(video_flow_service, "store") and hasattr(video_flow_service.store, "switch_account"):
+                video_flow_service.store.switch_account(target_db_path)
+        except Exception:
+            pass
         return True
 
     # -------------------------------------------------------------------------

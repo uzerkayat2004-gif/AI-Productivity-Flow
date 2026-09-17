@@ -9314,8 +9314,77 @@ async function loadAccountSettingsView() {
   }
 }
 
+async function handleSwitchAccountAction() {
+  try {
+    const res = await safeFetchJson(`/api/auth/status?t=${Date.now()}`);
+    if (!res || !res.success) {
+      openSwitchAccountModal([], null);
+      return;
+    }
+    const active = res.active_account;
+    const accounts = (res.accounts || []).filter(acc => !acc.email.endsWith("@flow.local") || !!acc.google_id);
+    openSwitchAccountModal(accounts, active);
+  } catch (err) {
+    console.debug("[ACCOUNT] Switch action error:", err);
+    openSwitchAccountModal([], null);
+  }
+}
+
+function openSwitchAccountModal(accounts = [], active = null) {
+  const modal = document.getElementById("account-switch-sub-modal");
+  const listEl = document.getElementById("modal-account-switch-list");
+  if (!modal || !listEl) return;
+
+  const validAccounts = Array.isArray(accounts) ? accounts : [];
+  if (validAccounts.length === 0) {
+    listEl.innerHTML = `
+      <div style="padding: 24px 16px; text-align: center; color: var(--text-muted); font-size: 13px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px dashed var(--border-color, rgba(255,255,255,0.1));">
+        <div style="font-size: 28px; margin-bottom: 8px;">👤</div>
+        <div style="font-weight: 600; color: var(--text-color, #fff); margin-bottom: 4px;">No other saved accounts</div>
+        <div>Connect another Google account to switch between accounts anytime on this PC.</div>
+      </div>
+    `;
+  } else {
+    listEl.innerHTML = validAccounts.map(acc => {
+      const isCurrent = Boolean(active && acc.id === active.id);
+      const initial = (acc.username || acc.email || "G").charAt(0).toUpperCase();
+      const color = acc.avatar_color || "#ff6a00";
+      const avatarHtml = acc.avatar_url
+        ? `<img src="${escapeHtml(acc.avatar_url)}" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
+        : `${initial}`;
+
+      return `
+        <div class="account-saved-item" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: ${isCurrent ? 'rgba(255, 106, 0, 0.08)' : 'rgba(255,255,255,0.03)'}; border: 1px solid ${isCurrent ? 'rgba(255, 106, 0, 0.3)' : 'rgba(255,255,255,0.08)'}; border-radius: 10px; margin-bottom: 6px;">
+          <div class="account-saved-item-left" style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+            <div class="account-saved-avatar" style="background: ${color}; width: 34px; height: 34px; font-size: 14px; font-weight: 700; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">${avatarHtml}</div>
+            <div class="account-saved-meta" style="display: flex; flex-direction: column; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="account-saved-name" style="font-size: 13.5px; font-weight: 700; color: var(--text-color, #fff);">${escapeHtml(acc.username || 'Google User')}</span>
+                ${isCurrent ? '<span class="account-status-pill" style="font-size: 10px; padding: 2px 6px; border-radius: 999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700;">● Active</span>' : ''}
+              </div>
+              <span class="account-saved-email" style="font-size: 12px; color: var(--text-muted, #94a3b8);">${escapeHtml(acc.email || '')}</span>
+            </div>
+          </div>
+          ${isCurrent 
+            ? `<span style="font-size: 12px; font-weight: 600; color: var(--primary-orange, #ff6a00); padding: 4px 10px;">Current</span>`
+            : `<button type="button" class="action-btn account-switch-btn" onclick="handleSwitchAccountFromModal('${escapeHtml(acc.id)}')">Switch</button>`
+          }
+        </div>
+      `;
+    }).join("");
+  }
+
+  modal.classList.remove("hidden");
+}
+
+async function handleSwitchAccountFromModal(accountId) {
+  if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
+  await handleSwitchAccountDirect(accountId);
+}
+
 async function handleSwitchAccountDirect(accountId) {
   try {
+    if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
     const res = await fetch("/api/auth/switch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -9347,6 +9416,7 @@ async function handleSimpleSignOut() {
     type: "signout"
   })) return;
   try {
+    if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
     await fetch("/api/auth/logout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

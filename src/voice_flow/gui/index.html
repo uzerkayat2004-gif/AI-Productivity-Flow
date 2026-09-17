@@ -2410,11 +2410,11 @@
 <button aria-label="General settings" class="nav-item active" onclick="switchSettingsTab('general', this)" type="button">
 <span class="nav-icon"><svg aria-hidden="true" class="lucide" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> <span class="nav-label">General</span>
 </button>
+<button aria-label="System settings" class="nav-item" id="settings-nav-system" onclick="switchSettingsTab('system', this)" type="button">
+<span class="nav-icon"><svg aria-hidden="true" class="lucide" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18"><rect height="14" rx="2" ry="2" width="20" x="2" y="3"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg></span> <span class="nav-label">System</span>
+</button>
 <button aria-label="Account settings" class="nav-item" id="settings-nav-account" onclick="switchSettingsTab('account', this)" type="button">
 <span class="nav-icon"><svg aria-hidden="true" class="lucide" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span> <span class="nav-label">Account</span>
-</button>
-<button aria-label="System settings" class="nav-item" onclick="switchSettingsTab('system', this)" type="button">
-<span class="nav-icon"><svg aria-hidden="true" class="lucide" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18"><rect height="14" rx="2" ry="2" width="20" x="2" y="3"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg></span> <span class="nav-label">System</span>
 </button>
 </div>
 <div class="settings-side-foot">
@@ -2492,6 +2492,52 @@
 </div>
 </div></div></section>
 </div>
+<!-- TAB: SYSTEM -->
+<div id="set-tab-system" style="display: none;">
+<div class="settings-tab-head">
+<div>
+<h3 style="font-size: 16px; font-weight: 800; margin: 0;">System</h3>
+<p class="settings-tab-sub">Manage startup, maintenance, and app information.</p>
+</div>
+</div>
+<section class="preference-section"><h4 class="preference-section-title">Startup &amp; visibility</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Auto-Startup <span aria-label="About Auto-Startup" class="info-tip" id="autostart-tip-span" data-tip="Launches Voice Flow silently on system boot." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
+</div>
+<label class="toggle-switch">
+<input id="toggle-autostart" onchange="toggleAutoStartSetting(this.checked)" type="checkbox"/>
+<span class="toggle-slider"></span>
+</label>
+</div><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title" id="show-in-taskbar-title">Show in Taskbar <span aria-label="About Show in Taskbar" class="info-tip" id="show-in-taskbar-tip" data-tip="Shows Voice Flow in the system dock / taskbar while the window is open. Turn off to keep it tray-only." tabindex="0">i</span></div>
+</div>
+<label class="toggle-switch">
+<input checked="" id="toggle-show-in-taskbar" onchange="toggleShowInTaskbarSetting(this.checked)" type="checkbox"/>
+<span class="toggle-slider"></span>
+</label>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Deep Restart <span aria-label="About Deep Restart" class="info-tip" data-tip="Resets the floating bar position, flushes runtime buffers, and restarts the engine cleanly." tabindex="0">i</span></div>
+</div>
+<button class="action-btn" onclick="triggerDeepAppRestart()">Restart Engine</button>
+</div><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Dictation history lives safely in ~/.voice_flow/voice_flow.db. This removes temporary audio files only." tabindex="0">i</span></div>
+</div>
+<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">App information &amp; help</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" id="runtime-tip-span" data-tip="Local API server with local speech-to-text." tabindex="0">i</span></div>
+</div>
+<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Local STT</span><span aria-hidden="true">·</span><span id="runtime-os-badge">Win x64</span></div>
+</div><div class="setting-row" style="border-bottom: none;">
+<div class="setting-info">
+<div class="setting-title">Onboarding <span aria-label="About Onboarding" class="info-tip" data-tip="Replays the voice-narrated welcome tour and product introduction." tabindex="0">i</span></div>
+</div>
+<button class="action-btn" onclick="replayOnboarding()">Replay Tour</button>
+</div></div></section>
+</div>
 <!-- TAB: ACCOUNT -->
 <div id="set-tab-account" style="display: none;">
 <div class="settings-tab-head">
@@ -2514,11 +2560,11 @@
 <div class="account-profile-email" id="account-current-email">user@gmail.com</div>
 </div>
 <div class="account-profile-actions">
-<button class="action-btn account-add-btn" onclick="handleGoogleAccountSignIn()" title="Connect another Google account" type="button">
-<svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" style="margin-right: 4px;" viewbox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
-<span>Add Account</span>
+<button class="action-btn account-switch-action-btn" id="account-switch-action-btn" onclick="handleSwitchAccountAction()" title="Switch account" type="button">
+<svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" style="margin-right: 4px;" viewbox="0 0 24 24" width="14"><path d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+<span>Switch Account</span>
 </button>
-<button class="btn-secondary account-signout-btn" onclick="handleSimpleSignOut()" type="button">
+<button class="btn-secondary account-signout-btn" id="account-signout-btn" onclick="handleSimpleSignOut()" type="button">
 <svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" style="margin-right: 4px;" viewbox="0 0 24 24" width="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" x2="9" y1="12" y2="12"></line></svg>
 <span>Sign Out</span>
 </button>
@@ -2570,51 +2616,6 @@
 </div>
 </div>
 </div>
-</div>
-<div id="set-tab-system" style="display: none;">
-<div class="settings-tab-head">
-<div>
-<h3 style="font-size: 16px; font-weight: 800; margin: 0;">System</h3>
-<p class="settings-tab-sub">Manage startup, maintenance, and app information.</p>
-</div>
-</div>
-<section class="preference-section"><h4 class="preference-section-title">Startup &amp; visibility</h4><div class="settings-group-card"><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Auto-Startup <span aria-label="About Auto-Startup" class="info-tip" id="autostart-tip-span" data-tip="Launches Voice Flow silently on system boot." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
-</div>
-<label class="toggle-switch">
-<input id="toggle-autostart" onchange="toggleAutoStartSetting(this.checked)" type="checkbox"/>
-<span class="toggle-slider"></span>
-</label>
-</div><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title" id="show-in-taskbar-title">Show in Taskbar <span aria-label="About Show in Taskbar" class="info-tip" id="show-in-taskbar-tip" data-tip="Shows Voice Flow in the system dock / taskbar while the window is open. Turn off to keep it tray-only." tabindex="0">i</span></div>
-</div>
-<label class="toggle-switch">
-<input checked="" id="toggle-show-in-taskbar" onchange="toggleShowInTaskbarSetting(this.checked)" type="checkbox"/>
-<span class="toggle-slider"></span>
-</label>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Deep Restart <span aria-label="About Deep Restart" class="info-tip" data-tip="Resets the floating bar position, flushes runtime buffers, and restarts the engine cleanly." tabindex="0">i</span></div>
-</div>
-<button class="action-btn" onclick="triggerDeepAppRestart()">Restart Engine</button>
-</div><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Dictation history lives safely in ~/.voice_flow/voice_flow.db. This removes temporary audio files only." tabindex="0">i</span></div>
-</div>
-<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">App information &amp; help</h4><div class="settings-group-card"><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" id="runtime-tip-span" data-tip="Local API server with local speech-to-text." tabindex="0">i</span></div>
-</div>
-<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Local STT</span><span aria-hidden="true">·</span><span id="runtime-os-badge">Win x64</span></div>
-</div><div class="setting-row" style="border-bottom: none;">
-<div class="setting-info">
-<div class="setting-title">Onboarding <span aria-label="About Onboarding" class="info-tip" data-tip="Replays the voice-narrated welcome tour and product introduction." tabindex="0">i</span></div>
-</div>
-<button class="action-btn" onclick="replayOnboarding()">Replay Tour</button>
-</div></div></section>
 </div>
 </div>
 </div>
@@ -2773,6 +2774,27 @@
       <div style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px;">
         <button type="button" class="action-btn" onclick="resetHotkeyDefaults()" style="opacity: 0.8;">Reset Defaults</button>
         <button type="button" class="action-btn" onclick="saveAndApplyHotkeyModal()" style="background: var(--primary-orange); color: #fff; font-weight: 700; border-color: var(--primary-orange);">Save &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS SUB-MODAL: SWITCH ACCOUNT -->
+  <div id="account-switch-sub-modal" class="modal-overlay hidden" style="z-index: 1250;" onclick="if(event.target === this) closeSubModal('account-switch-sub-modal')">
+    <div class="perfect-keys-card" style="width: 480px; max-width: calc(100vw - 32px);">
+      <div class="perfect-keys-header">
+        <div>
+          <h3 style="font-size: 18px; font-weight: 800; color: var(--text-color);">Switch Account</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Switch active profile or connect another Google account on this PC.</p>
+        </div>
+        <button class="close-icon-btn" onclick="closeSubModal('account-switch-sub-modal')">✕</button>
+      </div>
+      <div id="modal-account-switch-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 14px;"></div>
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn-secondary" onclick="closeSubModal('account-switch-sub-modal')">Close</button>
+        <button type="button" class="action-btn" onclick="closeSubModal('account-switch-sub-modal'); handleGoogleAccountSignIn();" style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" style="margin-right: 2px;" viewbox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
+          <span>Connect Another Account</span>
+        </button>
       </div>
     </div>
   </div>

@@ -3231,6 +3231,7 @@ html[data-theme="dark"] #settings-modal {
   flex-shrink: 0;
 }
 
+.account-switch-action-btn,
 .account-add-btn {
   font-size: 12px;
   padding: 6px 12px;
@@ -3246,6 +3247,7 @@ html[data-theme="dark"] #settings-modal {
   transition: all 120ms ease;
 }
 
+.account-switch-action-btn:hover,
 .account-add-btn:hover {
   background: var(--primary-orange, #ff6a00);
   color: #ffffff;
