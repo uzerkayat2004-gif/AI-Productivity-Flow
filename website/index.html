@@ -15,10 +15,18 @@
 
 <link rel="icon" href="assets/img/favicon.ico">
 <link rel="apple-touch-icon" href="assets/img/icon-256.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AI Productivity Flow">
+<meta name="application-name" content="AI Productivity Flow">
+<meta name="msapplication-TileColor" content="#161512">
+<meta name="msapplication-TileImage" content="assets/img/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/styles.css?v=20260917_10_fix">
+<link rel="stylesheet" href="assets/css/styles.css?v=20260918_dl_simple_2options">
 
 <style id="critical-flow-styles">
   /* Unconditional layout rules: bulletproof against browser cache mismatch */
@@ -760,6 +768,7 @@
   }
 })();
 </script>
+<link rel="stylesheet" href="assets/css/desktop-demo.css">
 </head>
 <body>
 
@@ -776,9 +785,9 @@
     <nav class="nav__links" aria-label="Sections">
       <a href="#problems">Problems</a>
       <a href="#solutions">Solutions</a>
-      <a href="#video">Video</a>
-      <a href="#audio">Audio</a>
-      <a href="#voice">Voice</a>
+      <a href="#demo">Demo</a>
+      <a href="#providers">Providers</a>
+      <a href="#privacy">Privacy</a>
       <a href="#download">Download</a>
     </nav>
 
@@ -880,7 +889,7 @@
         <!-- Panel 1: Video Flow Showcase (Default) -->
         <div class="showcase-panel is-active" id="panelVideo">
           <div class="panel-screen">
-            <video class="hero-showcase-video" autoplay loop muted playsinline preload="auto">
+            <video class="hero-showcase-video" autoplay loop muted playsinline preload="auto" poster="assets/img/hero_videoflow_poster.jpg">
               <source src="assets/video/videoflow_demo.mp4" type="video/mp4">
             </video>
           </div>
@@ -889,7 +898,7 @@
         <!-- Panel 2: Audio Flow Showcase -->
         <div class="showcase-panel" id="panelAudio">
           <div class="panel-screen">
-            <video class="hero-showcase-video" loop muted playsinline preload="auto">
+            <video class="hero-showcase-video" loop muted playsinline preload="none" poster="assets/img/hero_audioflow_poster.jpg">
               <source src="assets/video/audioflow_demo.mp4" type="video/mp4">
             </video>
           </div>
@@ -977,7 +986,7 @@
               <span class="media-frame__label">Without Flow &bull; The Straining Loop</span>
             </div>
             <div class="media-frame__img-wrap">
-              <video class="media-frame__media" autoplay loop muted playsinline preload="auto" poster="assets/img/problem_reading_strain.jpg">
+              <video class="media-frame__media" autoplay loop muted playsinline preload="metadata" poster="assets/img/problem_reading_strain.jpg">
                 <source src="assets/video/problem_strain.mp4" type="video/mp4">
                 <img src="assets/img/problem_reading_strain.jpg" alt="Person intensely squinting at dense computer screen" class="media-frame__img">
               </video>
@@ -1016,7 +1025,7 @@
               <span class="media-frame__label">With Flow &bull; Effortless Clarity</span>
             </div>
             <div class="media-frame__img-wrap">
-              <video class="media-frame__media" autoplay loop muted playsinline preload="auto" poster="assets/img/solution_relaxed_video.jpg" id="solutionVideo">
+              <video class="media-frame__media" autoplay loop muted playsinline preload="metadata" poster="assets/img/solution_relaxed_video.jpg" id="solutionVideo">
                 <source src="assets/video/solution_relaxed.mp4" type="video/mp4">
                 <img src="assets/img/solution_relaxed_video.jpg" alt="Relaxed professional enjoying coffee while watching Video Flow" class="media-frame__img">
               </video>
@@ -1112,276 +1121,540 @@
   </div>
 </section>
 
-<!-- ============================ HOW IT WORKS ============================ -->
-<section class="section" id="how">
-  <div class="wrap">
-    <div class="s-head s-head--center rv">
-      <span class="eyebrow">How it works</span>
-      <h2 class="s-title">One gesture, three directions</h2>
-      <p class="s-sub" style="margin-inline:auto">
-        Flow watches for a single trigger — a held key, a double-tap, a middle click, or a
-        text selection. What happens next depends on which flow you invoke.
-      </p>
-    </div>
 
-    <div class="flow__trigger rv">
-      Select text or hold your shortcut &mdash; in <b>VS Code</b>, <b>Chrome</b>, <b>Slack</b>, <b>Word</b>, anywhere
-    </div>
-    <div class="flow__arrow rv" aria-hidden="true">
-      <svg viewBox="0 0 22 30" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M11 1v22"/><path d="m4 18 7 7 7-7"/></svg>
-    </div>
+<!-- ============================ PAGE 4: LIVE INTERACTIVE DESKTOP DEMO ============================ -->
+<section class="section section--desktop-demo demo-track" id="demo">
+  <div class="demo__sticky" id="demoSticky">
+    <div class="demo__ambient-glow"></div>
 
-    <div class="flow">
-      <article class="pill-card rv">
-        <div class="pill-card__ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg>
-        </div>
-        <h3>Voice Flow</h3>
-        <p>Speak and your words appear in the window you were already using — punctuated, cleaned up and formatted to suit that app.</p>
-        <div class="pill-card__out">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
-          Pasted straight into the app
-        </div>
-      </article>
-
-      <article class="pill-card rv">
-        <div class="pill-card__ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19.5 6.5a8 8 0 0 1 0 11"/></svg>
-        </div>
-        <h3>Audio Flow</h3>
-        <p>Hear a selection read aloud in a natural voice, or get a spoken summary of the key ideas when the text is too long to read.</p>
-        <div class="pill-card__out">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
-          A small floating player
-        </div>
-      </article>
-
-      <article class="pill-card rv">
-        <div class="pill-card__ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="m16.5 12 5-3.5v11l-5-3.5Z"/></svg>
-        </div>
-        <h3>Video Flow</h3>
-        <p>Drop in a paper, a spec or a wall of code and get back a narrated, animated explainer that walks through it scene by scene.</p>
-        <div class="pill-card__out">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
-          A finished MP4
-        </div>
-      </article>
-    </div>
-  </div>
-</section>
-
-<!-- ============================ VOICE FLOW ============================ -->
-<section class="section section--alt" id="voice">
-  <div class="wrap">
-    <div class="row">
-      <div class="row__copy rv">
-        <span class="eyebrow">Voice Flow</span>
-        <h2>Dictation that knows where you are</h2>
-        <p>
-          Flow detects the window in front of you and adapts. Dictating into VS Code gives you
-          code-shaped text; the same sentence in Slack comes out conversational. You pick the
-          tone once per category and forget about it.
+    <div class="wrap demo__header" id="demoHeader">
+      <div class="s-head s-head--center rv">
+        <span class="eyebrow eyebrow--gold">The Actual Desktop App Demo</span>
+        <h2 class="s-title">Experience Flow right on your screen</h2>
+        <p class="s-sub" style="margin-inline:auto">
+          This is how Flow works in real life. Select text in Uzer Kayat's tweet below, or click any button to trigger Video Flow, Audio Flow, and Voice Flow.
         </p>
-        <div class="ticks">
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Your choice of trigger.</b> Ctrl+Win, a double-tap of Ctrl, the middle mouse button, or any custom key you record yourself.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Hold or toggle.</b> Hold to speak and release to paste, or tap once to start and again to finish. Both behaviours coexist without misfiring.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Offline by default.</b> Whisper and Nemotron models run on your own CPU, so dictation keeps working on a plane.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Names spelled right.</b> A personal dictionary biases the model, and shortcuts expand as you speak them.</span>
-          </div>
-        </div>
-        <div class="chips">
-          <span class="chip chip--on">Ctrl + Win</span>
-          <span class="chip">Double-tap Ctrl</span>
-          <span class="chip">Middle click</span>
-          <span class="chip">Hold to speak</span>
-          <span class="chip">Tap to toggle</span>
-          <span class="chip">Custom key</span>
+
+        <!-- Quick Action Playground Bar -->
+        <div class="demo-quick-bar">
+          <button class="demo-chip-btn is-active" id="btnDemoVideo" type="button">
+            <span>🎬</span>
+            <span>1. Select &amp; Generate Video Flow</span>
+          </button>
+          <button class="demo-chip-btn" id="btnDemoAudio" type="button">
+            <span>🎧</span>
+            <span>2. Select &amp; Listen to Audio Flow</span>
+          </button>
+          <button class="demo-chip-btn" id="btnDemoVoice" type="button">
+            <span>🎙️</span>
+            <span>3. Dictate with Voice Flow</span>
+          </button>
+          <button class="demo-chip-btn demo-chip-btn--reset" id="btnDemoReset" type="button">
+            <span>↺</span>
+            <span>Reset Demo</span>
+          </button>
         </div>
       </div>
-
-      <figure class="row__media media-frame rv">
-        <img class="shot-dark" src="assets/img/shots/home_dark.png" alt="The workspace page listing recent dictations, each tagged with the app it was spoken into, its word count and words-per-minute." width="1440" height="1150" loading="lazy">
-        <img class="shot-light" src="assets/img/shots/home_light.png" alt="The workspace page in the light parchment theme." width="1440" height="1150" loading="lazy">
-        <figcaption>Every dictation is logged with its app, word count and speed</figcaption>
-      </figure>
     </div>
-  </div>
-</section>
 
-<!-- ============================ AUDIO FLOW ============================ -->
-<section class="section" id="audio">
-  <div class="wrap">
-    <div class="row row--flip">
-      <div class="row__copy rv">
-        <span class="eyebrow">Audio Flow</span>
-        <h2>Listen to anything you can highlight</h2>
-        <p>
-          Two modes from the same selection. <b>Read</b> speaks the words exactly as written,
-          tracking along as it goes. <b>Summary</b> hands the text to NotebookLM and gives you
-          a spoken overview of just the key ideas.
-        </p>
-        <div class="ticks">
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Pick your depth.</b> Short, Balanced or Deep Dive, depending on how much of the detail you actually need.</span>
+    <!-- Desktop Showcase Stage -->
+    <div class="demo-showcase-stage" id="demoShowcaseStage">
+      <!-- The Computer Desktop Screen Frame -->
+      <div class="interactive-desktop-frame" id="desktopFrame">
+        <div class="desktop-screen-camera"></div>
+        <div class="desktop-screen win11-dark">
+          <!-- Windows 11 Wallpaper Background -->
+          <div class="desktop-wallpaper"></div>
+
+          <!-- Microsoft Edge Browser Window -->
+          <div class="edge-browser-window" id="browserWindow">
+            <!-- Browser Titlebar -->
+            <div class="edge-titlebar">
+              <div class="edge-tabs">
+                <div class="edge-tab active">
+                  <svg class="x-favicon" viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                  <span class="edge-tab-text">Uzer Kayat on X: "AI Productivity Flow...</span>
+                  <span class="edge-tab-close">&times;</span>
+                </div>
+                <button class="edge-new-tab" type="button" aria-label="New tab">+</button>
+              </div>
+              <div class="edge-win-controls">
+                <span class="win-btn">&minus;</span>
+                <span class="win-btn">&#9634;</span>
+                <span class="win-btn win-btn--close">&times;</span>
+              </div>
+            </div>
+
+            <!-- Browser Navigation Toolbar -->
+            <div class="edge-toolbar">
+              <div class="edge-nav-buttons">
+                <button class="t-btn" type="button" aria-label="Back">&larr;</button>
+                <button class="t-btn" type="button" aria-label="Forward">&rarr;</button>
+                <button class="t-btn" type="button" aria-label="Reload">&#8635;</button>
+              </div>
+              <div class="edge-address-bar">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span class="addr-url">https://x.com/UzerKayat/status/2100164203139231923</span>
+                <span class="addr-badge">&#127760;</span>
+              </div>
+              <div class="edge-ext-icons">
+                <span class="ext-btn" title="Extensions">&#129513;</span>
+                <span class="ext-btn" title="Favorites">&#9734;</span>
+                <span class="ext-btn" title="Copilot">&#10024;</span>
+              </div>
+            </div>
+
+            <!-- Browser Viewport: The Complete Twitter/X Interface -->
+            <div class="twitter-container" id="twitterApp">
+              <!-- Left Navigation Column -->
+              <aside class="x-nav-col">
+                <div class="x-logo">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                </div>
+                <nav class="x-nav-menu">
+                  <a href="#demo" class="x-menu-link active"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2L2 12h3v8h5v-6h4v6h5v-8h3L12 2zm0 2.83l7 7V20h-3v-6H8v6H5v-8.17l7-7z"/></svg></span> <span class="x-label">Home</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 001.48-5.34c-.47-2.78-2.79-5-5.59-5.34a6.505 6.505 0 00-7.27 7.27c.34 2.8 2.56 5.12 5.34 5.59a6.5 6.5 0 005.34-1.48l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span> <span class="x-label">Explore</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg></span> <span class="x-label">Notifications</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg></span> <span class="x-label">Chat</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M11.2 21.9l.4-6.8H7.4l6.2-12.5-.3 6.8h4.2l-6.3 12.5z"/></svg></span> <span class="x-label">Grok</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2l-3 4-4-2 2 5h10l2-5-4 2-3-4zm0 2.5l2 2.6 1.7-.8-.8 2.2H9.1l-.8-2.2 1.7.8 2-2.6z"/></svg></span> <span class="x-label">Premium</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 7c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4zm-6 4c.22-.72 3.31-2 6-2 2.7 0 5.8 1.29 6 2H6z"/></svg></span> <span class="x-label">Profile</span></a>
+                  <a href="#demo" class="x-menu-link"><span class="x-ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></span> <span class="x-label">More</span></a>
+                </nav>
+                <button class="x-post-btn" type="button" style="background:#fff;color:#0f1419;">Post</button>
+
+                <div class="x-user-mini">
+                  <div class="x-avatar"><img src="assets/img/demo/uzer_avatar.png" alt="UK" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>
+                  <div class="x-user-details">
+                    <div class="x-name">Uzer Kayat <span class="x-badge">&#10004;</span></div>
+                    <div class="x-handle">@UzerKayat</div>
+                  </div>
+                </div>
+              </aside>
+
+              <!-- Center Feed Column: The Tweet Article -->
+              <main class="x-article-col" id="tweetArticleCol">
+                <div class="x-article-header">
+                  <span class="x-back-btn">&larr;</span>
+                  <span class="x-header-title">Article</span>
+                  <span class="x-expand-ico">&#10530;</span>
+                </div>
+
+                <div class="x-article-body">
+                  <div class="x-author-row">
+                    <div class="x-avatar x-avatar--lg"><img src="assets/img/demo/uzer_avatar.png" alt="UK" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>
+                    <div class="x-author-meta">
+                      <div class="x-author-name">
+                        <b>Uzer Kayat</b>
+                        <svg class="x-verified-badge" viewBox="0 0 24 24" width="16" height="16" fill="#1d9bf0"><path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.99-3.818-3.99-.47 0-.917.09-1.332.25C14.786 2.5 13.5 1.7 12 1.7s-2.786.8-3.44 2.06c-.415-.16-.862-.25-1.332-.25-2.108 0-3.818 1.78-3.818 3.99 0 .495.084.965.238 1.4-1.273.65-2.148 2.02-2.148 3.6 0 1.46.746 2.74 1.863 3.44-.11.39-.17.8-.17 1.22 0 2.21 1.71 4 3.818 4 .557 0 1.08-.13 1.55-.35.688 1.13 1.88 1.89 3.25 1.89s2.562-.76 3.25-1.89c.47.22.993.35 1.55.35 2.108 0 3.818-1.79 3.818-4 0-.42-.06-.83-.17-1.22 1.117-.7 1.863-1.98 1.863-3.44zM10.2 16.5l-3.5-3.5 1.4-1.4 2.1 2.1 5.3-5.3 1.4 1.4-6.7 6.7z"/></svg>
+                        <span class="x-badge-label">AI</span>
+                      </div>
+                      <div class="x-author-sub">@UzerKayat &middot; Sep 16, 2026</div>
+                    </div>
+                    <div class="x-author-actions">
+                      <button class="x-btn-boost" type="button">Boost</button>
+                      <span class="x-more-btn">&middot;&middot;&middot;</span>
+                    </div>
+                  </div>
+
+                  <div style="margin: 12px 0;"><img src="assets/img/demo/article_cover.png" alt="Cover" style="width:100%; border-radius:16px; display:block; border:1px solid #2f3336;"></div>
+                  <h1 class="x-post-headline">AI Productivity Flow &mdash; Transform Information Without Leaving Your Workflow</h1>
+
+                  <div class="x-post-text" id="selectableArticle">
+                    <p class="article-p" id="p1" data-p="1">
+                      We use AI every day to summarize, explain, rewrite, research, and understand information.
+                    </p>
+                    <p class="article-p" id="p2" data-p="2">
+                      But there is still one big problem with how most AI tools work.
+                    </p>
+                    <p class="article-p" id="p3" data-p="3">
+                      You are reading something in one app, then you copy it, open another website, paste it into an AI chat, explain what you want, wait for the result, and then go back to what you were originally doing.
+                    </p>
+                    <p class="article-p article-p--key" id="p4" data-p="4">
+                      Productivity Flow was built to remove that interruption. It is an open-source desktop application designed around a simple idea: AI should fit into your existing workflow instead of forcing you to move your workflow into an AI app.
+                    </p>
+                    <p class="article-p" id="p5" data-p="5">
+                      Productivity Flow combines three major systems: <b>Video Flow</b>, <b>Audio Flow</b>, and <b>Voice Flow</b>.
+                    </p>
+                    <p class="article-p" id="p6" data-p="6">
+                      Together, they let you transform information into the format that is most useful to you &mdash; visual, audio, or text &mdash; while staying inside the applications you already use.
+                    </p>
+                  </div>
+
+                  <div class="x-post-meta">
+                    <span>3:35 PM &middot; Sep 16, 2026</span> &middot; <span><b>11.2K</b> Views</span>
+                  </div>
+
+                  <div class="x-post-engagements">
+                    <span class="eng-item"><span class="eng-ico">&#128172;</span> 42</span>
+                    <span class="eng-item"><span class="eng-ico">&#128257;</span> 128</span>
+                    <span class="eng-item"><span class="eng-ico">&#10084;</span> 1.4K</span>
+                    <span class="eng-item"><span class="eng-ico">&#128278;</span> 89</span>
+                    <span class="eng-item"><span class="eng-ico">&#128279;</span></span>
+                  </div>
+
+                  <!-- Live Reply Box for Voice Dictation Stream -->
+                  <div class="x-reply-box" id="xReplyBox">
+                    <div class="x-avatar x-avatar--sm"><img src="assets/img/demo/uzer_avatar.png" alt="UK" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>
+                    <div class="x-reply-input-wrap">
+                      <div class="x-reply-placeholder" id="xReplyText">Post your reply (or test Voice Flow dictation)...</div>
+                    </div>
+                    <button class="x-reply-submit" type="button">Reply</button>
+                  </div>
+                </div>
+              </main>
+
+              <!-- Right Column: Trends & Search -->
+              <aside class="x-sidebar-col">
+                <div class="x-search-box">
+                  <span class="x-search-ico">&#128269;</span>
+                  <input type="text" placeholder="Search" readonly value="AI Productivity Flow">
+                </div>
+                <div class="x-side-card">
+                  <h3 class="x-side-title">Relevant people</h3>
+                  <div class="x-person-row">
+                    <div class="x-avatar"><img src="assets/img/demo/uzer_avatar.png" alt="UK" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>
+                    <div class="x-person-info">
+                      <div class="x-person-name">Uzer Kayat <span class="x-badge">&#10004;</span></div>
+                      <div class="x-person-handle">@UzerKayat</div>
+                    </div>
+                    <button class="x-follow-btn" type="button">Follow</button>
+                  </div>
+                </div>
+                <div class="x-side-card">
+                  <h3 class="x-side-title">What's happening</h3>
+                  <div class="x-trend-item">
+                    <div class="x-trend-sub">Trending</div>
+                    <div class="x-trend-topic">Dare To Go Glam</div>
+                    <div class="x-trend-stats">15.2K posts</div>
+                  </div>
+                  <div class="x-trend-item">
+                    <div class="x-trend-sub">Politics &middot; Trending</div>
+                    <div class="x-trend-topic">#HappyBdayPM</div>
+                    <div class="x-trend-stats">128K posts</div>
+                  </div>
+                  <div class="x-trend-item">
+                    <div class="x-trend-sub">Politics &middot; Trending</div>
+                    <div class="x-trend-topic">#ModiBirthday2026</div>
+                    <div class="x-trend-stats">54.1K posts</div>
+                  </div>
+                  <div class="x-trend-item">
+                    <div class="x-trend-sub">Politics &middot; Trending</div>
+                    <div class="x-trend-topic">Annamalai</div>
+                    <div class="x-trend-stats">8,211 posts</div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+
+            <!-- ==================== ON-SCREEN NATIVE FLOW APP WIDGETS ==================== -->
+            
+            <!-- 1. Text Selection Trigger Badge (Appears right at selected text) -->
+            <div class="flow-selection-hud" id="flowSelectionHud" style="display: none;">
+              <div class="flow-hud-badge" id="flowHudBadge">
+                <img src="assets/img/logo.svg" alt="" width="16" height="16">
+              </div>
+              <div class="flow-hud-menu" id="flowHudMenu">
+                <button class="flow-menu-btn" id="menuBtnRead" type="button">
+                  <span>💬</span> Read
+                </button>
+                <div class="flow-pill-divider"></div>
+                <button class="flow-menu-btn" id="menuBtnAudio" type="button">
+                  <span>⚡</span> Summary
+                </button>
+                <div class="flow-pill-divider"></div>
+                <button class="flow-menu-btn" type="button">
+                  <span>⚙</span>
+                </button>
+                <div class="flow-pill-divider"></div>
+                <button class="flow-menu-btn" type="button">
+                  <span>⋮⋮</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 2. Audio Flow Depth / Mode Selector Dialog -->
+            <div class="flow-audio-dialog" id="flowAudioDialog" style="display: none;">
+              <div class="flow-dialog-header">
+                <div class="flow-dialog-title">
+                  <img src="assets/img/logo.svg" width="14" height="14" alt="">
+                  <span>Audio Flow</span>
+                </div>
+                <button class="flow-dialog-close" id="btnAudioDialogClose" type="button">&times;</button>
+              </div>
+              <div class="flow-dialog-body">
+                <div class="flow-dialog-notice">
+                  <span>💡 <b>Tip:</b> Summary is optimized for longer documents. Use Instant Read for short text.</span>
+                </div>
+                <div class="flow-depth-options" style="display: flex; gap: 4px; justify-content: center; margin-bottom: 14px;">
+                  <button class="flow-depth-btn" data-depth="short" type="button" style="flex:1;">
+                    <span class="depth-name">⚡ Short</span>
+                  </button>
+                  <button class="flow-depth-btn active" id="btnBalanced" data-depth="balanced" type="button" style="flex:1;">
+                    <span class="depth-name">✦ Balanced</span>
+                  </button>
+                  <button class="flow-depth-btn" data-depth="deep" type="button" style="flex:1;">
+                    <span class="depth-name">✦ Deep Dive</span>
+                  </button>
+                  <button class="flow-depth-btn" type="button" style="padding: 0 8px;">
+                    <span class="depth-name">⋮⋮</span>
+                  </button>
+                </div>
+                <button class="flow-btn-generate" id="btnGenerateAudioSummary" type="button">
+                  <span>⚡ Generate Audio Summary</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 4. Real Floating Video Flow Player Window (Matches frame_40.0s.jpg) -->
+            <div class="flow-window flow-window--video" id="videoFlowWindow" style="display: none;">
+              <div class="flow-window__titlebar">
+                <div class="flow-window__title">
+                  <img src="assets/img/logo.svg" width="14" height="14" alt="">
+                  <span>Video Flow</span>
+                </div>
+                <div class="flow-window__controls">
+                  <span class="f-ctrl">&minus;</span>
+                  <span class="f-ctrl">&#9634;</span>
+                  <span class="f-ctrl f-ctrl--close" id="btnVideoFlowClose">&times;</span>
+                </div>
+              </div>
+              <div class="flow-window__subbar">
+                <div class="flow-window__label">
+                  <span class="badge-tag">VIDEO FLOW</span>
+                  <span class="topic-tag">AI Productivity Flow &mdash; Transform Information Without Leaving</span>
+                </div>
+                <button class="btn-fullscreen-toggle" type="button">&#10530; Fullscreen</button>
+              </div>
+              <div class="flow-window__player">
+                <video class="flow-demo-video-player" id="interactiveDemoVideo" playsinline preload="none" poster="assets/img/solution_relaxed_video.jpg">
+                  <source src="assets/video/videoflow_demo.mp4" type="video/mp4">
+                </video>
+                <div class="flow-video-custom-controls">
+                  <button class="f-play-btn" id="fVideoPlayBtn" type="button">&#9658;</button>
+                  <div class="f-scrubber" id="fVideoScrubber">
+                    <div class="f-scrubber-track" id="fVideoTrack" style="width: 35%;"></div>
+                  </div>
+                  <span class="f-time" id="fVideoTime">0:14 / 0:50</span>
+                </div>
+              </div>
+              <div class="flow-window__footer">
+                <div class="status-left">
+                  <span class="status-dot"></span>
+                  <span>Ready</span>
+                </div>
+                <div class="status-right">
+                  <span class="pct-badge">100%</span>
+                  <a class="btn-download-mp4" href="assets/video/videoflow_demo.mp4" download="AI_Productivity_Flow_Explainer.mp4">
+                    <span>&darr; Download MP4</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Real Floating Audio Flow Summary Player Window -->
+            <div class="flow-window flow-window--audio" id="audioFlowWindow" style="display: none;">
+              <div class="flow-window__titlebar">
+                <div class="flow-window__title">
+                  <span class="audio-hud-icon">🎧</span>
+                  <span>Audio Flow &bull; Summary Player</span>
+                </div>
+                <div class="flow-window__controls">
+                  <span class="f-ctrl">&minus;</span>
+                  <span class="f-ctrl f-ctrl--close" id="btnAudioFlowClose">&times;</span>
+                </div>
+              </div>
+              <div class="audio-player-body">
+                <div class="audio-player-meta">
+                  <div class="audio-track-title">AI Productivity Flow &mdash; Transform Information</div>
+                  <div class="audio-track-sub">Balanced Summary &bull; Human-like Neural Voice</div>
+                  <div class="audio-soundwaves" id="audioSoundwaves">
+                    <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+                  </div>
+                </div>
+                <!-- Real demo audio element -->
+                <audio id="realDemoAudio" preload="auto">
+                  <source src="assets/audio/flow_demo.wav" type="audio/wav">
+                </audio>
+                <div class="audio-controls-row">
+                  <button class="audio-step-btn" id="btnAudioStepBack" type="button" title="Back 5s">&#8630; 5s</button>
+                  <button class="audio-main-play-btn" id="btnAudioPlay" type="button">&#9658;</button>
+                  <button class="audio-step-btn" id="btnAudioStepFwd" type="button" title="Forward 5s">5s &#8631;</button>
+                </div>
+                <div class="audio-seeker-row">
+                  <span class="audio-cur-time" id="audioCurTime">0:00</span>
+                  <div class="audio-seeker-bar" id="audioSeekerBar">
+                    <div class="audio-seeker-fill" id="audioSeekerFill" style="width: 0%;"></div>
+                  </div>
+                  <span class="audio-tot-time" id="audioTotTime">1:30</span>
+                </div>
+                <div class="audio-speed-row">
+                  <span class="speed-label">Speed:</span>
+                  <div class="speed-chips">
+                    <button class="speed-chip" data-speed="0.75" type="button">0.75&times;</button>
+                    <button class="speed-chip active" data-speed="1.0" type="button">1.0&times;</button>
+                    <button class="speed-chip" data-speed="1.25" type="button">1.25&times;</button>
+                    <button class="speed-chip" data-speed="1.5" type="button">1.5&times;</button>
+                    <button class="speed-chip" data-speed="2.0" type="button">2.0&times;</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>A real player, not a browser tab.</b> A compact always-on-top window with a waveform, scrub bar and speed control.</span>
+
+            <!-- 6. Video Flow Create Video Modal -->
+            <div class="flow-window flow-window--create-video" id="videoCreateModal" style="display: none; background: #ffffff; border: 1px solid #e5e7eb; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.15), 0 0 40px rgba(0,0,0,0.05); color: #111827;">
+              <div class="flow-window__titlebar" style="background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+                <div class="flow-window__title" style="color: #374151;">
+                  <img src="assets/img/logo.svg" width="14" height="14" alt="">
+                  <span>Video Flow &mdash; Create video</span>
+                </div>
+                <div class="flow-window__controls" style="color: #6b7280; display:flex; gap:12px;">
+                  <span class="f-ctrl">&minus;</span>
+                  <span class="f-ctrl">&#9634;</span>
+                  <span class="f-ctrl f-ctrl--close" id="btnVideoCreateClose">&times;</span>
+                </div>
+              </div>
+              <div class="video-create-body" style="padding: 14px 20px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <div style="background:#f97316; width:10px; height:10px; border-radius:2px;"></div>
+                    <span style="font-size:10.5px; font-weight:800; color:#f97316; letter-spacing:0.05em;">VIDEO FLOW</span>
+                </div>
+                <h2 style="font-size:18px; font-weight:800; margin:0 0 4px 0; letter-spacing:-0.02em;">Create AI Video</h2>
+                <p style="font-size:12px; color:#6b7280; margin:0 0 12px 0;">Turn text, articles, or attached documents into clear visual explanations.</p>
+                
+                <div class="engine-tabs" style="display:flex; background:#f3f4f6; border-radius:8px; padding:3px; margin-bottom:12px;">
+                  <button class="engine-tab active" type="button" style="flex:1; background:#fff; border:none; border-radius:6px; padding:6px 0; font-size:11.5px; font-weight:700; color:#111827; box-shadow:0 1px 3px rgba(0,0,0,0.1); color:#f97316;">✦ NotebookLM Cloud AI</button>
+                  <button class="engine-tab" type="button" style="flex:1; background:transparent; border:none; padding:6px 0; font-size:11.5px; font-weight:700; color:#6b7280; cursor:pointer;">⚙ Native Engine (Offline)</button>
+                </div>
+                
+                <div class="vc-account-badge" style="display:flex; align-items:center; gap:6px; padding:4px 8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:999px; margin-bottom:8px; width:fit-content;">
+                  <div class="vc-acc-details" style="font-size:10.5px; color:#166534; font-weight:500;">✦ Google NotebookLM Connected (naeem.kayat2004@gmail.com)</div>
+                </div>
+
+                <div class="vc-form-group" style="margin-bottom:8px;">
+                  <textarea class="vc-textarea" readonly id="vcSelectedText" style="width:100%; height:44px; padding:6px 8px; font-size:11.5px; color:#374151; background:#f9fafb; border:1px solid #d1d5db; border-radius:6px; resize:none; line-height:1.35;">Voice. Audio. Video. One workflow. Transform information without leaving your workflow.</textarea>
+                  <button style="margin-top:4px; display:inline-flex; align-items:center; gap:4px; background:transparent; border:1px solid #d1d5db; border-radius:6px; padding:3px 8px; font-size:10.5px; font-weight:600; color:#374151; cursor:pointer;">📄 Choose Document</button>
+                </div>
+                
+                <div class="vc-form-row" style="display:flex; gap:8px; margin-bottom:6px;">
+                  <div class="vc-form-group flex-1" style="flex:1;">
+                    <label class="vc-label" style="display:block; font-size:10.5px; font-weight:700; color:#6b7280; margin-bottom:3px;">Video Format</label>
+                    <select class="vc-select" style="width:100%; padding:5px 7px; font-size:11.5px; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:6px; outline:none;">
+                      <option>Auto-Adaptive (Recommended)</option>
+                    </select>
+                  </div>
+                  <div class="vc-form-group flex-1" style="flex:1;">
+                    <label class="vc-label" style="display:block; font-size:10.5px; font-weight:700; color:#6b7280; margin-bottom:3px;">Visual Style</label>
+                    <select class="vc-select" style="width:100%; padding:5px 7px; font-size:11.5px; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:6px; outline:none;">
+                      <option>Auto</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div class="vc-form-group" style="margin-bottom:6px;">
+                    <label class="vc-label" style="display:block; font-size:10.5px; font-weight:700; color:#6b7280; margin-bottom:3px;">Focus / Visual Direction (optional)</label>
+                    <input type="text" style="width:100%; padding:5px 7px; font-size:11.5px; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:6px; outline:none;" placeholder="">
+                </div>
+                <div class="vc-form-group" style="margin-bottom:10px;">
+                    <label class="vc-label" style="display:block; font-size:10.5px; font-weight:700; color:#6b7280; margin-bottom:3px;">Video Title (optional)</label>
+                    <input type="text" style="width:100%; padding:5px 7px; font-size:11.5px; color:#111827; background:#fff; border:1px solid #d1d5db; border-radius:6px; outline:none;" value="AI Productivity Flow — Transform Information Without Leaving">
+                </div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div style="display:flex; gap:3px;">
+                            <div style="width:10px; height:5px; background:#f97316; border-radius:2px;"></div>
+                            <div style="width:10px; height:5px; background:#f97316; border-radius:2px;"></div>
+                            <div style="width:10px; height:5px; background:#f97316; border-radius:2px;"></div>
+                            <div style="width:10px; height:5px; background:#f97316; border-radius:2px;"></div>
+                            <div style="width:10px; height:5px; background:#f97316; border-radius:2px;"></div>
+                        </div>
+                        <span style="font-size:11px; color:#6b7280; font-weight:500;">Selected text is ready.</span>
+                    </div>
+                    <button class="flow-btn-generate" id="btnGenerateVideoNow" type="button" style="padding:8px 16px; border-radius:8px; background:linear-gradient(135deg, #f97316, #ea580c); color:#fff; font-weight:700; font-size:12.5px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(234, 88, 12, 0.4); display:flex; align-items:center; gap:5px;">
+                      Generate Video ✦
+                    </button>
+                </div>
+              </div>
+            </div>
+
+          <!-- 3. Floating Bottom Pill HUD (Positioned cleanly 8px above Windows taskbar!) -->
+          <div class="flow-floating-pill-hud" id="flowBottomPill">
+            <img class="flow-pill-logo" src="assets/img/logo.svg" alt="Flow" width="16" height="16">
+            <div class="flow-pill-actions" id="flowPillActions">
+              <button class="flow-pill-btn flow-pill-btn--speak" id="pillBtnSpeak" type="button" style="color: #374151; padding: 4px 10px; display:flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px; border:none; background:none; cursor:pointer; flex-shrink: 0;">
+                <span class="pill-speak-text" id="pillSpeakText">Click to speak</span>
+              </button>
+              <div class="flow-pill-divider" style="background:#e5e7eb; width:1px; height:18px; margin:0 2px;"></div>
+              <button class="flow-pill-btn flow-pill-btn--video" id="pillBtnVideo" type="button" style="color: #6b7280; padding: 4px 10px; display:flex; align-items:center; gap:6px; font-weight:500; font-size:12.5px; border:none; background:none; cursor:pointer; flex-shrink: 0;">
+                <span class="pill-video-text" id="pillVideoText">... Video</span>
+              </button>
+              <div class="flow-pill-divider" style="background:#e5e7eb; width:1px; height:18px; margin:0 2px;"></div>
+              <button class="flow-pill-btn flow-pill-btn--settings" id="pillBtnSettings" type="button" title="Settings" style="color: #6b7280; padding: 4px 8px; display:flex; align-items:center; justify-content:center; font-size:13px; border:none; background:none; cursor:pointer; flex-shrink: 0;">
+                <span>⚙</span>
+              </button>
+              <div class="flow-pill-divider" style="background:#e5e7eb; width:1px; height:18px; margin:0 2px;"></div>
+              <button class="flow-pill-btn flow-pill-btn--handle" id="pillBtnHandle" type="button" style="color: #6b7280; padding: 4px 10px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; border:none; background:none; cursor:pointer; flex-shrink: 0;">
+                <span>⋮⋮</span>
+              </button>
+            </div>
           </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Free voices included.</b> Microsoft Edge Neural and offline Windows SAPI5 work with no key at all.</span>
+
+          <!-- Windows 11 Taskbar (Real layout matching frame_04.0s.jpg) -->
+          <div class="desktop-taskbar">
+            <div class="taskbar-left">
+              <div class="taskbar-weather">
+                <span class="weather-icon">&#127780;</span>
+                <span class="weather-temp">29&deg;C</span>
+              </div>
+            </div>
+            <div class="taskbar-center">
+              <div class="tb-icon tb-start" title="Start">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="#0078d4"><path d="M22 12V2.5l-9.5 1.5v8l9.5-.001zm-10.5 0V4.2l-8 1.2v6.6h8zm0 1v8.5l-8-1.2v-6.3h8zm10.5 0h-9.5V21.5l9.5-1.5V13z"/></svg>
+              </div>
+              <div class="tb-search-pill">
+                <span class="search-ico">&#128269;</span>
+                <span>Search</span>
+              </div>
+              <div class="tb-icon tb-app tb-app--active" title="AI Productivity Flow (Active)">
+                <img src="assets/img/logo.svg" width="22" height="22" alt="Flow">
+                <span class="active-dot active-dot--flow"></span>
+              </div>
+              <div class="tb-icon tb-app tb-app--active" title="Microsoft Edge">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="#0078d4"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.22-.38-.52-.73-.87-1.02-.91-.76-2.1-.96-3.15-.55l-.57.22c-.63.25-1.35-.06-1.61-.69-.25-.63.06-1.35.69-1.61l.57-.22c1.78-.69 3.81-.35 5.35.93.59.49 1.09 1.1 1.48 1.77.12.2.18.43.18.66 0 .58-.38 1.1-.94 1.25l-.26.07c-.45.12-.91-.12-1.07-.56z"/></svg>
+                <span class="active-dot"></span>
+              </div>
+              <div class="tb-icon tb-app" title="File Explorer">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="#f59e0b"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"/></svg>
+              </div>
+              <div class="tb-icon tb-app" title="Visual Studio Code">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="#0065A9"><path d="M17.8 2.8L12 7.1 6.2 2.8 2 5.5v13l4.2 2.7 5.8-4.3 5.8 4.3 4.2-2.7v-13l-4.2-2.7zm-5.8 11.5l-4-3 4-3v6z"/></svg>
+              </div>
+              <div class="tb-icon tb-app" title="Slack">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="#E01E5A"><path d="M5 15a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm2-4H5a2 2 0 1 1 2-2v2zm12 2a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm-2-4h2a2 2 0 1 1-2 2v-2zm-6-6a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 2V5a2 2 0 1 1 2 2h-2zm0 12a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0-2v2a2 2 0 1 1 2-2h-2zm-2-2H9a2 2 0 1 1 0-4h2a2 2 0 1 1 0 4z"/></svg>
+              </div>
+              <div class="tb-icon tb-app" title="Microsoft Word">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="#2B579A"><path d="M4 4h10v16H4V4zm11 2h5v12h-5V6zm-8 4l1.5 5h1l1-4.5h1l1 4.5h1L13 10h-1l-1 4-1-4H8z"/></svg>
+              </div>
+            </div>
+            <div class="taskbar-right">
+              <div class="systray-group">
+                <span class="tray-ico" title="WiFi">&#128246;</span>
+                <span class="tray-ico" title="Volume">&#128266;</span>
+                <span class="tray-ico" title="Battery: 80%">&#128267;</span>
+              </div>
+              <div class="tray-lang">ENG<br>IN</div>
+              <div class="tray-clock">07:28 PM<br>16-09-2026</div>
+            </div>
           </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Keep the audio.</b> Download any summary as an MP3, named after the card it came from.</span>
-          </div>
-        </div>
-        <div class="chips">
-          <span class="chip">0.75&times;</span>
-          <span class="chip">1&times;</span>
-          <span class="chip">1.25&times;</span>
-          <span class="chip chip--on">1.5&times;</span>
-          <span class="chip">1.75&times;</span>
-          <span class="chip">2&times;</span>
         </div>
       </div>
-
-      <figure class="row__media media-frame rv">
-        <img src="assets/img/shots/player.png" alt="The compact floating audio player, showing an Audio Overview card with a scrub bar, skip controls, playback speed chips and an MP3 download button." width="500" height="240" loading="lazy" style="width:100%">
-        <figcaption>The floating player — small enough to leave open while you work</figcaption>
-      </figure>
     </div>
   </div>
 </section>
 
-<!-- ============================ VIDEO FLOW ============================ -->
-<section class="section section--alt" id="video">
-  <div class="wrap">
-    <div class="row">
-      <div class="row__copy rv">
-        <span class="eyebrow">Video Flow</span>
-        <h2>Turn dense material into a video you can follow</h2>
-        <p>
-          Paste text or drop in a PDF, DOCX, Markdown or CSV file. Flow reads it, plans a
-          sequence of scenes around the actual claims in the source, writes the narration and
-          renders the whole thing to MP4.
-        </p>
-        <div class="ticks">
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Grounded in your source.</b> Scenes are built from claims and entities found in the document, not invented around the topic.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Formats for the job.</b> Brief overview, full explainer, cinematic, or a 9:16 vertical cut for Shorts and Reels.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Never paywalled.</b> If no generative video API is configured, the renderer falls back to procedural 2D and 3D scenes that cost nothing.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Built-in or cloud.</b> Render locally with the bundled engine, or connect NotebookLM for one-click cloud generation.</span>
-          </div>
-        </div>
-        <div class="chips">
-          <span class="chip chip--on">Automatic</span>
-          <span class="chip">Brief</span>
-          <span class="chip">Explainer</span>
-          <span class="chip">Cinematic</span>
-          <span class="chip">Vertical 9:16</span>
-        </div>
-      </div>
-
-      <figure class="row__media media-frame rv">
-        <img class="shot-dark" src="assets/img/shots/videoflow_dark.png" alt="The Video Flow page, with a content panel for the title, document upload and source text on the left, and video settings on the right offering NotebookLM or the built-in engine plus format choices." width="1440" height="1340" loading="lazy">
-        <img class="shot-light" src="assets/img/shots/videoflow_light.png" alt="The Video Flow page in the light parchment theme." width="1440" height="1340" loading="lazy">
-        <figcaption>Add your content on the left, choose how it should look on the right</figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
-
-<!-- ============================ INSIGHTS ============================ -->
-<section class="section" id="insights">
-  <div class="wrap">
-    <div class="row row--flip">
-      <div class="row__copy rv">
-        <span class="eyebrow">Insights</span>
-        <h2>Numbers you can actually check</h2>
-        <p>
-          Flow measures your real speaking speed, the time you saved against typing, and where
-          you dictate most. Nothing is a guess — every figure traces back to a logged dictation,
-          and low-confidence detections are shown as unattributed rather than filled in.
-        </p>
-        <div class="ticks">
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Speaking speed</b> from a plausible measured band, so a stray one-second clip cannot skew it.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Time saved</b> compared against typing at 40 wpm, minus the time you actually spent speaking.</span>
-          </div>
-          <div class="tick">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
-            <span><b>Where you dictate,</b> broken down per application, plus a month heat map and your current streak.</span>
-          </div>
-        </div>
-      </div>
-
-      <figure class="row__media media-frame rv">
-        <img class="shot-dark" src="assets/img/shots/insights_dark.png" alt="The Insights dashboard showing 145 words per minute, 63 hours saved, 10,406 text cleanups and a 50 day streak, alongside a per-application breakdown and a monthly activity heat map." width="1440" height="1180" loading="lazy">
-        <img class="shot-light" src="assets/img/shots/insights_light.png" alt="The Insights dashboard in the light parchment theme." width="1440" height="1180" loading="lazy">
-        <figcaption>Speaking speed, time saved, app breakdown and a month heat map</figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
-
-<!-- ============================ STYLE + DICTIONARY ============================ -->
-<section class="section section--alt">
-  <div class="wrap">
-    <div class="s-head s-head--center rv">
-      <span class="eyebrow">Make it sound like you</span>
-      <h2 class="s-title">Tone and spelling, handled once</h2>
-      <p class="s-sub" style="margin-inline:auto">
-        Two small settings that quietly remove most of the editing you would otherwise do
-        after every dictation.
-      </p>
-    </div>
-
-    <div class="grid-2">
-      <figure class="media-frame rv">
-        <img class="shot-dark" src="assets/img/shots/style_dark.png" alt="The Style page with category tabs and three tone preview cards — Formal, Casual and very casual — each previewing the same sentence." width="1440" height="880" loading="lazy">
-        <img class="shot-light" src="assets/img/shots/style_light.png" alt="The Style page in the light parchment theme." width="1440" height="880" loading="lazy">
-        <figcaption>Set a tone per app category and preview it before committing</figcaption>
-      </figure>
-
-      <figure class="media-frame rv">
-        <img class="shot-dark" src="assets/img/shots/dictionary_dark.png" alt="The Dictionary page listing custom terms with exact-spelling badges, plus a shortcut that expands to an email address." width="1440" height="840" loading="lazy">
-        <img class="shot-light" src="assets/img/shots/dictionary_light.png" alt="The Dictionary page in the light parchment theme." width="1440" height="840" loading="lazy">
-        <figcaption>Teach it names, jargon and shortcuts that expand as you speak</figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
-
-<!-- ============================ PROVIDERS ============================ -->
+<!-- ============================ 5TH PAGE: PROVIDERS ============================ -->
 <section class="section" id="providers">
   <div class="wrap">
     <div class="s-head rv">
@@ -1444,22 +1717,16 @@
         </div>
       </div>
     </div>
-
-    <figure class="media-frame rv" style="margin-top:44px">
-      <img class="shot-dark" src="assets/img/shots/providers_dark.png" alt="The Voice Flow providers page, showing speech recognition and text cleanup selectors, a grid of speech services with connection status, and offline model downloads." width="1440" height="1120" loading="lazy">
-      <img class="shot-light" src="assets/img/shots/providers_light.png" alt="The providers page in the light parchment theme." width="1440" height="1120" loading="lazy">
-      <figcaption>Connect a key, test it, and switch models without restarting</figcaption>
-    </figure>
   </div>
 </section>
 
 <!-- ============================ PRIVACY ============================ -->
-<section class="section section--tight">
+<section class="section section--tight" id="privacy">
   <div class="wrap">
     <div class="priv rv">
       <span class="eyebrow">Privacy</span>
-      <h2 class="s-title" style="margin-bottom:10px">Local-first, and honest about it</h2>
-      <p class="s-sub">Flow is a desktop app, not a thin client for someone else's server.</p>
+      <h2 class="s-title" style="margin-bottom:10px">Built local-first. Private by default.</h2>
+      <p class="s-sub">Your voice, documents, and keys stay on your hardware. Zero telemetry, zero logging.</p>
 
       <div class="priv__grid">
         <div class="priv__item">
@@ -1467,21 +1734,21 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10.5" rx="2.4"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
             Audio stays on your machine
           </h4>
-          <p>Transcription runs locally through Whisper unless you deliberately choose a cloud speech provider.</p>
+          <p>Whisper transcribes speech directly on your device. Raw audio never leaves your computer.</p>
         </div>
         <div class="priv__item">
           <h4>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5 4 6v6c0 4.6 3.3 8.4 8 9.5 4.7-1.1 8-4.9 8-9.5V6l-8-3.5Z"/></svg>
             Keys never leave your disk
           </h4>
-          <p>Credentials are encrypted in a local SQLite database. There is no telemetry endpoint collecting them.</p>
+          <p>API credentials are encrypted in local SQLite. No middleman proxies, zero telemetry.</p>
         </div>
         <div class="priv__item">
           <h4>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
             Nothing is sent without asking
           </h4>
-          <p>Your text only reaches an external model when you pick that model and authorise the request.</p>
+          <p>External AI models are only contacted when you explicitly choose to trigger a flow.</p>
         </div>
       </div>
     </div>
@@ -1491,97 +1758,49 @@
 <!-- ============================ DOWNLOAD ============================ -->
 <section class="section" id="download">
   <div class="wrap dl">
-    <div class="s-head s-head--center rv" style="margin-bottom:8px">
-      <span class="eyebrow">Get started</span>
-      <h2 class="s-title">Install Flow</h2>
+    <div class="s-head s-head--center rv" style="margin-bottom:28px">
+      <span class="eyebrow">Direct Download</span>
+      <h2 class="s-title">Get AI Productivity Flow</h2>
       <p class="s-sub" style="margin-inline:auto">
-        Install Flow instantly using a single terminal command. Sets up an isolated environment,
-        configures speech models and rendering engines, and registers dual-layer background auto-startup.
+        Install Flow directly on your desktop with a single click.
       </p>
-
-      <div class="os-tabs">
-        <button class="os-tab-btn is-active" data-target="panel-win" type="button">
-          Windows <span class="os-badge os-badge--tested">Verified</span>
-        </button>
-        <button class="os-tab-btn" data-target="panel-mac" type="button">
-          macOS <span class="os-badge os-badge--exp">Preview</span>
-        </button>
-        <button class="os-tab-btn" data-target="panel-manual" type="button">
-          Manual Setup
-        </button>
-      </div>
     </div>
 
-    <!-- Windows Panel -->
-    <div class="os-panel" id="panel-win">
-      <div class="code rv">
-        <div class="code__bar">
-          <span>PowerShell (Run as User — No Admin Required)</span>
-          <button class="code__copy" type="button" data-copy="irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex">Copy</button>
+    <!-- Direct Download Options: Windows and Mac -->
+    <div class="dl-simple-wrap rv">
+      <div class="dl-simple-grid">
+        <!-- Windows Option -->
+        <div class="dl-simple-item">
+          <a class="btn btn--primary btn--lg dl-simple-btn" href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-Setup-x64.exe" download>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.801"/></svg>
+            Download for Windows
+          </a>
+          <span class="dl-simple-sub">Windows 10 / 11 &bull; 64-bit Installer</span>
         </div>
-<pre data-copy="irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex"><span class="c"># One-liner automated installation for Windows 10/11 x64</span>
-<span class="cmd">irm </span>https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex</pre>
-      </div>
-    </div>
 
-    <!-- macOS Panel -->
-    <div class="os-panel is-hidden" id="panel-mac">
-      <div class="code rv">
-        <div class="code__bar">
-          <span>Terminal (macOS 12+ Apple Silicon &amp; Intel)</span>
-          <button class="code__copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash">Copy</button>
+        <!-- macOS Option -->
+        <div class="dl-simple-item">
+          <a class="btn btn--primary btn--lg dl-simple-btn" href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.zip" download>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.36c.64-.78 1.08-1.86.96-2.95-1 .04-2.12.67-2.78 1.44-.58.67-1.1 1.77-.96 2.84 1.12.09 2.16-.57 2.78-1.33z"/></svg>
+            Download for Mac
+          </a>
+          <span class="dl-simple-sub">macOS 12+ &bull; Universal App (.zip)</span>
         </div>
-<pre data-copy="curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash"><span class="c"># One-liner automated installation for macOS</span>
-<span class="cmd">curl </span>-fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash</pre>
       </div>
 
-      <div class="mac-warning-card rv">
-        <div style="font-weight:700; color:#f59e0b; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
-          Important Note for macOS Users
-        </div>
-        <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--muted);">
-          macOS support is currently in <strong>Community Preview / Experimental</strong> mode and has not yet undergone comprehensive physical device QA. You might experience hotkey quirks, audio permissions dialogs, or minor bugs. <strong>Windows remains our fully verified production tier.</strong> If you encounter any issues on Mac, please help us improve by reporting them on GitHub!
+      <!-- Mac Beta Note -->
+      <div class="dl-simple-note">
+        <span class="dl-note-badge">Mac Beta</span>
+        <p>
+          AI Productivity Flow was built for Windows first and is now arriving on Mac. Core features work smoothly, but you might encounter a few rough edges as we finish polishing it. You can also install via Terminal using <code>curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash</code>.
         </p>
       </div>
-    </div>
 
-    <!-- Manual Git Clone Panel -->
-    <div class="os-panel is-hidden" id="panel-manual">
-      <div class="code rv">
-        <div class="code__bar">
-          <span>Git &amp; PowerShell / Bash</span>
-          <button class="code__copy" type="button">Copy</button>
-        </div>
-<pre><span class="c"># 1 — Clone the repository</span>
-<span class="p">$ </span>git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
-<span class="p">$ </span>cd AI-Productivity-Flow
-
-<span class="c"># 2 — Install Python packages &amp; Video Flow renderer</span>
-<span class="p">$ </span>pip install -e .
-<span class="p">$ </span>cd video_flow_renderer; npm install; cd ..
-
-<span class="c"># 3 — Register desktop app &amp; auto-startup</span>
-<span class="p">$ </span>.\setup_desktop_app.bat
-
-<span class="c"># 4 — Run Flow (silent background mode)</span>
-<span class="p">$ </span>.\run_voice_flow.bat</pre>
+      <div class="dl-simple-links">
+        <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" rel="noopener">View Source on GitHub &rarr;</a>
+        <span>&bull;</span>
+        <a href="#demo">Try Interactive Demo &rarr;</a>
       </div>
-    </div>
-
-    <div class="req rv">
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Windows 10/11 x64 (Primary) | macOS 12+ (Preview)</span>
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Python 3.10+</span>
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> Node.js 18+ (Video Flow)</span>
-      <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg> No paid API key required</span>
-    </div>
-
-    <div class="hero__cta rv" style="margin-top:34px">
-      <a class="btn btn--primary btn--lg" href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.77-.24.77-.54v-1.9c-3.11.68-3.77-1.5-3.77-1.5-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.94.1-.73.39-1.22.71-1.5-2.48-.28-5.1-1.24-5.1-5.53 0-1.22.44-2.22 1.15-3-.11-.29-.5-1.43.11-2.98 0 0 .94-.3 3.07 1.15a10.6 10.6 0 0 1 5.6 0c2.12-1.45 3.06-1.15 3.06-1.15.62 1.55.23 2.7.11 2.98.72.78 1.15 1.78 1.15 3 0 4.3-2.62 5.25-5.11 5.52.4.35.76 1.03.76 2.08v3.08c0 .3.2.65.78.54A11.2 11.2 0 0 0 12 .8Z"/></svg>
-        View on GitHub
-      </a>
-      <a class="btn btn--ghost btn--lg" href="#how">Read how it works</a>
     </div>
   </div>
 </section>
@@ -1606,10 +1825,11 @@
       <div class="foot__cols">
         <div class="foot__col">
           <h5>Product</h5>
-          <a href="#voice">Voice Flow</a>
-          <a href="#audio">Audio Flow</a>
-          <a href="#video">Video Flow</a>
-          <a href="#insights">Insights</a>
+          <a href="#problems">Problems</a>
+          <a href="#solutions">Solutions</a>
+          <a href="#demo">Live Demo</a>
+          <a href="#providers">Providers &amp; Models</a>
+          <a href="#privacy">Privacy</a>
         </div>
         <div class="foot__col">
           <h5>Get it</h5>
@@ -1866,6 +2086,24 @@
   };
 })();
 </script>
-<script src="assets/js/main.js?v=20260917_12_smooth"></script>
+<script src="assets/js/main.js?v=20260918_fast_video"></script>
+<script src="assets/js/desktop-demo.js"></script>
+<script>
+// Unregister any legacy service worker on localhost so no update banners or PWA modals trigger
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+    for (var i = 0; i < registrations.length; i++) {
+      registrations[i].unregister();
+    }
+  }).catch(function() {});
+}
+</script>
+<!-- Vercel Web Analytics & Speed Insights -->
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<script defer src="/_vercel/speed-insights/script.js"></script>
 </body>
 </html>
