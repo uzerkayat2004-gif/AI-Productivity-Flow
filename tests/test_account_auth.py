@@ -620,6 +620,17 @@ def test_settings_ui_order_and_switch_account_contract():
     assert 'function openSwitchAccountModal(' in js
     assert 'async function handleSwitchAccountFromModal(' in js
 
+    # 6. Check DOM IDs for navigation buttons
+    assert 'id="settings-nav-general"' in html
+    assert 'id="settings-nav-system"' in html
+    assert 'id="settings-nav-account"' in html
+
+    # 7. Check theme safety: no un-tokenized --text-color in switch modal
+    switch_modal_html = html[html.index('id="account-switch-sub-modal"'):html.index('id="modal-add-connection"')]
+    assert "var(--text-color)" not in switch_modal_html, "Found undefined var(--text-color); must use design system tokens"
+    assert 'closeSubModal("account-switch-sub-modal")' in js
+    assert "vfLoadProviders" in js
+
 
 def test_end_to_end_switch_account_and_signout_data_isolation(temp_env):
     """End-to-end verification that Switch Account and Sign Out carry each account's
@@ -759,6 +770,53 @@ def test_end_to_end_switch_account_and_signout_data_isolation(temp_env):
         assert "gsk_alpha_secret_key_111" in recheck_keys
     finally:
         am_module._account_manager = old_singleton
+        try:
+            from voice_flow.storage import resolve_active_db_path
+            storage.switch_account(resolve_active_db_path())
+        except Exception:
+            pass
+
+
+def test_switch_and_logout_invalidates_history_cache(temp_env):
+    """Verify that switching accounts or signing out purges the in-memory API history cache."""
+    import time
+    from voice_flow.gui.api_server import _API_CACHE, _API_CACHE_LOCK
+    am = AccountManager(base_dir=temp_env)
+    old_singleton = am_module._account_manager
+    am_module._account_manager = am
+    try:
+        reg_a = am.register_account("alpha_cache@flow.local", "Alpha Cache", "pass123")
+        reg_b = am.register_account("beta_cache@flow.local", "Beta Cache", "pass456")
+        id_a = reg_a["account"]["id"]
+        id_b = reg_b["account"]["id"]
+
+        # Populate cache with dummy history item for Account A
+        with _API_CACHE_LOCK:
+            _API_CACHE["/api/history?limit=50"] = (time.time(), {"records": [{"id": 1, "raw_text": "cached A"}]})
+            _API_CACHE["/api/insights?days=7"] = (time.time(), {"wpm": 120})
+
+        assert "/api/history?limit=50" in _API_CACHE
+
+        # Switch to Account B -> must purge history and insights cache
+        am.switch_account(id_b)
+        assert "/api/history?limit=50" not in _API_CACHE
+        assert "/api/insights?days=7" not in _API_CACHE
+
+        # Repopulate and test logout -> must also purge
+        with _API_CACHE_LOCK:
+            _API_CACHE["/api/history?limit=50"] = (time.time(), {"records": [{"id": 2, "raw_text": "cached B"}]})
+        assert "/api/history?limit=50" in _API_CACHE
+
+        am.logout_account()
+        assert "/api/history?limit=50" not in _API_CACHE
+    finally:
+        am_module._account_manager = old_singleton
+        try:
+            from voice_flow.storage import resolve_active_db_path
+            storage.switch_account(resolve_active_db_path())
+        except Exception:
+            pass
+
 
 
 

@@ -9,10 +9,13 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from voice_flow.paths import data_dir
@@ -259,7 +262,48 @@ class StorageEngine:
             pass
         return conn
 
+    def _recover_corrupted_db(self) -> None:
+        """Attempt to restore a malformed SQLite DB from .repaired, or quarantine it."""
+        try:
+            base = Path(self.db_path)
+            rep = base.with_name(base.name + ".repaired")
+            if rep.exists() and rep.stat().st_size > 0:
+                try:
+                    with sqlite3.connect(str(rep)) as test_conn:
+                        res = test_conn.execute("PRAGMA integrity_check;").fetchone()
+                        if res and res[0] == "ok":
+                            shutil.copy2(str(rep), str(base))
+                            log.warning("Successfully restored corrupted database %s from %s", self.db_path, rep)
+                            return
+                except Exception:
+                    pass
+            ts = int(time.time())
+            bak = base.with_name(f"{base.name}.corrupt.{ts}.bak")
+            if base.exists():
+                shutil.copy2(str(base), str(bak))
+                for ext in ("", "-wal", "-shm"):
+                    f = Path(str(base) + ext)
+                    if f.exists():
+                        try:
+                            f.unlink()
+                        except Exception:
+                            pass
+                log.critical("Corrupted database %s quarantined to %s. Clean database will be initialized.", self.db_path, bak)
+        except Exception:
+            log.exception("Failed during corrupted database recovery for %s", self.db_path)
+
     def _init_db(self) -> None:
+        try:
+            self._do_init_db()
+        except sqlite3.DatabaseError as exc:
+            if any(k in str(exc).lower() for k in ("malformed", "corrupt", "disk image", "not a database")):
+                log.critical("Detected corrupted database at %s (%s). Attempting auto-recovery...", self.db_path, exc)
+                self._recover_corrupted_db()
+                self._do_init_db()
+            else:
+                raise
+
+    def _do_init_db(self) -> None:
         with self._get_conn() as conn:
             # Table 1: Dictation History
             conn.execute("""

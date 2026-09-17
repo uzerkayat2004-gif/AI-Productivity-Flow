@@ -2858,6 +2858,7 @@ async function clearAudioRecordingsCache() {
 async function closeSettings() {
   const modal = document.getElementById("settings-modal");
   if (modal) modal.classList.add("hidden");
+  if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
 }
 
 function switchSettingsTab(tabId, el = null) {
@@ -9322,7 +9323,7 @@ async function handleSwitchAccountAction() {
       return;
     }
     const active = res.active_account;
-    const accounts = (res.accounts || []).filter(acc => !acc.email.endsWith("@flow.local") || !!acc.google_id);
+    const accounts = (res.accounts || []).filter(acc => !(acc.email === "primary@flow.local" && !acc.google_id));
     openSwitchAccountModal(accounts, active);
   } catch (err) {
     console.debug("[ACCOUNT] Switch action error:", err);
@@ -9338,9 +9339,9 @@ function openSwitchAccountModal(accounts = [], active = null) {
   const validAccounts = Array.isArray(accounts) ? accounts : [];
   if (validAccounts.length === 0) {
     listEl.innerHTML = `
-      <div style="padding: 24px 16px; text-align: center; color: var(--text-muted); font-size: 13px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px dashed var(--border-color, rgba(255,255,255,0.1));">
+      <div style="padding: 24px 16px; text-align: center; color: var(--text-muted, #64748b); font-size: 13px; background: var(--surface-2, rgba(0,0,0,0.02)); border-radius: 10px; border: 1px dashed var(--border-color, rgba(0,0,0,0.12));">
         <div style="font-size: 28px; margin-bottom: 8px;">👤</div>
-        <div style="font-weight: 600; color: var(--text-color, #fff); margin-bottom: 4px;">No other saved accounts</div>
+        <div style="font-weight: 600; color: var(--text-main, var(--text, #1c1917)); margin-bottom: 4px;">No other saved accounts</div>
         <div>Connect another Google account to switch between accounts anytime on this PC.</div>
       </div>
     `;
@@ -9354,15 +9355,15 @@ function openSwitchAccountModal(accounts = [], active = null) {
         : `${initial}`;
 
       return `
-        <div class="account-saved-item" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: ${isCurrent ? 'rgba(255, 106, 0, 0.08)' : 'rgba(255,255,255,0.03)'}; border: 1px solid ${isCurrent ? 'rgba(255, 106, 0, 0.3)' : 'rgba(255,255,255,0.08)'}; border-radius: 10px; margin-bottom: 6px;">
+        <div class="account-saved-item" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: ${isCurrent ? 'rgba(255, 106, 0, 0.08)' : 'var(--surface-2, rgba(0,0,0,0.02))'}; border: 1px solid ${isCurrent ? 'rgba(255, 106, 0, 0.3)' : 'var(--border-color, rgba(0,0,0,0.08))'}; border-radius: 10px; margin-bottom: 6px;">
           <div class="account-saved-item-left" style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-            <div class="account-saved-avatar" style="background: ${color}; width: 34px; height: 34px; font-size: 14px; font-weight: 700; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">${avatarHtml}</div>
+            <div class="account-saved-avatar" style="background: ${color}; width: 34px; height: 34px; font-size: 14px; font-weight: 700; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #ffffff;">${avatarHtml}</div>
             <div class="account-saved-meta" style="display: flex; flex-direction: column; min-width: 0;">
               <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="account-saved-name" style="font-size: 13.5px; font-weight: 700; color: var(--text-color, #fff);">${escapeHtml(acc.username || 'Google User')}</span>
-                ${isCurrent ? '<span class="account-status-pill" style="font-size: 10px; padding: 2px 6px; border-radius: 999px; background: rgba(34,197,94,0.15); color: #4ade80; font-weight: 700;">● Active</span>' : ''}
+                <span class="account-saved-name" style="font-size: 13.5px; font-weight: 700; color: var(--text-main, var(--text, #1c1917));">${escapeHtml(acc.username || 'Google User')}</span>
+                ${isCurrent ? '<span class="account-status-pill" style="font-size: 10px; padding: 2px 6px; border-radius: 999px; background: rgba(34,197,94,0.15); color: #16a34a; font-weight: 700;">● Active</span>' : ''}
               </div>
-              <span class="account-saved-email" style="font-size: 12px; color: var(--text-muted, #94a3b8);">${escapeHtml(acc.email || '')}</span>
+              <span class="account-saved-email" style="font-size: 12px; color: var(--text-muted, #64748b);">${escapeHtml(acc.email || '')}</span>
             </div>
           </div>
           ${isCurrent 
@@ -9517,6 +9518,8 @@ function reloadAllApplicationMemory() {
   try { if (typeof renderProviderConnectionsList === "function") renderProviderConnectionsList(); } catch (_) {}
   try { if (typeof loadAudioFlowPage === "function") loadAudioFlowPage(); } catch (_) {}
   try { if (typeof loadAudioFlow === "function") loadAudioFlow(); } catch (_) {}
+  try { if (typeof vfLoadProviders === "function") vfLoadProviders(); } catch (_) {}
+  try { if (typeof vfGoogleLoadAccount === "function") vfGoogleLoadAccount(); } catch (_) {}
   requestAnimationFrame(() => resetPageScroll());
   setTimeout(() => resetPageScroll(), 100);
 }

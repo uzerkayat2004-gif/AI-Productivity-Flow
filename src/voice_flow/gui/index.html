@@ -2407,7 +2407,7 @@
 <p class="settings-side-sub">Make Flow work your way.</p>
 </div>
 <div aria-label="Settings sections" class="settings-side-nav">
-<button aria-label="General settings" class="nav-item active" onclick="switchSettingsTab('general', this)" type="button">
+<button aria-label="General settings" class="nav-item active" id="settings-nav-general" onclick="switchSettingsTab('general', this)" type="button">
 <span class="nav-icon"><svg aria-hidden="true" class="lucide" fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="18"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> <span class="nav-label">General</span>
 </button>
 <button aria-label="System settings" class="nav-item" id="settings-nav-system" onclick="switchSettingsTab('system', this)" type="button">
@@ -2783,13 +2783,13 @@
     <div class="perfect-keys-card" style="width: 480px; max-width: calc(100vw - 32px);">
       <div class="perfect-keys-header">
         <div>
-          <h3 style="font-size: 18px; font-weight: 800; color: var(--text-color);">Switch Account</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Switch active profile or connect another Google account on this PC.</p>
+          <h3 style="font-size: 18px; font-weight: 800; color: var(--text-main, var(--text, #1c1917));">Switch Account</h3>
+          <p style="font-size: 12px; color: var(--text-muted, #64748b); margin-top: 2px;">Switch active profile or connect another Google account on this PC.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('account-switch-sub-modal')">✕</button>
       </div>
       <div id="modal-account-switch-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 14px;"></div>
-      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(255,255,255,0.08)); display: flex; justify-content: flex-end; gap: 8px;">
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color, rgba(0,0,0,0.08)); display: flex; justify-content: flex-end; gap: 8px;">
         <button type="button" class="btn-secondary" onclick="closeSubModal('account-switch-sub-modal')">Close</button>
         <button type="button" class="action-btn" onclick="closeSubModal('account-switch-sub-modal'); handleGoogleAccountSignIn();" style="display: inline-flex; align-items: center; gap: 6px;">
           <svg fill="none" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" style="margin-right: 2px;" viewbox="0 0 24 24" width="14"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>

@@ -348,7 +348,45 @@ class VideoFlowProviderService:
         finally:
             conn.close()
 
+    def _recover_corrupted_db(self) -> None:
+        """Attempt to restore a malformed SQLite DB from .repaired, or quarantine it."""
+        try:
+            base = Path(self.db_path)
+            rep = base.with_name(base.name + ".repaired")
+            if rep.exists() and rep.stat().st_size > 0:
+                try:
+                    with sqlite3.connect(str(rep)) as test_conn:
+                        res = test_conn.execute("PRAGMA integrity_check;").fetchone()
+                        if res and res[0] == "ok":
+                            shutil.copy2(str(rep), str(base))
+                            return
+                except Exception:
+                    pass
+            ts = int(time.time())
+            bak = base.with_name(f"{base.name}.corrupt.{ts}.bak")
+            if base.exists():
+                shutil.copy2(str(base), str(bak))
+                for ext in ("", "-wal", "-shm"):
+                    f = Path(str(base) + ext)
+                    if f.exists():
+                        try:
+                            f.unlink()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     def _init_db(self) -> None:
+        try:
+            self._do_init_db()
+        except sqlite3.DatabaseError as exc:
+            if any(k in str(exc).lower() for k in ("malformed", "corrupt", "disk image", "not a database")):
+                self._recover_corrupted_db()
+                self._do_init_db()
+            else:
+                raise
+
+    def _do_init_db(self) -> None:
         with self._connection() as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS video_flow_provider_connections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

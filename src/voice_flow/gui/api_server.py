@@ -2514,6 +2514,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             try:
                 am = get_account_manager()
                 res = am.switch_account(account_id)
+                invalidate_history_cache()
                 accounts = [a for a in (res.get("accounts") or am.list_accounts()) if not (a.get("email") == "primary@flow.local" and not a.get("google_id"))]
                 self.send_json_response({
                     "success": True,
@@ -2553,6 +2554,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             token = data.get("session_token")
             am = get_account_manager()
             am.logout_account(token)
+            invalidate_history_cache()
             self.send_json_response({"success": True})
             return
 

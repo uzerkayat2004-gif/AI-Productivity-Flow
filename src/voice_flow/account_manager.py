@@ -447,28 +447,36 @@ class AccountManager:
 
         target_db_path = str(self.get_account_db_path(account_id))
         
-        # Dynamically repoint StorageEngine singleton
-        try:
-            from voice_flow.storage import storage
-            storage.switch_account(target_db_path)
-        except Exception:
-            log.exception("Failed to switch StorageEngine database path to %s", target_db_path)
+        is_active_manager = (self.base_dir == data_dir()) or (_account_manager is self)
+        if is_active_manager:
+            # Dynamically repoint StorageEngine singleton
+            try:
+                from voice_flow.storage import storage
+                storage.switch_account(target_db_path)
+            except Exception:
+                log.exception("Failed to switch StorageEngine database path to %s", target_db_path)
 
-        # Dynamically repoint VideoFlowProviderService
-        try:
-            from voice_flow.video_flow_providers import video_flow_provider_service
-            if hasattr(video_flow_provider_service, "switch_account"):
-                video_flow_provider_service.switch_account(target_db_path)
-        except Exception:
-            log.exception("Failed to switch VideoFlowProviderService to %s", target_db_path)
+            # Dynamically repoint VideoFlowProviderService
+            try:
+                from voice_flow.video_flow_providers import video_flow_provider_service
+                if hasattr(video_flow_provider_service, "switch_account"):
+                    video_flow_provider_service.switch_account(target_db_path)
+            except Exception:
+                log.exception("Failed to switch VideoFlowProviderService to %s", target_db_path)
 
-        # Dynamically repoint VideoFlowService store
-        try:
-            from voice_flow.video_flow_service import video_flow_service
-            if hasattr(video_flow_service, "store") and hasattr(video_flow_service.store, "switch_account"):
-                video_flow_service.store.switch_account(target_db_path)
-        except Exception:
-            pass
+            # Dynamically repoint VideoFlowService store
+            try:
+                from voice_flow.video_flow_service import video_flow_service
+                if hasattr(video_flow_service, "store") and hasattr(video_flow_service.store, "switch_account"):
+                    video_flow_service.store.switch_account(target_db_path)
+            except Exception:
+                pass
+
+            try:
+                from voice_flow.gui.api_server import invalidate_history_cache
+                invalidate_history_cache()
+            except Exception:
+                pass
 
         log.info("Successfully switched active account to %s (%s)", account_id, target_db_path)
         return {
@@ -526,25 +534,32 @@ class AccountManager:
             conn.execute("INSERT OR REPLACE INTO account_state (key, value) VALUES ('active_account_id', '')")
             conn.commit()
 
-        # Repoint StorageEngine singleton back to default database
-        target_db_path = str(self.base_dir / "voice_flow.db")
-        try:
-            from voice_flow.storage import storage
-            storage.switch_account(target_db_path)
-        except Exception:
-            pass
-        try:
-            from voice_flow.video_flow_providers import video_flow_provider_service
-            if hasattr(video_flow_provider_service, "switch_account"):
-                video_flow_provider_service.switch_account(target_db_path)
-        except Exception:
-            pass
-        try:
-            from voice_flow.video_flow_service import video_flow_service
-            if hasattr(video_flow_service, "store") and hasattr(video_flow_service.store, "switch_account"):
-                video_flow_service.store.switch_account(target_db_path)
-        except Exception:
-            pass
+        is_active_manager = (self.base_dir == data_dir()) or (_account_manager is self)
+        if is_active_manager:
+            # Repoint StorageEngine singleton back to default database
+            target_db_path = str(self.base_dir / "voice_flow.db")
+            try:
+                from voice_flow.storage import storage
+                storage.switch_account(target_db_path)
+            except Exception:
+                pass
+            try:
+                from voice_flow.video_flow_providers import video_flow_provider_service
+                if hasattr(video_flow_provider_service, "switch_account"):
+                    video_flow_provider_service.switch_account(target_db_path)
+            except Exception:
+                pass
+            try:
+                from voice_flow.video_flow_service import video_flow_service
+                if hasattr(video_flow_service, "store") and hasattr(video_flow_service.store, "switch_account"):
+                    video_flow_service.store.switch_account(target_db_path)
+            except Exception:
+                pass
+            try:
+                from voice_flow.gui.api_server import invalidate_history_cache
+                invalidate_history_cache()
+            except Exception:
+                pass
         return True
 
     # -------------------------------------------------------------------------
