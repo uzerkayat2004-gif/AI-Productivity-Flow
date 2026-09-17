@@ -85,7 +85,7 @@ def clean_media_title(
     # Clean redundant dashes
     cleaned = re.sub(r"\s*-\s*", " - ", cleaned)
     cleaned = re.sub(r"(\s*-\s*)+", " - ", cleaned)
-    cleaned = cleaned.strip(" -_.")
+    cleaned = cleaned.strip(" -_.,;:")
 
     if not cleaned:
         cleaned = default
@@ -306,50 +306,158 @@ def get_user_music_dir() -> Path:
     return get_user_downloads_dir()
 
 
+def get_all_user_downloads_dirs() -> list[Path]:
+    """Return all distinct, valid Downloads directories on the system.
+    Safely includes both redirected drives (e.g. D:\\Downloads) and default user profile folders (C:\\Users\\<user>\\Downloads)."""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    candidates = [
+        get_user_downloads_dir(),
+        Path(os.environ.get("USERPROFILE", "")) / "Downloads" if os.environ.get("USERPROFILE") else None,
+        Path.home() / "Downloads",
+    ]
+    for cand in candidates:
+        if cand:
+            try:
+                p = Path(cand).expanduser().resolve()
+                p.mkdir(parents=True, exist_ok=True)
+                canon = str(p).lower()
+                if p.is_dir() and canon not in seen:
+                    seen.add(canon)
+                    dirs.append(p)
+            except Exception:
+                pass
+    return dirs or [get_user_downloads_dir()]
+
+
+def get_all_user_videos_dirs() -> list[Path]:
+    """Return all distinct, valid Videos directories on the system (e.g. D:\\Videos and C:\\Users\\<user>\\Videos)."""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    candidates = [
+        get_user_videos_dir(),
+        Path(os.environ.get("USERPROFILE", "")) / "Videos" if os.environ.get("USERPROFILE") else None,
+        Path.home() / "Videos",
+    ]
+    for cand in candidates:
+        if cand:
+            try:
+                p = Path(cand).expanduser().resolve()
+                p.mkdir(parents=True, exist_ok=True)
+                canon = str(p).lower()
+                if p.is_dir() and canon not in seen:
+                    seen.add(canon)
+                    dirs.append(p)
+            except Exception:
+                pass
+    return dirs or [get_user_videos_dir()]
+
+
+def get_all_user_music_dirs() -> list[Path]:
+    """Return all distinct, valid Music directories on the system (e.g. D:\\Music and C:\\Users\\<user>\\Music)."""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    candidates = [
+        get_user_music_dir(),
+        Path(os.environ.get("USERPROFILE", "")) / "Music" if os.environ.get("USERPROFILE") else None,
+        Path.home() / "Music",
+    ]
+    for cand in candidates:
+        if cand:
+            try:
+                p = Path(cand).expanduser().resolve()
+                p.mkdir(parents=True, exist_ok=True)
+                canon = str(p).lower()
+                if p.is_dir() and canon not in seen:
+                    seen.add(canon)
+                    dirs.append(p)
+            except Exception:
+                pass
+    return dirs or [get_user_music_dir()]
+
+
 def save_media_to_downloads(
     source_path: Path | str,
     filename: str,
     copy_to_media_folder: bool = True,
 ) -> tuple[Path, str]:
-    """Copy source_path into the user's Downloads folder with collision handling.
-    Also copies video files to the user's Videos folder and audio files to the Music folder."""
+    """Copy source_path into the user's Downloads folder(s) with collision handling.
+    Also copies video files to the user's Videos folder(s) and audio files to the Music folder(s).
+    Touches the modification timestamp of every copied file to the current time so it immediately
+    appears at the very top of Windows Explorer under 'Today'."""
     src = Path(source_path).expanduser().resolve()
     if not src.is_file():
         raise FileNotFoundError(f"Source media file not found: {source_path}")
-    dl_dir = get_user_downloads_dir()
-    dl_dir.mkdir(parents=True, exist_ok=True)
+
+    all_dl_dirs = get_all_user_downloads_dirs()
     clean_name = safe_media_filename(filename, default="media", ext=src.suffix)
-    target = dl_dir / clean_name
-    stem = target.stem
-    ext = target.suffix
-    counter = 1
-    while target.is_file():
+    primary_target: Path | None = None
+    final_name = clean_name
+    import shutil
+
+    for idx, dl_dir in enumerate(all_dl_dirs):
         try:
-            if target.stat().st_size == src.stat().st_size:
-                break
+            dl_dir.mkdir(parents=True, exist_ok=True)
+            target = dl_dir / clean_name
+            stem = target.stem
+            ext = target.suffix
+            counter = 1
+            while target.is_file():
+                try:
+                    if target.stat().st_size == src.stat().st_size:
+                        break
+                except Exception:
+                    pass
+                target = dl_dir / f"{stem} ({counter}){ext}"
+                counter += 1
+            shutil.copy2(src, target)
+            try:
+                # Update modification and access times to right now so Explorer groups under 'Today'
+                os.utime(target, None)
+            except Exception:
+                pass
+            if idx == 0:
+                primary_target = target
+                final_name = target.name
         except Exception:
             pass
-        target = dl_dir / f"{stem} ({counter}){ext}"
-        counter += 1
-    import shutil
-    shutil.copy2(src, target)
 
     if copy_to_media_folder:
         try:
             ext_lower = src.suffix.lower()
-            media_dir: Path | None = None
+            media_dirs: list[Path] = []
             if ext_lower in {".mp4", ".mov", ".mkv", ".webm", ".avi"}:
-                media_dir = get_user_videos_dir()
+                media_dirs = get_all_user_videos_dirs()
             elif ext_lower in {".mp3", ".m4a", ".wav", ".ogg", ".aac", ".flac"}:
-                media_dir = get_user_music_dir()
-            if media_dir and media_dir.resolve() != dl_dir.resolve():
-                media_dir.mkdir(parents=True, exist_ok=True)
-                media_target = media_dir / target.name
-                shutil.copy2(src, media_target)
+                media_dirs = get_all_user_music_dirs()
+
+            dl_paths_str = {str(d.resolve()).lower() for d in all_dl_dirs}
+            for mdir in media_dirs:
+                if str(mdir.resolve()).lower() not in dl_paths_str:
+                    try:
+                        mdir.mkdir(parents=True, exist_ok=True)
+                        m_target = mdir / final_name
+                        shutil.copy2(src, m_target)
+                        try:
+                            os.utime(m_target, None)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
         except Exception:
             pass
 
-    return target, target.name
+    if primary_target is None:
+        dl_dir = get_user_downloads_dir()
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        primary_target = dl_dir / final_name
+        shutil.copy2(src, primary_target)
+        try:
+            os.utime(primary_target, None)
+        except Exception:
+            pass
+
+    return primary_target, final_name
 
 
 def register_summary_audio(audio_path: str | Path, *, depth: str = "balanced", token: str | None = None) -> str:

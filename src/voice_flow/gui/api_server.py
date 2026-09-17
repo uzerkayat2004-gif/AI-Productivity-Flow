@@ -6248,8 +6248,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     pass
 
         try:
-            from voice_flow.audio_summary_player import get_user_videos_dir, get_user_downloads_dir
-            allowed_roots = [data_dir().resolve(), get_user_videos_dir().resolve(), get_user_downloads_dir().resolve()]
+            from voice_flow.audio_summary_player import get_all_user_videos_dirs, get_all_user_downloads_dirs
+            allowed_roots = [data_dir().resolve(), Path.home().resolve()]
+            for d in get_all_user_videos_dirs():
+                allowed_roots.append(d.resolve())
+            for d in get_all_user_downloads_dirs():
+                allowed_roots.append(d.resolve())
             if path is not None:
                 resolved = path.resolve()
                 if not any(r == resolved or r in resolved.parents for r in allowed_roots):

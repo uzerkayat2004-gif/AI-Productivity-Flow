@@ -363,4 +363,40 @@ def test_resolve_summary_audio_direct_path_and_history(tmp_path, monkeypatch):
     assert res_by_id[0].resolve() == f.resolve()
 
 
+def test_save_media_to_downloads_touches_mtime_to_now(tmp_path, monkeypatch):
+    import time, os
+    from voice_flow.audio_summary_player import save_media_to_downloads, clean_media_title
+
+    dl1 = tmp_path / "Downloads1"
+    dl2 = tmp_path / "Downloads2"
+    dl1.mkdir()
+    dl2.mkdir()
+    monkeypatch.setattr("voice_flow.audio_summary_player.get_all_user_downloads_dirs", lambda: [dl1, dl2])
+    monkeypatch.setattr("voice_flow.audio_summary_player.get_user_downloads_dir", lambda: dl1)
+
+    src = tmp_path / "sample.mp4"
+    src.write_bytes(b"TEST_VIDEO_BYTES_12345")
+    # Set src mtime to 3 days ago
+    old_time = time.time() - 259200
+    os.utime(src, (old_time, old_time))
+    assert abs(src.stat().st_mtime - old_time) < 2
+
+    # Clean title with trailing comma
+    title_with_comma = "I reviewed the entire live website across both themes,"
+    cleaned = clean_media_title(title_with_comma)
+    assert not cleaned.endswith(","), "Trailing comma must be stripped"
+
+    t0 = time.time()
+    saved_path, final_name = save_media_to_downloads(src, title_with_comma)
+
+    assert final_name == "I reviewed the entire live website across both themes.mp4"
+    assert (dl1 / final_name).is_file()
+    assert (dl2 / final_name).is_file()
+
+    # Verify both copies have mtime set to NOW (within 5 seconds), not the 3-day-old time
+    assert abs((dl1 / final_name).stat().st_mtime - t0) < 5
+    assert abs((dl2 / final_name).stat().st_mtime - t0) < 5
+
+
+
 

@@ -320,6 +320,16 @@ class VideoFlowStore:
                     error_message=message if state != "complete" else None,
                     created_at=now,
                 )
+                if state == "complete" and out_p and Path(str(out_p)).is_file() and Path(str(out_p)).stat().st_size > 1000:
+                    try:
+                        from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
+                        clean_vname = safe_media_filename(title, default=f"video_{job_id[:8]}", ext=".mp4")
+                        save_media_to_downloads(str(out_p), clean_vname, copy_to_media_folder=True)
+                        merged_meta["downloaded"] = True
+                        with contextlib.closing(self._connection()) as conn_u, conn_u:
+                            conn_u.execute("UPDATE video_flow_jobs SET meta_json = ? WHERE job_id = ?", (_json(merged_meta), job_id))
+                    except Exception:
+                        pass
                 try:
                     from voice_flow.gui.api_server import invalidate_history_cache
                     invalidate_history_cache()

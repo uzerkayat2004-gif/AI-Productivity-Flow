@@ -2149,6 +2149,13 @@ class VoiceFlowApp:
                             duration_sec=duration_sec,
                             status="success",
                         )
+                        try:
+                            from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
+                            clean_aname = safe_media_filename(title_param or text_to_read[:50], default="Audio_Summary", ext=".mp3")
+                            save_media_to_downloads(audio_path, clean_aname, copy_to_media_folder=True)
+                            storage.update_audio_summary_history(history_id, downloaded=1)
+                        except Exception:
+                            pass
                     except Exception as hexc:
                         log.debug("Failed to update audio summary history: %s", hexc)
 
