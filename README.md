@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-F
 Transform dense articles, notes, or documentation into visually captivating, animated 1080p MP4 videos with synchronized voiceover.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/docs/assets/videoflow_demo.gif" width="100%" alt="Video Flow Demo">
+  <video src="https://github.com/user-attachments/assets/61afd3f3-d75b-4cff-8010-6a7f0d8657a9" controls width="100%"></video>
 </p>
 
 * **Any Content**: Highlight text, paste notes, or drag-and-drop documents (`.pdf`, `.docx`, `.txt`, `.md`, `.csv`, `.json` up to 8 MB).
@@ -73,7 +73,7 @@ Transform dense articles, notes, or documentation into visually captivating, ani
 Turn any web page, research paper, code comment, or document into an instant personal audio track.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/docs/assets/audioflow_demo.gif" width="100%" alt="Audio Flow Demo">
+  <video src="https://github.com/user-attachments/assets/d1bc3228-548b-43a0-882d-d81665ee20a3" controls width="100%"></video>
 </p>
 
 * **Highlight & Listen**: Select any text on screen (drag >= 6px) to bring up the floating player bar at your cursor.
