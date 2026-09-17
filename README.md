@@ -1,276 +1,252 @@
-# 🌊 AI Productivity Flow — Open-Source Multimodal Desktop Transformation
-
-> **Zero-friction information transformation across Speech, Audio, and Video directly from your desktop workflow.**
+# 🌊 AI Productivity Flow
 
 <p align="center">
-  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/actions/workflows/ci.yml"><img src="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/actions/workflows/ci.yml/badge.svg" alt="CI & Multi-Platform Build"></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%20(Tested)%20%7C%20macOS%20(Preview)-0078D4.svg" alt="Platform: Windows & macOS">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/Status-Beta%20v2.1-orange.svg" alt="Status: Beta">
+  <b>Turn speech into text, text into audio, and notes into videos — anywhere on your computer.</b><br>
+  <i>A free, private, lightweight desktop AI assistant that works inside every app you already use.</i>
+</p>
+
+<p align="center">
+  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases"><img src="https://img.shields.io/badge/Release-v2.1%20Beta-orange.svg" alt="Release: v2.1 Beta"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20(Tested)%20%7C%20macOS%20(Preview)-0078D4.svg" alt="Platform: Windows & macOS">
+  <img src="https://img.shields.io/badge/Privacy-100%25%20Local%20Speech-success.svg" alt="Privacy: 100% Local Speech">
+  <img src="https://img.shields.io/badge/Cost-100%25%20Free%20%26%20Open%20Source-blue.svg" alt="100% Free & Open Source">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/ai-productivity-flow-hero.png" alt="AI Productivity Flow Interface Banner" width="900">
 </p>
 
 ---
 
-## ⚡ Quick Download & Install (One-Liner Terminal Commands)
+## ⚡ What is AI Productivity Flow?
 
-Install AI Productivity Flow in seconds. The automated installer configures an isolated environment, verifies dependencies, provisions speech models and rendering engines, registers desktop shortcuts, and activates resilient background auto-start.
+**AI Productivity Flow** is built around one simple truth:
+> **You shouldn't have to leave the app you're working in just to use AI.**
 
-### 🪟 Windows 10 / 11 (Primary & Fully Tested)
-Run this command in **PowerShell** (no Administrator privileges required):
+Forget switching tabs to ChatGPT, copy-pasting text back and forth, or typing long emails by hand. Flow runs quietly in the background on your desktop. Whenever you need it, a single mouse click or text selection unleashes instant superpowers:
 
-```powershell
-irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex
-```
+* 🎙️ **Voice Flow** — Speak naturally. It types clean, polished, error-free text directly into whatever app you have open (Slack, Word, Gmail, VS Code, or any browser).
+* 🎧 **Audio Flow** — Tired of reading? Highlight any text or article, and a sleek player reads it out loud in warm, natural human voices while highlighting words as it speaks.
+* 🎬 **Video Flow** — Turn dry text, notes, or PDFs into beautiful 1080p animated explainer videos with narration, charts, and captions in seconds.
+* 📓 **NotebookLM Magic** — Connect your Google research notebooks for instant access to your notes, summaries, and audio discussions.
+* 🔒 **100% Private & Free** — Speech is transcribed offline right on your computer. Your microphone is never listening in the background, and all basic features are 100% free with zero subscriptions.
 
-*Prefer a standalone installer?* Download the pre-built **`AI-Productivity-Flow-Setup-x64.exe`** directly from our **[GitHub Releases](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases)**.
+---
+
+## 🚀 Quick Install (Get Started in 60 Seconds)
+
+Choose the method that suits you best:
+
+### 🪟 Windows 10 & 11 (Primary & Fully Tested)
+
+* **Option 1: The Easy 1-Line Command (Fastest)**  
+  Press `Win + X`, open **PowerShell** (no Administrator required), and paste:
+  ```powershell
+  irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex
+  ```
+  *(This automatically sets up the environment, downloads speech models, puts a shortcut on your Desktop, and launches Flow!)*
+
+* **Option 2: Standalone Installer**  
+  Prefer a classic setup file? Download **`AI-Productivity-Flow-Setup-x64.exe`** from our **[GitHub Releases](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases)** page and run it.
 
 ---
 
 ### 🍎 macOS 12+ Apple Silicon & Intel (Community Preview)
-Run this command in **Terminal**:
 
+Open your Mac **Terminal** and paste:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash
 ```
 
 > [!WARNING]
-> **⚠️ Note for macOS Users (Experimental / Untested Disclaimer):**
-> macOS support is currently in **Community Preview / Experimental** mode and **has not yet undergone full physical hardware validation** across all Apple hardware and macOS versions. You may encounter system permission prompts (Accessibility, Microphone, Input Monitoring), audio input latency, or minor hotkey quirks.
-> 
-> **Windows 10/11 x64 is the primary, production-verified platform.** If you encounter any bugs, crashes, or quirks on macOS, please help us improve by reporting them on [GitHub Issues](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues).
+> **⚠️ Note for Mac Users (Community Preview):**  
+> macOS support is currently in **Community Preview** and has not yet undergone full physical hardware testing on every Mac generation. While the core features work, you may encounter system permission prompts (Microphone, Accessibility, Input Monitoring) or minor hotkey differences.  
+>  
+> **Windows 10/11 x64 is the primary, production-verified platform.** If you run into any quirks or bugs on Mac, please help us improve by reporting them on [GitHub Issues](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues)!
 
 ---
 
-## 💡 What is AI Productivity Flow?
+## 💡 Everyday Magic: How You'll Use Flow Every Day
 
-**AI Productivity Flow** is a native desktop productivity platform engineered around a core principle:
-
-> **You should never need to open the main application window to receive value.**
-
-Whether you are writing code in VS Code, researching papers in Chrome, analyzing spreadsheets in Excel, or communicating in Slack, Flow operates silently beside your workflow. With a single gesture (middle mouse button, hotkey, or text selection), Flow transforms information instantly:
-
-```text
-User selects text anywhere (Browser / IDE / Document / Chat)
-                            ↓
-                     Invoke Flow
-          __________________|__________________
-         |                  |                  |
-    🎙 Voice Flow      🎧 Audio Flow      🎬 Video Flow
-   (Speech → Text)    (Text → Audio)     (Text → Video)
-         ↓                  ↓                  ↓
-  Direct Paste in App  Spoken Audio Bar  Visual Explainer (MP4)
-```
+| What you want to do | How Flow makes it effortless |
+| :--- | :--- |
+| **Write an email or document without typing** | Hold your **Middle Mouse Button** (or press `Ctrl + Win`), speak naturally, and release. Flow types clean, grammatically correct sentences with no typos or "ums". |
+| **Rest your eyes and listen to an article** | Highlight any paragraph or article on your screen. The **Audio Bar** pops up instantly, reading each sentence aloud in natural human voices. |
+| **Explain a complex note or PDF visually** | Select any text or drag-and-drop a file. Click **Video**, and Flow automatically generates an educational 1080p MP4 video summary with visuals and voiceover. |
+| **Review research from Google NotebookLM** | Sign in securely to sync your Google NotebookLM research notebooks directly to your desktop workflow. |
 
 ---
 
-## 🌟 The Core Upgrades & Feature Pillars
+## 🌟 The Core Superpowers
 
-### 1. 🎙️ Voice Flow — Speech → Polished Text & Intelligent Dictation
-* **Zero-Latency Triggers:** Middle Mouse Button (scroll-wheel click) or `Ctrl + Win` (Windows) / `Cmd + Ctrl` (macOS).
-* **Push-to-Talk & Tap-to-Toggle:** Hold (>0.30s) to speak and release to paste, or quick-tap (<0.30s) to toggle continuous dictation.
-* **Local Faster-Whisper Transcription:** Fast offline transcription powered by bundled `base.en` (CPU int8). Dictation audio never leaves your machine.
-* **Active Window Style Engine:** Automatically senses the active foreground window and formats text contextually:
-  * *VS Code / IDE:* Formats as code-friendly identifiers (`snake_case`, `camelCase`) and Markdown.
-  * *Slack / Teams / Chat:* Natural, concise phrasing.
-  * *Email / Outlook:* Professional, polished prose.
-* **Intelligent AI Auto-Refinement:** Cleans disfluencies, pauses, and grammar while strictly preserving code symbols, keywords, and domain acronyms.
-* **Custom Personal Dictionary & Snippets:** Add custom acronyms, technical terms, and trigger expansions (e.g., `myemail` → `me@company.com`). Longer triggers take priority; code spans are protected.
-* **Telemetry & Insights:** 28-day activity heatmap, speedometer WPM gauge, estimated time saved, and per-app breakdowns.
+### 1. 🎙️ Voice Flow — Talk Instead of Typing
+Stop typing thousands of words every day. Speak naturally, and Flow will type for you anywhere your cursor is placed.
 
----
+<p align="center">
+  <img src="website/assets/img/shots/home_dark.png" alt="Voice Flow Dashboard" width="700">
+</p>
 
-### 2. 🎧 Audio Flow — Selected Text → Natural Spoken Audio & Screen Reader
-* **Screen Highlight Reading:** Highlight text anywhere on screen to hear it read aloud immediately with synchronized yellow word tracking.
-* **Compact Floating Player Bar:** Includes a real-time waveform scrub bar, skip forward/back controls, playback speed adjustment (0.8x to 2.0x), and one-click MP3 download.
-* **Spoken AI Summaries:** Summarize lengthy text into spoken audio at three selectable depths: **Quick**, **Standard**, or **Detailed**.
-* **Multi-Provider TTS Engine:**
-  * **Free Microsoft Edge Neural Voices:** High-fidelity, natural voices out of the box with zero API key or setup required.
-  * **Google Cloud TTS & Gemini AI Audio:** Includes latest preview voices (`gemini-3.1-flash-tts-preview:Orus`, `Puck`, etc.).
-  * **ElevenLabs & Deepgram Aura:** Studio-grade ultra-realistic voices.
-  * **OpenAI & NVIDIA:** High-performance neural voice endpoints.
+* **Simple Gestures**: Hold down your **Middle Mouse Button** (scroll wheel) or press `Ctrl + Win` (`Cmd + Ctrl` on Mac) while speaking. Release when done, and watch the text appear!
+* **Removes Hesitations**: Flow automatically cleans up slips of the tongue, filler words ("uh", "um", "like"), and pauses while keeping your exact meaning intact.
+* **App-Aware Smart Formatting**:
+  * In **Word / Outlook / Gmail**: Writes formal, well-punctuated, professional paragraphs.
+  * In **Slack / Discord / Teams**: Keeps messages friendly, natural, and concise.
+  * In **VS Code / IDEs**: Automatically formats programming keywords, `snake_case`, and markdown blocks.
+* **Personal Dictionary & Shortcuts**: Teach Flow your name, specialized technical jargon, or custom abbreviations (e.g. say or type `myzoom` to paste your Zoom meeting link).
+* **100% Offline Speech Engine**: Transcribes directly on your processor using offline Faster-Whisper. Audio is processed on your PC and is never sent to the cloud.
 
 ---
 
-### 3. 🎬 Video Flow — Text or Documents → Source-Grounded Visual Explainers
-* **Dense Content to 1080p Video:** Highlight text, paste notes, or drag-and-drop documents (`.txt`, `.md`, `.pdf`, `.docx`, `.html`, `.csv`, `.json`). Video Flow plans an educational breakdown, designs a multi-scene visual sequence, narrates it, and renders a finished 1080p MP4 with synchronized captions.
-* **Educational Scene Planning:** Analyzes key concepts, evidence claims, and entities using your connected AI model.
-* **Creative Director (15 Dynamic Visual Treatments):** Avoids monotonous slides by varying scenes with:
-  * Title cards and concept highlights
-  * Animated process flowcharts and timelines
-  * Data metrics and animated counters
-  * 3D WebGL scenes and spatial visualizations
-  * Waveform demos and recap grids
-* **Hybrid & Deterministic Rendering:** Browser-based rendering powered by bundled HyperFrames, Narova, and WebGL modules.
-* **Free-First Fallback Guarantee:** When external generative video APIs are not configured, Video Flow automatically falls back to deterministic procedural rendering. **You are never paywalled.**
-* **Built-in Player & Export:** Watch in the lightweight on-screen player with speed controls, scrubber, captions toggle, and local MP4 file saving.
+### 2. 🎧 Audio Flow — Turn Any Text Into Speech
+Turn any web page, document, code comment, or email into an instant personal podcast.
+
+<p align="center">
+  <img src="website/assets/img/shots/audioflow_dark.png" alt="Audio Flow Player" width="700">
+</p>
+
+* **Highlight & Listen**: Just select text on any screen. A floating mini-player appears right at your cursor.
+* **Synchronized Yellow Word Tracker**: Words illuminate in real-time as they are spoken, making it effortless to follow along.
+* **Full Playback Control**: Adjust reading speed from 0.8x to 2.0x, scrub through the waveform timeline, jump back 10 seconds, or save the speech as an MP3 file with one click.
+* **Spoken AI Summaries**: Pressed for time? Click **Quick Summary** or **Deep Dive** and have the AI summarize the text before reading it to you.
+* **Free Natural Human Voices**: Ships with ultra-realistic Microsoft Edge Neural voices out of the box with zero setup. Also supports Google Cloud, Gemini Audio, ElevenLabs, and OpenAI voices if you want extra variety.
 
 ---
 
-### 4. 📓 NotebookLM Durable Session Integration
-* **Native NotebookLM Integration:** Deep pipeline support for Google NotebookLM session workflows.
-* **Durable Session Management:** Automatic cookie refresh, account switching, and resilient session recovery.
-* **Chrome 127+ App-Bound Encryption Support:** Seamlessly handles modern Chrome cookie encryption schemes and provides accurate diagnostics for expired or invalid sessions.
+### 3. 🎬 Video Flow — Turn Notes into Engaging 1080p Videos
+Why read walls of text when you can watch a concise, visually rich explainer video?
+
+<p align="center">
+  <img src="website/assets/img/shots/videoflow_dark.png" alt="Video Flow Generator" width="700">
+</p>
+
+* **Drag-and-Drop Any Document**: Highlight text or drop files (`.pdf`, `.docx`, `.txt`, `.md`, `.csv`, `.json`).
+* **Automated Storyboarding**: Flow analyzes the key ideas and structures an educational, multi-scene visual presentation.
+* **15 Dynamic Visual Treatments**: Keeps viewers engaged with dynamic title cards, animated timelines, data charts, flowcharts, metric counters, and 3D WebGL scenes.
+* **100% Free Animation Guarantee**: You don't need expensive paid video AI subscriptions. Flow includes a built-in deterministic motion renderer that builds full 1080p MP4 videos with narration and subtitles for free!
+* **Built-in Video Player**: Watch right inside the app, scrub scenes, toggle subtitles, or export to your video folder.
 
 ---
 
-### 5. 🤖 Multi-Model / BYOK Connection Hub
-* **Bring Your Own Key (BYOK):** AI Productivity Flow ships without proprietary developer keys. You retain full control over your cloud inference.
-* **Multi-Provider Support:**
-  * **OpenAI:** GPT-4o, GPT-4o-mini, o1, o3-mini
-  * **Anthropic:** Claude 3.5 Sonnet, Claude 3.5 Haiku
-  * **Google Gemini:** Gemini 2.0 Flash, Gemini 1.5 Pro, Gemini 1.5 Flash
-  * **NVIDIA NIM:** Nemotron, Llama 3.1
-  * **Groq, Mistral, DeepSeek, Local Ollama:** Full support for custom OpenAI-compatible endpoints.
-* **Resilient Failover & Load Balancing:** Automatic round-robin distribution and failover pools ensure your dictation and planning never stall on API rate limits.
-* **Consent Gates:** Source text is only sent to external LLMs when explicitly initiated and authorized by the user.
+### 4. 📓 NotebookLM Deep Research Integration
+Bring the power of Google NotebookLM into your daily desktop flow:
+* **One-Click Browser Connection**: Easily sign in with your Google account.
+* **Persistent & Resilient**: Modern Chrome cookie support keeps your session healthy without requiring you to re-login every time you restart your PC.
+* **Instant Research Summaries**: Pull your deep notes and study guides directly into audio or video summaries.
 
 ---
 
-### 6. 🎨 Dynamic UI Themes & Cross-Platform Adaptation
-* **Adaptive Dark & Light Themes:** The web dashboard, floating flow bar, and media players automatically detect and adapt to your OS color scheme, with instant manual overrides.
-* **Platform-Native Ergonomics:**
-  * *Windows:* Win32 low-level hooks, system tray integration, silent background watchdog supervisor, and zero-console startup.
-  * *macOS:* Native menu bar item, Cocoa accessibility clipboard bridge, and adapted keyboard hints (`Cmd` vs `Win`).
+### 5. 🔑 Bring Your Own Key (BYOK) — Or Stay 100% Free
+AI Productivity Flow is built for everyone:
+
+<p align="center">
+  <img src="website/assets/img/shots/providers_dark.png" alt="Provider Settings" width="700">
+</p>
+
+* **100% Free Out of the Box**: Offline speech recognition and natural voice playback work out of the box without signing up for any accounts or paying any money.
+* **Connect Any AI Provider (Optional)**: If you want to use cloud AI for extra-smart text polishing or video planning, you can easily plug in your own API key:
+  * **OpenAI** (GPT-4o, GPT-4o-mini, o1, o3-mini)
+  * **Anthropic** (Claude 3.5 Sonnet, Claude 3.5 Haiku)
+  * **Google Gemini** (Gemini 2.0 Flash, Gemini 1.5 Pro)
+  * **DeepSeek, Groq, Mistral, NVIDIA**
+  * **Local Offline AI** via Ollama (completely free and private!)
+* **Complete Privacy**: Your API keys are encrypted and stored solely on your machine. We never see or store your keys.
 
 ---
 
-## 🚦 Project Status & Component Matrix
-
-| Subsystem | Component | Status | Description |
-| :--- | :--- | :---: | :--- |
-| **Voice Flow** | Local Speech-to-Text | ✅ Verified | Bundled Faster-Whisper `base.en`, CPU int8, zero cloud leaks |
-| **Voice Flow** | Active Window Style Engine | ✅ Verified | Automatic application sensing (VS Code, Slack, Email, Browser) |
-| **Voice Flow** | Auto-Startup & Watchdog | ✅ Verified | Resilient single-instance Registry autostart (HKCU Run), background watchdog supervisor |
-| **Audio Flow** | Highlight Screen Reader | ✅ Verified | Cursor-tracking floating player bar with synchronized yellow tracking |
-| **Audio Flow** | Multi-Provider TTS | ✅ Verified | Free Edge Neural, Google, Gemini Audio, ElevenLabs, Deepgram, NVIDIA |
-| **Video Flow** | Pedagogical Scene Brain | ✅ Verified | Evidence grounding, concept extraction, 15 visual treatments |
-| **Video Flow** | Deterministic Renderer | ✅ Verified | HyperFrames / Narova / WebGL browser-based 1080p MP4 rendering |
-| **Video Flow** | Free-First Fallback Router | ✅ Verified | Guaranteed zero-cost rendering without external paid video APIs |
-| **NotebookLM** | Durable Sessions Pipeline | ✅ Verified | Chrome 127+ App-Bound encryption support, cookie refresh, error diagnostics |
-| **Platform** | Multi-Key BYOK Manager | ✅ Verified | OpenAI, Anthropic, Gemini, NVIDIA, Groq, Mistral, DeepSeek, Ollama |
-| **Platform** | Insights & Telemetry | ✅ Verified | 28-day activity heatmap, speedometer WPM gauge, application breakdown |
-| **Platform** | macOS Support | 🚧 Preview | Native app bundle, accessibility integration (physical QA in progress) |
+### 6. 🎨 Beautiful Dark & Light Themes
+Whether you prefer a calm dark mode or a bright paper parchment theme, Flow automatically adapts to your operating system's settings with a smooth, instant toggle.
 
 ---
 
-## 📦 Manual Setup & Developer Guide
+## ⌨️ Shortcut Cheat Sheet
+
+| Action | Shortcut / Gesture | What it does |
+| :--- | :--- | :--- |
+| **Talk to Type (Voice Flow)** | **Middle Mouse Button** (Hold & Release)<br>or `Ctrl + Win` (`Cmd + Ctrl` on Mac) | Hold down, speak freely, and release to paste formatted text into your active app. |
+| **Screen Reader & Video (Flow Bar)** | **Select / Highlight any text** on screen | A sleek mini-bar appears with **🎙️ Voice**, **🎧 Audio**, and **🎬 Video** buttons. |
+| **Settings & History Dashboard** | Open **`http://127.0.0.1:8991`** in your browser | Access your dictation history, personal dictionary, voice settings, and AI keys. |
+
+---
+
+## 🔒 Privacy & Safety First
+
+* 🛡️ **Offline Speech Processing**: All voice dictation is processed on your local CPU/GPU using the built-in Faster-Whisper model. Your voice audio never leaves your computer.
+* 🛡️ **No Background Listening**: The microphone only activates during the exact moments you press the trigger button. There is no passive listening.
+* 🛡️ **Zero Analytics or Tracking**: We do not collect telemetry, track your keystrokes, or monitor what you write.
+* 🛡️ **Local SQLite Database**: Your history and personal dictionary entries are stored securely on your own hard drive (`~/.voice_flow/voice_flow.db`).
+
+---
+
+## 🛠️ For Developers & Manual Setup
+
+<details>
+<summary><b>Click here to view Developer Setup & Manual Build Guide</b></summary>
 
 ### Prerequisites
-* **Operating System:** Windows 10/11 x64 (Primary) or macOS 12+ (Community Preview)
-* **Python:** 3.10+ (tested on 3.11, 3.12, 3.13, 3.14)
-* **Node.js:** 18+ (optional, for Remotion rendering components)
+* **Operating System**: Windows 10/11 x64 or macOS 12+
+* **Python**: 3.10+ (tested on 3.11, 3.12, 3.13, 3.14)
+* **Node.js**: 18+ (optional, for local video rendering components)
 
-### Manual Installation from Source
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
-   cd AI-Productivity-Flow
-   ```
-
-2. **Set up Python virtual environment & install dependencies:**
-   ```bash
-   python -m venv .venv
-   # Windows:
-   .\.venv\Scripts\activate
-   # macOS:
-   source .venv/bin/activate
-
-   pip install -e .
-   ```
-
-3. **Install Video Flow Renderer dependencies (optional for local video):**
-   ```bash
-   cd video_flow_renderer
-   npm install
-   cd ..
-   ```
-
-4. **Register Desktop App & Auto-Start:**
-   * **Windows:** Run `setup_desktop_app.bat` to register startup entries and create Start Menu shortcuts.
-   * **macOS:** Build the standalone app bundle with `python scripts/build_macos_app.py`.
-
----
-
-## 🚀 Running AI Productivity Flow
-
-### On Windows
-* **Silent Background Mode (Recommended):**
-  Double-click `VoiceFlowLauncher.vbs` or run:
-  ```bat
-  .\run_voice_flow.bat
-  ```
-* **Interactive Console Mode:**
-  ```bat
-  .\run_voice_flow.bat --console
-  ```
-* **Check Background Watchdog Status:**
-  ```bash
-  python -m voice_flow.watchdog --status
-  ```
-
-### On macOS
-* **Using the Pre-built `.app` Bundle:**
-  1. Download `VoiceFlow-macOS-unsigned.zip` from GitHub Releases or run `python scripts/build_macos_app.py`.
-  2. Move `Voice Flow.app` to `/Applications`.
-  3. Clear the macOS Gatekeeper quarantine attribute:
-     ```bash
-     xattr -cr "/Applications/Voice Flow.app"
-     ```
-  4. Launch `Voice Flow.app` and grant **Microphone**, **Accessibility**, and **Input Monitoring** permissions when prompted.
-* **Running from Terminal:**
-  ```bash
-  python3 -m voice_flow.main
-  ```
-
-### Web Dashboard (All Platforms)
-Open **`http://127.0.0.1:8991`** in any browser to configure providers, manage custom dictionary entries, view telemetry insights, and adjust audio/video preferences.
-
----
-
-## 🧪 Testing & Verification
-
-Run the comprehensive offline test suite across platforms (all tests execute offline with zero paid API calls):
-
+### Manual Installation
 ```bash
-# Platform Abstraction & Cross-Platform Contract Tests (Windows & macOS)
-pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py -v
+# 1. Clone the repository
+git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
+cd AI-Productivity-Flow
 
-# Video Flow Engine, NotebookLM & Media Player Tests
-pytest tests/test_video_flow_engine.py tests/test_video_flow_providers.py tests/test_video_flow_contracts.py tests/test_video_flow_notebooklm.py tests/test_audio_video_download_and_player_fixes.py -v
+# 2. Create and activate a virtual environment
+python -m venv .venv
+# On Windows:
+.\.venv\Scripts\activate
+# On macOS:
+source .venv/bin/activate
 
-# Core Feature & Subsystem Tests (Insights, History, Dictionary Safety, Style Presets)
-pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py tests/test_style_system.py -v
+# 3. Install dependencies in editable mode
+pip install -e .
+
+# 4. (Optional) Install local video renderer modules
+cd video_flow_renderer
+npm install
+cd ..
 ```
 
+### Running Locally
+* **Windows Silent Mode**: Run `.\run_voice_flow.bat` or launch `VoiceFlowLauncher.vbs`.
+* **Windows Console Mode**: Run `.\run_voice_flow.bat --console`.
+* **macOS Terminal**: Run `python3 -m voice_flow.main`.
+
+### Running Tests
+All unit and integration tests run offline with zero external API calls:
+```bash
+# Cross-platform contract and runtime tests
+pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py -v
+
+# Video Flow and Audio Flow tests
+pytest tests/test_video_flow_engine.py tests/test_video_flow_providers.py tests/test_audio_video_download_and_player_fixes.py -v
+
+# Core features (Dictionary, Insights, Style Presets)
+pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py -v
+```
+
+### Technical Documentation
+Detailed technical specifications and design docs are available in [`docs/`](docs/):
+* [`docs/CURRENT_PRODUCT_MAP.md`](docs/CURRENT_PRODUCT_MAP.md) — Comprehensive technical architecture map
+* [`docs/PRODUCT_FACTS.md`](docs/PRODUCT_FACTS.md) — Verified technical specifications
+* [`VIDEO_FLOW_ARCHITECTURE.md`](VIDEO_FLOW_ARCHITECTURE.md) — Video Flow rendering pipeline deep dive
+
+</details>
+
 ---
 
-## 🔒 Privacy & Local-First Architecture
+## 📢 Community & Support
 
-* **Local Speech Recognition:** Dictation is transcribed locally on your CPU/GPU using the bundled Whisper model. Audio is never sent to external servers.
-* **Local Database:** Transcripts, dictionary words, and history are stored locally in SQLite at `~/.voice_flow/voice_flow.db`.
-* **Zero Telemetry Tracking:** We do not track your usage, collect telemetry, or store your text.
-* **Consent-Gated External AI:** Source text is only transmitted to external LLM providers when you explicitly trigger cloud features (AI Polish, Spoken Summaries, or Video Planning).
-
----
-
-## 📢 Information Channel & Community
-
-* **GitHub Releases:** [Releases & Changelogs](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases)
-* **Issue Tracker:** [Bug Reports & Feature Requests](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues)
-* **Product Documentation:** Detailed technical documentation lives under [`docs/`](docs/):
-  * [`docs/CURRENT_PRODUCT_MAP.md`](docs/CURRENT_PRODUCT_MAP.md) — Comprehensive technical architecture map
-  * [`docs/PRODUCT_FACTS.md`](docs/PRODUCT_FACTS.md) — Verified product specifications and supported subsystems
-  * [`VIDEO_FLOW_ARCHITECTURE.md`](VIDEO_FLOW_ARCHITECTURE.md) — Deep-dive into the Video Flow rendering pipeline
+* 📦 **Downloads & Updates**: [GitHub Releases](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases)
+* 🐛 **Report a Bug or Request a Feature**: [GitHub Issues](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues)
+* 💬 **Website**: [Productivity Flow Landing Page](https://uzerkayat2004-gif.github.io/AI-Productivity-Flow/)
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **Apache License 2.0**. See the [`LICENSE`](LICENSE) file for details.
-
-### Third-Party Notices
-Third-party libraries used in AI Productivity Flow remain subject to their respective open-source licenses:
-* Faster-Whisper, SoundDevice, PyWebView, React, and Three.js remain under MIT / Apache / BSD licenses.
-* Attributions are cataloged in [`release/THIRD_PARTY_NOTICES.txt`](release/THIRD_PARTY_NOTICES.txt).
+This project is open-source under the **Apache License 2.0**. See the [`LICENSE`](LICENSE) file for details.  
+All third-party libraries (Whisper, SoundDevice, PyWebView, React, Three.js) remain subject to their respective licenses cataloged in [`release/THIRD_PARTY_NOTICES.txt`](release/THIRD_PARTY_NOTICES.txt).
