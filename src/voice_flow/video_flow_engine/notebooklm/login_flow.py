@@ -226,6 +226,8 @@ def self_heal(*, profile: str | None = None, timeout: int = 240) -> dict[str, An
                             from voice_flow.storage import StorageEngine
                             StorageEngine().save_setting("video_flow_notebooklm_email", email)
                             StorageEngine().save_setting("video_flow_notebooklm_authenticated", True)
+                            StorageEngine().save_setting("video_flow_notebooklm_auth_error", "")
+                            StorageEngine().save_setting("video_flow_notebooklm_disconnected", False)
                     except Exception:
                         pass
             else:
@@ -278,14 +280,34 @@ def _login_log_path() -> Path:
     return log_dir / "notebooklm-login.log"
 
 
-def _storage_email() -> str | None:
+def _storage_email(*args, **kwargs) -> str | None:
+    profile = args[0] if args else kwargs.get("profile")
     try:
         from voice_flow.storage import StorageEngine
 
         email = str(StorageEngine().get_setting("video_flow_notebooklm_email") or "").strip()
-        return email or None
+        if email and not _is_placeholder(email):
+            return email
     except Exception:
-        return None
+        pass
+
+    try:
+        from .config import get_storage_state_path
+        st_p = get_storage_state_path(profile)
+        if st_p.is_file():
+            st_data = json.loads(st_p.read_text(encoding="utf-8"))
+            if isinstance(st_data, dict):
+                em = (
+                    (st_data.get("notebooklm") or {}).get("account", {}).get("email")
+                    or (st_data.get("account") or {}).get("email")
+                    or st_data.get("email")
+                )
+                if em and not _is_placeholder(str(em)):
+                    return str(em).strip()
+    except Exception:
+        pass
+
+    return None
 
 
 def _save_email(email: str) -> None:
@@ -1177,12 +1199,17 @@ def start_login(
     if cli_path is None and mode not in ("browser", "system-browser"):
         return {"launched": False, "error": "NotebookLM CLI not found — cannot start sign-in"}
 
-    if mode in ("master-token", "legacy-cli", "cli", "interactive", "playwright"):
+    if mode in ("master-token", "legacy-cli", "cli", "interactive", "playwright", "durable"):
         if switch_account:
             account_email = account_email.strip() if account_email else None
         else:
-            account_email = (account_email or _storage_email() or "").strip() or None
-        run_mode = "master-token" if (mode == "master-token" and account_email) else "browser"
+            if not account_email:
+                try:
+                    account_email = _storage_email(profile)
+                except TypeError:
+                    account_email = _storage_email()
+            account_email = (account_email or "").strip() or None
+        run_mode = "master-token" if (mode in ("master-token", "durable") and account_email) else "browser"
         with _STATE_LOCK:
             if _STATE.get("running"):
                 if switch_account:
@@ -1200,7 +1227,11 @@ def start_login(
                 note=(
                     "Google NotebookLM account chooser is opening in browser — choose an account."
                     if switch_account
-                    else "Google NotebookLM sign-in is opening — finish the sign-in there."
+                    else (
+                        "Google NotebookLM one-time sign-in is opening — finish sign-in to establish permanent access."
+                        if run_mode == "master-token"
+                        else "Google NotebookLM sign-in is opening — finish the sign-in there."
+                    )
                 ),
                 durable=None,
                 log_path=str(log_path),

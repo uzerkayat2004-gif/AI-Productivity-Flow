@@ -517,10 +517,14 @@ def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str 
                         is_expired_online = True
 
                 auth_error_recorded = storage.get_setting("video_flow_notebooklm_auth_error")
-                is_explicit_unauth = (
-                    is_expired_online
-                    or (auth_setting in (False, "false", "False", 0, "0") and bool(auth_error_recorded))
-                )
+                is_explicit_unauth = False
+                if has_master:
+                    is_explicit_unauth = False
+                elif is_expired_online:
+                    is_explicit_unauth = True
+                elif auth_setting in (False, "false", "False", 0, "0") and bool(auth_error_recorded) and not has_auth_cookies:
+                    is_explicit_unauth = True
+
                 if is_explicit_unauth:
                     details = {
                         "account": {"email": email} if email else {},
@@ -568,6 +572,7 @@ def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str 
                     }
                     try:
                         storage.save_setting("video_flow_notebooklm_authenticated", True)
+                        storage.save_setting("video_flow_notebooklm_auth_error", "")
                         if email:
                             storage.save_setting("video_flow_notebooklm_email", email)
                     except Exception:
@@ -1423,22 +1428,30 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 else:
                     authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
                     if not authenticated and not details.get("disconnected") and not os.environ.get("PYTEST_CURRENT_TEST"):
-                        auth_saved = storage.get_setting("video_flow_notebooklm_authenticated")
-                        saved_email = storage.get_setting("video_flow_notebooklm_email")
-                        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
-                        if switched_from and saved_email and str(saved_email).strip().lower() == str(switched_from).strip().lower():
-                            saved_email = None
-                        if auth_saved and auth_saved not in (False, "false", "False", 0, "0") and saved_email:
+                        if details.get("master_token_present"):
                             try:
-                                from voice_flow.video_flow_engine.notebooklm import browser_sync
-                                sync_res = browser_sync.auto_sync_from_browser(
-                                    profile=profile,
-                                    expected_email=saved_email,
-                                )
-                                if sync_res.get("success"):
-                                    authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
+                                from voice_flow.video_flow_engine.notebooklm import trigger_keepalive_now
+                                trigger_keepalive_now(profile=profile, force=True, background=False)
+                                authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
                             except Exception:
                                 pass
+                        if not authenticated:
+                            auth_saved = storage.get_setting("video_flow_notebooklm_authenticated")
+                            saved_email = storage.get_setting("video_flow_notebooklm_email")
+                            switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+                            if switched_from and saved_email and str(saved_email).strip().lower() == str(switched_from).strip().lower():
+                                saved_email = None
+                            if auth_saved and auth_saved not in (False, "false", "False", 0, "0") and saved_email:
+                                try:
+                                    from voice_flow.video_flow_engine.notebooklm import browser_sync
+                                    sync_res = browser_sync.auto_sync_from_browser(
+                                        profile=profile,
+                                        expected_email=saved_email,
+                                    )
+                                    if sync_res.get("success"):
+                                        authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
+                                except Exception:
+                                    pass
                     if authenticated and not details.get("disconnected") and not os.environ.get("PYTEST_CURRENT_TEST"):
                         try:
                             from voice_flow.video_flow_engine.notebooklm.config import is_session_near_expiry
@@ -1507,20 +1520,30 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                 healed = False
                                 if not os.environ.get("PYTEST_CURRENT_TEST"):
                                     try:
-                                        from voice_flow.video_flow_engine.notebooklm import browser_sync
-                                        heal_res = browser_sync.sync_cookies_with_playwright(
-                                            profile=profile,
-                                            headless=True,
-                                            expected_email=email,
-                                            timeout_seconds=15,
-                                        )
-                                        if heal_res.get("success"):
-                                            verification = login_flow.verify_online(profile=profile, force=True)
-                                            if str(verification.get("status") or "").lower() == "ok":
-                                                online_verified = True
-                                                authenticated = True
-                                                email = verification.get("email") or heal_res.get("email") or email
-                                                healed = True
+                                        if details.get("master_token_present") or login_flow.master_token_present(profile):
+                                            heal_res = login_flow.self_heal(profile=profile, timeout=15)
+                                            if heal_res.get("ok"):
+                                                verification = login_flow.verify_online(profile=profile, force=True)
+                                                if str(verification.get("status") or "").lower() == "ok":
+                                                    online_verified = True
+                                                    authenticated = True
+                                                    email = verification.get("email") or email
+                                                    healed = True
+                                        if not healed:
+                                            from voice_flow.video_flow_engine.notebooklm import browser_sync
+                                            heal_res = browser_sync.sync_cookies_with_playwright(
+                                                profile=profile,
+                                                headless=True,
+                                                expected_email=email,
+                                                timeout_seconds=15,
+                                            )
+                                            if heal_res.get("success"):
+                                                verification = login_flow.verify_online(profile=profile, force=True)
+                                                if str(verification.get("status") or "").lower() == "ok":
+                                                    online_verified = True
+                                                    authenticated = True
+                                                    email = verification.get("email") or heal_res.get("email") or email
+                                                    healed = True
                                     except Exception:
                                         pass
                                 if not healed:
@@ -4075,10 +4098,19 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     res = browser_sync.import_cookies(payload, profile=profile, email=email)
                     self.send_json_response(res, 200 if res.get("success") else 400)
                 else:
+                    req_prof = data.get("profile")
+                    req_email = data.get("account_email") or data.get("account")
+                    if not req_email and not bool(data.get("switch_account")):
+                        _, active_email, _, _ = _read_notebooklm_storage_state(req_prof)
+                        req_email = active_email or storage.get_setting("video_flow_notebooklm_email")
+                    req_mode = data.get("mode")
+                    if not req_mode or req_mode == "playwright":
+                        req_mode = "master-token" if req_email else "browser"
+
                     result = login_flow.start_login(
-                        profile=data.get("profile"),
-                        account_email=data.get("account_email") or data.get("account"),
-                        mode=data.get("mode") or "browser",
+                        profile=req_prof,
+                        account_email=req_email,
+                        mode=req_mode,
                         browser=str(data.get("browser") or "chrome"),
                         browser_timeout=max(60, min(int(data.get("browser_timeout") or 300), 900)),
                         switch_account=bool(data.get("switch_account")),
@@ -8952,7 +8984,7 @@ def start_api_server(host: str = "127.0.0.1") -> None:
         try:
             from voice_flow.video_flow_engine.notebooklm import start_keepalive_daemon, trigger_keepalive_now
             start_keepalive_daemon()
-            trigger_keepalive_now(force=False, background=True)
+            trigger_keepalive_now(force=True, background=True)
         except Exception:
             pass
         httpd.serve_forever()

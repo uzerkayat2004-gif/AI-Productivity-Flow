@@ -238,17 +238,21 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
   const isAuth = Boolean(authStatus && authStatus.authenticated && email && authStatus.status !== "unauthenticated");
   const cookieHealth = authStatus && authStatus.cookie_health;
 
+  const isDurable = Boolean(authStatus && (authStatus.master_token_present || authStatus.durable));
+
   if (isAuth) {
     if (cookieHealth && cookieHealth.status === "expiring_soon") {
       badge.classList.add("expiring");
       dot.classList.add("expiring");
       text.textContent = `Expiring Soon: ${email}`;
-      if (desc) desc.textContent = `${cookieHealth.message || "Session expiring soon"} — Click 'Sync Browser' to refresh cookies seamlessly.`;
+      if (desc) desc.textContent = `${cookieHealth.message || "Session expiring soon"} — Auto-refresh is renewing your session with Google.`;
     } else {
       badge.classList.add("connected");
       dot.classList.add("connected");
-      text.textContent = `Connected: ${email}`;
-      if (desc) desc.textContent = `Google Account connected (${email}) · Ready for 1-click cloud AI video generation.`;
+      text.textContent = isDurable ? `Connected (Permanent): ${email}` : `Connected: ${email}`;
+      if (desc) desc.textContent = isDurable
+        ? `Google Account permanently connected (${email}) · Session auto-renews automatically.`
+        : `Google Account connected (${email}) · Ready for 1-click cloud AI video generation.`;
     }
     if (loginBtn) {
       loginBtn.className = "btn-secondary vf-nlm-switch-btn";
@@ -279,10 +283,10 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
     dot.classList.add("disconnected");
     if (cookieHealth && cookieHealth.status === "expired") {
       text.textContent = email ? `Session Expired (${email})` : "Session Expired";
-      if (desc) desc.textContent = "Your Google session has expired. Click 'Log in to NotebookLM' to reconnect.";
+      if (desc) desc.textContent = "Your Google session has expired. Click 'Log in to NotebookLM' to establish a permanent session that never expires.";
     } else {
       text.textContent = "Disconnected";
-      if (desc) desc.textContent = "Connect your Google account to enable cloud video rendering with NotebookLM.";
+      if (desc) desc.textContent = "Connect your Google account to enable permanent 1-click cloud video rendering.";
     }
     if (loginBtn) {
       loginBtn.className = "btn-primary vf-nlm-login-btn";
@@ -523,22 +527,24 @@ async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = fals
   const text = document.getElementById("vf-nlm-status-text");
 
   if (loginLabel) {
-    loginLabel.textContent = switchAccount ? "Opening Account Chooser…" : "Opening NotebookLM sign-in window…";
+    loginLabel.textContent = switchAccount ? "Opening Account Chooser…" : "Opening Sign-in Window…";
   }
   if (loginBtn) loginBtn.disabled = true;
   if (disconnectBtn) disconnectBtn.disabled = true;
   if (badge) badge.className = "vf-nlm-status-badge polling";
   if (dot) dot.className = "status-dot-indicator polling";
-  if (text) text.textContent = switchAccount ? "Choose account in browser…" : "Waiting for sign-in in browser…";
+  if (text) text.textContent = switchAccount ? "Choose account in browser…" : "Waiting for permanent sign-in…";
 
   try {
     const activeProfile = vfNlmAuthStatus.profile || "video-flow-experiment";
+    const resolvedEmail = (switchAccount ? "" : (previousEmail || vfNlmAuthStatus.email || "")).trim();
     const data = await safeFetchJson("/api/video-flow/notebooklm/auth/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         profile: activeProfile,
-        mode: "playwright",
+        mode: "master-token",
+        account_email: resolvedEmail || undefined,
         browser: "chrome",
         switch_account: Boolean(switchAccount),
         direct: true,

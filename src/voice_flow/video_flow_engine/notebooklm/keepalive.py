@@ -112,15 +112,20 @@ class NotebookLMKeepaliveService:
         target_profile = (profile or self.profile or "").strip() or resolve_notebooklm_profile(None)
         now = time.time()
 
-        with self._refresh_lock:
-            if self._refresh_in_progress:
+        wait_deadline = time.time() + (1.0 if force else 0.0)
+        while True:
+            with self._refresh_lock:
+                if not self._refresh_in_progress:
+                    self._refresh_in_progress = True
+                    break
+            if time.time() >= wait_deadline:
                 return {
                     "ran": False,
                     "reason": "refresh_already_in_progress",
                     "profile": target_profile,
                     "status": self.status(),
                 }
-            self._refresh_in_progress = True
+            time.sleep(0.02)
 
         try:
             # Only skip keepalive if user explicitly clicked Disconnect and no cookies exist
@@ -207,6 +212,15 @@ class NotebookLMKeepaliveService:
                 self._last_success = now
                 self._last_error = None
                 self._success_count += 1
+                if not self._refresh_func:
+                    try:
+                        from voice_flow.storage import StorageEngine
+                        storage = StorageEngine()
+                        storage.save_setting("video_flow_notebooklm_authenticated", True)
+                        storage.save_setting("video_flow_notebooklm_auth_error", "")
+                        storage.save_setting("video_flow_notebooklm_disconnected", False)
+                    except Exception:
+                        pass
                 logger.debug("NotebookLM keepalive succeeded for profile %s", target_profile)
             else:
                 self._last_error = str(result.get("error") or "Refresh failed")
