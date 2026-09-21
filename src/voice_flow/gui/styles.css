@@ -4043,40 +4043,18 @@ html[data-theme="light"] .heatmap-cell.level-4 {
    + detail sub-view (mirrors openProviderDetail pattern)
    ========================================================================== */
 .downloadable-model-card {
-  /* Exact outer-size match with the API provider cards (e.g. Google
-     Gemini) in the same 4-column grid: those wrap their control onto a
-     second line, making them 104px tall. Same here. */
-  min-height: 104px;
+  min-height: 78px;
   cursor: pointer;
 }
 
-/* The front row mirrors the provider cards' wrap behaviour: logo + name +
-   status on the first line, the action buttons (Download / Cancel / Set as
-   STT / Delete) on the second. Without wrap, the buttons squeeze the text
-   column to 0 width at the 227px card size. Row math matches the provider
-   card's 74px content height (40 + 6 + 28) so both sit at 104px. */
-.downloadable-model-card > div:first-child {
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-
 .downloadable-model-card .provider-card-left {
-  /* Inline style sets flex:1 (basis 0) which can never force a wrap;
-     content basis lets the text take its own line. Scoped to model cards
-     only — provider cards keep their own layout. */
-  flex-basis: auto !important;
+  min-width: 0;
 }
 
-/* One-line status keeps the text block at 40px (same as the provider
-   card's logo row) instead of wrapping to two lines. */
 .downloadable-model-card .provider-card-status {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.downloadable-model-card > div:first-child > div:last-child {
-  margin-left: auto;
 }
 
 .downloadable-model-card:hover {
