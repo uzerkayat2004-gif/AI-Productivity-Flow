@@ -153,14 +153,14 @@ html[data-theme="dark"] #page-videoflow.studio-page .vf-nlm-brand-icon {
 #page-providers.studio-page .flow-cards > .flow-card { padding: 22px 0; gap: 8px 24px; }
 #page-providers.studio-page .flow-cards .vf-model-picker-button { min-height: 72px; padding: 14px 16px !important; }
 #page-providers.studio-page .flow-services-section { margin-top: 30px !important; }
-#page-providers.studio-page #providers-grid-container { grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 12px; }
-#page-providers.studio-page #providers-grid-container .provider-card-item { min-height: 78px; padding: 16px !important; border-radius: 13px; align-items: center; background: var(--polish-paper) !important; border-color: var(--polish-line) !important; box-shadow: 0 3px 8px #18151104 !important; transform: none !important; }
-#page-providers.studio-page #providers-grid-container .provider-card-item:hover { border-color: var(--polish-accent) !important; background: var(--polish-well) !important; }
-#page-providers.studio-page #providers-grid-container .provider-card-left { gap: 10px; }
-#page-providers.studio-page #providers-grid-container .provider-card-logo { width: 36px; height: 36px; flex-shrink: 0; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) { grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 12px; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-item { min-height: 78px; padding: 14px 16px !important; border-radius: 13px; align-items: center; background: var(--polish-paper) !important; border-color: var(--polish-line) !important; box-shadow: 0 3px 8px #18151104 !important; transform: none !important; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-item:hover { border-color: var(--polish-accent) !important; background: var(--polish-well) !important; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-left { gap: 10px; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-logo { width: 36px; height: 36px; flex-shrink: 0; }
 #page-providers.studio-page #providers-grid-container .provider-card-name { font-size: 13px; max-width: none; white-space: normal; overflow-wrap: anywhere; }
-#page-providers.studio-page #providers-grid-container .provider-card-info { min-width: 0; }
-#page-providers.studio-page #providers-grid-container .provider-card-status { font-size: 11px; line-height: 1.4; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-info { min-width: 0; }
+#page-providers.studio-page :is(#providers-grid-container, #voice-downloadable-models-grid) .provider-card-status { font-size: 11px; line-height: 1.4; }
 
 /* Provider detail refinement: button positions and the existing layout stay intact. */
 :is(#page-audioflow, #page-videoflow, #page-providers).studio-page .nine-router-card { background: var(--polish-paper) !important; border: 1px solid var(--polish-line) !important; border-radius: 17px !important; box-shadow: 0 8px 28px #18151104 !important; }
@@ -246,7 +246,7 @@ body.flow-workspace-active .main-content { padding: 28px clamp(24px, 3vw, 48px) 
 #page-providers.studio-page .flow-services-section .flow-section-title { font-size: 19px !important; }
 
 /* Provider inventories share card sizing; names get space before the toggle. */
-:is(#page-audioflow, #page-providers, #page-videoflow).studio-page :is(#audio-providers-grid-container, #providers-grid-container, #vf-api-provider-grid, #vf-oauth-provider-grid, #vf-custom-provider-grid) { grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 10px; }
+:is(#page-audioflow, #page-providers, #page-videoflow).studio-page :is(#audio-providers-grid-container, #providers-grid-container, #voice-downloadable-models-grid, #vf-api-provider-grid, #vf-oauth-provider-grid, #vf-custom-provider-grid) { grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 10px; }
 :is(#page-audioflow, #page-providers, #page-videoflow).studio-page .providers-cards-grid > .provider-card-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 74px; padding: 14px !important; border-radius: 11px !important; box-shadow: 0 2px 6px #18151103 !important; }
 :is(#page-audioflow, #page-providers, #page-videoflow).studio-page .providers-cards-grid .provider-card-left { min-width: 0; width: 100%; gap: 10px; }
 :is(#page-audioflow, #page-providers, #page-videoflow).studio-page .providers-cards-grid .provider-card-info { min-width: 0; }

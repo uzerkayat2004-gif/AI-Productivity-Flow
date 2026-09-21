@@ -31,14 +31,17 @@
 - Narration: independent Video Flow voice setting (default Edge `en-US-AvaNeural`), same catalog as Audio Flow; captions SRT/VTT; progress; cancellation; history; standalone player.
 - Output: `<job>/video.mp4` 1080p MP4 in the existing player.
 
-## Platform shell
-- Dashboard (pywebview, loopback 127.0.0.1:8991), always-on-top non-activating Flow Bar, global hooks, selection capture with console guard, 6-slide onboarding (once), settings, light/dark theme, Windows autostart (HKCU Run + Startup .lnk), watchdog supervisor, data under `~/.voice_flow`.
+## Platform shell & multi-account
+- Dashboard (pywebview, loopback 127.0.0.1:8991), always-on-top non-activating Flow Bar, global hooks, selection capture with console guard, 6-slide onboarding (once), settings (General -> System -> Account), light/dark theme, Windows autostart (HKCU Run + Startup .lnk), watchdog supervisor, data under `~/.voice_flow`.
+- Multi-Account & Security: Isolated user database, Switch Account modal, separate profile credentials vault.
+- NotebookLM Sync: Direct Google OAuth token integration, syncing research notebooks, audio overviews, and study guides.
+- Cross-Platform Preview: macOS 12+ Community Preview with automated shell installer (`scripts/install.sh`) and Universal App bundle (`AI-Productivity-Flow-macOS.zip`).
 
 ## Installer / release state
-- One per-user Inno Setup exe: private CPython 3.12.10 (62 pinned packages), Node 20.18.1, FFmpeg/FFprobe, faster-whisper base.en (pinned rev), HyperFrames 0.7.96 modules, vendored Narova + Code2Video (MIT, attributed), WebView2 bootstrapper + VC++ redist (conditional, silent).
-- Render browser provisioned automatically during installation via the renderer's official command (not redistributed; license).
-- Status: installer built and locally validated; **fresh external clean-Windows acceptance pending** (`release-packaging/CLEAN_MACHINE_TEST.md`).
+- One per-user Inno Setup exe: private CPython 3.12.10 (62 pinned packages), Node 20.18.1, FFmpeg/FFprobe, faster-whisper base.en (pinned rev), HyperFrames modules, vendored Narova + Code2Video (MIT, attributed), WebView2 bootstrapper + VC++ redist (conditional, silent).
+- Terminal one-liner installer for Windows PowerShell (`scripts/install.ps1`) and macOS Terminal (`scripts/install.sh`).
+- Status: v2.1 Beta installer and macOS package published on GitHub Releases.
 
 ## Verified-absent legacy (do not document as current)
-Standalone Snippets UI (merged into Dictionary rules) · Remotion in the shipped product · Veo · hybrid render router / `video_generation/` · "lesson" video mode · working offline SAPI5 TTS · macOS/Linux support.
-`video_flow_renderer/` is a dev-side legacy asset (single fallback bundle reference only); the canvas V3 preview player mounts only if program data exists (always 404 now) — playback is the standard `<video>` element.
+Standalone Snippets UI (merged into Dictionary rules) · standalone Remotion rendering in end-user build (HyperFrames deterministic renderer active) · Veo cloud video · "lesson" video mode · working offline SAPI5 TTS.
+`video_flow_renderer/` is a dev-side fallback reference; playback in the desktop shell uses the standard `<video>` player.
