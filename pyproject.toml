@@ -1,6 +1,6 @@
 [project]
 name = "voice-flow"
-version = "1.0.0"
+version = "2.1.0"
 description = "Flow — Open-source multimodal information accessibility and transformation platform (Speech, Audio, Video)"
 readme = "README.md"
 requires-python = ">=3.10"

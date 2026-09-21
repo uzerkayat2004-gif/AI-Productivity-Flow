@@ -6,8 +6,10 @@ disfluency removal, and transcript cleanup.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,8 @@ LFM_SYSTEM_PROMPT = (
 
 _LLM_LOCK = threading.Lock()
 _TEMPLATE_PATCHED = False
+_LFM_CONTEXT_TOKENS = 2048
+_LFM_OUTPUT_CAP_TOKENS = 1024
 
 
 _ANALYSIS_MARKERS = (
@@ -68,6 +72,38 @@ def _looks_like_cloud_policy(text: str) -> bool:
     """Whether ``text`` is a cloud polishing policy rather than a local instruction."""
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _CLOUD_POLICY_MARKERS)
+
+
+def is_lfm_model_ref(model_ref: str) -> bool:
+    """Whether *model_ref* selects this local LFM adapter."""
+    return str(model_ref or "").strip().casefold() in LFM_ALIASES
+
+
+def _trusted_instruction(instruction: str, embedded_system: str | None) -> str:
+    """Keep a compact trusted style/task directive, never the cloud policy."""
+    candidate = str(instruction or "").strip()
+    if not candidate and embedded_system:
+        match = re.search(r"(?:^|\\n)\\s*style instruction:\s*([^\\n]+)", embedded_system, re.IGNORECASE)
+        candidate = match.group(1).strip() if match else ""
+    return re.sub(r"\\s+", " ", candidate)[:320].strip()
+
+
+def _local_system_prompt(instruction: str) -> str:
+    prompt = "Rewrite the transcript. Remove filler words and fix grammar. Reply only with the rewrite."
+    if instruction:
+        prompt += f" Apply this trusted style or task: {instruction}."
+    return prompt
+
+
+def _completion_token_budget(llm: Any, user_text: str) -> int:
+    """Avoid the old fixed 256-token cut-off while reserving model context."""
+    desired = min(_LFM_OUTPUT_CAP_TOKENS, max(64, len(user_text.split()) * 2 + 32))
+    try:
+        input_tokens = len(llm.tokenize(user_text.encode("utf-8"), add_bos=False))
+    except Exception:
+        input_tokens = len(user_text.split()) * 2
+    available = _LFM_CONTEXT_TOKENS - input_tokens - 128
+    return min(desired, available) if available >= 64 else 0
 
 
 def _strip_annotation_lines(text: str) -> str:
@@ -186,6 +222,32 @@ def is_lfm_runtime_available() -> bool:
         return False
 
 
+def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
+    """Load the local model once so the first dictation avoids cold-start cost."""
+    model_path = get_lfm_model_path()
+    if not model_path or not is_lfm_runtime_available() or timeout_seconds <= 0:
+        return False
+    if not _LLM_LOCK.acquire(timeout=float(timeout_seconds)):
+        return False
+    try:
+        if getattr(polish_with_lfm, "_cached_llm_path", None) == str(model_path):
+            return True
+        from llama_cpp import Llama  # type: ignore
+
+        llm = Llama(
+            model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
+            n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
+        )
+        setattr(polish_with_lfm, "_cached_llm", llm)
+        setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
+        return True
+    except Exception as exc:
+        log.warning("[LFM] Could not warm local model: %s", exc)
+        return False
+    finally:
+        _LLM_LOCK.release()
+
+
 def polish_with_lfm(
     text: str,
     instruction: str = "",
@@ -211,6 +273,7 @@ def polish_with_lfm(
 
     user_text, embedded_sys = _extract_transcript(text)
     effective_system = system_prompt or embedded_sys
+    local_instruction = _trusted_instruction(instruction, effective_system)
 
     # The 350M model must never receive the cloud polishing policy. That policy
     # enumerates the categories to fix ("self-corrections", "ECHO REPEATS",
@@ -246,26 +309,72 @@ def polish_with_lfm(
     _patch_chat_template_parser()
 
     try:
-        # Keep the model resident between dictations: loading the GGUF per
-        # request would add seconds to every polish. The lock serializes
-        # access because a llama.cpp context is not safe for concurrent use.
-        with _LLM_LOCK:
+        # Keep the model resident between dictations.  A context is not safe
+        # for concurrent use, so waiting for one is bounded by this request's
+        # deadline instead of queuing a stale dictation indefinitely.
+        remaining = max(0.0, float(timeout_seconds))
+        if not _LLM_LOCK.acquire(timeout=remaining):
+            log.info("[LFM] Timed out waiting for the local model lock.")
+            return None
+        deadline = time.monotonic() + remaining
+        try:
             llm = getattr(polish_with_lfm, "_cached_llm", None)
             cached_path = getattr(polish_with_lfm, "_cached_llm_path", None)
             if llm is None or cached_path != str(model_path):
-                llm = Llama(model_path=str(model_path), n_ctx=1024, verbose=False)
+                llm = Llama(
+                    model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
+                    n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
+                )
                 setattr(polish_with_lfm, "_cached_llm", llm)
                 setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
-            sys_msg = effective_system or LFM_SYSTEM_PROMPT
+            max_tokens = _completion_token_budget(llm, user_text)
+            if max_tokens <= 0 or time.monotonic() >= deadline:
+                return None
             resp = llm.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": sys_msg},
+                    {"role": "system", "content": _local_system_prompt(local_instruction)},
                     {"role": "user", "content": user_text},
                 ],
-                max_tokens=256,
+                max_tokens=max_tokens,
                 temperature=0.1,
+                top_k=50,
+                repeat_penalty=1.05,
+                stream=True,
             )
-            content = str(resp["choices"][0]["message"]["content"] or "").strip()
+            chunks: list[str] = []
+            finish_reason = None
+            try:
+                if isinstance(resp, dict):
+                    choices = resp.get("choices") or []
+                    if choices:
+                        choice = choices[0]
+                        finish_reason = choice.get("finish_reason")
+                        msg = choice.get("message") or {}
+                        content_piece = msg.get("content") or choice.get("text") or ""
+                        if content_piece:
+                            chunks.append(str(content_piece))
+                else:
+                    for chunk in resp:
+                        if time.monotonic() >= deadline:
+                            log.info("[LFM] Timed out during local generation.")
+                            return None
+                        if not isinstance(chunk, dict):
+                            continue
+                        choice = (chunk.get("choices") or [{}])[0]
+                        finish_reason = choice.get("finish_reason") or finish_reason
+                        piece = (choice.get("delta") or {}).get("content") or choice.get("text")
+                        if piece:
+                            chunks.append(str(piece))
+            finally:
+                close = getattr(resp, "close", None)
+                if callable(close):
+                    close()
+            if finish_reason == "length":
+                log.info("[LFM] Local response reached its token limit; rejecting partial text.")
+                return None
+            content = "".join(chunks).strip()
+        finally:
+            _LLM_LOCK.release()
         # A tiny model occasionally appends a stray newline or trailing spaces.
         content = content.strip().strip('"').strip()
         # It may also echo the wrapping tags it saw in the prompt.

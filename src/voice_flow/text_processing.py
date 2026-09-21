@@ -38,6 +38,9 @@ def apply_spoken_punctuation(text: str) -> str:
 
 
 _FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
+_PROTECTED_CLEANUP_SPAN_RE = re.compile(
+    r"(`[^`]*`|\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w))"
+)
 
 
 def _strip_filler(match: "re.Match[str]") -> str:
@@ -59,18 +62,29 @@ def cleanup_text(text: str, level: str) -> str:
     text = text.strip()
     if level == "cleanup_none":
         return text
-    text = _FILLER_RE.sub(_strip_filler, text)
-    text = re.sub(r"(?:^|,)\s*you know\s*(?=,|$)", lambda m: "," if m.group(0).startswith(",") else "", text, flags=re.I)
-    for pattern, replacement in (
-        (r"\blet's meet at\s+([^,.]+?)\s+(?:actually|no wait|wait no)\s+([^,.]+)", r"let's meet at \2"),
-        (r"\bsend it\s+([^,.]+?)\s+(?:scratch that|actually)\s+([^,.]+)", r"send it \2"),
-        (r"\bmy code is\s+([^,.]+?)\s+(?:no wait|wait no|actually)\s+([^,.]+)", r"my code is \2"),
-    ):
-        text = re.sub(pattern, replacement, text, flags=re.I)
-    text = collapse_echo_repeats(text)
-    if level in ("cleanup_medium", "cleanup_high"):
-        text = re.sub(r"\b(\w+(?:\s+\w+){0,5})\s+(?:I mean|rather),?\s+\1\b", r"\1", text, flags=re.I)
-    return re.sub(r"\s+", " ", text).strip()
+
+    def clean_unprotected(segment: str) -> str:
+        segment = _FILLER_RE.sub(_strip_filler, segment)
+        segment = re.sub(r"(?:^|,)\s*you know\s*(?=,|$)", lambda m: "," if m.group(0).startswith(",") else "", segment, flags=re.I)
+        for pattern, replacement in (
+            (r"\blet's meet at\s+([^,.]+?)\s+(?:actually|no wait|wait no)\s+([^,.]+)", r"let's meet at \2"),
+            (r"\bsend it\s+([^,.]+?)\s+(?:scratch that|actually)\s+([^,.]+)", r"send it \2"),
+            (r"\bmy code is\s+([^,.]+?)\s+(?:no wait|wait no|actually)\s+([^,.]+)", r"my code is \2"),
+        ):
+            segment = re.sub(pattern, replacement, segment, flags=re.I)
+        # A doubled first-person pronoun is a common ASR stutter. Keep all
+        # other single-word repetitions because they can carry meaning.
+        segment = re.sub(r"\b(I)(?:[ \t]+\1\b)+", r"\1", segment, flags=re.I)
+        segment = collapse_echo_repeats(segment)
+        if level in ("cleanup_medium", "cleanup_high"):
+            segment = re.sub(r"\b(\w+(?:\s+\w+){0,5})\s+(?:I mean|rather),?\s+\1\b", r"\1", segment, flags=re.I)
+        # Newlines are dictated structure. Normalize horizontal spacing only.
+        return re.sub(r"[ \t]+", " ", segment)
+
+    parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = clean_unprotected(parts[index])
+    return "".join(parts).strip()
 
 
 def collapse_echo_repeats(text: str) -> str:

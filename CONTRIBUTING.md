@@ -1,22 +1,29 @@
-# 🤝 Contributing to Flow
+# 🤝 Contributing to AI Productivity Flow
 
-Thank you for your interest in contributing to **Flow**! We welcome contributions from developers, researchers, designers, and educators.
+Thank you for your interest in contributing to **AI Productivity Flow**! We welcome contributions from developers, researchers, designers, and educators.
 
 ---
 
 ## 🛠️ Development Environment Setup
 
 ### 1. Prerequisites
-* **Python:** 3.10+ (Python 3.14 supported)
-* **Node.js:** 18+ and npm 9+
+* **Python:** 3.10+ (tested on 3.11, 3.12, 3.13, 3.14)
+* **Node.js:** 18+ and npm 9+ (for Video Flow Remotion renderer)
 * **Git**
-* **OS:** Windows 10 / 11 (for desktop hooks; core packages run cross-platform)
+* **OS:** Windows 10 / 11 x64 (primary production tier) or macOS 12+ (community preview)
 
 ### 2. Initial Setup
 ```bash
 # Clone the repository
-git clone https://github.com/uzerkayat2004-gif/Voice-Flow.git
-cd Voice-Flow
+git clone https://github.com/uzerkayat2004-gif/AI-Productivity-Flow.git
+cd AI-Productivity-Flow
+
+# Create virtual environment
+python -m venv .venv
+# Windows:
+.\.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
 
 # Install Python package in editable mode
 pip install -e .
@@ -31,73 +38,53 @@ cd ..
 
 ## 🧪 Running Tests
 
-Before submitting a Pull Request, ensure all tests pass:
+Before submitting a Pull Request, ensure all relevant test suites pass:
 
 ```bash
-# Run all Python tests
-python -m pytest tests/test_insights_deep.py tests/test_history_features.py tests/test_dictionary_safety.py tests/test_style_system.py tests/test_provider_management.py tests/test_watchdog_and_startup.py tests/test_hybrid_render_routing.py tests/test_video_flow_benchmarks.py -s
+# Run Core Platform, Account Security & Download Verification Tests
+python -m pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py -v
 
-# Run Video Flow engine tests
-python -m pytest tests/test_video_flow.py tests/test_video_flow_models.py tests/test_video_flow_motion.py tests/test_video_flow_providers.py tests/test_video_flow_themes.py -s
+# Run Text Processing & Voice Polishing Regressions
+python -m pytest tests/test_text_processing.py tests/test_capture_command_regressions.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v
+
+# Run NotebookLM Integration Tests
+python -m pytest tests/test_notebooklm_account_switch_and_sync.py tests/test_video_flow_subscription_auth.py -v
 
 # Typecheck the Remotion Renderer
-cd video_flow_renderer && npm run typecheck
+cd video_flow_renderer && npm run typecheck && cd ..
 ```
 
 ---
 
-## 🏗️ Architecture & How to Extend
+## 🏗️ Architecture & Guiding Invariants
 
-### 1. Adding a Generative Video Provider
-All generative video models must implement the `GenerativeVideoProvider` interface in `src/voice_flow/video_generation/`:
-
-```python
-from voice_flow.video_generation import (
-    GenerativeVideoProvider,
-    VideoGenerationRequest,
-    GeneratedVideoAsset,
-    VideoProviderCapabilities,
-    video_provider_registry,
-)
-
-class MyCustomVideoProvider(GenerativeVideoProvider):
-    @property
-    def provider_id(self) -> str:
-        return "my_custom_provider"
-
-    @property
-    def display_name(self) -> str:
-        return "My Custom Generative Video Model"
-
-    def available(self) -> bool:
-        # Check credentials or local model availability
-        return True
-
-    def capabilities(self) -> VideoProviderCapabilities:
-        return VideoProviderCapabilities(
-            provider_id=self.provider_id,
-            display_name=self.display_name,
-            supports_text_to_video=True,
-            supported_aspect_ratios=["16:9"],
-        )
-
-    def generate(self, request: VideoGenerationRequest) -> GeneratedVideoAsset:
-        # Generate video and return standardized asset
-        ...
-
-# Register provider
-video_provider_registry.register(MyCustomVideoProvider())
-```
-
-### 2. Free-First Architectural Invariant
+### 1. Free-First Architectural Invariant
 * **Never make a paid API mandatory.**
 * All video scenes must maintain a working deterministic fallback (`procedural_2d`, `procedural_3d`, or `remotion`).
+* Core Voice Flow dictation must remain 100% functional offline using the bundled local Whisper model.
+
+### 2. Multi-Account Privacy & Isolation
+* User data, personal dictionaries, API keys, and NotebookLM sync tokens must remain completely isolated under their active user profile in `~/.voice_flow/`.
+* Switching accounts must never leak cached state or open database handles.
+
+### 3. Media Download Predictability
+* All exported media must be accessible in the user's standard Windows folders (`Downloads`, `Videos`, `Music`).
+* File modification timestamps are synchronized upon completion to ensure immediate prominence at the top of Explorer under "Today".
 
 ---
 
 ## 📋 Pull Request Guidelines
 
 1. **Keep Changes Focused:** One feature or bugfix per PR.
-2. **Preserve Existing Functionality:** Do not break existing Voice Flow or Audio Flow features.
-3. **Add Tests:** Include unit tests in `tests/` for any new logic or providers.
-4. **No Secrets:** Never commit API keys, credentials, or private machine paths.
+2. **Include Tests:** Add unit or regression test cases in `tests/` for any new logic.
+3. **Preserve Compatibility:** Do not break existing desktop hotkeys, active styles, or storage contracts.
+4. **Documentation:** Update `README.md` or relevant architecture docs if user-facing behavior changes.
+
+---
+
+## 📢 Community, Issues & Support
+
+* 🐛 **Bug Reports & Feature Requests:** [GitHub Issues](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues)
+* 💬 **Discussions & Feedback:** [GitHub Discussions](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/discussions)
+* 🌐 **Project Website:** [https://ai-productivity-flow.vercel.app/](https://ai-productivity-flow.vercel.app/)
+* 👤 **Maintainer:** [@uzerkayat2004-gif](https://github.com/uzerkayat2004-gif) (Uzer Kayat)

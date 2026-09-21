@@ -795,7 +795,7 @@ class TextPolisher:
         if deadline is not None:
             try:
                 if float(deadline) - time.monotonic() <= AI_POLISH_DETERMINISTIC_RESERVE_SECONDS:
-                    cleaned = self._deterministic_cleanup(raw_text, instruction, "cleanup_none")
+                    cleaned = self._deterministic_cleanup(raw_text, "", level)
                     self._notify_outcome(outcome_callback, "timeout")
                     return _apply_dictionary_safely(cleaned)
             except (TypeError, ValueError):
@@ -814,8 +814,10 @@ class TextPolisher:
             polishing_enabled = False
         # Disabling polishing is a privacy/remote-work switch.  A command may
         # request an AI transformation, but it must never override that switch.
+        # Basic deterministic cleanup and explicit dictionary rules remain
+        # local, fast, and useful; do not apply a selected writing style here.
         if not polishing_enabled:
-            cleaned = self._deterministic_cleanup(raw_text, instruction, "cleanup_none")
+            cleaned = self._deterministic_cleanup(raw_text, "", level)
             self._notify_outcome(outcome_callback, "disabled")
             return _apply_dictionary_safely(cleaned)
 
@@ -947,7 +949,9 @@ class TextPolisher:
             pass
 
         # Step 2: Built-in instant zero-latency NLP polisher fallback
-        cleaned = self._deterministic_cleanup(raw_text, instruction, level)
+        # The selected AI/style pass did not complete. Deliver only safe local
+        # cleanup rather than silently applying a style or voice command.
+        cleaned = self._deterministic_cleanup(raw_text, "", level)
         log.info("Polished cleanup (%s): '%s' -> '%s'", level, raw_text, cleaned)
         self._notify_outcome(outcome_callback, attempt_outcome)
         return _apply_dictionary_safely(cleaned)
@@ -1001,6 +1005,11 @@ class TextPolisher:
     @staticmethod
     def _deterministic_cleanup(raw_text: str, style_instruction: str, level: str) -> str:
         cleaned = cleanup_text(raw_text, level)
+        # ``cleanup_none`` is an explicit verbatim preference. Dictionary
+        # processing is applied by the caller, but local cleanup must not add
+        # sentence case, punctuation, or a style transformation.
+        if level == "cleanup_none":
+            return cleaned
         cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
         style = (style_instruction or "").lower()
         if "very_casual" in style or "lowercase" in style:

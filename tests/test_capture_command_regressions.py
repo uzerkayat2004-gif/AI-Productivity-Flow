@@ -90,8 +90,53 @@ def test_failed_ai_outcomes_keep_input_and_have_truthful_labels(monkeypatch) -> 
     monkeypatch.setattr(main.polisher, "polish", lambda _text, **kw: kw["outcome_callback"]("timeout") or "changed text")
     monkeypatch.setattr(main, "smart_format", lambda *_args: (_ for _ in ()).throw(AssertionError("must not format failed AI output")))
 
-    assert app._finalize_text("First and last words", session) == "First and last words"
-    assert _polish_outcome_label("timeout") == "AI timed out — original text kept"
-    assert _polish_outcome_label("provider_failure") == "AI unavailable — original text kept"
-    assert _polish_outcome_label("disabled") == "Transcribed"
+    assert app._finalize_text("First and last words", session) == "changed text"
+    assert _polish_outcome_label("timeout") == "AI timed out — basic cleanup applied"
+    assert _polish_outcome_label("provider_failure") == "AI unavailable — basic cleanup applied"
+    assert _polish_outcome_label("disabled") == "Basic cleanup applied"
     assert _polish_outcome_label("local") == "Cleaned locally"
+
+
+def test_disabled_polish_still_delivers_basic_cleanup_and_dictionary(monkeypatch) -> None:
+    """The privacy switch skips AI/style work, not safe local delivery work."""
+    from voice_flow import main, polisher as polisher_module
+
+    class Dictionary:
+        def apply_dictionary_post_processing(self, text: str) -> str:
+            return text.replace("Hyper Kube", "HyperKube")
+
+        def restore_dictionary_spelling(self, text: str) -> str:
+            return text
+
+    dictionary = Dictionary()
+    monkeypatch.setattr(main, "dictionary_engine", dictionary)
+    monkeypatch.setattr(polisher_module, "dictionary_engine", dictionary)
+    monkeypatch.setattr(polisher_module.storage, "get_setting", lambda key, default=None: False if key == "polishing_enabled" else default)
+    monkeypatch.setattr(main, "smart_format", lambda *_args: (_ for _ in ()).throw(AssertionError("disabled polish must not apply a style")))
+
+    app = object.__new__(VoiceFlowApp)
+    session = SimpleNamespace(cleanup_level="cleanup_light", style_id="other_formal", cursor_context=None)
+
+    assert app._finalize_text("Um, send the Hyper Kube update uh to Alice", session) == "Send the HyperKube update to Alice."
+
+
+def test_disabled_polish_respects_explicit_cleanup_none(monkeypatch) -> None:
+    """The explicit no-cleanup setting stays verbatim apart from dictionary rules."""
+    from voice_flow import main, polisher as polisher_module
+
+    class Dictionary:
+        def apply_dictionary_post_processing(self, text: str) -> str:
+            return text.replace("Hyper Kube", "HyperKube")
+
+        def restore_dictionary_spelling(self, text: str) -> str:
+            return text
+
+    dictionary = Dictionary()
+    monkeypatch.setattr(main, "dictionary_engine", dictionary)
+    monkeypatch.setattr(polisher_module, "dictionary_engine", dictionary)
+    monkeypatch.setattr(polisher_module.storage, "get_setting", lambda key, default=None: False if key == "polishing_enabled" else default)
+
+    app = object.__new__(VoiceFlowApp)
+    session = SimpleNamespace(cleanup_level="cleanup_none", style_id="personal_very_casual", cursor_context=None)
+
+    assert app._finalize_text("Um, send the Hyper Kube update uh to Alice", session) == "Um, send the HyperKube update uh to Alice"

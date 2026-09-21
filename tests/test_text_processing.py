@@ -44,3 +44,8 @@ def test_echo_cleanup_does_not_cross_sentence_boundaries() -> None:
     """Repeated complete sentences can be deliberate emphasis or quoted text."""
     text = "Send the report today. Send the report today."
     assert collapse_echo_repeats(text) == text
+
+
+def test_cleanup_preserves_quoted_code_and_line_structure() -> None:
+    text = 'um I I need "um" and `uh`\nuh send it now'
+    assert cleanup_text(text, "cleanup_light") == 'I need "um" and `uh`\nsend it now'

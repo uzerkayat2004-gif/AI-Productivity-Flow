@@ -34,6 +34,10 @@ jobs:
         run: |
           pytest tests/test_runtime_compatibility.py -vv -s --timeout=30
 
+      - name: Run Core Features, Security & Text Processing Tests
+        run: |
+          pytest tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v --timeout=60
+
   macos-build:
     name: macOS Validation & App Packaging
     runs-on: macos-latest

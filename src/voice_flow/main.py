@@ -309,16 +309,16 @@ def get_cached_setting(key: str, default: Any = None, ttl: float = 5.0) -> Any:
 
 
 def _polish_outcome_label(outcome: str) -> str:
-    """Describe a polish result without claiming a failed AI pass was local."""
+    """Describe delivery without claiming a failed AI pass was successful."""
     return {
         "ai_accepted": "AI polished",
         "local": "Cleaned locally",
         "local_model": "Cleaned locally (offline model)",
-        "disabled": "Transcribed",
-        "timeout": "AI timed out — original text kept",
-        "provider_failure": "AI unavailable — original text kept",
-        "fidelity_reject": "AI unavailable — original text kept",
-    }.get(str(outcome or ""), "AI unavailable — original text kept")
+        "disabled": "Basic cleanup applied",
+        "timeout": "AI timed out — basic cleanup applied",
+        "provider_failure": "AI unavailable — basic cleanup applied",
+        "fidelity_reject": "AI output rejected — basic cleanup applied",
+    }.get(str(outcome or ""), "AI unavailable — basic cleanup applied")
 
 
 class VoiceFlowApp:
@@ -1271,10 +1271,13 @@ class VoiceFlowApp:
             outcome_callback=_notify_outcome,
             speed_mode=_normalize_polish_speed_mode(speed_mode or getattr(session, "polish_speed_mode", None) or (session.get("polish_speed_mode") if isinstance(session, dict) else None)),
         )
-        # A timeout/failure must not be followed by style formatting that
-        # changes wording while the UI says the original was kept.
+        # The polisher's deterministic fallback has already applied safe
+        # cleanup and dictionary replacements. Do not run style formatting
+        # after a disabled/failed AI attempt, because a style or command did
+        # not actually run; do deliver the safe fallback instead of throwing
+        # it away and pasting the raw transcript.
         if observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "disabled"}:
-            return raw_action_text
+            return polished
         formatted = smart_format(polished, post_style_id, context)
         # Style formatters may lowercase casual text after the polisher has
         # restored canonical vocabulary. Restore casing only; running the
@@ -1694,7 +1697,7 @@ class VoiceFlowApp:
                         # Spec §50: never silently pretend a transformation ran.
                         label = f" — {effective.label}" if effective.label else ""
                         detail = (
-                            "Turn on text cleanup to run this command"
+                            "Turn on AI polishing to run this command"
                             if polish_outcome["value"] == "disabled"
                             else _polish_outcome_label(polish_outcome["value"])
                         )

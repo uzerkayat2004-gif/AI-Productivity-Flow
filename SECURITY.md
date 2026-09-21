@@ -26,7 +26,7 @@ Flow takes the security and privacy of user data and credentials seriously.
 If you discover a potential security vulnerability in Flow, please disclose it responsibly:
 
 1. **Do not create a public GitHub issue.**
-2. Send a detailed report to the maintainers via GitHub Private Vulnerability Reporting or email the repository owner.
+2. Submit a private report via [GitHub Security Advisories](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/security/advisories/new) or contact the maintainer [@uzerkayat2004-gif](https://github.com/uzerkayat2004-gif).
 3. Include reproducible steps and details on the affected components.
 
 We will acknowledge receipt within 48 hours and work with you to resolve the issue before public disclosure.
