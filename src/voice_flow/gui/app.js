@@ -2547,32 +2547,42 @@ function renderDictionaryFilteredChips() {
   const sorted = [...filtered].sort((a, b) => dictionaryWord(a).localeCompare(dictionaryWord(b), undefined, { sensitivity: "base" }));
   chipContainer.innerHTML = sorted.map(entry => {
     const w = dictionaryWord(entry);
-    const badge = getDictionaryCasingBadge(w);
-    const heard = dictionaryHeardAs[w.toLowerCase()] || [];
-    const heardText = heard.slice(0, 3).map(v => escapeHtml(v)).join(", ");
     const isExpansion = /->|=>/.test(w);
-    const cleanWords = String(w).replace(/[->=|:]+/g, " ").trim().split(/\s+/).filter(Boolean);
-    const avatar = cleanWords.length > 1
-      ? (cleanWords[0].charAt(0) + cleanWords[1].charAt(0)).toUpperCase()
-      : (escapeHtml((cleanWords[0] || w).trim().charAt(0).toUpperCase() || "•"));
+    let trigger = w;
+    let expansion = "";
+    if (isExpansion) {
+      const parts = w.split(/->|=>/);
+      trigger = parts[0].trim();
+      expansion = (parts[1] || "").trim();
+    }
+    const hasCamelOrUpper = /[A-Z]/.test(w);
+    const isAutoCaptured = String(entry.category || "").toLowerCase() === "auto-captured";
+
+    let contentHtml = "";
+    if (isExpansion) {
+      contentHtml = `
+        <span class="dict-capsule-trigger" ondblclick="startChipEdit(this)" title="Double-click to edit">${escapeHtml(trigger)}</span>
+        <span class="dict-capsule-arrow" aria-hidden="true">→</span>
+        <span class="dict-capsule-expansion" ondblclick="startChipEdit(this)" title="Double-click to edit">${escapeHtml(expansion)}</span>
+      `;
+    } else {
+      contentHtml = `
+        <span class="dict-capsule-word" ondblclick="startChipEdit(this)" title="Double-click to edit">${escapeHtml(w)}</span>
+      `;
+    }
+
+    if (isAutoCaptured) {
+      contentHtml += `
+        <button type="button" class="dict-capsule-approve" onclick="event.stopPropagation(); approveDictionaryWord('${escapeJs(w)}')" title="Approve exact spelling">Approve</button>
+      `;
+    }
+
     return `
-      <div class="dict-word-row">
-        <div class="dict-word-id">
-          <span class="dict-word-avatar" aria-hidden="true">${avatar}</span>
-          <div class="dict-word-text">
-            <span class="dict-word" ondblclick="startChipEdit(this)" title="Double-click to rename">${escapeHtml(w)}</span>
-            ${heardText ? `<span class="dict-word-sub">Often heard as “${heardText}”</span>` : ""}
-          </div>
-        </div>
-        <div class="dict-word-side">
-          ${String(entry.category).toLowerCase() === "auto-captured" ? `<button type="button" class="flow-btn flow-btn--secondary" onclick="approveDictionaryWord('${escapeJs(w)}')" title="Use this exact spelling in future dictations">Use spelling</button><span class="flow-tag">Captured · not active</span>` : (isExpansion ? `<span class="flow-tag">Shortcut</span>` : (badge ? `<span class="flow-tag">${badge}</span>` : ""))}
-          <button type="button" class="dict-icon-btn" onclick="startRowEdit(this)" title="Rename" aria-label="Rename ${escapeHtml(w)}">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l4 4L8 20l-5 1 1-5z"/></svg>
-          </button>
-          <button type="button" class="dict-icon-btn dict-icon-btn--danger" onclick="removeDictionaryWord('${escapeJs(w)}')" title="Remove" aria-label="Remove ${escapeHtml(w)}">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0l-.8 12.2a1 1 0 0 1-1 .8H7.8a1 1 0 0 1-1-.8L6 7"/></svg>
-          </button>
-        </div>
+      <div class="dict-capsule" data-word="${escapeHtml(w)}" title="${isExpansion ? 'Shortcut: ' + escapeHtml(w) : 'Dictionary term: ' + escapeHtml(w)}">
+        ${contentHtml}
+        <button type="button" class="dict-capsule-delete" onclick="event.stopPropagation(); removeDictionaryWord('${escapeJs(w)}', this)" title="Remove “${escapeHtml(w)}” from dictionary" aria-label="Remove ${escapeHtml(w)}">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>`;
   }).join("");
 }
@@ -2692,7 +2702,13 @@ async function approveDictionaryWord(word) {
   }
 }
 
-async function removeDictionaryWord(word) {
+async function removeDictionaryWord(word, btnEl) {
+  const capsule = btnEl ? btnEl.closest(".dict-capsule, .dict-word-row") : null;
+  if (capsule) {
+    capsule.style.transition = "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)";
+    capsule.style.transform = "scale(0.8) translateY(4px)";
+    capsule.style.opacity = "0";
+  }
   try {
     const res = await fetch("/api/dictionary/remove", {
       method: "POST",
@@ -2701,13 +2717,21 @@ async function removeDictionaryWord(word) {
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
+      if (capsule) {
+        capsule.style.transform = "";
+        capsule.style.opacity = "";
+      }
       showToast(data.error || "Failed to remove dictionary term.", "⚠️");
       return;
     }
-    showToast(`“${word}” removed from your dictionary.`, "✅");
-    loadDictionary();
+    showToast(`“${word}” removed from dictionary.`, "✅");
+    await loadDictionary();
   } catch (err) {
     console.error("Error removing dictionary word:", err);
+    if (capsule) {
+      capsule.style.transform = "";
+      capsule.style.opacity = "";
+    }
     showToast("Network error removing term.", "⚠️");
   }
 }
@@ -5381,7 +5405,14 @@ function openAddAudioModelModal(prov) {
   }
   modal.dataset.provider = prov || currentAudioProvider || "";
   const inputEl = document.getElementById("audio-model-input-id");
-  if (inputEl) inputEl.value = "";
+  if (inputEl) {
+    inputEl.value = "";
+    if ((prov || currentAudioProvider) === "gemini") {
+      inputEl.placeholder = "e.g. gemini-3.8-flash-tts:Kore or gemini-3.8-flash-lite-tts:Puck";
+    } else {
+      inputEl.placeholder = "e.g. my-custom-voice";
+    }
+  }
   const out = document.getElementById("vf2-addaudio-test-out");
   if (out) { out.style.display = "none"; out.innerHTML = ""; }
   vf2LastVerifiedAudioModel = null;
@@ -5795,7 +5826,7 @@ async function loadAudioSummaryHistory() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.success && Array.isArray(data.summaries)) {
-      afSummaries = data.summaries;
+      afSummaries = data.summaries.slice(0, 50);
     } else {
       afSummaries = [];
     }
@@ -8352,6 +8383,73 @@ async function loadVoiceDownloadableModels() {
 
 let vfDownloadableModelsFilter = "all";
 
+const DM_LANGUAGE_DETAILS = {
+  "en": { flag: "🇺🇸", name: "English", code: "EN" },
+  "es": { flag: "🇪🇸", name: "Spanish", code: "ES" },
+  "de": { flag: "🇩🇪", name: "German", code: "DE" },
+  "fr": { flag: "🇫🇷", name: "French", code: "FR" },
+  "it": { flag: "🇮🇹", name: "Italian", code: "IT" },
+  "ar": { flag: "🇸🇦", name: "Arabic", code: "AR" },
+  "ja": { flag: "🇯🇵", name: "Japanese", code: "JA" },
+  "ko": { flag: "🇰🇷", name: "Korean", code: "KO" },
+  "pt": { flag: "🇵🇹", name: "Portuguese", code: "PT" },
+  "ru": { flag: "🇷🇺", name: "Russian", code: "RU" },
+  "hi": { flag: "🇮🇳", name: "Hindi", code: "HI" },
+  "zh": { flag: "🇨🇳", name: "Chinese", code: "ZH" },
+  "vi": { flag: "🇻🇳", name: "Vietnamese", code: "VI" },
+  "he": { flag: "🇮🇱", name: "Hebrew", code: "HE" },
+  "nl": { flag: "🇳🇱", name: "Dutch", code: "NL" },
+  "cs": { flag: "🇨🇿", name: "Czech", code: "CS" },
+  "da": { flag: "🇩🇰", name: "Danish", code: "DA" },
+  "pl": { flag: "🇵🇱", name: "Polish", code: "PL" },
+  "no": { flag: "🇳🇴", name: "Norwegian", code: "NO" },
+  "sv": { flag: "🇸🇪", name: "Swedish", code: "SV" },
+  "th": { flag: "🇹🇭", name: "Thai", code: "TH" },
+  "tr": { flag: "🇹🇷", name: "Turkish", code: "TR" },
+  "bg": { flag: "🇧🇬", name: "Bulgarian", code: "BG" },
+  "el": { flag: "🇬🇷", name: "Greek", code: "EL" },
+  "et": { flag: "🇪🇪", name: "Estonian", code: "ET" },
+  "fi": { flag: "🇫🇮", name: "Finnish", code: "FI" },
+  "hr": { flag: "🇭🇷", name: "Croatian", code: "HR" },
+  "hu": { flag: "🇭🇺", name: "Hungarian", code: "HU" },
+  "lt": { flag: "🇱🇹", name: "Lithuanian", code: "LT" },
+  "lv": { flag: "🇱🇻", name: "Latvian", code: "LV" },
+  "ro": { flag: "🇷🇴", name: "Romanian", code: "RO" },
+  "sk": { flag: "🇸🇰", name: "Slovak", code: "SK" },
+  "uk": { flag: "🇺🇦", name: "Ukrainian", code: "UK" },
+  "mt": { flag: "🇲🇹", name: "Maltese", code: "MT" },
+  "sl": { flag: "🇸🇮", name: "Slovenian", code: "SL" },
+  "multilingual": { flag: "🌐", name: "Multilingual", code: "MULTI" }
+};
+
+function formatDmLanguageCapsule(langStr) {
+  const match = String(langStr || "").match(/\(([^)]+)\)/);
+  const code = match ? match[1].toLowerCase().trim() : String(langStr || "").toLowerCase().trim();
+  const info = DM_LANGUAGE_DETAILS[code];
+  const flag = info ? info.flag : "🌐";
+  const name = info ? info.name : String(langStr || "").replace(/\s*\([^)]*\)/, "").trim();
+  const codeBadge = info ? info.code : (match ? match[1].toUpperCase() : "");
+
+  return `
+    <span class="dm-lang-capsule" title="${escapeHtml(name)} speech recognition supported">
+      <span class="dm-lang-flag">${flag}</span>
+      <span class="dm-lang-name">${escapeHtml(name)}</span>
+      ${codeBadge ? `<span class="dm-lang-code">${escapeHtml(codeBadge)}</span>` : ""}
+    </span>
+  `;
+}
+
+function getDmUserFriendlyDescription(m) {
+  const isPolish = m.category === "voice_polishing" || String(m.tag || "").toLowerCase().includes("polish");
+  if (isPolish) {
+    return "Ultra-fast voice cleanup assistant. It automatically removes speech fillers like 'um', 'uh', repeated words, and pauses from your voice dictation before pasting clean text into your apps.";
+  }
+  if (m.is_multilingual) {
+    return "High-performance multilingual voice dictation engine. Accurately transcribes 35 worldwide languages with natural cadence and accents directly on your device, requiring zero cloud connectivity.";
+  }
+  return "Accurate, instant speech-to-text dictation engineered specifically for English speech. Runs entirely on your computer for zero latency, complete privacy, and no internet requirements.";
+}
+
 function setDownloadableModelsFilter(filter) {
   vfDownloadableModelsFilter = filter || "all";
   ["all", "stt", "voice_polishing"].forEach(f => {
@@ -8359,15 +8457,12 @@ function setDownloadableModelsFilter(filter) {
     if (btn) {
       if (f === vfDownloadableModelsFilter) {
         btn.classList.add("active");
-        btn.style.background = "var(--primary-orange, #f97316)";
-        btn.style.color = "#000000";
-        btn.style.borderColor = "var(--primary-orange, #f97316)";
       } else {
         btn.classList.remove("active");
-        btn.style.background = "var(--bg-card, rgba(255,255,255,0.05))";
-        btn.style.color = "var(--text-muted, #9ca3af)";
-        btn.style.borderColor = "var(--border-color, rgba(255,255,255,0.1))";
       }
+      btn.style.background = "";
+      btn.style.color = "";
+      btn.style.borderColor = "";
     }
   });
   renderVoiceDownloadableModels();
@@ -8457,92 +8552,53 @@ function renderVoiceDownloadableModels() {
     const isDownloading = m.status === "downloading";
     const isPolish = m.category === "voice_polishing" || String(m.tag || "").toLowerCase().includes("polish");
 
-    const isActiveSTT = !isPolish && isDownloaded && (
-      activeSTT === m.full_id ||
-      activeSTT === `local/${m.id}` ||
-      activeSTT === m.id ||
-      activeSTT.endsWith(m.filename)
-    );
-    const isActivePolish = isPolish && isDownloaded && (
-      activePolish === m.full_id ||
-      activePolish === `local/${m.id}` ||
-      activePolish === m.id ||
-      activePolish.endsWith(m.filename)
-    );
-
     const cleanId = String(m.id).replace(/[^a-zA-Z0-9_-]/g, "_");
     const pct = Number(m.progress || 0).toFixed(1);
     const downloadedMb = Number(m.downloaded_mb != null ? m.downloaded_mb : ((m.downloaded_bytes || 0) / (1024 * 1024))).toFixed(1);
     const totalMb = Number(m.total_mb != null ? m.total_mb : m.size_mb).toFixed(1);
-    const remainingMb = Number(m.remaining_mb != null ? m.remaining_mb : Math.max(0, totalMb - downloadedMb)).toFixed(1);
     const speed = m.speed_display || "";
     const eta = m.eta_display || "";
 
-    const statusText = isDownloading
-      ? `Downloading ${pct}%`
-      : isDownloaded
-        ? "Downloaded"
-        : (m.status === "failed" ? (m.error ? `Failed: ${m.error}` : "Download failed") : `${m.size_display} · Not downloaded`);
-
-    const tagBadge = isPolish
-      ? `<span style="font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); margin-left: 6px;">Voice Polishing</span>`
-      : `<span style="font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); margin-left: 6px;">Speech-to-Text (STT)</span>`;
-
     return `
-      <div class="provider-card-item downloadable-model-card" id="dm-card-${cleanId}" onclick="openDownloadableModelDetail('${escapeJs(m.id)}')" style="cursor: pointer; flex-direction: column; align-items: stretch;">
-        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-          <div class="provider-card-left" style="flex: 1; min-width: 0;">
-            <div class="provider-card-logo dm-compact-logo" style="flex-shrink: 0;">
+      <div class="provider-card-item flow-card downloadable-model-card" id="dm-card-${cleanId}" onclick="openDownloadableModelDetail('${escapeJs(m.id)}')" title="${escapeHtml(m.name)}" style="cursor: pointer;">
+        <div class="dm-card-main-row">
+          <div class="provider-card-left">
+            <div class="provider-card-logo dm-compact-logo" style="background: ${isPolish ? 'rgba(168, 85, 247, 0.12)' : 'rgba(59, 130, 246, 0.12)'}; color: ${isPolish ? '#c084fc' : '#60a5fa'}; border: 1px solid ${isPolish ? 'rgba(168, 85, 247, 0.25)' : 'rgba(59, 130, 246, 0.25)'};">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.93V17a1 1 0 0 1-2 0v-.07A7.003 7.003 0 0 1 5.07 11H5a1 1 0 0 1 0-2h.07A7.003 7.003 0 0 1 11 5.07V5a1 1 0 0 1 2 0v.07A7.003 7.003 0 0 1 18.93 11H19a1 1 0 0 1 0 2h-.07A7.003 7.003 0 0 1 13 16.93z"/>
               </svg>
             </div>
-            <div class="provider-card-info" style="min-width: 0; flex: 1;">
-              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-                <span class="provider-card-name dm-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(m.name)}</span>
-                ${tagBadge}
-              </div>
-              <span class="provider-card-status">
+            <div class="provider-card-info">
+              <span class="provider-card-name dm-title" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
+              <span class="provider-card-status dm-status-line">
                 <span class="status-dot-indicator ${isDownloaded ? 'connected' : (isDownloading ? 'downloading' : '')}"></span>
-                ${escapeHtml(statusText)}
+                <span class="dm-category-text">${isPolish ? 'Voice Polishing' : 'Speech-to-Text'}</span>
               </span>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;" onclick="event.stopPropagation()">
+          <div class="dm-card-actions" onclick="event.stopPropagation()">
             ${isDownloading
-              ? `<button type="button" class="dm-card-cancel-btn" onclick="cancelDownloadModel('${escapeJs(m.id)}')">✕ Cancel</button>`
+              ? `<button type="button" class="dm-card-cancel-btn dm-card-action-btn" onclick="cancelDownloadModel('${escapeJs(m.id)}')">✕ Cancel</button>`
               : isDownloaded
-                ? `
-                    ${isPolish
-                      ? (isActivePolish
-                          ? `<span class="dm-active-stt-pill" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border-color: rgba(168, 85, 247, 0.4);">★ Active Polish</span>`
-                          : `<button type="button" class="btn-secondary dm-card-action-btn" onclick="selectDownloadableModelAsPolish('${escapeJs(m.id)}')">Set as Polish</button>`
-                        )
-                      : (isActiveSTT
-                          ? `<span class="dm-active-stt-pill">★ Active STT</span>`
-                          : `<button type="button" class="btn-secondary dm-card-action-btn" onclick="selectDownloadableModelAsSTT('${escapeJs(m.id)}')">Set as STT</button>`
-                        )
-                    }
-                    <button type="button" class="dm-delete-btn dm-card-action-btn" onclick="openDeleteConfirmModal('${escapeJs(m.id)}')">🗑️ Delete</button>
-                  `
-                : `<button type="button" class="btn-primary dm-card-action-btn" style="background: #76b900; border-color: #76b900; color: #000; font-weight: 700;" onclick="startDownloadModel('${escapeJs(m.id)}')"><span>↓</span> Download</button>`
+                ? `<button type="button" class="dm-delete-icon-btn" title="Delete model from PC" aria-label="Delete model" onclick="openDeleteConfirmModal('${escapeJs(m.id)}')">🗑️</button>`
+                : `<button type="button" class="btn-primary dm-card-action-btn dm-download-btn" onclick="startDownloadModel('${escapeJs(m.id)}')"><span>↓</span> Download</button>`
             }
             <span class="dm-compact-chevron" style="cursor: pointer;" onclick="openDownloadableModelDetail('${escapeJs(m.id)}')">›</span>
           </div>
         </div>
         ${isDownloading ? `
-          <div class="dm-card-progress-box">
-            <div class="dm-progress-track" style="margin-bottom: 4px;">
-              <div class="dm-progress-bar" style="width: ${Math.min(100, Math.max(0, pct))}%;"></div>
+          <div class="dm-card-progress-box" style="margin-top: 8px; width: 100%;">
+            <div class="dm-progress-track" style="margin-bottom: 4px; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden;">
+              <div class="dm-progress-bar" style="width: ${Math.min(100, Math.max(0, pct))}%; height: 100%; background: #76b900; transition: width 0.3s ease;"></div>
             </div>
-            <div class="dm-card-stats">
+            <div class="dm-card-stats" style="display: flex; justify-content: space-between; font-size: 10px; color: var(--polish-muted);">
               <span><strong>${downloadedMb} / ${totalMb} MB</strong></span>
               <span><strong style="color: #60a5fa;">${speed || 'Starting...'}</strong>${eta ? ' · ' + eta : ''}</span>
             </div>
           </div>
         ` : ''}
         ${!isDownloading && !isDownloaded && m.status === "failed" && m.error ? `
-          <div class="dm-card-progress-box">
+          <div class="dm-card-progress-box" style="margin-top: 8px; width: 100%;">
             <div style="font-size: 11px; color: #ef4444; margin-bottom: 4px;">⚠️ ${escapeHtml(m.error)}</div>
             <button type="button" class="btn-secondary dm-card-action-btn" style="padding: 3px 8px !important; font-size: 11px !important;" onclick="event.stopPropagation(); startDownloadModel('${escapeJs(m.id)}')">↻ Retry Download</button>
           </div>
@@ -8593,8 +8649,8 @@ function renderDownloadableModelDetail(modelId) {
     activePolish === m.id ||
     activePolish.endsWith(m.filename)
   );
-  const languagesCount = (m.languages || []).length;
-  const languagesSummary = m.is_multilingual ? `Multilingual (${languagesCount})` : `English (1)`;
+  const languagesList = Array.isArray(m.languages) ? m.languages : ["English (en)"];
+  const languagesCount = languagesList.length;
 
   const pct = Number(m.progress || 0).toFixed(1);
   const downloadedMb = Number(m.downloaded_mb != null ? m.downloaded_mb : ((m.downloaded_bytes || 0) / (1024 * 1024))).toFixed(1);
@@ -8606,24 +8662,67 @@ function renderDownloadableModelDetail(modelId) {
   const nameEl = document.getElementById("dm-detail-name");
   if (nameEl) nameEl.textContent = m.name;
   const subEl = document.getElementById("dm-detail-sub");
-  if (subEl) subEl.textContent = isDownloading
-    ? `Downloading ${pct}% · ${downloadedMb} / ${totalMb} MB (${remainingMb} MB remaining)`
-    : isDownloaded
-      ? (isPolish
-          ? (isActivePolish ? "Ready / Downloaded · Active Voice Polish Engine" : "Ready / Downloaded · Saved to PC")
-          : (isActiveSTT ? "Ready / Downloaded · Active STT Engine" : "Ready / Downloaded · Saved to PC"))
-      : "Not downloaded";
+  if (subEl) {
+    if (isDownloading) {
+      subEl.textContent = `Downloading ${pct}% · ${downloadedMb} / ${totalMb} MB (${remainingMb} MB remaining)`;
+    } else if (isDownloaded) {
+      subEl.textContent = isPolish
+        ? "100% Offline Voice Polishing · Cleans transcriptions locally on your PC"
+        : "100% Offline Speech-to-Text · Real-time private voice dictation";
+    } else {
+      subEl.textContent = isPolish
+        ? "Offline Voice Polishing · Removes hesitations and speech clutter locally"
+        : "Offline Speech-to-Text · Fast private dictation without internet";
+    }
+  }
+
+  const friendlyDesc = getDmUserFriendlyDescription(m);
 
   const infoEl = document.getElementById("dm-detail-info");
   if (infoEl) {
     infoEl.innerHTML = `
-      <div class="dm-detail-row"><span>Size</span><strong style="color: var(--primary-orange);">${escapeHtml(m.size_display)}</strong></div>
-      <div class="dm-detail-row"><span>Format</span><strong>${escapeHtml(m.format || (isPolish ? "Local GGUF (Q4_0)" : "Local GGUF (Q8_0)"))}</strong></div>
-      <div class="dm-detail-row"><span>Task / Engine</span><strong style="color: ${isPolish ? '#c084fc' : '#60a5fa'};">${escapeHtml(isPolish ? 'Voice Polishing' : 'Speech-to-Text (STT)')}</strong></div>
-      <div class="dm-detail-row"><span>Repository</span><a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" class="dm-repo-link"><span>Hugging Face</span> ↗</a></div>
-      <div class="dm-detail-row"><span>Languages</span><strong>${escapeHtml(languagesSummary)}</strong></div>
-      <div class="dm-lang-tags" style="margin-top: 4px;">${(m.languages || []).map(l => `<span class="dm-lang-pill">${escapeHtml(l)}</span>`).join("")}</div>
-      ${m.description ? `<p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 10px 0 0;">${escapeHtml(m.description)}</p>` : ""}
+      <div class="dm-desc-paragraph">
+        ${escapeHtml(friendlyDesc)}
+      </div>
+
+      <div class="dm-feature-grid">
+        <div class="dm-feature-card">
+          <div class="dm-feature-icon-row">
+            <span>🛡️</span> <span>100% Private</span>
+          </div>
+          <div class="dm-feature-desc">Runs entirely on your PC. Voice audio never leaves your computer.</div>
+        </div>
+        <div class="dm-feature-card">
+          <div class="dm-feature-icon-row">
+            <span>⚡</span> <span>Instant Speed</span>
+          </div>
+          <div class="dm-feature-desc">Real-time local streaming with zero internet lag or API rate limits.</div>
+        </div>
+        <div class="dm-feature-card">
+          <div class="dm-feature-icon-row">
+            <span>💾</span> <span>${escapeHtml(m.size_display)}</span>
+          </div>
+          <div class="dm-feature-desc">Compact local storage footprint, permanently saved on your drive.</div>
+        </div>
+        <div class="dm-feature-card">
+          <div class="dm-feature-icon-row">
+            <span>🌐</span> <span>Zero Internet</span>
+          </div>
+          <div class="dm-feature-desc">Works anywhere, including offline, airplane mode, or spotty networks.</div>
+        </div>
+      </div>
+
+      <div class="dm-lang-section">
+        <div class="dm-lang-header">
+          <div class="dm-lang-title">
+            <span>Supported Languages</span>
+            <span class="dm-lang-count-badge">${languagesCount} ${languagesCount === 1 ? 'language' : 'languages'}</span>
+          </div>
+        </div>
+        <div class="dm-lang-container">
+          ${languagesList.map(l => formatDmLanguageCapsule(l)).join("")}
+        </div>
+      </div>
     `;
   }
 
@@ -8631,9 +8730,9 @@ function renderDownloadableModelDetail(modelId) {
   if (actionEl) {
     if (isDownloading) {
       actionEl.innerHTML = `
-        <div class="dm-download-active-card">
+        <div class="dm-install-card">
           <div class="dm-progress-header">
-            <span class="dm-progress-title">Downloading · <strong style="color: #76b900;">${pct}%</strong></span>
+            <span class="dm-progress-title">Downloading Model · <strong style="color: #76b900;">${pct}%</strong></span>
             <span class="dm-progress-eta">${escapeHtml(eta)}</span>
           </div>
           <div class="dm-progress-track">
@@ -8646,63 +8745,88 @@ function renderDownloadableModelDetail(modelId) {
             </div>
             <div class="dm-metric">
               <span class="dm-metric-label">Remaining</span>
-              <strong class="dm-metric-val" style="color: var(--primary-orange);">${remainingMb} MB remaining</strong>
+              <strong class="dm-metric-val" style="color: var(--primary-orange, #f97316);">${remainingMb} MB</strong>
             </div>
             <div class="dm-metric">
-              <span class="dm-metric-label">Download Speed</span>
+              <span class="dm-metric-label">Speed</span>
               <strong class="dm-metric-val" style="color: #60a5fa;">${escapeHtml(speed || "Connecting...")}</strong>
             </div>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
-            <span style="font-size: 11px; color: var(--text-muted);">Saving whole model directly to your PC</span>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--polish-line);">
+            <span style="font-size: 11.5px; color: var(--polish-muted);">Saving model directly into your Voice Flow storage</span>
             <button type="button" class="dm-card-cancel-btn" style="padding: 6px 14px; font-size: 11.5px;" onclick="cancelDownloadModel('${escapeJs(m.id)}')">✕ Cancel Download</button>
           </div>
         </div>
       `;
     } else if (isDownloaded) {
       actionEl.innerHTML = `
-        <div class="dm-downloaded-card">
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <span class="dm-ready-status">
-                <span class="status-dot-indicator connected"></span>
-                <strong>Ready / Downloaded</strong>
-              </span>
-              <span style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(m.size_display)} · Saved to PC</span>
+        <div class="dm-install-card">
+          <div class="dm-install-main-row">
+            <div class="dm-install-status">
+              <span class="status-dot-indicator connected" style="width: 10px; height: 10px;"></span>
+              <div class="dm-install-status-text">
+                <span class="dm-install-status-title">Ready on your PC</span>
+                <span class="dm-install-status-sub">${escapeHtml(m.size_display)} · Saved in offline storage</span>
+              </div>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="dm-install-actions">
               ${isPolish
                 ? (isActivePolish
-                    ? `<span class="dm-active-stt-pill" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border-color: rgba(168, 85, 247, 0.4);">★ Active Polish Model</span>`
-                    : `<button type="button" class="btn-primary" style="padding: 6px 14px; font-size: 12px; background: #a855f7; border-color: #a855f7; color: #fff; font-weight: 700;" onclick="selectDownloadableModelAsPolish('${escapeJs(m.id)}')">Set as Polish Model</button>`
+                    ? `<span class="dm-active-badge-large">✓ Currently Active Polish Engine</span>`
+                    : `<button type="button" class="btn-primary" style="padding: 8px 16px; font-size: 12px; font-weight: 650;" onclick="selectDownloadableModelAsPolish('${escapeJs(m.id)}')">Activate as Polish Engine</button>`
                   )
                 : (isActiveSTT
-                    ? `<span class="dm-active-stt-pill">★ Active STT Model</span>`
-                    : `<button type="button" class="btn-primary" style="padding: 6px 14px; font-size: 12px; background: #76b900; border-color: #76b900; color: #000; font-weight: 700;" onclick="selectDownloadableModelAsSTT('${escapeJs(m.id)}')">Set as STT</button>`
+                    ? `<span class="dm-active-badge-large">✓ Currently Active Speech Engine</span>`
+                    : `<button type="button" class="btn-primary" style="padding: 8px 16px; font-size: 12px; font-weight: 650;" onclick="selectDownloadableModelAsSTT('${escapeJs(m.id)}')">Activate as Speech Engine</button>`
                   )
               }
-              <button type="button" class="dm-delete-btn" style="padding: 6px 12px; font-size: 11.5px;" onclick="openDeleteConfirmModal('${escapeJs(m.id)}')">🗑️ Delete Model</button>
+              <button type="button" class="btn-secondary dm-delete-btn" style="padding: 8px 14px; font-size: 12px;" onclick="openDeleteConfirmModal('${escapeJs(m.id)}')">🗑️ Remove from PC</button>
             </div>
           </div>
-          ${m.local_path ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; font-family: monospace; word-break: break-all;">Location: ${escapeHtml(m.local_path)}</div>` : ""}
+          <details class="dm-advanced-toggle">
+            <summary style="cursor: pointer; font-size: 11.5px; color: var(--polish-muted);">Advanced Details &amp; Location</summary>
+            <div class="dm-advanced-content">
+              <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
+              <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+              ${m.local_path ? `<div><strong>Local Path:</strong> <code style="word-break: break-all; font-size: 10.5px;">${escapeHtml(m.local_path)}</code></div>` : ""}
+            </div>
+          </details>
         </div>
       `;
     } else {
       actionEl.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <button type="button" class="dm-btn-download" onclick="startDownloadModel('${escapeJs(m.id)}')">
-            <span>↓</span> Download Model (${escapeHtml(m.size_display)})
-          </button>
+        <div class="dm-install-card">
+          <div class="dm-install-main-row">
+            <div class="dm-install-status">
+              <span class="status-dot-indicator" style="width: 10px; height: 10px; background: var(--polish-muted);"></span>
+              <div class="dm-install-status-text">
+                <span class="dm-install-status-title">Not downloaded yet</span>
+                <span class="dm-install-status-sub">${escapeHtml(m.size_display)} download · Zero internet required once saved</span>
+              </div>
+            </div>
+            <div class="dm-install-actions">
+              <button type="button" class="dm-btn-download-primary" onclick="startDownloadModel('${escapeJs(m.id)}')">
+                <span>↓</span> Download Model (${escapeHtml(m.size_display)})
+              </button>
+            </div>
+          </div>
           ${m.status === "failed" && m.error ? `
-            <div class="dm-error-box">
-              <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; margin-bottom: 2px;">
+            <div class="dm-error-box" style="margin-top: 10px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; margin-bottom: 2px; color: #ef4444;">
                 <span>⚠️</span> Download Failed
               </div>
-              <div>${escapeHtml(m.error)}</div>
-              <div style="margin-top: 6px; font-size: 11px; color: var(--text-muted);">Please check your connection and click Retry below.</div>
+              <div style="font-size: 12px; color: var(--polish-ink);">${escapeHtml(m.error)}</div>
+              <div style="margin-top: 6px; font-size: 11px; color: var(--polish-muted);">Please check your network connection and click Retry below.</div>
               <button type="button" class="btn-secondary dm-card-action-btn" style="margin-top: 8px;" onclick="startDownloadModel('${escapeJs(m.id)}')">↻ Retry Download</button>
             </div>
           ` : ""}
+          <details class="dm-advanced-toggle">
+            <summary style="cursor: pointer; font-size: 11.5px; color: var(--polish-muted);">Advanced Details</summary>
+            <div class="dm-advanced-content">
+              <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
+              <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+            </div>
+          </details>
         </div>
       `;
     }
@@ -10188,4 +10312,85 @@ async function initPlatformAdaptation() {
     console.debug("[PLATFORM] Platform adaptation check skipped:", err);
   }
 }
+
+// =============================================================================
+// Full App UI Auto-Refresh & State Reset on Window Restore / Desktop Launch
+// =============================================================================
+let _lastAppRefreshGeneration = null;
+
+async function refreshFullAppUI(force = false) {
+  try {
+    const res = await fetch("/api/app/ui-refresh-status", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.success) {
+      const currentGen = data.generation || 0;
+      if (force || _lastAppRefreshGeneration === null || currentGen !== _lastAppRefreshGeneration) {
+        _lastAppRefreshGeneration = currentGen;
+
+        // 1. Reload Voice Flow dictation history
+        if (typeof loadHistory === "function") {
+          try { await loadHistory(); } catch (e) { console.debug("loadHistory refresh skipped:", e); }
+        }
+
+        // 2. Reload Audio Flow summary history
+        if (typeof loadAudioSummaryHistory === "function") {
+          try { await loadAudioSummaryHistory(); } catch (e) { console.debug("loadAudioSummaryHistory refresh skipped:", e); }
+        }
+
+        // 3. Reload Video Flow jobs and queue
+        if (typeof loadVideoFlow === "function") {
+          try { await loadVideoFlow(); } catch (e) { console.debug("loadVideoFlow refresh skipped:", e); }
+        }
+
+        // 4. Reload feature toggles & settings
+        if (typeof loadFeatureToggleStates === "function") {
+          try { await loadFeatureToggleStates(); } catch (e) {}
+        }
+        if (typeof loadStyleSettings === "function") {
+          try { await loadStyleSettings(); } catch (e) {}
+        }
+        if (typeof loadHotkeySettings === "function") {
+          try { await loadHotkeySettings(); } catch (e) {}
+        }
+        if (typeof loadAudioSummarySettings === "function") {
+          try { await loadAudioSummarySettings(); } catch (e) {}
+        }
+
+        // 5. Update connection status for NotebookLM
+        if (typeof updateAudioSummaryConnectionUI === "function") {
+          try { updateAudioSummaryConnectionUI(); } catch (e) {}
+        }
+
+        // 6. Reset any stuck UI states (recording badges, spinners)
+        const recordBtn = document.getElementById("record-btn");
+        if (recordBtn && recordBtn.classList.contains("recording")) {
+          recordBtn.classList.remove("recording");
+        }
+        const recordStatus = document.getElementById("record-status");
+        if (recordStatus && recordStatus.textContent.toLowerCase().includes("recording")) {
+          recordStatus.textContent = "Ready";
+        }
+      }
+    }
+  } catch (err) {
+    console.debug("[APP REFRESH] Check failed:", err);
+  }
+}
+
+try {
+  window.addEventListener("focus", () => {
+    refreshFullAppUI(true);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      refreshFullAppUI(true);
+    }
+  });
+  setInterval(() => {
+    if (document.visibilityState === "visible") {
+      refreshFullAppUI(false);
+    }
+  }, 4000);
+} catch (_) {}
 
