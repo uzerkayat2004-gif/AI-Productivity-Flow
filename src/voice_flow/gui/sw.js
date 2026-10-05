@@ -1,5 +1,5 @@
 // Voice Flow PWA Service Worker — Network-First Strategy (v38)
-const CACHE_NAME = "voice-flow-cache-v41";
+const CACHE_NAME = "voice-flow-cache-v43";
 const APP_SHELL = "/index.html";
 const ASSETS_TO_CACHE = [
   APP_SHELL,

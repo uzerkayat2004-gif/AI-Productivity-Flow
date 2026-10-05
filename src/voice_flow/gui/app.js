@@ -6257,7 +6257,102 @@ window.afToggleMenu = afToggleMenu;
 window.afCloseAllMenus = afCloseAllMenus;
 window.loadAudioSummaryHistory = loadAudioSummaryHistory;
 
+function initAudioLandingMotion() {
+  if (window._audioLandingMotionInitialized) return;
+  window._audioLandingMotionInitialized = true;
+
+  const page = document.getElementById("page-audioflow");
+  const scroller = document.querySelector(".main-content");
+  if (!page || !scroller || typeof window.matchMedia !== "function") return;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const cards = Array.from(page.querySelectorAll(".flow-mode"));
+  const illustrations = cards.map((card) => card.querySelector(".flow-mode-art")).filter(Boolean);
+  const active = new WeakSet();
+  const lastRun = new WeakMap();
+  const stopTimers = new WeakMap();
+  const pendingFrames = new WeakMap();
+  const cooldownMs = 1800;
+  let scrollTimer = 0;
+  let observer = null;
+
+  const isVisible = (card) => {
+    const art = card.querySelector(".flow-mode-art");
+    if (!art) return false;
+    const rect = art.getBoundingClientRect();
+    const view = scroller.getBoundingClientRect();
+    return rect.bottom > view.top && rect.top < view.bottom;
+  };
+  const stop = (card) => {
+    active.delete(card);
+    const timer = stopTimers.get(card);
+    if (timer) window.clearTimeout(timer);
+    stopTimers.delete(card);
+    const frame = pendingFrames.get(card);
+    if (frame) window.cancelAnimationFrame(frame);
+    pendingFrames.delete(card);
+    card.classList.remove("af-art-running");
+  };
+  const play = (card, force = false) => {
+    if (document.hidden || reducedMotion.matches || !isVisible(card)) return;
+    const now = Date.now();
+    if (active.has(card) || (!force && now - (lastRun.get(card) || 0) < cooldownMs)) return;
+    active.add(card);
+    lastRun.set(card, now);
+    card.classList.remove("af-art-running");
+    const frame = window.requestAnimationFrame(() => {
+      pendingFrames.delete(card);
+      if (active.has(card) && !document.hidden && !reducedMotion.matches && isVisible(card)) {
+        card.classList.add("af-art-running");
+        stopTimers.set(card, window.setTimeout(() => stop(card), 1550));
+      } else stop(card);
+    });
+    pendingFrames.set(card, frame);
+  };
+  const replayVisible = () => cards.forEach((card) => play(card));
+  const onScroll = () => {
+    if (scrollTimer) return;
+    scrollTimer = window.setTimeout(() => {
+      scrollTimer = 0;
+      replayVisible();
+    }, 140);
+  };
+  const updateMotionPreference = () => {
+    if (reducedMotion.matches) cards.forEach(stop);
+    else replayVisible();
+  };
+
+  if (typeof window.IntersectionObserver === "function") {
+    observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const card = entry.target.closest(".flow-mode");
+        if (!card) return;
+        if (entry.isIntersecting) play(card);
+        else stop(card);
+      });
+    }, { root: scroller, threshold: 0.28 });
+    illustrations.forEach((art) => observer.observe(art));
+  }
+  scroller.addEventListener("scroll", onScroll, { passive: true });
+  cards.forEach((card) => {
+    card.addEventListener("pointerenter", () => play(card, true), { passive: true });
+    card.addEventListener("focusin", () => play(card, true));
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) cards.forEach(stop);
+    else replayVisible();
+  });
+  if (typeof reducedMotion.addEventListener === "function") reducedMotion.addEventListener("change", updateMotionPreference);
+  else if (typeof reducedMotion.addListener === "function") reducedMotion.addListener(updateMotionPreference);
+  window.addEventListener("pagehide", () => {
+    if (observer) observer.disconnect();
+    if (scrollTimer) window.clearTimeout(scrollTimer);
+    cards.forEach(stop);
+  }, { once: true });
+  replayVisible();
+}
+
 function loadAudioFlowPage() {
+  initAudioLandingMotion();
   loadAudioProvidersOverview();
   loadExecAudioFlowPolicy();
   loadAudioSummarySettings();
