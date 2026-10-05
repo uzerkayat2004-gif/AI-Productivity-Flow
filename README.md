@@ -1,8 +1,8 @@
 <h1 align="center">🌊 AI Productivity Flow</h1>
 
 <p align="center">
-  <b>From text to video. From text to audio. From voice to text. Without switching apps.</b><br>
-  <i>A free, open-source desktop AI system for Windows and macOS designed to work inside your existing workflow.</i>
+  <b>Turn documents into video, text into audio, and voice into polished text — without switching apps.</b><br>
+  <i>A free, open-source desktop AI assistant for Windows and macOS designed to work seamlessly inside your existing workflow.</i>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/ai-productivity-flow-hero.png" alt="AI Productivity Flow Interface" width="920">
+  <img src="docs/assets/ai-productivity-flow-hero.png" alt="AI Productivity Flow Interface Banner" width="920">
 </p>
 
 ---
@@ -59,6 +59,12 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
 
 Video Flow transforms dense articles, technical notes, or documentation into structured, animated MP4 explainer videos with synchronized voiceover narration.
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/61afd3f3-d75b-4cff-8010-6a7f0d8657a9" controls width="100%"></video>
+  <br>
+  <sub>🎬 <b><a href="https://ai-productivity-flow.vercel.app/assets/video/videoflow_demo.mp4">Watch or download Video Flow demo (MP4)</a></b></sub>
+</p>
+
 ```
 Source Text / Notes
        │
@@ -84,6 +90,12 @@ Finished Explainer Video (.mp4 saved to Downloads + in-app player)
 ### 2. 🎧 Audio Flow — Spoken Readers & Multi-Depth Audio Summaries
 
 Audio Flow gives you two dedicated ways to absorb written content without eye strain:
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/d1bc3228-548b-43a0-882d-d81665ee20a3" controls width="100%"></video>
+  <br>
+  <sub>🎧 <b><a href="https://ai-productivity-flow.vercel.app/assets/video/audioflow_demo.mp4">Watch or download Audio Flow demo (MP4)</a></b></sub>
+</p>
 
 * **Read Mode (Spoken Explainer)**: An intelligent reader designed to articulate selected paragraphs, articles, or documentation naturally. Rather than robotic text playback, it speaks with natural human cadence, clear phrasing, and synchronized playback.
 * **Summary Mode (Multi-Depth Audio Summaries)**:

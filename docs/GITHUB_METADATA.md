@@ -3,7 +3,7 @@
 Canonical GitHub repository metadata for **AI Productivity Flow**.
 
 ## Description
-Open-source desktop AI that turns selected text into video or audio and voice into polished text — system-wide, local-first, BYOK.
+Turn documents into video, text into audio, and voice into polished text — directly from your desktop, without switching apps.
 
 ## Homepage
 https://ai-productivity-flow.vercel.app/
@@ -25,7 +25,7 @@ ai-productivity · desktop-app · windows · macos · voice-dictation · speech-
 
 ```bash
 gh repo edit uzerkayat2004-gif/AI-Productivity-Flow \
-  --description "Open-source desktop AI that turns selected text into video or audio and voice into polished text — system-wide, local-first, BYOK." \
+  --description "Turn documents into video, text into audio, and voice into polished text — directly from your desktop, without switching apps." \
   --homepage "https://ai-productivity-flow.vercel.app/" \
   --add-topic ai-productivity --add-topic desktop-app --add-topic windows --add-topic macos \
   --add-topic voice-dictation --add-topic speech-to-text --add-topic text-to-speech --add-topic tts \
