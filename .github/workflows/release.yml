@@ -32,7 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
-          $canonical = (Get-Content src/voice_flow/_version.py | Select-String 'VERSION\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          $canonical = (python -c "import sys; sys.path.insert(0, 'src'); from voice_flow._version import VERSION; print(VERSION)").Trim()
           Write-Host "Triggered Tag: $tag, Canonical Version: $canonical"
           if ($tag -ne $canonical) {
             Write-Error "Release tag 'v$tag' does not match canonical source version '$canonical' in src/voice_flow/_version.py!"
