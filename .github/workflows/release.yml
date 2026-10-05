@@ -180,18 +180,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download macOS Artifacts
+      - name: Download All Release Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: macos-release-artifacts
           path: release-assets/
-
-      - name: Download Windows Artifacts (if available)
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: windows-release-artifacts
-          path: release-assets/
+          merge-multiple: true
 
       - name: Prepare Release Notes & Verify Artifacts
         id: prep
@@ -207,9 +200,14 @@ jobs:
           tag="${{ github.ref_name }}"
           version="${tag#v}"
           
-          # Publish stable release
-          gh release create "$tag" \
-            release-assets/* \
-            --title "AI Productivity Flow $tag" \
-            --notes-file CHANGELOG.md \
-            --repo "${{ github.repository }}"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists; updating assets and notes..."
+            gh release upload "$tag" release-assets/* --clobber --repo "${{ github.repository }}"
+            gh release edit "$tag" --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
+          else
+            gh release create "$tag" \
+              release-assets/* \
+              --title "AI Productivity Flow $tag" \
+              --notes-file CHANGELOG.md \
+              --repo "${{ github.repository }}"
+          fi
