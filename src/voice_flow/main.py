@@ -1722,7 +1722,27 @@ class VoiceFlowApp:
                 used_stream_text = False
                 failure: Exception | None = None
                 part = ""
+                stream_input_incomplete = False
                 if use_streaming:
+                    try:
+                        recorder = getattr(self, "audio", None)
+                        stream_input_incomplete = bool(
+                            getattr(recorder, "stream_input_incomplete", False)
+                        )
+                    except Exception as exc:
+                        # If the recorder cannot establish completeness, use
+                        # the archived full recording as the safe source.
+                        log.warning(
+                            "[STREAM STT] recorder completeness probe failed (%s); using whole-buffer transcription.",
+                            exc,
+                        )
+                        stream_input_incomplete = True
+                    if stream_input_incomplete:
+                        log.warning(
+                            "[STREAM STT] recorder reports incomplete stream input; using whole-buffer transcription."
+                        )
+
+                if use_streaming and not stream_input_incomplete:
                     # A full-frame WebSocket session is one coherent provider
                     # request. It cannot return an out-of-order chunk prefix,
                     # so let its finalization use the whole release window

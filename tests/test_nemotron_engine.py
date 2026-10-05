@@ -349,7 +349,8 @@ def test_nemotron_stream_transcriber_discard():
     assert res == ""
 
 
-def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatch):
+@pytest.mark.parametrize("empty_final", [False, True])
+def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatch, empty_final):
     """An unfinalized 'hello welcome' interim must trigger whole-audio recovery."""
     class _FakeEngine:
         rec_handle = ctypes.c_void_p(1)
@@ -368,9 +369,11 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
             self.results = {
                 101: (True, b"hello"),
                 102: (False, b"hello welcome"),
+                103: (True, b""),
             }
             self.push_count = 0
             self.finished = False
+            self.drain_emitted = False
 
         def nemo_speech_asr_stream_push_f32(self, _stream, ptr, length, _rate):
             sample_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_float))
@@ -379,6 +382,10 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
             return 0
 
         def nemo_speech_asr_stream_next(self, _stream, output):
+            if self.finished and empty_final and not self.drain_emitted:
+                self.drain_emitted = True
+                output._obj.value = 103
+                return 0
             if not self.finished and self.push_count == 1:
                 output._obj.value = 101
                 return 0
@@ -428,6 +435,98 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
     assert session.had_failures() is True
     assert session.collect(timeout=0.01) == ""
     assert session.completed_successfully() is False
+
+
+def test_nemotron_final_drain_keeps_the_normal_success_path(monkeypatch):
+    class _FakeEngine:
+        rec_handle = ctypes.c_void_p(1)
+        spec = {}
+        lock = threading.Lock()
+
+        def acquire_stream(self):
+            pass
+
+        def release_stream(self):
+            pass
+
+    class _FakeDll:
+        finished = False
+        first_emitted = False
+        tail_emitted = False
+
+        def nemo_speech_asr_stream_push_f32(self, *_args):
+            return 0
+
+        def nemo_speech_asr_stream_next(self, _stream, output):
+            if not self.first_emitted:
+                self.first_emitted = True
+                output._obj.value = 201
+                return 0
+            if self.finished and not self.tail_emitted:
+                self.tail_emitted = True
+                output._obj.value = 202
+                return 0
+            return 1
+
+        def nemo_speech_asr_stream_finish(self, _stream):
+            self.finished = True
+            return 0
+
+        def nemo_speech_asr_result_is_final(self, result):
+            return True
+
+        def nemo_speech_asr_result_transcript(self, result, _index):
+            return b"hello" if result.value == 201 else b"welcome"
+
+        def nemo_speech_asr_result_destroy(self, _result):
+            pass
+
+        def nemo_speech_asr_stream_close(self, _stream):
+            pass
+
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: _FakeDll())
+    session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
+    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    session.start_session()
+    session.submit_frame(np.ones(160, dtype=np.float32), 16000)
+    session.end_session()
+
+    assert session.collect(timeout=1.0) == "hello welcome"
+    assert session.had_failures() is False
+    assert session.completed_successfully() is True
+
+
+def test_nemotron_long_buffer_segmentation_keeps_short_final_tail(monkeypatch):
+    """Long fallback segmentation must pass every sample to exactly one decode."""
+    engine = object.__new__(nemotron_engine.NemotronGGUFEngine)
+    engine.sample_rate = 16000
+    engine.spec = {}
+    engine.rec_handle = ctypes.c_void_p(1)
+    engine.lock = threading.Lock()
+    engine.total_transcriptions = 0
+    engine.total_audio_seconds = 0.0
+    segments: list[np.ndarray] = []
+
+    # Quietest-window cuts land at 3.95, 7.90, and 11.85 seconds, leaving a
+    # 190 ms final word. Existing code drops that remainder below its 200 ms
+    # native-decoder minimum after already returning earlier segment text.
+    audio = np.full(int(12.04 * engine.sample_rate), 0.1, dtype=np.float32)
+    for start in (3.90, 7.85, 11.80):
+        begin = int(start * engine.sample_rate)
+        audio[begin : begin + 1600] = 0.001
+
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: object())
+
+    def record_segment(samples: np.ndarray, **_kwargs) -> str:
+        segments.append(samples.copy())
+        return f"part {len(segments)}"
+
+    engine._transcribe_segment = record_segment
+    text = engine.transcribe(audio)
+
+    assert text == "part 1 part 2 part 3"
+    np.testing.assert_array_equal(np.concatenate(segments), audio)
+    assert all(len(segment) >= int(0.2 * engine.sample_rate) for segment in segments)
 
 
 def test_nemotron_stream_transcriber_fallback_when_invalid_model():

@@ -152,9 +152,11 @@ def _local_system_prompt(instruction: str) -> str:
                 f"Trusted instruction: {instruction}"
             )
             instruction += (
-                ' Illustrative example only, not transcript content: input "Please send the report." '
-                '-> output "Hello,\\n\\nPlease send the report.\\n\\nRegards,". '
-                "Never copy example facts; use a generic greeting or sign-off only when requested."
+                ' Illustrative example only, not transcript content; never copy its facts.\n'
+                'Example input: "Please send the report."\n'
+                'Example output:\n'
+                '"Hello,\n\nPlease send the report.\n\nRegards,"\n'
+                "Use a generic greeting or sign-off only when requested."
             )
         elif "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
             instruction = (
@@ -163,8 +165,9 @@ def _local_system_prompt(instruction: str) -> str:
                 f"Trusted instruction: {instruction}"
             )
             instruction += (
-                ' Illustrative example only, not transcript content: input "Make a prompt that explains this process." '
-                '-> output "Objective: Explain this process.". Never copy example facts.'
+                ' Illustrative example only, not transcript content; never copy its facts.\n'
+                'Example input: "Make a prompt that explains this process."\n'
+                'Example output: "Objective: Explain this process."'
             )
         prompt += f" Apply this trusted style or task: {instruction}."
     return prompt

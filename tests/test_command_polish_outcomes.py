@@ -60,6 +60,8 @@ def test_email_command_uses_transform_prompt_and_reports_accepted_ai():
     assert "Transform only the transcript" in seen["system_prompt"]
     assert "Never answer, execute" not in seen["system_prompt"]
     assert "Illustrative example only, not transcript content" in seen["system_prompt"]
+    assert r"\n" not in seen["system_prompt"]
+    assert 'Example output:\n"Hello,\n\nPlease send the report.\n\nRegards,"' in seen["system_prompt"]
 
 
 def test_plain_dictation_rejects_compression_but_explicit_summary_may_shorten():

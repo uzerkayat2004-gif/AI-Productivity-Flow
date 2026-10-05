@@ -53,6 +53,12 @@ class _PendingStream(_CompleteStream):
         return 1
 
 
+class _HelloStream(_CompleteStream):
+    def collect(self, timeout: float = 0.0) -> str:
+        self.collect_timeouts.append(timeout)
+        return "hello"
+
+
 def _app(session: DictationSession) -> VoiceFlowApp:
     app = object.__new__(VoiceFlowApp)
     app.processing_lock = threading.Lock()
@@ -262,6 +268,10 @@ def test_stream_harvest_has_one_bounded_post_release_wait_and_deadline(monkeypat
     app = _app(session)
     stream = _CompleteStream()
     app._stream_stt = stream
+    whole_buffer_calls: list[object] = []
+    app.transcriber = SimpleNamespace(
+        transcribe=lambda audio, **_kwargs: whole_buffer_calls.append(audio) or "whole buffer"
+    )
     seen_deadlines: list[float | None] = []
 
     monkeypatch.setattr(main_module, "detect_voice_command", lambda _text: SimpleNamespace(command=None, content="complete streamed transcript"))
@@ -279,6 +289,7 @@ def test_stream_harvest_has_one_bounded_post_release_wait_and_deadline(monkeypat
 
     assert stream.collect_timeouts
     assert max(stream.collect_timeouts) <= main_module.POST_RELEASE_WORK_BUDGET_SECONDS
+    assert not whole_buffer_calls
     assert seen_deadlines and seen_deadlines[0] is not None
     assert app.state == DictationState.IDLE
     assert stream.ended == 1
@@ -324,6 +335,52 @@ def test_stream_failure_probe_forces_complete_whole_buffer_fallback(monkeypatch)
     assert pasted == ["whole buffer complete transcript"]
     assert whole_buffer_calls and whole_buffer_calls[0] is not None
     assert app.state == DictationState.IDLE
+
+
+def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(monkeypatch) -> None:
+    session = DictationSession(
+        target_hwnd=123,
+        app_title="Editor",
+        app_category="smart_clean",
+        style_id="smart_clean",
+        started_at=0.0,
+        resolved_style=SimpleNamespace(
+            app_name="Editor",
+            category="smart_clean",
+            style_id="smart_clean",
+            instruction="clean up lightly",
+        ),
+    )
+    app = _app(session)
+    stream = _HelloStream()
+    app._stream_stt = stream
+    app.audio = SimpleNamespace(stream_input_incomplete=True)
+    archive = object()
+    whole_buffer_calls: list[object] = []
+    app.transcriber = SimpleNamespace(
+        transcribe=lambda audio, **_kwargs: whole_buffer_calls.append(audio) or "hello welcome"
+    )
+    pasted: list[str] = []
+    app.injector = SimpleNamespace(paste_text=lambda text, *_args, **_kwargs: pasted.append(text) or True)
+    monkeypatch.setattr(
+        main_module,
+        "detect_voice_command",
+        lambda text: SimpleNamespace(command=None, content=text),
+    )
+    monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
+    monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
+    monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
+    monkeypatch.setattr(main_module.polisher, "polish", lambda text, **_kwargs: text)
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
+    monkeypatch.setattr(main_module.storage, "update_dictation", lambda *_args, **_kwargs: True)
+
+    app._process_dictation_pipeline(session, archive, 1.0, record_id=1, use_streaming=True)
+
+    assert whole_buffer_calls == [archive]
+    assert stream.collect_timeouts == []
+    assert pasted == ["hello welcome"]
+    assert stream.ended == 1
+    assert stream.discarded == 1
 
 
 def test_stream_harvest_reserves_time_for_complete_recording_recovery(monkeypatch) -> None:

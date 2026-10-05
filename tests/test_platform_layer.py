@@ -282,12 +282,12 @@ def test_build_macos_app_script_runs():
     assert res.returncode == 0, f"build_macos_app.py failed: {res.stderr}"
 
     dist_dir = Path(__file__).resolve().parent.parent / "dist"
-    app_bundle = dist_dir / "Voice Flow.app"
-    zip_bundle = dist_dir / "VoiceFlow-macOS-unsigned.zip"
+    app_bundle = dist_dir / "AI Productivity Flow.app"
+    zip_bundle = dist_dir / "AI-Productivity-Flow-macOS.zip"
 
     assert app_bundle.is_dir()
     assert (app_bundle / "Contents" / "Info.plist").is_file()
-    assert (app_bundle / "Contents" / "MacOS" / "voice-flow-launcher").is_file()
+    assert (app_bundle / "Contents" / "MacOS" / "ai-productivity-flow-launcher").is_file()
     assert zip_bundle.is_file()
     assert zip_bundle.stat().st_size > 1000
     assert (app_bundle / "Contents" / "Resources" / "AppIcon.icns").is_file()

@@ -746,14 +746,17 @@ def _command_system_prompt(
     )
     if command_format == "email":
         prompt += (
-            ' Illustrative example only, not transcript content: input "Please send the report." '
-            '-> output "Hello,\\n\\nPlease send the report.\\n\\nRegards,". '
-            "Never copy example facts; use a generic greeting or sign-off only when requested."
+            ' Illustrative example only, not transcript content; never copy its facts.\n'
+            'Example input: "Please send the report."\n'
+            'Example output:\n'
+            '"Hello,\n\nPlease send the report.\n\nRegards,"\n'
+            "Use a generic greeting or sign-off only when requested."
         )
     elif task == "prompt":
         prompt += (
-            ' Illustrative example only, not transcript content: input "Make a prompt that explains this process." '
-            '-> output "Objective: Explain this process.". Never copy example facts.'
+            ' Illustrative example only, not transcript content; never copy its facts.\n'
+            'Example input: "Make a prompt that explains this process."\n'
+            'Example output: "Objective: Explain this process."'
         )
     return prompt
 

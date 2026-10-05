@@ -840,6 +840,13 @@ class NemotronGGUFEngine:
                                     split_point = offset + chunk_samples
                             else:
                                 split_point = offset + chunk_samples
+                            # Keep a short final remainder in the preceding
+                            # segment. The native decoder rejects segments
+                            # below 200 ms, and silently skipping one after
+                            # earlier text succeeded loses a trailing word.
+                            min_segment_samples = int(0.2 * self.sample_rate)
+                            if 0 < n_samples - split_point < min_segment_samples:
+                                split_point = n_samples
                             seg = wav[offset:split_point]
                             offset = split_point
 
@@ -1209,7 +1216,7 @@ class NemotronStreamTranscriber:
                     if is_fin:
                         if t:
                             committed_transcripts.append(t)
-                        interim_latest = ""
+                            interim_latest = ""
                     elif t:
                         interim_latest = t
                 finally:

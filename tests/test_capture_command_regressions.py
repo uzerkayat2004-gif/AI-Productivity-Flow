@@ -101,6 +101,9 @@ def test_startup_replay_overflow_flags_stream_incomplete_and_keeps_archive(monke
     assert recorder.stream_input_incomplete is True
     np.testing.assert_array_equal(np.concatenate(recorder._buffer), np.concatenate((first, arriving_during_replay)))
 
+    recorder.begin_stream_input_buffering()
+    assert recorder.stream_input_incomplete is False
+
 
 def test_stream_sink_exception_flags_incomplete_but_retains_recorded_frame() -> None:
     recorder = AudioRecorder()
