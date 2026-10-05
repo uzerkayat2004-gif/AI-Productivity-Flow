@@ -1,116 +1,82 @@
-# 🎬 Video Flow Architecture: Hybrid Rendering Engine
+# 🎬 Video Flow Architecture: Multimodal Explainer Pipeline
 
-> **Version:** 2.0-hybrid  
-> **Status:** Implemented & Verified Baseline  
-> **Primary Runtime:** Python 3.10+ Orchestration & Remotion 4 / Canvas / WebGL Production  
-> **Canonical Contract:** `src/voice_flow/video_flow_engine/contracts.py` & `src/voice_flow/video_generation/contracts.py`
+> **Canonical System Documentation**  
+> **Package:** `voice_flow.video_flow_engine`  
+> **Status:** Production v1.0.0 Architecture  
 
 ---
 
-## 1. Core Architectural Philosophy
+## 1. Core Architectural Pipeline
 
-Video Flow is a source-grounded visual explanation system. Its objective is simple:
+Video Flow converts articles, technical documentation, or selected text into structured visual explainer videos with synchronized voiceover narration. 
 
-> **The viewer should understand the source content without having to read it.**
+Rather than relying on unconstrained generative video prompting, Video Flow operates through a controlled four-stage pipeline:
 
-Rather than treating video generation as a black-box text-to-video prompt, Video Flow separates **Understanding & Pedagogy (The Brain)** from **Visual Production (The Renderers)**:
-
-```text
-Source Input (Text, URL, Document, Code)
-                    ↓
-        Evidence Extraction & Grounding
-   (Claims, Entities, Spans, Provenance, Uncertainty)
-                    ↓
-           Video Flow Brain & Director
-      (Pedagogical Planning & Scene Programs)
-                    ↓
-            Hybrid Render Router
-       ↙             ↓             ↘
-Procedural 2D    WebGL / 3D    Generative Video
-  (Remotion)      (Canvas)       (Veo / Future)
-       ↓             ↓             ↓
-      ───────────────────────────────
-                    ↓
-          Narration & Audio Sync
-                    ↓
-           Automated QA & Repair
-                    ↓
-           Final Explainer MP4
+```
+[1. Source Input]
+   Text selection, markdown, PDF, or Google NotebookLM document
+         │
+         ▼
+[2. AI Concept & Pedagogy Planning]
+   Extract core thesis, conceptual chunks, key entities, and relationships
+   (Gemini, OpenAI, Claude, Groq, or Local Fallback)
+         │
+         ▼
+[3. Creative Director & Scene Authoring]
+   Map concepts into pedagogical scene programs (statement, process, diagram, metrics)
+   Apply visual hierarchy, pacing, layout solver, and visual signature
+         │
+         ▼
+[4. Controlled Rendering & Audio Synthesis]
+   Narova / Code2Video / Canvas-WebGL composition + TTS voiceover synthesis
+   (Edge TTS, Cartesia, ElevenLabs, OpenAI TTS)
+         │
+         ▼
+[5. Finished Explainer Video]
+   1080p MP4 with synchronized narration and captions, saved to Downloads folder
 ```
 
 ---
 
-## 2. Subsystem Landscape & Status
+## 2. Pipeline Subsystems
 
-### ✅ Implemented Components
+### A. Understanding & Scene Authoring (`scene_author.py`, `visual_plan_v2.py`)
+- **Intent Extraction**: Ingests unstructured source text and decomposes it into discrete conceptual beats.
+- **Pedagogical Archetypes**: Assigns appropriate visual archetypes to each beat:
+  - `statement`: Core takeaway or thesis.
+  - `process`: Step-by-step sequential or workflow diagrams.
+  - `comparison`: Side-by-side contrast of concepts or metrics.
+  - `metric`: Quantitative emphasis with highlighted numeric callouts.
+  - `diagram`: Structural cards and hierarchical relationships.
 
-| Component | Source Path | Description |
-| :--- | :--- | :--- |
-| **Evidence Assembly** | `src/voice_flow/video_flow_engine/evidence.py` | Deterministic extraction of claims, entities, relationships, confidence, and provenance from raw sources. |
-| **Source Adapters** | `src/voice_flow/video_flow_engine/sources.py` | Normalizes plaintext, markdown, URLs, PDFs, and screenshots with byte limits and chunking. |
-| **Visual Director** | `src/voice_flow/video_flow_engine/director.py` | Maps pedagogical goals to visual patterns (`statement`, `comparison`, `process`, `metric`, `diagram`). |
-| **Diversity Engine** | `src/voice_flow/video_flow_engine/diversity.py` | Validates scene type distribution, prevents visual repetition, and enforces pacing rules. |
-| **Quality & QA** | `src/voice_flow/video_flow_engine/quality.py` | Evaluates factual grounding, readability, duration constraints, and triggers targeted scene repair. |
-| **Hybrid Render Router** | `src/voice_flow/video_generation/router.py` | Evaluates scene render strategies against user policy, with guaranteed zero-cost fallback. |
-| **Generative Contracts** | `src/voice_flow/video_generation/contracts.py` | Provider-neutral request, asset, capability, and routing definitions. |
-| **Deterministic Renderer** | `video_flow_renderer/` | React 18 + Remotion 4 compositor for deterministic 1080p60/1080p30 video output. |
-| **Benchmark Harness** | `tests/benchmarks/` | 12 domain benchmark fixtures scoring fidelity, grounding, diversity, and fallback success. |
+### B. Creative Director (`creative_director.py`, `visual_director_v2.py`)
+- **Pacing & Rhythm**: Calculates target durations based on narration script length and viewer cognitive load.
+- **Visual Diversity**: Ensures consecutive scenes do not repeat identical layouts or color balances.
+- **Layout Solver (`layout_solver_v21.py`)**: Computes bounds, text reflow, and element spacing deterministically to avoid collision or overflow across screen resolutions.
 
-### 🧪 Experimental & Prototype Components
+### C. Controlled Rendering Engines (`code2video_runner.py`, `narova_runner.py`)
+- **Narova / Code2Video Path**: Compiles scene programs into styled DOM elements, CSS transitions, and SVG vectors rendered via headless browser or canvas pipelines.
+- **Deterministic Local Fallback**: When external LLM APIs fail, time out, or hit rate limits, Video Flow activates an offline deterministic visual synthesis path that constructs cards and kinetic text locally.
 
-| Component | Location | Notes |
-| :--- | :--- | :--- |
-| **Scene Studio (Three.js)** | `video_flow_renderer/src/scene-studio/` | Experimental 3D spatial scene renderer using Three.js and Canvas. |
-| **Notebook Sketch POC** | `video_flow_renderer/src/notebook-sketch-poc/` | Hand-drawn procedural sketch animation prototype. |
-| **Procedural Motion Scene** | `video_flow_renderer/src/ProceduralMotionScene.tsx` | Pure SVG/CSS vector motion scene engine without heavy asset dependencies. |
+### D. Narration & Voiceover Synchronization (`voice_provider_worker.py`)
+- Narration scripts are segmented per scene and rendered via the active audio provider:
+  - **Edge TTS**: High quality, zero cost, no API key required.
+  - **Cartesia / ElevenLabs**: Low-latency, ultra-expressive neural voices.
+  - **OpenAI / Google Cloud TTS**: Standard cloud text-to-speech.
+- Audio durations drive precise timeline alignment so visual transitions coincide with spoken phrases.
 
-### 🚧 In Progress
+### E. Google NotebookLM Integration (`notebooklm/`)
+- Native Google OAuth pairing allows users to query NotebookLM notebooks and generate audio/visual overviews from curated research collections.
 
-* **Generative Video Provider Integrations:** Integrating candidate generative video backends (Google Veo, Hugging Face, Fal.ai) behind the `GenerativeVideoProvider` abstraction.
-* **Per-Scene Asset Stitching:** Merging generated video MP4 clips seamlessly into the Remotion audio-synced composition timeline.
-
-### 📋 Planned (Future Roadmap)
-
-* **HyperFrames Renderer Adapter:** High-performance vector animation renderer adapter alternative.
-* **Local Diffusion Video:** Support for local quantized text-to-video models for offline premium mode.
-* **Sponsored Compute Pools:** Integration with community-sponsored GPU inference clusters.
-
----
-
-## 3. The Hybrid Rendering Protocol
-
-### The Zero-Cost Fallback Invariant
-**Every generative-video scene must have a deterministic fallback.**
-
-```text
-Scene Strategy Requested: GENERATIVE_VIDEO
-                      ↓
-           Check GenerationPolicy
-  (FREE_DETERMINISTIC / BALANCED / PREMIUM / LOCAL_ONLY)
-                      ↓
-           Is Provider Available & Valid?
-             ↙                      ↘
-          YES                        NO
-           ↓                          ↓
-   Render Video Clip         Graceful Fallback to:
- (GeneratedVideoAsset)      PROCEDURAL_2D / REMOTION
-           ↓                          ↓
-           ────────────────────────────
-                      ↓
-            Timeline Composition
-```
-
-### Supported Render Strategies:
-1. `procedural_2d`: Fast 2D vector/typography animation (SVG/HTML5 Canvas).
-2. `procedural_3d`: WebGL/Three.js spatial geometry and data visualizations.
-3. `remotion`: React-based component animations.
-4. `generative_video`: AI-generated video clip with grounding prompt metadata.
-5. `media`: Static/user-provided images, diagrams, or captured screenshots.
+### F. Media Export & Management (`video_flow_service.py`)
+- Jobs execute asynchronously via background process workers (`process_manager.py`).
+- Rendered MP4 files are validated (header check, duration check, non-zero size), tagged with sanitized metadata, and saved automatically to the user's `Downloads` folder.
+- Video status and history are recorded in SQLite (`video_flow_jobs` and `history` tables).
 
 ---
 
-## 4. Historical Decisions & Architecture Changelog
+## 3. Reliability & Invariants
 
-* **Decision 2026-08 (Remotion as V1 Foundation):** Kept Remotion as the primary deterministic rendering engine rather than rewriting everything from scratch.
-* **Decision 2026-08 (Brain vs Renderer Decoupling):** Established that the Python backend owns evidence, pedagogy, and scene planning, while rendering engines only produce visual output.
-* **Decision 2026-08 (Hybrid Router & Free-First Principle):** Mandated that no generative video provider will ever be a hard dependency for Video Flow, guaranteeing 100% free functionality for all users.
+1. **Guaranteed Completion**: Video generation will never fail silently or hang indefinite workers. Process timeouts and watchdog monitors kill stalled renderers and trigger fallback strategies.
+2. **Offline-Capable Fallback**: Core layout and rendering components operate locally without external subscriptions.
+3. **Loopback Only**: All inter-process communication between GUI, workers, and API server occurs strictly over `127.0.0.1`.

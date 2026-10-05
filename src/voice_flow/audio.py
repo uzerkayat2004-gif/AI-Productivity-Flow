@@ -73,11 +73,13 @@ class AudioRecorder:
         # order, then replay them into the newly armed provider. This is a
         # bounded, per-recording buffer; it is never an always-listening mic.
         self._buffer_stream_input = False
+        self._replaying_stream_input = False
         self._pending_live_frames: list[NDArray[np.float32]] = []
         self._pending_closed_chunks: list[tuple[NDArray[np.float32], float]] = []
         self._pending_stream_events: list[tuple[str, NDArray[np.float32], float]] = []
         self._startup_stream_buffered_samples = 0
         self._startup_stream_overflow = False
+        self._stream_input_failed = False
         self._vad = AdaptiveVAD(min_speech_rms=_SILENCE_RMS)
 
     # -- public API --
@@ -90,6 +92,17 @@ class AudioRecorder:
     def level(self) -> float:
         """Current audio RMS level (0.0–1.0), used for waveform animation."""
         return self._level
+
+    @property
+    def stream_input_incomplete(self) -> bool:
+        """Whether any live-stream audio was skipped or its sink failed.
+
+        The archived recording remains complete and is the recovery source.
+        Callers should treat a live transcript as incomplete when this flag is
+        true and transcribe the archived audio instead.
+        """
+        with self._lock:
+            return bool(self._startup_stream_overflow or self._stream_input_failed)
 
     def start(self, device: str | int | None = None) -> bool:
         """Start capture and return whether the input stream was opened successfully."""
@@ -114,11 +127,13 @@ class AudioRecorder:
                 # words of the dictation. Only reset the buffer when buffering
                 # was not requested for this capture.
                 if not getattr(self, "_buffer_stream_input", False):
+                    self._replaying_stream_input = False
                     self._pending_live_frames.clear()
                     self._pending_closed_chunks.clear()
                     self._pending_stream_events.clear()
                     self._startup_stream_buffered_samples = 0
                     self._startup_stream_overflow = False
+                    self._stream_input_failed = False
                 if getattr(self, "_vad", None) is not None:
                     self._vad.reset()
 
@@ -356,6 +371,8 @@ class AudioRecorder:
                         retained.clear()
                 self._startup_stream_buffered_samples = 0
                 self._startup_stream_overflow = False
+                self._stream_input_failed = False
+                self._replaying_stream_input = False
             if stream is not None:
                 try:
                     stream.stop()
@@ -379,37 +396,68 @@ class AudioRecorder:
             self._pending_stream_events = []
             self._startup_stream_buffered_samples = 0
             self._startup_stream_overflow = False
+            self._stream_input_failed = False
+            self._replaying_stream_input = False
 
     def flush_stream_input_buffer(self) -> None:
         """Replay startup frames and chunks after the provider is ready."""
         with self._lock:
-            frames = self._pending_live_frames
-            chunks = self._pending_closed_chunks
-            self._pending_live_frames = []
-            self._pending_closed_chunks = []
+            if self._replaying_stream_input:
+                return
+            # Keep new callback input buffered until the older startup frames
+            # have replayed. Otherwise a frame arriving during this loop can
+            # reach the live provider before the remaining startup frames.
             self._buffer_stream_input = False
-            frame_sink = self.on_audio_frame
-            native_sr = self._native_sr
-        # Invoke consumers outside the recorder lock. They may enqueue work
-        # or synchronously fail, neither of which may stall mic callbacks.
-        if frame_sink is not None:
-            for frame in frames:
+            self._replaying_stream_input = True
+
+        while True:
+            with self._lock:
+                frames = self._pending_live_frames
+                chunks = self._pending_closed_chunks
+                self._pending_live_frames = []
+                self._pending_closed_chunks = []
+                frame_sink = self.on_audio_frame
+                native_sr = self._native_sr
+                if not frames and not chunks:
+                    self._replaying_stream_input = False
+                    return
+                batch_samples = sum(int(frame.shape[0]) for frame in frames)
+
+            # Invoke consumers outside the recorder lock. They may enqueue
+            # work or synchronously fail, neither of which may stall mic
+            # callbacks. New live frames queue behind this batch and are
+            # drained by the next iteration.
+            if frame_sink is not None:
+                for frame in frames:
+                    try:
+                        frame_sink(frame, native_sr)
+                    except Exception:
+                        with self._lock:
+                            self._stream_input_failed = True
+                        log.exception("Buffered live audio intake failed; full recording retained")
+            for chunk, overlap_prefix_seconds in chunks:
                 try:
-                    frame_sink(frame, native_sr)
-                except Exception:
-                    log.exception("Buffered live audio intake failed; full recording retained")
-        for chunk, overlap_prefix_seconds in chunks:
-            try:
-                self._emit_closed_chunk(chunk, overlap_prefix_seconds)
-            except Exception as exc:
-                log.debug("[AUDIO] Buffered chunk dispatch failed: %s", exc)
+                    self._emit_closed_chunk(chunk, overlap_prefix_seconds)
+                except Exception as exc:
+                    with self._lock:
+                        self._stream_input_failed = True
+                    log.debug("[AUDIO] Buffered chunk dispatch failed: %s", exc)
+            if batch_samples:
+                with self._lock:
+                    self._startup_stream_buffered_samples = max(
+                        0, self._startup_stream_buffered_samples - batch_samples
+                    )
 
     def discard_stream_input_buffer(self) -> None:
         """Forget a startup buffer when stream setup fails or is cancelled."""
         with self._lock:
             self._buffer_stream_input = False
+            self._replaying_stream_input = False
             self._pending_live_frames = []
             self._pending_closed_chunks = []
+            self._startup_stream_buffered_samples = 0
+            self._startup_stream_overflow = False
+            self._stream_input_failed = False
 
     def take_open_chunk(self) -> NDArray[np.float32] | None:
         """Return the still-open streaming chunk (native rate) and reset chunk
@@ -486,15 +534,25 @@ class AudioRecorder:
             captured_frame.setflags(write=False)
             self._buffer.append(captured_frame)
             frame_sink = getattr(self, "on_audio_frame", None)
-            if getattr(self, "_buffer_stream_input", False):
+            if getattr(self, "_buffer_stream_input", False) or getattr(self, "_replaying_stream_input", False):
                 pending_frames = getattr(self, "_pending_live_frames", None)
                 if pending_frames is None:
                     pending_frames = self._pending_live_frames = []
-                pending_frames.append(captured_frame)
+                max_pending_samples = int(MAX_STARTUP_STREAM_BUFFER_SECONDS * max(1, self._native_sr))
+                buffered_samples = int(getattr(self, "_startup_stream_buffered_samples", 0))
+                if (
+                    not getattr(self, "_startup_stream_overflow", False)
+                    and buffered_samples + captured_frame.shape[0] <= max_pending_samples
+                ):
+                    pending_frames.append(captured_frame)
+                    self._startup_stream_buffered_samples = buffered_samples + captured_frame.shape[0]
+                else:
+                    self._startup_stream_overflow = True
             elif frame_sink is not None:
                 try:
                     frame_sink(captured_frame, self._native_sr)
                 except Exception:
+                    self._stream_input_failed = True
                     log.exception("Live audio intake failed; full recording retained")
             rms = float(np.sqrt(np.mean(safe_indata**2)))
             self._level = min(1.0, rms / 0.08)
@@ -577,13 +635,15 @@ class AudioRecorder:
                 # words whenever sibling chunks already produced text and the
                 # whole-buffer fallback therefore never ran.
                 if voice_secs > 0 and self.on_chunk_closed is not None:
-                    if getattr(self, "_buffer_stream_input", False):
+                    if getattr(self, "_buffer_stream_input", False) or getattr(self, "_replaying_stream_input", False):
                         pending_chunks = getattr(self, "_pending_closed_chunks", None)
                         if pending_chunks is None:
                             pending_chunks = self._pending_closed_chunks = []
-                        pending_chunks.append((chunk, overlap_prefix_seconds))
+                        if not getattr(self, "_startup_stream_overflow", False):
+                            pending_chunks.append((chunk, overlap_prefix_seconds))
                     else:
                         try:
                             self._emit_closed_chunk(chunk, overlap_prefix_seconds)
                         except Exception as exc:
+                            self._stream_input_failed = True
                             log.debug("[AUDIO] Chunk dispatch failed: %s", exc)

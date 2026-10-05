@@ -2695,6 +2695,23 @@
 <div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Dictation history lives safely in ~/.voice_flow/voice_flow.db. This removes temporary audio files only." tabindex="0">i</span></div>
 </div>
 <button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">About &amp; Updates</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title" style="display:flex;align-items:center;gap:8px;">
+<strong>AI Productivity Flow</strong>
+<span class="status-badge" style="background:var(--bg-accent, rgba(234,88,12,0.1));color:var(--primary-orange,#ea580c);font-weight:700;">Version 1.0.0</span>
+<span class="status-badge">Apache-2.0</span>
+</div>
+<div style="font-size:12px;color:var(--text-muted,#888);margin-top:4px;display:flex;gap:12px;">
+<a href="https://ai-productivity-flow.vercel.app/" target="_blank" style="color:var(--primary-orange,#ea580c);text-decoration:none;">Website ↗</a>
+<a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" style="color:var(--primary-orange,#ea580c);text-decoration:none;">GitHub ↗</a>
+</div>
+</div>
+<div class="vf-row-control">
+<button class="action-btn" id="btn-check-updates" onclick="checkForAppUpdates(true)">Check for updates</button>
+</div>
+</div><div id="update-status-row" class="setting-row" style="display:none;border-bottom:none;padding:8px 14px;">
+<div id="update-status-message" style="font-size:12px;width:100%;"></div>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">App information &amp; help</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
 <div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" id="runtime-tip-span" data-tip="Local API server with local speech-to-text." tabindex="0">i</span></div>

@@ -892,6 +892,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "runtime_badge": f"macOS ({arch})" if is_mac else "Win x64",
             })
             return
+        if path == "/api/version":
+            from voice_flow._version import VERSION
+            self.send_json_response({
+                "success": True,
+                "name": "AI Productivity Flow",
+                "version": VERSION,
+                "license": "Apache-2.0",
+                "website": "https://ai-productivity-flow.vercel.app/",
+                "github": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow",
+            })
+            return
+        if path == "/api/updates/check":
+            from voice_flow.update_checker import check_for_updates
+            qs = urllib.parse.parse_qs(parsed.query)
+            force = qs.get("force", ["0"])[0] in ("1", "true", "yes")
+            result = check_for_updates(force=force)
+            self.send_json_response({"success": True, **result})
+            return
         if path == "/api/auth/status":
             _sync_active_storage()
             from voice_flow.account_manager import get_account_manager

@@ -10489,3 +10489,71 @@ try {
   }, 4000);
 } catch (_) {}
 
+async function checkForAppUpdates(manual = false) {
+  const btn = document.getElementById("btn-check-updates");
+  const row = document.getElementById("update-status-row");
+  const msg = document.getElementById("update-status-message");
+
+  if (manual) {
+    if (btn) btn.textContent = "Checking...";
+    if (row) row.style.display = "flex";
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted,#888);">Checking for updates from GitHub...</span>';
+  }
+
+  try {
+    const res = await fetch(`/api/updates/check${manual ? "?force=1" : ""}`);
+    const data = await res.json();
+    if (btn) btn.textContent = "Check for updates";
+
+    if (!data || !data.success) {
+      if (manual && row && msg) {
+        row.style.display = "flex";
+        msg.innerHTML = '<span style="color:var(--danger,#ef4444);">Could not check for updates. Check internet access.</span>';
+      }
+      return;
+    }
+
+    if (data.update_available) {
+      const releaseUrl = data.release_url || "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest";
+      const versionText = `AI Productivity Flow v${data.latest_version || ""} is available`;
+      if (row && msg) {
+        row.style.display = "flex";
+        msg.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:12px;flex-wrap:wrap;background:rgba(234,88,12,0.08);padding:8px 12px;border-radius:6px;border:1px solid rgba(234,88,12,0.2);">
+            <div><strong>${versionText}</strong></div>
+            <div style="display:flex;gap:8px;">
+              <a href="${releaseUrl}" target="_blank" class="action-btn" style="background:var(--primary-orange,#ea580c);color:#fff;text-decoration:none;padding:4px 10px;font-size:12px;border-radius:4px;">View what's new</a>
+              <a href="${releaseUrl}" target="_blank" class="btn-secondary" style="text-decoration:none;padding:4px 10px;font-size:12px;border-radius:4px;">Download update</a>
+            </div>
+          </div>
+        `;
+      }
+      if (!manual && typeof vfToast === "function") {
+        vfToast(`${versionText} - Check System settings to update.`);
+      }
+    } else {
+      if (manual && row && msg) {
+        row.style.display = "flex";
+        msg.innerHTML = `<span style="color:var(--success,#22c55e);">✓ You are running the latest version (v${data.current_version || "1.0.0"}).</span>`;
+      }
+    }
+  } catch (err) {
+    if (btn) btn.textContent = "Check for updates";
+    if (manual && row && msg) {
+      row.style.display = "flex";
+      msg.innerHTML = '<span style="color:var(--danger,#ef4444);">Could not check for updates. Check internet access.</span>';
+    }
+  }
+}
+
+try {
+  setTimeout(() => {
+    const lastCheck = parseInt(localStorage.getItem("apf_last_update_check") || "0", 10);
+    const now = Date.now();
+    if (now - lastCheck > 86400000) {
+      localStorage.setItem("apf_last_update_check", String(now));
+      checkForAppUpdates(false);
+    }
+  }, 10000);
+} catch (_) {}
+

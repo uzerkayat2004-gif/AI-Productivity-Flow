@@ -872,6 +872,38 @@ class NemotronGGUFEngine:
         return result
 
 
+def get_cached_nemotron_engine(model_ref_or_path: str | Path | None = None) -> NemotronGGUFEngine | None:
+    """Retrieve an already warm singleton NemotronGGUFEngine without constructing a cold one."""
+    from voice_flow import downloadable_models
+
+    model_id_str = str(model_ref_or_path or "").strip()
+    if not model_id_str or model_id_str.lower() in ("default", "none"):
+        model_id_str = "nvidia/nemotron-speech-streaming-en-0.6b"
+
+    spec = downloadable_models.get_model_spec(model_id_str)
+    if not spec:
+        path = Path(model_id_str)
+        if path.is_file() and path.suffix.lower() == ".gguf":
+            model_file = path
+        else:
+            return None
+    else:
+        model_file = downloadable_models.get_models_dir() / spec["filename"]
+
+    if not model_file.is_file() or model_file.stat().st_size == 0:
+        return None
+
+    path_key = str(model_file.resolve())
+    with _CACHE_LOCK:
+        cached = _NEMOTRON_CACHE.get(path_key)
+        if cached is not None and cached.is_warm:
+            touch = getattr(cached, "touch", None)
+            if callable(touch):
+                touch()
+            return cached
+    return None
+
+
 def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> NemotronGGUFEngine | None:
     """Retrieve or instantiate a warm singleton NemotronGGUFEngine."""
     from voice_flow import downloadable_models
@@ -1167,15 +1199,34 @@ class NemotronStreamTranscriber:
                 if next_st != 0 or not res.value:
                     break
                 try:
+                    is_final_fn = getattr(dll, "nemo_speech_asr_result_is_final", None)
+                    # The registered C ABI exposes this function. Keep
+                    # compatibility with older alternate bindings that only
+                    # return terminal drain results and lack the flag.
+                    is_fin = bool(is_final_fn(res)) if callable(is_final_fn) else True
                     txt_p = dll.nemo_speech_asr_result_transcript(res, 0)
                     t = txt_p.decode("utf-8", errors="replace").strip() if txt_p else ""
-                    if t:
-                        committed_transcripts.append(t)
+                    if is_fin:
+                        if t:
+                            committed_transcripts.append(t)
+                        interim_latest = ""
+                    elif t:
+                        interim_latest = t
                 finally:
                     dll.nemo_speech_asr_result_destroy(res)
 
-            if interim_latest and not committed_transcripts:
-                committed_transcripts.append(interim_latest)
+            if interim_latest:
+                # A final interim may contain words that the last committed
+                # result does not (for example, "hello welcome" after a
+                # committed "hello"). Preserve it for diagnostics, but never
+                # publish it as a complete stream transcript: the caller must
+                # recover from the full captured recording instead.
+                if not committed_transcripts:
+                    committed_transcripts.append(interim_latest)
+                self._failed = True
+                log.warning(
+                    "[NEMOTRON STREAM] Stream finished with unfinalized interim text; requesting whole-recording recovery"
+                )
 
             self._text = " ".join(committed_transcripts).strip()
             drain_ms = (time.perf_counter() - t_finish) * 1000

@@ -54,6 +54,117 @@ def test_startup_frame_buffer_replays_frames_then_closed_chunks_in_order() -> No
     assert not recorder._buffer_stream_input
 
 
+def test_startup_live_frame_replay_keeps_frames_arriving_during_flush_in_order() -> None:
+    recorder = AudioRecorder()
+    recorder._native_sr = 16000
+    recorder._recording = True
+    recorder.begin_stream_input_buffering()
+    for value in (0.1, 0.2):
+        recorder._audio_callback(np.full((4, 1), value, dtype=np.float32), 4, None, None)
+
+    delivered: list[float] = []
+    injected = False
+
+    def on_frame(frame: np.ndarray, _sample_rate: int) -> None:
+        nonlocal injected
+        delivered.append(float(frame[0, 0]))
+        if not injected:
+            injected = True
+            recorder._audio_callback(np.full((4, 1), 0.3, dtype=np.float32), 4, None, None)
+
+    recorder.on_audio_frame = on_frame
+    recorder.flush_stream_input_buffer()
+
+    assert delivered == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_startup_replay_overflow_flags_stream_incomplete_and_keeps_archive(monkeypatch) -> None:
+    monkeypatch.setattr("voice_flow.audio.MAX_STARTUP_STREAM_BUFFER_SECONDS", 4 / 16000)
+    recorder = AudioRecorder()
+    recorder._native_sr = 16000
+    recorder._recording = True
+    recorder.begin_stream_input_buffering()
+    first = np.full((4, 1), 0.1, dtype=np.float32)
+    arriving_during_replay = np.full((4, 1), 0.3, dtype=np.float32)
+    recorder._audio_callback(first, 4, None, None)
+
+    delivered: list[float] = []
+
+    def slow_frame_sink(frame: np.ndarray, _sample_rate: int) -> None:
+        delivered.append(float(frame[0, 0]))
+        recorder._audio_callback(arriving_during_replay, 4, None, None)
+
+    recorder.on_audio_frame = slow_frame_sink
+    recorder.flush_stream_input_buffer()
+
+    assert delivered == pytest.approx([0.1])
+    assert recorder.stream_input_incomplete is True
+    np.testing.assert_array_equal(np.concatenate(recorder._buffer), np.concatenate((first, arriving_during_replay)))
+
+
+def test_stream_sink_exception_flags_incomplete_but_retains_recorded_frame() -> None:
+    recorder = AudioRecorder()
+    recorder._native_sr = 16000
+    recorder._recording = True
+    recorder.begin_stream_input_buffering()
+    frame = np.full((4, 1), 0.1, dtype=np.float32)
+    recorder._audio_callback(frame, 4, None, None)
+
+    def failing_sink(_frame: np.ndarray, _sample_rate: int) -> None:
+        raise RuntimeError("simulated stream intake failure")
+
+    recorder.on_audio_frame = failing_sink
+    recorder.flush_stream_input_buffer()
+
+    assert recorder.stream_input_incomplete is True
+    np.testing.assert_array_equal(np.concatenate(recorder._buffer), frame)
+
+
+def test_concurrent_startup_flush_has_a_single_replay_owner() -> None:
+    recorder = AudioRecorder()
+    recorder._native_sr = 16000
+    recorder._recording = True
+    recorder.begin_stream_input_buffering()
+    for value in (0.1, 0.2):
+        recorder._audio_callback(np.full((4, 1), value, dtype=np.float32), 4, None, None)
+
+    first_sink_entered = threading.Event()
+    release_sink = threading.Event()
+    delivered: list[float] = []
+
+    def blocking_sink(frame: np.ndarray, _sample_rate: int) -> None:
+        delivered.append(float(frame[0, 0]))
+        if len(delivered) == 1:
+            first_sink_entered.set()
+            assert release_sink.wait(1.0)
+
+    recorder.on_audio_frame = blocking_sink
+    owner = threading.Thread(target=recorder.flush_stream_input_buffer)
+    owner.start()
+    assert first_sink_entered.wait(0.5)
+
+    callback_done = threading.Event()
+    callback = threading.Thread(
+        target=lambda: (
+            recorder._audio_callback(np.full((4, 1), 0.3, dtype=np.float32), 4, None, None),
+            callback_done.set(),
+        )
+    )
+    callback.start()
+    assert callback_done.wait(0.5), "recorder callback blocked behind the provider sink"
+
+    second_flush = threading.Thread(target=recorder.flush_stream_input_buffer)
+    second_flush.start()
+    second_flush.join(timeout=0.5)
+    assert not second_flush.is_alive(), "a second flush must not steal the active replay queue"
+
+    release_sink.set()
+    owner.join(timeout=1.0)
+    callback.join(timeout=1.0)
+    assert not owner.is_alive()
+    assert delivered == pytest.approx([0.1, 0.2, 0.3])
+
+
 def test_dictation_opens_capture_before_stream_setup(monkeypatch) -> None:
     session = DictationSession(123, "Editor", "smart_clean", "smart_clean", 0.0)
     app = object.__new__(VoiceFlowApp)

@@ -111,6 +111,29 @@ class TestCommandDetection(unittest.TestCase):
         self.assertIn("Hey Voice Flow", r.content)
         self.assertIn("budget meeting", r.content)
 
+    def test_format_words_in_ordinary_speech_do_not_consume_content(self):
+        for text in (
+            "Hey Voice Flow I received an email from Morgan about the launch",
+            "Hey Voice Flow this prompt describes the bakery website I need",
+            "Hey Voice Flow, the email from Morgan says launch Monday.",
+        ):
+            with self.subTest(text=text):
+                r = detect_voice_command(text)
+                self.assertIsNone(r.command)
+                self.assertEqual(r.content, text)
+
+    def test_unpunctuated_make_as_prompt_and_email_keep_payload(self):
+        prompt = "Hey Voice Flow make this as a prompt Build a bakery website with orange and cream"
+        prompt_result = detect_voice_command(prompt)
+        self.assertEqual(prompt_result.content, "Build a bakery website with orange and cream")
+        self.assertEqual(prompt_result.command.operation, "prompt_generation")
+        self.assertEqual(prompt_result.command.format, "prompt")
+
+        email = "Launch is Monday Hey Voice Flow make this as an email"
+        email_result = detect_voice_command(email)
+        self.assertEqual(email_result.content, "Launch is Monday")
+        self.assertEqual(email_result.command.format, "email")
+
     def test_begin_prompt_generation(self):
         r = detect_voice_command("Hey Voice Flow, make this a proper prompt. Build a landing page using orange and cream.")
         self.assertEqual(r.content, "Build a landing page using orange and cream.")
@@ -257,6 +280,17 @@ class TestEffectiveStyleResolution(unittest.TestCase):
             eff = resolve_effective_style(_base("email", "email_formal"), cmd)
         self.assertEqual(eff.style_id, "email_very_casual")
         self.assertIn("minimal punctuation", eff.instruction.lower())
+
+    def test_unpunctuated_email_command_uses_saved_profile_and_extra(self):
+        detected = detect_voice_command("Launch is Monday Hey Voice Flow make this as an email")
+        with patch.object(es_mod.storage, "get_setting", side_effect=lambda key, default=None: {
+            "style_email": "email_excited",
+            "style_email_extra": "Always sign off with Best.",
+        }.get(key, default)):
+            eff = resolve_effective_style(_base(), detected.command)
+        self.assertEqual(detected.content, "Launch is Monday")
+        self.assertEqual((eff.category, eff.style_id), ("email", "email_excited"))
+        self.assertIn("Always sign off with Best.", eff.instruction)
 
     def test_message_formats_use_their_matching_saved_cards(self):
         saved_cards = {

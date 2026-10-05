@@ -179,8 +179,8 @@ def resolve_active_db_path() -> str:
 class StorageEngine:
     """SQLite Database manager for persistent dictation history & metrics."""
 
-    def __init__(self, db_path: str | None = None) -> None:
-        self._custom_db = db_path is not None
+    def __init__(self, db_path: str | None = None, custom_db: bool = False) -> None:
+        self._custom_db = custom_db
         if db_path is None:
             db_path = resolve_active_db_path()
         os.makedirs(os.path.dirname(db_path), exist_ok=True)

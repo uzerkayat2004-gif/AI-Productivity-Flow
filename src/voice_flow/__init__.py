@@ -1,7 +1,6 @@
-"""Voice Flow — Wispr Flow-like voice dictation for Windows."""
+"""AI Productivity Flow — Desktop AI system for Windows and macOS."""
 
-__version__ = "1.0.0"
-
+from voice_flow._version import VERSION, __version__
 from voice_flow.local_summarizer import LocalSpokenSummarizer, local_spoken_summarizer
 
-__all__ = ["LocalSpokenSummarizer", "local_spoken_summarizer", "__version__"]
+__all__ = ["LocalSpokenSummarizer", "local_spoken_summarizer", "__version__", "VERSION"]

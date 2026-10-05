@@ -1,6 +1,7 @@
 """Comprehensive tests for NVIDIA Nemotron Speech ASR GGUF Engine and Voice Flow integration."""
 from __future__ import annotations
 
+import ctypes
 import threading
 import time
 import wave
@@ -348,6 +349,87 @@ def test_nemotron_stream_transcriber_discard():
     assert res == ""
 
 
+def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatch):
+    """An unfinalized 'hello welcome' interim must trigger whole-audio recovery."""
+    class _FakeEngine:
+        rec_handle = ctypes.c_void_p(1)
+        spec = {}
+        lock = threading.Lock()
+
+        def acquire_stream(self):
+            pass
+
+        def release_stream(self):
+            pass
+
+    class _FakeDll:
+        def __init__(self):
+            self.pushed_samples: list[np.ndarray] = []
+            self.results = {
+                101: (True, b"hello"),
+                102: (False, b"hello welcome"),
+            }
+            self.push_count = 0
+            self.finished = False
+
+        def nemo_speech_asr_stream_push_f32(self, _stream, ptr, length, _rate):
+            sample_ptr = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_float))
+            self.pushed_samples.append(np.ctypeslib.as_array(sample_ptr, shape=(length,)).copy())
+            self.push_count += 1
+            return 0
+
+        def nemo_speech_asr_stream_next(self, _stream, output):
+            if not self.finished and self.push_count == 1:
+                output._obj.value = 101
+                return 0
+            if not self.finished and self.push_count >= 3:
+                output._obj.value = 102
+                return 0
+            return 1
+
+        def nemo_speech_asr_stream_finish(self, _stream):
+            self.finished = True
+            return 0
+
+        def nemo_speech_asr_result_is_final(self, result):
+            return self.results[result.value][0]
+
+        def nemo_speech_asr_result_transcript(self, result, _index):
+            return self.results[result.value][1]
+
+        def nemo_speech_asr_result_destroy(self, _result):
+            pass
+
+        def nemo_speech_asr_stream_close(self, _stream):
+            pass
+
+    dll = _FakeDll()
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
+    session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
+    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    session.start_session()
+
+    # Include a very short, quiet leading frame and quiet ending samples. The
+    # live path must push every native-rate sample in order, even when the
+    # decoder has only finalized "hello" and leaves "hello welcome" interim.
+    frames = [
+        np.array([0.001, 0.002, 0.003], dtype=np.float32),
+        np.linspace(-0.08, 0.08, 160, dtype=np.float32),
+        np.array([0.002, 0.001, 0.0005], dtype=np.float32),
+    ]
+    for frame in frames:
+        session.submit_frame(frame, native_sr=16000)
+    session.end_session()
+
+    assert session._done.wait(1.0)
+    pushed = np.concatenate(dll.pushed_samples)
+    np.testing.assert_array_equal(pushed, np.concatenate(frames))
+    assert session._text == "hello"
+    assert session.had_failures() is True
+    assert session.collect(timeout=0.01) == ""
+    assert session.completed_successfully() is False
+
+
 def test_nemotron_stream_transcriber_fallback_when_invalid_model():
     """Verify NemotronStreamTranscriber gracefully marks failure if model cannot be loaded."""
     from voice_flow.nemotron_engine import NemotronStreamTranscriber
@@ -356,4 +438,3 @@ def test_nemotron_stream_transcriber_fallback_when_invalid_model():
     streamer.start_session(model_ref="nonexistent/fake-model-12345")
     assert streamer.had_failures() is True
     assert streamer.collect(timeout=0.1) == ""
-

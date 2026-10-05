@@ -269,3 +269,46 @@ def test_save_wav_quarantines_non_finite_samples() -> None:
         output = os.path.join(directory, "capture.wav")
         AudioRecorder.save_wav(np.array([np.nan, np.inf, -np.inf, 0.1], dtype=np.float32), output)
         assert os.path.getsize(output) > 44
+
+
+def test_streaming_local_decode_preserves_quiet_chunk_boundary_words(monkeypatch) -> None:
+    """A non-empty VAD result must not silently discard quiet edge words."""
+    from voice_flow import transcriber as transcriber_module
+
+    audio = np.concatenate((
+        np.full(3200, 0.002, dtype=np.float32),  # quiet opening word
+        np.full(6400, 0.08, dtype=np.float32),   # clear middle word
+        np.full(3200, 0.002, dtype=np.float32),  # quiet closing word
+    ))
+    calls: list[dict[str, object]] = []
+
+    class _Segment:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _BoundarySensitiveModel:
+        def transcribe(self, samples: np.ndarray, **kwargs):
+            calls.append({"audio": samples.copy(), **kwargs})
+            if kwargs.get("vad_filter"):
+                return [_Segment("middle")], None
+            return [_Segment("opening middle closing")], None
+
+    transcriber = object.__new__(transcriber_module.Transcriber)
+    transcriber.model = _BoundarySensitiveModel()
+    transcriber.nemotron_engine = None
+    transcriber._lock = threading.Lock()
+    transcriber._transcribe_lock = threading.Lock()
+    transcriber._last_vad_parameters = {}
+    transcriber._wait_for_model = lambda *_args, **_kwargs: True
+    transcriber._local_model_name = lambda *_args, **_kwargs: "tiny.en"
+    monkeypatch.setattr(transcriber_module.nemotron_engine, "is_nemotron_model", lambda _ref: False)
+    monkeypatch.setattr(transcriber_module.dictionary_engine, "get_initial_prompt", lambda _category: "")
+    monkeypatch.setattr(transcriber_module.dictionary_engine, "apply_dictionary_post_processing", lambda text: text)
+
+    text = transcriber._transcribe_local(audio, is_chunk=True)
+
+    assert text == "opening middle closing"
+    assert len(calls) == 1
+    assert calls[0]["audio"][0] == audio[0]
+    assert calls[0]["audio"][-1] == audio[-1]
+    assert calls[0]["vad_filter"] is False

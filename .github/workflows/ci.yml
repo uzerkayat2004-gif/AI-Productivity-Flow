@@ -34,6 +34,10 @@ jobs:
         run: |
           pytest tests/test_runtime_compatibility.py -vv -s --timeout=30
 
+      - name: Run Version Consistency & Update Checker Tests
+        run: |
+          pytest tests/test_version_consistency.py tests/test_update_checker.py -vv
+
       - name: Run Core Features, Security & Text Processing Tests
         run: |
           pytest tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v --timeout=60
@@ -73,9 +77,11 @@ jobs:
         run: |
           python scripts/build_macos_app.py
 
-      - name: Upload macOS Unsigned App Artifact
+      - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VoiceFlow-macOS-unsigned
-          path: dist/VoiceFlow-macOS-unsigned.zip
+          name: AI-Productivity-Flow-macOS
+          path: |
+            dist/AI-Productivity-Flow-macOS.zip
+            dist/AI-Productivity-Flow-macOS.zip.sha256
           if-no-files-found: error

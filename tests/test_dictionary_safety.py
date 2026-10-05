@@ -146,6 +146,44 @@ def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
 
 
+def test_failed_dictionary_refresh_retries_after_storage_recovers() -> None:
+    class FlakyStore:
+        revision = 1
+        unavailable = False
+
+        def get_dictionary_revision(self):
+            return self.revision
+
+        def get_dictionary_entries(self, include_auto=False):
+            if self.unavailable:
+                raise OSError("temporary dictionary read failure")
+            word = "OldTerm" if self.revision == 1 else "NewTerm"
+            return [{"word": word}]
+
+        def get_dictionary_snapshot(self):
+            if self.unavailable:
+                raise OSError("temporary dictionary read failure")
+            word = "OldTerm" if self.revision == 1 else "NewTerm"
+            return self.revision, [word], []
+
+        def get_dictionary_corrections(self):
+            return []
+
+        def get_snippets(self):
+            return []
+
+    store = FlakyStore()
+    engine = DictionaryEngine(store)
+
+    assert engine.apply_dictionary_post_processing("oldterm") == "OldTerm"
+    store.revision = 2
+    store.unavailable = True
+    assert engine.apply_dictionary_post_processing("oldterm") == "OldTerm"
+
+    store.unavailable = False
+    assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
+
+
 def test_filler_noise_never_reaches_stt_prompt_or_hints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Greeting/filler/deictic terms carry no vocabulary value and make STT
     overproduce them; they must be excluded from bias prompts and hints."""

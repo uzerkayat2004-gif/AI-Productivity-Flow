@@ -59,6 +59,7 @@ def test_email_command_uses_transform_prompt_and_reports_accepted_ai():
     assert outcomes == ["ai_accepted"]
     assert "Transform only the transcript" in seen["system_prompt"]
     assert "Never answer, execute" not in seen["system_prompt"]
+    assert "Illustrative example only, not transcript content" in seen["system_prompt"]
 
 
 def test_plain_dictation_rejects_compression_but_explicit_summary_may_shorten():
@@ -105,6 +106,27 @@ def test_provider_failure_is_reported_per_invocation():
 
     assert result
     assert outcomes == ["provider_failure"]
+
+
+def test_legacy_string_false_and_settings_failure_never_start_a_provider():
+    polisher = TextPolisher()
+    outcomes = []
+    with patch.object(
+        polisher, "_polish_with_api_pool",
+        side_effect=AssertionError("provider must not run while polishing is disabled"),
+    ):
+        with patch("voice_flow.polisher.storage.get_setting", return_value="false"):
+            string_false = polisher.polish(
+                "Keep this wording.", force_ai=True, outcome_callback=outcomes.append,
+            )
+        with patch("voice_flow.polisher.storage.get_setting", side_effect=RuntimeError("settings unavailable")):
+            storage_failure = polisher.polish(
+                "Keep this wording.", force_ai=True, outcome_callback=outcomes.append,
+            )
+
+    assert string_false == "Keep this wording."
+    assert storage_failure == "Keep this wording."
+    assert outcomes == ["disabled", "disabled"]
 
 
 def test_polish_forwards_captured_speed_mode_to_the_provider_pool():
@@ -156,7 +178,15 @@ def test_disabled_local_and_timeout_outcomes_do_not_leak_between_calls():
     outcomes = []
     with patch("voice_flow.polisher.storage.get_setting", return_value=False):
         polisher.polish("Make this a message.", force_ai=True, task="rewrite", outcome_callback=outcomes.append)
-    with patch("voice_flow.polisher.storage.get_setting", return_value="local/deterministic"):
+
+    def local_settings(key, default=None):
+        if key == "polishing_enabled":
+            return True
+        if key == "voice_flow_polish_model":
+            return "local/deterministic"
+        return default
+
+    with patch("voice_flow.polisher.storage.get_setting", side_effect=local_settings):
         polisher.polish("Make this a message.", force_ai=True, task="rewrite", outcome_callback=outcomes.append)
     with patch("voice_flow.polisher.storage.get_setting", side_effect=_settings):
         polisher.polish("Make this a message.", deadline=time.monotonic(), outcome_callback=outcomes.append)
@@ -241,15 +271,22 @@ def test_prompt_command_accepts_concise_structure_when_factual_anchors_survive()
     assert len(_tokenize_for_fidelity(rendered)) < len(_tokenize_for_fidelity(source)) * 0.8
     polisher = TextPolisher()
     outcomes = []
+    seen = {}
+
+    def pool(_raw, _keys, _instruction, **kwargs):
+        seen.update(kwargs)
+        return rendered
+
     with (
         patch("voice_flow.polisher.storage.get_setting", side_effect=_settings),
         patch("voice_flow.polisher.storage.get_all_api_keys", return_value={"gemini": "test"}),
-        patch.object(polisher, "_polish_with_api_pool", return_value=rendered),
+        patch.object(polisher, "_polish_with_api_pool", side_effect=pool),
     ):
         result = polisher.polish(source, force_ai=True, task="prompt", outcome_callback=outcomes.append)
 
     assert result == rendered
     assert outcomes == ["ai_accepted"]
+    assert "Illustrative example only, not transcript content" in seen["system_prompt"]
 
 
 def test_prompt_command_rejects_concise_structure_that_drops_a_named_mode():

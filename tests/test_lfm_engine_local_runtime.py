@@ -73,6 +73,85 @@ def test_lfm_uses_the_real_wrapper_when_policy_mentions_input_tag():
     assert lfm_engine._trusted_instruction("", system) == "Rewrite as a professional email."
 
 
+def test_local_email_prompt_keeps_register_format_and_saved_preferences():
+    instruction = (
+        "Format the result as an email: greeting, body, sign-off. Use a warm, friendly tone. "
+        "Keep the original first-person voice and use short sentences."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert "warm, friendly tone" in prompt
+    assert "greeting, body, sign-off" in prompt
+    assert "first-person voice" in prompt
+    assert "short sentences" in prompt
+    assert "formal email" not in prompt
+
+
+def test_local_prompt_generation_keeps_all_trusted_requirements():
+    instruction = (
+        "Turn the transcript into a well-structured prompt for an AI assistant. "
+        "Keep every requirement and detail. Use clear labels only where they genuinely fit. "
+        "Never invent requirements, answer the task, or drop any dictated detail."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert "clear labels only where they genuinely fit" in prompt
+    assert "Never invent requirements, answer the task, or drop any dictated detail" in prompt
+    assert "Write an AI prompt from this request" not in prompt
+
+
+def test_local_bullet_instruction_keeps_url_and_perspective_preferences():
+    instruction = (
+        "Format the result as a concise bullet list. Preserve URLs exactly. "
+        "Keep first-person wording and every factual detail."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert instruction in prompt
+    assert "Preserve URLs exactly" in prompt
+    assert "first-person wording" in prompt
+
+
+def test_local_short_command_keeps_composable_saved_style_preferences():
+    instruction = (
+        "Be concise; keep the result short. Use a professional register, "
+        "preserve all negations, and prefer short sentences."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert instruction in prompt
+    assert "professional register" in prompt
+    assert "preserve all negations" in prompt
+    assert "prefer short sentences" in prompt
+
+
+def test_local_casual_style_keeps_additional_saved_preferences():
+    instruction = (
+        "Use a casual, relaxed tone. Preserve technical terms exactly and keep "
+        "the speaker's first-person perspective."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert instruction in prompt
+    assert "technical terms exactly" in prompt
+    assert "first-person perspective" in prompt
+
+
+def test_local_professional_style_keeps_saved_sentence_preference():
+    instruction = (
+        "Keep the register professional. Preserve technical terms exactly and use short sentences."
+    )
+
+    prompt = lfm_engine._local_system_prompt(instruction)
+
+    assert instruction in prompt
+
+
 def test_bridge_forwards_only_the_trusted_style_to_lfm(monkeypatch):
     captured: dict[str, object] = {}
     prompt = (

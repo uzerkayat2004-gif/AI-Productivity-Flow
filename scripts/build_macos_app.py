@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Build an unsigned macOS Application Bundle (.app) and zip for distribution.
+"""Build an unsigned macOS Application Bundle (.app) and zip archive for distribution.
 
 Produces:
-    dist/Voice Flow.app
-    dist/VoiceFlow-macOS-unsigned.zip
+    dist/AI Productivity Flow.app
+    dist/AI-Productivity-Flow-macOS.zip
+    dist/AI-Productivity-Flow-macOS.zip.sha256
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import os
 import plistlib
 import shutil
@@ -17,28 +20,35 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
-APP_NAME = "Voice Flow"
+APP_NAME = "AI Productivity Flow"
 BUNDLE_DIR = DIST_DIR / f"{APP_NAME}.app"
 CONTENTS_DIR = BUNDLE_DIR / "Contents"
 MACOS_DIR = CONTENTS_DIR / "MacOS"
 RESOURCES_DIR = CONTENTS_DIR / "Resources"
 SRC_DIR = REPO_ROOT / "src" / "voice_flow"
 
+# Canonical version
+try:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from voice_flow._version import VERSION
+except Exception:
+    VERSION = "1.0.0"
+
 
 def create_info_plist() -> None:
     plist_data = {
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
-        "CFBundleIdentifier": "com.voiceflow.app",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleIdentifier": "com.uzerkayat.aiproductivityflow",
+        "CFBundleVersion": VERSION,
+        "CFBundleShortVersionString": VERSION,
         "CFBundlePackageType": "APPL",
         "CFBundleSignature": "????",
-        "CFBundleExecutable": "voice-flow-launcher",
+        "CFBundleExecutable": "ai-productivity-flow-launcher",
         "CFBundleIconFile": "AppIcon",
         "LSMinimumSystemVersion": "12.0",
-        "NSMicrophoneUsageDescription": "Voice Flow requires microphone access for voice dictation and speech-to-text.",
-        "NSAppleEventsUsageDescription": "Voice Flow needs access to paste transcribed text into target applications.",
+        "NSMicrophoneUsageDescription": "AI Productivity Flow requires microphone access for voice dictation and speech-to-text.",
+        "NSAppleEventsUsageDescription": "AI Productivity Flow needs access to paste transcribed text into target applications.",
         "NSSupportsAutomaticGraphicsSwitching": True,
         "NSHighResolutionCapable": True,
         "LSUIElement": False,
@@ -48,35 +58,38 @@ def create_info_plist() -> None:
 
 
 def create_launcher_script() -> None:
-    launcher = MACOS_DIR / "voice-flow-launcher"
-    current_python = sys.executable
-    script = f"""#!/usr/bin/env bash
-DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")/.." && pwd)"
-export PYTHONPATH="$DIR/Resources/src:$PYTHONPATH"
+    launcher = MACOS_DIR / "ai-productivity-flow-launcher"
+    script = """#!/usr/bin/env bash
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$DIR/Resources/src:$DIR/Resources/runtime/site-packages:$DIR/Resources/runtime/python/lib/python3.11/site-packages:$PYTHONPATH"
+export PATH="$DIR/Resources/runtime/python/bin:$PATH"
 
-# Prefer virtual environment python where dependencies were installed
+# 1. Check for bundled private standalone Python runtime
 PYTHON=""
-for candidate in \\
-    "{current_python}" \\
-    "$DIR/../../.venv/bin/python" \\
-    "$DIR/../../.venv/bin/python3" \\
-    "$HOME/AI-Productivity-Flow/.venv/bin/python" \\
-    "$HOME/AI-Productivity-Flow/.venv/bin/python3" \\
-    "$VIRTUAL_ENV/bin/python" \\
-    /opt/homebrew/bin/python3 \\
-    /usr/local/bin/python3 \\
-    python3 \\
-    /usr/bin/python3; do
-    if [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-            PYTHON="$candidate"
-            break
+if [ -x "$DIR/Resources/runtime/python/bin/python3" ]; then
+    PYTHON="$DIR/Resources/runtime/python/bin/python3"
+elif [ -x "$DIR/Resources/runtime/bin/python3" ]; then
+    PYTHON="$DIR/Resources/runtime/bin/python3"
+fi
+
+# 2. Fallback to system / homebrew / user python 3.10+
+if [ -z "$PYTHON" ]; then
+    for candidate in \\
+        /opt/homebrew/bin/python3 \\
+        /usr/local/bin/python3 \\
+        python3 \\
+        /usr/bin/python3; do
+        if [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+                PYTHON="$candidate"
+                break
+            fi
         fi
-    fi
-done
+    done
+fi
 
 if [ -z "$PYTHON" ]; then
-    osascript -e 'display dialog "Python 3.10+ is required to run Voice Flow. Please install Python 3.10 or newer." buttons {{"OK"}} default button 1 with icon stop'
+    osascript -e 'display dialog "Python 3.10+ is required to run AI Productivity Flow. Please install Python 3.10 or newer from python.org or Homebrew." buttons {"OK"} default button 1 with icon stop'
     exit 1
 fi
 
@@ -113,8 +126,28 @@ def copy_resources() -> None:
     )
 
 
+def bundle_runtime_dependencies() -> None:
+    """Bundle dependencies into Contents/Resources/runtime/site-packages if present."""
+    runtime_dir = RESOURCES_DIR / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    # If a private venv or site-packages exists in build environment, copy dependencies
+    venv_site = REPO_ROOT / ".venv" / "lib"
+    if venv_site.is_dir():
+        for py_dir in venv_site.glob("python3*"):
+            sp = py_dir / "site-packages"
+            if sp.is_dir():
+                target_sp = runtime_dir / "site-packages"
+                if not target_sp.exists():
+                    print(f"Bundling dependencies from {sp}...")
+                    shutil.copytree(
+                        sp,
+                        target_sp,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
+                    )
+
+
 def package_zip() -> Path:
-    zip_path = DIST_DIR / "VoiceFlow-macOS-unsigned.zip"
+    zip_path = DIST_DIR / "AI-Productivity-Flow-macOS.zip"
     if zip_path.exists():
         zip_path.unlink()
     print(f"Archiving {BUNDLE_DIR} to {zip_path}...")
@@ -124,12 +157,24 @@ def package_zip() -> Path:
                 full_path = Path(root) / file
                 rel_path = full_path.relative_to(DIST_DIR)
                 zf.write(full_path, arcname=str(rel_path))
-    print(f"Created {zip_path} ({zip_path.stat().st_size} bytes)")
+    size = zip_path.stat().st_size
+    print(f"Created {zip_path} ({size} bytes)")
+
+    # Generate SHA-256
+    sha = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    sha_path = DIST_DIR / "AI-Productivity-Flow-macOS.zip.sha256"
+    sha_path.write_text(f"{sha} *AI-Productivity-Flow-macOS.zip\n", encoding="utf-8")
+    print(f"Generated {sha_path} ({sha})")
     return zip_path
 
 
 def main() -> None:
-    print(f"Building {APP_NAME}.app...")
+    parser = argparse.ArgumentParser(description="Build macOS Application Bundle")
+    parser.add_argument("--bundle-runtime", action="store_true", help="Bundle dependencies into app package")
+    args = parser.parse_args()
+
+    print(f"Building {APP_NAME}.app (v{VERSION})...")
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
     if BUNDLE_DIR.exists():
         shutil.rmtree(BUNDLE_DIR)
     MACOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -138,6 +183,8 @@ def main() -> None:
     create_launcher_script()
     create_app_icon()
     copy_resources()
+    if args.bundle_runtime:
+        bundle_runtime_dependencies()
     zip_path = package_zip()
     print(f"Build complete: {zip_path}")
 

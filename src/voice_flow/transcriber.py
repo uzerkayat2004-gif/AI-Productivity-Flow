@@ -655,7 +655,7 @@ class Transcriber:
                 and getattr(self, "_loaded_model_ref", None) == requested_model
             ):
                 return True
-            eng = nemotron_engine.get_nemotron_engine(requested_model)
+            eng = getattr(nemotron_engine, "get_cached_nemotron_engine", lambda _: None)(requested_model)
             if eng and eng.is_warm:
                 with self._lock:
                     self.nemotron_engine = eng
@@ -859,7 +859,13 @@ class Transcriber:
                     temperature=config.temperature,
                     language=config.language,
                     initial_prompt=initial_prompt,
-                    vad_filter=True,
+                    # Streaming chunks already have their boundaries chosen by
+                    # the recorder's silence split. A second, model-internal
+                    # VAD pass can trim quiet first/last words from those
+                    # boundaries, while a non-empty partial result prevents the
+                    # direct-audio fallback below. Preserve every chunk sample
+                    # for local decoding; keep VAD on the whole-recording path.
+                    vad_filter=not is_chunk,
                     # Long-dictation accuracy: carrying hallucinated context
                     # across windows is what makes mid-text "break" (repeated
                     # or drifting words) on long recordings, and whispers of

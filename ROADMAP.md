@@ -4,55 +4,53 @@
 
 ---
 
-## 🟢 Stage 1: Core Multimodal Foundation (Completed & Verified)
+## 🟢 Stage 1: Core Multimodal Foundation (Completed — v1.0.0 Stable)
 
-* [x] **Voice Flow (Zero-Friction Dictation)**
-  * [x] Low-latency global middle-click and `Ctrl+Win` (`Cmd+Ctrl` on Mac) triggers with Push-to-Talk and toggle modes.
-  * [x] 64-bit native Win32 message-pump hook (`WH_MOUSE_LL`) with auto-rehook watchdog.
-  * [x] Local Faster-Whisper transcription with custom dictionary prompt-biasing and dual-pass VAD.
-  * [x] Active window style engine adapting tone and syntax across VS Code, Slack, Outlook, Excel, and Chrome.
-  * [x] Silent Windows Auto-Startup on laptop boot with background supervisor auto-recovery.
-* [x] **Audio Flow (Text-to-Speech & Screen Reader)**
-  * [x] Screen text highlight detection with real-time word tracking.
-  * [x] Floating player with waveform scrub bar, speed adjustment (0.75x–2.0x), and audio controls.
-  * [x] Multi-provider TTS backend (Free Microsoft Edge Neural, Google Cloud, ElevenLabs, Deepgram Aura, SAPI5).
-  * [x] Automatic and one-click downloading to user Downloads & Music folders with exact title preservation.
-* [x] **Video Flow v2.1 (Pedagogy & Hybrid Rendering)**
-  * [x] 15 dynamic visual treatments: animated flowcharts, timelines, metric counters, 3D WebGL scenes, and recap grids.
-  * [x] Evidence assembly: claims, entities, relationships, confidence, and provenance extraction.
-  * [x] Guaranteed zero-cost deterministic Remotion & procedural rendering fallback.
-  * [x] Dual-mode operation: Summary Mode (rapid briefing) & Full Mode (deep educational breakdown).
-  * [x] Automatic and one-click downloading to user Downloads & Videos folders.
+* [x] **Video Flow (Text-to-Video Visual Explainers)**
+  * [x] AI-driven planning, concept breakdown, and Creative Director scene authoring.
+  * [x] Multi-engine rendering architecture with dynamic layout solver and visual themes.
+  * [x] Guaranteed zero-cost local deterministic layout and synthesis fallback.
+  * [x] Native Google NotebookLM integration for audio/visual research synthesis.
+  * [x] Direct MP4 compilation with automatic download to system Downloads folder.
+* [x] **Audio Flow (Spoken Reader & Multi-Depth Audio Summaries)**
+  * [x] **Read Mode**: Natural conversational spoken reader articulating selected text with high fidelity.
+  * [x] **Summary Mode**: Multi-depth audio summaries (Short, Balanced, Deep Dive).
+  * [x] Integrated floating and window player with waveform scrub bar, playback rate control (0.75x–2.0x), and MP3 download.
+  * [x] Comprehensive voice provider ecosystem (Free Microsoft Edge Neural, ElevenLabs, Cartesia, Google Cloud, OpenAI TTS).
+* [x] **Voice Flow (System-Wide Voice Dictation & Text Injection)**
+  * [x] Low-latency global triggers (`Ctrl+Win` on Windows, `Cmd+Option` on macOS, Middle Click, Alt+Space).
+  * [x] Local-first Faster-Whisper transcription running 100% on-device with zero cloud dependencies.
+  * [x] Downloadable NVIDIA Nemotron Speech Streaming English 0.6B and Nemotron 3.5 ASR Streaming 0.6B models.
+  * [x] Downloadable Liquid LFM 1.3B/3B on-device text rewriting and Windows AI Text Rewriter integration.
+  * [x] Optional cloud STT (Deepgram, Groq, OpenAI Whisper, Gemini STT) and cloud LLM polishers.
+  * [x] User dictionary and snippet expansion with cross-process persistence.
 
 ---
 
-## 🟢 Stage 2: Intelligence, Accounts & Connectivity (Completed & Verified)
+## 🟢 Stage 2: Security, Accounts & Distribution (Completed — v1.0.0 Stable)
 
-* [x] **NotebookLM Research Sync & Knowledge Base**
-  * [x] Native Google OAuth integration with durable token refresh and error state recovery.
-  * [x] Direct synchronization of Google Notebooks, Audio Overviews, study guides, and research sources.
 * [x] **Multi-Account Security & Isolation**
-  * [x] General → System → Account Settings navigation order.
-  * [x] Interactive Switch Account modal with zero data leakage.
-  * [x] Isolated SQLite databases and secure encrypted credential vaults per account profile.
-* [x] **Robust Download Engine**
-  * [x] Multi-directory dual-drive saving across `D:\` and `C:\` (`Downloads`, `Videos`, `Music`).
-  * [x] Timestamp synchronization (`mtime` set to `NOW`) guaranteeing top placement under "Today" in Windows Explorer.
-  * [x] Sanitized filenames preserving exact media titles without trailing punctuation.
+  * [x] Isolated SQLite storage (`voice_flow.db`) and separate profile workspaces under `~/.voice_flow/`.
+  * [x] Instant account switching with zero data leakage or lock contention.
+  * [x] AES-256-GCM encrypted `.flowvault` archives for full account backup and migration.
+* [x] **Cross-Platform Packaging & Release Baseline**
+  * [x] Windows 10/11 x64 single-file installer (`AI-Productivity-Flow-Setup-x64.exe`) with isolated private runtime.
+  * [x] macOS 12+ application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
+  * [x] Safe, non-intrusive update checker querying GitHub Releases for stable updates.
+  * [x] Canonical product versioning pinned strictly to `1.0.0` with CI consistency enforcement.
 
 ---
 
-## 🟡 Stage 3: Ecosystem, Distribution & Accessibility (Active & Next Up)
+## 🟡 Stage 3: Ecosystem Expansion & Enhancements (Next Milestones)
 
-* [ ] **Cross-Platform Parity**
-  * [x] macOS Community Preview with one-liner installer (`curl ... | bash`) and Universal App bundle (.zip).
-  * [ ] Full physical hardware QA and notarization on Apple Silicon (M1/M2/M3/M4) and Intel macOS.
+* [ ] **Packaging & Signing Expansion**
+  * [ ] Apple Developer ID code signing and automated notarization pipeline for macOS Gatekeeper.
+  * [ ] Windows EV code signing certificate integration.
   * [ ] Linux desktop companion packaging (Flatpak / AppImage).
-* [ ] **Advanced Generative Model Adapters**
-  * [x] OpenAI Codex & Whisper streaming integration with transient socket resilience.
-  * [ ] Native Google Veo and Vertex AI video generation adapters.
-  * [ ] Local quantized diffusion video models (e.g., Wan2.1, HunyuanVideo) for offline premium visual generation.
-* [ ] **Multimodal Accessibility**
+* [ ] **Visual Layouts & Narration**
+  * [ ] Additional animated flowchart, code execution, and data-visualization scene types.
   * [ ] Auto-generated closed captions (SRT / VTT) and multi-track narration.
   * [ ] Multilingual translation pipeline for instant visual explanation localization.
-  * [ ] Community-contributed educational theme templates and visual motion libraries.
+* [ ] **Local Model Performance**
+  * [ ] Quantized local diffusion video adapters where GPU compute is available.
+  * [ ] Extended voice cloning and local Piper TTS integration.

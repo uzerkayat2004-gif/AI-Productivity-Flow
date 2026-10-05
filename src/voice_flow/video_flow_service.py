@@ -183,10 +183,10 @@ class VideoFlowStore:
                     pass
             try:
                 from voice_flow.storage import storage, StorageEngine
-                if Path(storage.db_path).resolve() == self.db_path.resolve():
+                if Path(storage.db_path).resolve() == self.db_path.resolve() and not self._custom_db:
                     self._storage_engine = storage
                 else:
-                    self._storage_engine = StorageEngine(str(self.db_path))
+                    self._storage_engine = StorageEngine(str(self.db_path), custom_db=self._custom_db)
                 return self._storage_engine
             except Exception:
                 return None

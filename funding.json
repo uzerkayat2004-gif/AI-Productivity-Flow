@@ -5,19 +5,18 @@
     "type": "individual",
     "role": "maintainer",
     "name": "Uzer Kayat",
-    "email": "uzer.kayat2004@gmail.com",
-    "description": "I am an independent developer from India and the creator and solo maintainer of Productivity Flow. I started building the project to solve a problem I personally had with consuming long text and information, and it has grown into an open-source Windows productivity application combining voice dictation, audio summaries, and visual video explanations. I have built the project independently from scratch and am currently preparing it for its first major public release.",
+    "description": "I am an independent developer from India and the creator and solo maintainer of AI Productivity Flow. I started building the project to solve a problem I personally had with consuming long text and information, and it has grown into an open-source desktop AI system for Windows and macOS combining voice dictation, audio summaries, and visual explainer videos. I have built the project independently from scratch as a free, open-source application.",
     "webpageUrl": {
-      "url": "https://uzerkayat.vercel.app/"
+      "url": "https://ai-productivity-flow.vercel.app/"
     }
   },
   "projects": [
     {
       "guid": "productivity-flow",
       "name": "AI Productivity Flow",
-      "description": "Productivity Flow is a free and open-source Windows productivity application designed to let users transform information without leaving the application they are already working in. It combines three system-wide workflows: Voice Flow for speech-to-text dictation, Audio Flow for reading or summarising selected text, and Video Flow for turning text, articles, documents, and code into narrated visual explanations.\n\nThe application is designed around user control and local-first operation. It supports local speech recognition, offline summarisation, and local text-to-speech, while optional cloud AI features use a Bring-Your-Own-Key model rather than a developer-controlled AI service. The project is currently in active pre-release development, with a working Windows application and public release planned after final development and hardening.",
+      "description": "AI Productivity Flow is a free and open-source desktop AI system for Windows and macOS designed to let users transform information without leaving the application they are already working in. It combines three system-wide workflows: Video Flow for turning text, articles, documents, and code into narrated visual explanations, Audio Flow for reading or summarising selected text, and Voice Flow for speech-to-text dictation and text injection.\n\nThe application is designed around user control and local-first operation. It supports local speech recognition, offline summarisation, and local text-to-speech, while optional cloud AI features use a Bring-Your-Own-Key model rather than a developer-controlled AI service.",
       "webpageUrl": {
-        "url": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow"
+        "url": "https://ai-productivity-flow.vercel.app/"
       },
       "repositoryUrl": {
         "url": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow"

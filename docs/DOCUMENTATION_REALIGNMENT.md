@@ -1,3 +1,5 @@
+> 🗄️ **HISTORICAL AUDIT ARCHIVE (2026-08-22)**: This document records historical audit realignment notes prior to the v1.0.0 public release. For current product documentation, refer to [PRODUCT_FACTS.md](PRODUCT_FACTS.md) and [CURRENT_PRODUCT_MAP.md](CURRENT_PRODUCT_MAP.md).
+
 # DOCUMENTATION_REALIGNMENT — 2026-08-22 audit & rewrite record
 
 Mission: align the public GitHub presentation with the product that exists in

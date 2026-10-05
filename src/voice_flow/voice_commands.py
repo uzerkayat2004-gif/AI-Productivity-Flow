@@ -253,6 +253,18 @@ _DEDUPE_RE = re.compile(r"\bremove\s+(?:the\s+)?repetit(?:ion|ive)\b", re.I)
 _SUMMARIZE_RE = re.compile(r"\bsummarize|summarise\b", re.I)
 _REWRITE_RE = re.compile(r"^\s*(?:please\s+)?(?:rewrite|polish|clean\s+up)\b", re.I)
 _INSTRUCTIONS_RE = re.compile(r"\bas\s+(?:clear\s+)?instructions\b", re.I)
+_COMMAND_SHAPE_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|"
+    r"shorten|clean(?:\s+up)?|polish|convert|send|generate|draft)\b"
+    # A verified ASR substitution for "make this" used by the voice-log alias.
+    r"|^\s*may\s+this\b"
+    r"|^\s*keep\s+my\s+(?:wording|words|phrasing)\b"
+    r"|^\s*(?:always|from\s+now\s+on|remember\s+(?:this|that)|"
+    r"save\s+(?:this|that)(?:\s+style)?)\s+(?:please\s+)?"
+    r"(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|shorten|"
+    r"clean(?:\s+up)?|polish|convert|send|generate|draft)\b",
+    re.I,
+)
 _PERSISTENT_RE = re.compile(
     r"\b(?:always|from\s+now\s+on|remember\s+(?:this|that)|save\s+(?:this|that)(?:\s+style)?)\b", re.I
 )
@@ -290,6 +302,11 @@ def _extract_context_reference(clause: str) -> str | None:
 def _parse_command(clause: str) -> VoiceCommand:
     """Parse one command clause (wake phrase already removed) into a schema object."""
     text = clause.strip()
+    # A wake phrase can also precede ordinary dictation. Require a recognized
+    # command lead before treating format words mentioned in that dictation
+    # (for example, "the email from Morgan") as instructions.
+    if not _COMMAND_SHAPE_RE.match(text):
+        return VoiceCommand(raw_phrase=text)
     lowered = text.lower()
     preserve_wording = bool(_KEEP_WORDING_RE.search(lowered)) and not bool(
         _NEGATED_KEEP_WORDING_RE.search(lowered)

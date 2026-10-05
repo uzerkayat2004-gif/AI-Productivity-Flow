@@ -141,34 +141,31 @@ def _local_system_prompt(instruction: str) -> str:
         "Do not invent names, placeholders, or extra content. Reply only with the rewrite."
     )
     if instruction:
-        # Long profile prose is counterproductive for this 350M model.  Its
-        # measured command success improves substantially when one concrete
-        # task is stated in a short imperative; the caller still validates
-        # every response before delivery.
+        # Keep complete trusted instructions: saved preferences and temporary
+        # command constraints compose, so replacing them with a task label
+        # silently loses requirements.
         lowered = instruction.casefold()
         if "email" in lowered:
-            if "very casual" in lowered or "minimal punctuation" in lowered or "informal email" in lowered:
-                register = "very casual"
-            elif "casual email" in lowered or "casual, relaxed" in lowered or "friendly, direct" in lowered:
-                register = "casual"
-            elif "enthusiastic" in lowered or "excited" in lowered or "upbeat" in lowered:
-                register = "enthusiastic"
-            else:
-                register = "formal"
             instruction = (
-                f"Write a concise {register} email. Keep the result short. Preserve the user's original wording and every fact. Do not invent a subject, "
-                "names, placeholders, greeting, or sign-off. Output only the email"
+                "Write the requested email, following the trusted instruction's register and format. "
+                "Use only the transcript's facts; do not invent names, a subject, or details. "
+                f"Trusted instruction: {instruction}"
             )
-        elif "bullet list" in lowered:
-            instruction = "Write a bullet list. Keep every fact. Output only the list"
-        elif "keep the result short" in lowered or "be concise" in lowered:
-            instruction = "Make this shorter. Keep every fact. Output only the rewritten text"
+            instruction += (
+                ' Illustrative example only, not transcript content: input "Please send the report." '
+                '-> output "Hello,\\n\\nPlease send the report.\\n\\nRegards,". '
+                "Never copy example facts; use a generic greeting or sign-off only when requested."
+            )
         elif "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
-            instruction = "Write an AI prompt from this request. Keep every fact. Do not answer it. Output only the prompt"
-        elif "casual" in lowered:
-            instruction = "Rewrite this casually. Keep every fact. Output only the rewrite"
-        elif "formal" in lowered or "professional" in lowered:
-            instruction = "Rewrite this formally. Keep every fact. Output only the rewrite"
+            instruction = (
+                "Turn the transcript into the requested prompt. Preserve every dictated requirement; "
+                "do not answer the task or invent requirements. "
+                f"Trusted instruction: {instruction}"
+            )
+            instruction += (
+                ' Illustrative example only, not transcript content: input "Make a prompt that explains this process." '
+                '-> output "Objective: Explain this process.". Never copy example facts.'
+            )
         prompt += f" Apply this trusted style or task: {instruction}."
     return prompt
 

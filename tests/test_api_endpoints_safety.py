@@ -459,3 +459,19 @@ def test_gemini_model_test_routing_and_no_openai_leak(test_server):
             assert 'api.openai.com' not in u
             assert 'generativelanguage.googleapis.com' in u
 
+
+def test_version_and_updates_endpoints(test_server):
+    base_url = test_server['base_url']
+    status, headers, body = _get(f'{base_url}/api/version')
+    assert status == 200
+    assert body['success'] is True
+    assert body['version'] == '1.0.0'
+    assert body['name'] == 'AI Productivity Flow'
+    assert body['license'] == 'Apache-2.0'
+
+    status, headers, body = _get(f'{base_url}/api/updates/check')
+    assert status == 200
+    assert body['success'] is True
+    assert 'current_version' in body
+    assert body['current_version'] == '1.0.0'
+

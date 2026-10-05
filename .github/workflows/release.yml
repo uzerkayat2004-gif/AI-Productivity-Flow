@@ -1,0 +1,122 @@
+name: Release AI Productivity Flow
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-test:
+    name: Validate Version & Run Quality Gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pytest-timeout cryptography
+
+      - name: Verify Git Tag Matches Canonical Version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $canonical = (Get-Content src/voice_flow/_version.py | Select-String 'VERSION\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          Write-Host "Triggered Tag: $tag, Canonical Version: $canonical"
+          if ($tag -ne $canonical) {
+            Write-Error "Release tag 'v$tag' does not match canonical source version '$canonical' in src/voice_flow/_version.py!"
+            exit 1
+          }
+
+      - name: Run Version Consistency Test
+        run: |
+          pytest tests/test_version_consistency.py tests/test_update_checker.py -vv
+
+      - name: Run Platform & Core Feature Tests
+        run: |
+          pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py -v --timeout=60
+
+  build-macos:
+    name: Build macOS Release Bundle
+    needs: validate-and-test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pillow
+
+      - name: Build macOS Application Bundle (.app & .zip)
+        run: |
+          python scripts/build_macos_app.py
+
+      - name: Verify macOS Artifacts
+        run: |
+          test -f dist/AI-Productivity-Flow-macOS.zip
+          test -f dist/AI-Productivity-Flow-macOS.zip.sha256
+          echo "macOS archive size: $(wc -c < dist/AI-Productivity-Flow-macOS.zip) bytes"
+          cat dist/AI-Productivity-Flow-macOS.zip.sha256
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-artifacts
+          path: |
+            dist/AI-Productivity-Flow-macOS.zip
+            dist/AI-Productivity-Flow-macOS.zip.sha256
+
+  publish-github-release:
+    name: Publish Stable GitHub Release
+    needs: [validate-and-test, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release-artifacts
+          path: release-assets/
+
+      - name: Prepare Release Notes & Verify Artifacts
+        id: prep
+        run: |
+          tag="${{ github.ref_name }}"
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          ls -la release-assets/
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          version="${tag#v}"
+          
+          # Publish stable release
+          gh release create "$tag" \
+            release-assets/* \
+            --title "AI Productivity Flow $tag" \
+            --notes-file CHANGELOG.md \
+            --repo "${{ github.repository }}"

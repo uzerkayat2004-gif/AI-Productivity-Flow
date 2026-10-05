@@ -267,10 +267,10 @@ class DictionaryEngine:
             except Exception as exc:
                 log.warning("Dictionary storage unavailable; retaining cached rules: %s", exc)
                 # Keep the last good snapshot. On first startup the empty
-                # snapshot is still a safe no-op, and the next explicit
-                # revision/dirty signal can refresh it.
-                self._dirty = False
-                self._revision = revision
+                # snapshot is still a safe no-op. Leave the reload pending so
+                # the next dictation retries even if storage's revision did
+                # not change while it was unavailable.
+                self._dirty = True
                 return
 
             rules: list[_Rule] = []

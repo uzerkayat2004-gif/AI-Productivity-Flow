@@ -1,43 +1,35 @@
-# GITHUB_METADATA — proposed repository metadata
+# GITHUB_METADATA — Repository Metadata for v1.0.0 Public Release
 
-Apply AFTER the documentation realignment is committed and pushed. Prepared per
-the 2026-08-22 mission; GitHub was NOT edited until publication was authorized.
+Canonical GitHub repository metadata for **AI Productivity Flow**.
 
-## Description (canonical, fits GitHub limit)
-
-Windows desktop AI productivity app for voice dictation, selected-text audio, and visual explainer videos — system-wide, BYOK, and workflow-first.
-
-Shorter fallback if length-limited:
-
-Windows AI productivity app for voice dictation, selected-text audio and visual explainer videos.
+## Description
+Open-source desktop AI that turns selected text into video or audio and voice into polished text — system-wide, local-first, BYOK.
 
 ## Homepage
+https://ai-productivity-flow.vercel.app/
 
-Leave blank — no official website exists.
+## Topics
+ai-productivity · desktop-app · windows · macos · voice-dictation · speech-to-text · text-to-speech · tts · visual-explainer · video-generation · nvidia-nemotron · notebooklm · byok · local-first · open-source · multimodal · productivity · accessibility · python
 
-## Topics (GitHub caps topics; prefer this order)
+## Release Identity
+- **Tag**: `v1.0.0`
+- **Title**: `AI Productivity Flow v1.0.0`
+- **Pre-release**: false (Stable)
+- **Stable Download Assets**:
+  - Windows: `AI-Productivity-Flow-Setup-x64.exe`
+  - Windows Checksum: `AI-Productivity-Flow-Setup-x64.exe.sha256`
+  - macOS: `AI-Productivity-Flow-macOS.zip`
+  - macOS Checksum: `AI-Productivity-Flow-macOS.zip.sha256`
 
-windows · desktop-app · ai-productivity · voice-dictation · speech-to-text ·
-faster-whisper · text-to-speech · tts · visual-explainer · video-generation ·
-byok · multimodal · productivity · accessibility · python
-
-## Recommended release identity
-
-- Tag: `v0.9.0-beta`
-- Title: `AI Productivity Flow v0.9.0 Beta — Windows`
-- Pre-release: yes
-- Repository tagline (About): the description above; mention **Windows Beta** in
-  README/release notes (done).
-
-## Apply command (run only when authorized)
+## GitHub CLI Update Command
 
 ```bash
 gh repo edit uzerkayat2004-gif/AI-Productivity-Flow \
-  --description "Windows desktop AI productivity app for voice dictation, selected-text audio, and visual explainer videos — system-wide, BYOK, and workflow-first." \
-  --remove-website \
-  --add-topic windows --add-topic desktop-app --add-topic ai-productivity \
-  --add-topic voice-dictation --add-topic speech-to-text --add-topic faster-whisper \
-  --add-topic text-to-speech --add-topic tts --add-topic visual-explainer \
-  --add-topic video-generation --add-topic byok --add-topic multimodal \
-  --add-topic productivity --add-topic accessibility --add-topic python
+  --description "Open-source desktop AI that turns selected text into video or audio and voice into polished text — system-wide, local-first, BYOK." \
+  --homepage "https://ai-productivity-flow.vercel.app/" \
+  --add-topic ai-productivity --add-topic desktop-app --add-topic windows --add-topic macos \
+  --add-topic voice-dictation --add-topic speech-to-text --add-topic text-to-speech --add-topic tts \
+  --add-topic visual-explainer --add-topic video-generation --add-topic nvidia-nemotron \
+  --add-topic notebooklm --add-topic byok --add-topic local-first --add-topic open-source \
+  --add-topic multimodal --add-topic productivity --add-topic accessibility --add-topic python
 ```
