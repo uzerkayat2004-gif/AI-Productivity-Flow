@@ -1,4 +1,14 @@
 // Voice Flow Desktop App - Real Data Controller
+if (typeof globalThis.vfBrandLogo !== "function") {
+  globalThis.vfBrandLogo = function(id, fallback) {
+    return fallback !== undefined && fallback !== null ? fallback : "🎬";
+  };
+}
+if (typeof globalThis.vfBrandLogoByName !== "function") {
+  globalThis.vfBrandLogoByName = function(name) {
+    return "";
+  };
+}
 if (typeof history !== "undefined" && "scrollRestoration" in history) {
   try { history.scrollRestoration = "manual"; } catch (_) {}
 }

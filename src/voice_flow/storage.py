@@ -180,6 +180,7 @@ class StorageEngine:
     """SQLite Database manager for persistent dictation history & metrics."""
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._custom_db = db_path is not None
         if db_path is None:
             db_path = resolve_active_db_path()
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -207,6 +208,8 @@ class StorageEngine:
         Returns True when the engine switched databases (schema re-initialized),
         False when it is already on the right DB.
         """
+        if getattr(self, "_custom_db", False):
+            return False
         try:
             target = resolve_active_db_path()
         except Exception:
@@ -4242,7 +4245,7 @@ class StorageEngine:
         clean_prompt = str(prompt or clean_title).strip()
         word_count = len(clean_prompt.split())
 
-        with self._get_conn() as conn:
+        with self._get_conn_ctx() as conn:
             row = None
             if job_id:
                 row = conn.execute(
@@ -4336,7 +4339,7 @@ class StorageEngine:
         clean_text = str(text_snippet or clean_title).strip()
         word_count = len(clean_text.split())
 
-        with self._get_conn() as conn:
+        with self._get_conn_ctx() as conn:
             row = None
             if audio_id:
                 row = conn.execute(
@@ -4405,7 +4408,7 @@ class StorageEngine:
         """Backfill existing Video Flow jobs and Audio Flow summaries into history table."""
         synced_videos = 0
         synced_audios = 0
-        with self._get_conn() as conn:
+        with self._get_conn_ctx() as conn:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             if "video_flow_jobs" in tables:
                 cursor = conn.execute("SELECT job_id, state, message, meta_json, created_at FROM video_flow_jobs")

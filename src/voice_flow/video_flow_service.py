@@ -117,6 +117,7 @@ class VideoFlowStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._storage_engine = None
         self._init_db()
         try:
             self.prune_excess_jobs(max_keep=50)
@@ -124,7 +125,7 @@ class VideoFlowStore:
             pass
 
     def _init_db(self) -> None:
-        with contextlib.closing(self._connection()) as conn, conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS video_flow_jobs (
@@ -143,6 +144,7 @@ class VideoFlowStore:
         """Repoint video flow store to active account database."""
         with self._lock:
             self.db_path = Path(new_db_path)
+            self._storage_engine = None
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_db()
             try:
@@ -170,11 +172,41 @@ class VideoFlowStore:
         except Exception:
             return False
 
-    def _connection(self) -> sqlite3.Connection:
+    def _get_storage(self):
+        with self._lock:
+            cached = getattr(self, "_storage_engine", None)
+            if cached is not None:
+                try:
+                    if Path(cached.db_path).resolve() == self.db_path.resolve():
+                        return cached
+                except Exception:
+                    pass
+            try:
+                from voice_flow.storage import storage, StorageEngine
+                if Path(storage.db_path).resolve() == self.db_path.resolve():
+                    self._storage_engine = storage
+                else:
+                    self._storage_engine = StorageEngine(str(self.db_path))
+                return self._storage_engine
+            except Exception:
+                return None
+
+    @contextlib.contextmanager
+    def _connection(self):
         self.repoint_if_needed()
-        conn = sqlite3.connect(self.db_path, timeout=10)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout = 15000")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+        except Exception:
+            pass
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def prune_excess_jobs(self, max_keep: int = 50) -> list[str]:
         """Prune oldest video jobs so total jobs does not exceed max_keep (FIFO)."""
@@ -217,25 +249,24 @@ class VideoFlowStore:
                         conn.execute(f"DELETE FROM history WHERE app_name = 'Video Flow' AND insertion_status IN ({placeholders})", tuple(pruned_ids))
                     except Exception:
                         pass
-            try:
-                conn.execute(
-                    """
-                    DELETE FROM history
-                    WHERE app_name = 'Video Flow'
-                    AND id NOT IN (
-                        SELECT id FROM (
-                            SELECT id FROM history
-                            WHERE app_name = 'Video Flow'
-                            ORDER BY id DESC
-                            LIMIT ?
+                try:
+                    conn.execute(
+                        """
+                        DELETE FROM history
+                        WHERE app_name = 'Video Flow'
+                        AND id NOT IN (
+                            SELECT id FROM (
+                                SELECT id FROM history
+                                WHERE app_name = 'Video Flow'
+                                ORDER BY id DESC
+                                LIMIT ?
+                            )
                         )
+                        """,
+                        (max_keep,),
                     )
-                    """,
-                    (max_keep,),
-                )
-            except Exception:
-                pass
-            conn.commit()
+                except Exception:
+                    pass
             if pruned_ids:
                 try:
                     from voice_flow.gui.api_server import invalidate_history_cache
@@ -245,7 +276,6 @@ class VideoFlowStore:
         return pruned_ids
 
     def create(self, job: JobV3) -> JobV3:
-        self.prune_excess_jobs(max_keep=49)
         now = time.time()
         with self._lock, self._connection() as conn:
             conn.execute(
@@ -254,31 +284,31 @@ class VideoFlowStore:
                 (job.job_id, job.state, job.progress, job.message, _json(job.meta), now, now),
             )
         try:
-            from voice_flow.storage import storage, StorageEngine
-            target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
-            if hasattr(target_engine, "repoint_if_needed"):
-                target_engine.repoint_if_needed()
-            title = str((job.meta or {}).get("title") or (job.meta or {}).get("prompt") or f"Video {job.job_id[:8]}").strip()
-            prompt = str((job.meta or {}).get("prompt") or (job.meta or {}).get("source_text") or title).strip()
-            out_p = (job.meta or {}).get("output_path") or (job.meta or {}).get("video_path")
-            dur = float((job.meta or {}).get("duration") or (job.meta or {}).get("duration_seconds") or 0.0)
-            status = "success" if job.state == "complete" else ("processing" if job.state not in _TERMINAL_STATES else "error")
-            err = job.message if job.state in ("failed", "cancelled") else None
-            target_engine.record_video_history(
-                job_id=job.job_id,
-                title=title,
-                prompt=prompt,
-                output_path=str(out_p) if out_p else None,
-                duration_sec=dur,
-                status=status,
-                error_message=err,
-                created_at=now,
-            )
-            try:
-                from voice_flow.gui.api_server import invalidate_history_cache
-                invalidate_history_cache()
-            except Exception:
-                pass
+            target_engine = self._get_storage()
+            if target_engine is not None:
+                if hasattr(target_engine, "repoint_if_needed"):
+                    target_engine.repoint_if_needed()
+                title = str((job.meta or {}).get("title") or (job.meta or {}).get("prompt") or f"Video {job.job_id[:8]}").strip()
+                prompt = str((job.meta or {}).get("prompt") or (job.meta or {}).get("source_text") or title).strip()
+                out_p = (job.meta or {}).get("output_path") or (job.meta or {}).get("video_path")
+                dur = float((job.meta or {}).get("duration") or (job.meta or {}).get("duration_seconds") or 0.0)
+                status = "success" if job.state == "complete" else ("processing" if job.state not in _TERMINAL_STATES else "error")
+                err = job.message if job.state in ("failed", "cancelled") else None
+                target_engine.record_video_history(
+                    job_id=job.job_id,
+                    title=title,
+                    prompt=prompt,
+                    output_path=str(out_p) if out_p else None,
+                    duration_sec=dur,
+                    status=status,
+                    error_message=err,
+                    created_at=now,
+                )
+                try:
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
         except Exception:
             pass
         self.prune_excess_jobs(max_keep=50)
@@ -356,7 +386,7 @@ class VideoFlowStore:
             next_state = state or current.state
             next_progress = max(current.progress, _bounded_progress(progress)) if progress is not None else current.progress
             next_message = _redact(message) if message is not None else current.message
-            with contextlib.closing(self._connection()) as conn, conn:
+            with self._connection() as conn:
                 conn.execute(
                     "UPDATE video_flow_jobs SET state = ?, progress = ?, message = ?, meta_json = ?, updated_at = ? "
                     "WHERE job_id = ?",
@@ -383,7 +413,7 @@ class VideoFlowStore:
             merged_meta = {**current.meta, **(meta_updates or {})}
             progress = 100.0 if state == "complete" else current.progress
             now = time.time()
-            with contextlib.closing(self._connection()) as conn, conn:
+            with self._connection() as conn:
                 conn.execute(
                     "UPDATE video_flow_jobs SET state = ?, progress = ?, message = ?, meta_json = ?, updated_at = ? "
                     "WHERE job_id = ?",
@@ -391,31 +421,31 @@ class VideoFlowStore:
                 )
             job = JobV3(job_id, state, progress, _redact(message), merged_meta)
             try:
-                from voice_flow.storage import storage, StorageEngine
-                target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
-                if hasattr(target_engine, "repoint_if_needed"):
-                    target_engine.repoint_if_needed()
-                title = str((merged_meta or {}).get("title") or (merged_meta or {}).get("prompt") or f"Video {job_id[:8]}").strip()
-                prompt = str((merged_meta or {}).get("prompt") or (merged_meta or {}).get("source_text") or title).strip()
-                out_p = (merged_meta or {}).get("output_path") or (merged_meta or {}).get("video_path")
-                dur = float((merged_meta or {}).get("duration") or (merged_meta or {}).get("duration_seconds") or 0.0)
-                target_engine.record_video_history(
-                    job_id=job_id,
-                    title=title,
-                    prompt=prompt,
-                    output_path=str(out_p) if out_p else None,
-                    duration_sec=dur,
-                    status="success" if state == "complete" else ("cancelled" if state == "cancelled" else "error"),
-                    error_message=message if state != "complete" else None,
-                    created_at=now,
-                )
+                target_engine = self._get_storage()
+                if target_engine is not None:
+                    if hasattr(target_engine, "repoint_if_needed"):
+                        target_engine.repoint_if_needed()
+                    title = str((merged_meta or {}).get("title") or (merged_meta or {}).get("prompt") or f"Video {job_id[:8]}").strip()
+                    prompt = str((merged_meta or {}).get("prompt") or (merged_meta or {}).get("source_text") or title).strip()
+                    out_p = (merged_meta or {}).get("output_path") or (merged_meta or {}).get("video_path")
+                    dur = float((merged_meta or {}).get("duration") or (merged_meta or {}).get("duration_seconds") or 0.0)
+                    target_engine.record_video_history(
+                        job_id=job_id,
+                        title=title,
+                        prompt=prompt,
+                        output_path=str(out_p) if out_p else None,
+                        duration_sec=dur,
+                        status="success" if state == "complete" else ("cancelled" if state == "cancelled" else "error"),
+                        error_message=message if state != "complete" else None,
+                        created_at=now,
+                    )
                 if state == "complete" and out_p and Path(str(out_p)).is_file() and Path(str(out_p)).stat().st_size > 1000:
                     try:
                         from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
                         clean_vname = safe_media_filename(title, default=f"video_{job_id[:8]}", ext=".mp4")
                         save_media_to_downloads(str(out_p), clean_vname, copy_to_media_folder=True)
                         merged_meta["downloaded"] = True
-                        with contextlib.closing(self._connection()) as conn_u, conn_u:
+                        with self._connection() as conn_u:
                             conn_u.execute("UPDATE video_flow_jobs SET meta_json = ? WHERE job_id = ?", (_json(merged_meta), job_id))
                     except Exception:
                         pass
@@ -435,27 +465,27 @@ class VideoFlowStore:
             if current is None:
                 return None
             merged_meta = {**current.meta, **(meta_updates or {})}
-            with contextlib.closing(self._connection()) as conn, conn:
+            with self._connection() as conn:
                 conn.execute(
                     "UPDATE video_flow_jobs SET meta_json = ?, updated_at = ? WHERE job_id = ?",
                     (_json(merged_meta), time.time(), job_id),
                 )
             if meta_updates and any(k in meta_updates for k in ("title", "output_path", "video_path", "duration", "duration_seconds")):
                 try:
-                    from voice_flow.storage import storage, StorageEngine
-                    target_engine = storage if Path(storage.db_path).resolve() == self.db_path.resolve() else StorageEngine(str(self.db_path))
-                    title = str(merged_meta.get("title") or merged_meta.get("prompt") or f"Video {job_id[:8]}").strip()
-                    prompt = str(merged_meta.get("prompt") or merged_meta.get("source_text") or title).strip()
-                    out_p = merged_meta.get("output_path") or merged_meta.get("video_path")
-                    dur = float(merged_meta.get("duration") or merged_meta.get("duration_seconds") or 0.0)
-                    target_engine.record_video_history(
-                        job_id=job_id,
-                        title=title,
-                        prompt=prompt,
-                        output_path=str(out_p) if out_p else None,
-                        duration_sec=dur,
-                        status="success" if current.state == "complete" else ("processing" if current.state not in _TERMINAL_STATES else "error"),
-                    )
+                    target_engine = self._get_storage()
+                    if target_engine is not None:
+                        title = str(merged_meta.get("title") or merged_meta.get("prompt") or f"Video {job_id[:8]}").strip()
+                        prompt = str(merged_meta.get("prompt") or merged_meta.get("source_text") or title).strip()
+                        out_p = merged_meta.get("output_path") or merged_meta.get("video_path")
+                        dur = float(merged_meta.get("duration") or merged_meta.get("duration_seconds") or 0.0)
+                        target_engine.record_video_history(
+                            job_id=job_id,
+                            title=title,
+                            prompt=prompt,
+                            output_path=str(out_p) if out_p else None,
+                            duration_sec=dur,
+                            status="success" if current.state == "complete" else ("processing" if current.state not in _TERMINAL_STATES else "error"),
+                        )
                 except Exception:
                     pass
             return JobV3(job_id, current.state, current.progress, current.message, merged_meta)

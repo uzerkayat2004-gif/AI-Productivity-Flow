@@ -1,3 +1,13 @@
+if (typeof globalThis.vfBrandLogo !== "function") {
+  globalThis.vfBrandLogo = function(id, fallback) {
+    return fallback !== undefined && fallback !== null ? fallback : "🎬";
+  };
+}
+if (typeof globalThis.vfBrandLogoByName !== "function") {
+  globalThis.vfBrandLogoByName = function(name) {
+    return "";
+  };
+}
 let vfCatalog = {providers: [], models: [], active_model: "local/deterministic"};
 let vfCatalogLoaded = false;
 let vfVideos = [];
@@ -1757,7 +1767,9 @@ function renderVideoProviderGrid(elementId, providers) {
       : connected
         ? `${provider.active_count} Active`
         : provider.category === "local" ? "Native / Local" : "Not connected";
-    const logo = vfBrandLogo(provider.id, vfProviderIcons[provider.id] || provider.icon || "🎬");
+    const logo = (typeof vfBrandLogo === "function")
+      ? vfBrandLogo(provider.id, vfProviderIcons[provider.id] || provider.icon || "🎬")
+      : (vfProviderIcons[provider.id] || provider.icon || "🎬");
     return `
       <div class="provider-card-item" onclick="openVideoProvider(${vfJsArg(provider.id)})">
         <div class="provider-card-left">
@@ -4520,7 +4532,9 @@ function renderVideoProviderDetails() {
   const isOAuth = provider.category === "oauth";
   const isLocal = provider.category === "local";
   const oauthStatus = provider.oauth_status || {};
-  const logo = vfBrandLogo(provider.id, vfEscape(vfProviderIcons[provider.id] || provider.icon || "\uD83C\uDFAC"));
+  const logo = (typeof vfBrandLogo === "function")
+    ? vfBrandLogo(provider.id, vfEscape(vfProviderIcons[provider.id] || provider.icon || "\uD83C\uDFAC"))
+    : vfEscape(vfProviderIcons[provider.id] || provider.icon || "\uD83C\uDFAC");
   const conns = (data.connections || []).slice().sort(function(a, b) {
     return (a.priority || 1) - (b.priority || 1) || (a.id - b.id);
   });
