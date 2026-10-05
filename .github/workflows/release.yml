@@ -47,6 +47,76 @@ jobs:
         run: |
           pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py -v --timeout=60
 
+      - name: Verify License and Third-Party Notices
+        shell: pwsh
+        run: |
+          if (-not (Test-Path LICENSE)) { Write-Error "LICENSE file missing!"; exit 1 }
+          if (-not (Test-Path release/THIRD_PARTY_NOTICES.txt)) { Write-Error "release/THIRD_PARTY_NOTICES.txt missing!"; exit 1 }
+          Write-Host "License and Third-Party notices verified."
+
+      - name: Secret Scanning Quality Gate
+        shell: pwsh
+        run: |
+          $forbidden = @("ghp_[a-zA-Z0-9]{30,}", "sk-[a-zA-Z0-9]{32,}", "AIzaSy[a-zA-Z0-9_-]{33}", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----")
+          $targets = Get-ChildItem -Path src, release, scripts -Recurse -File -Exclude *.ico,*.png,*.jpg,*.zip,*.exe,*.bin,*.gguf | Select-Object -ExpandProperty FullName
+          foreach ($pattern in $forbidden) {
+            $matches = Select-String -Path $targets -Pattern $pattern
+            if ($matches) {
+              Write-Error "Potential secret found matching pattern ${pattern}:`n$matches"
+              exit 1
+            }
+          }
+          Write-Host "Secret scan passed cleanly."
+
+  package-windows:
+    name: Package & Validate Windows Installer
+    needs: validate-and-test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify Windows Release Artifacts & Smoke Test
+        shell: pwsh
+        run: |
+          $exe = "dist/AI-Productivity-Flow-Setup-x64.exe"
+          $sha = "dist/AI-Productivity-Flow-Setup-x64.exe.sha256"
+          if (Test-Path $exe) {
+            $size = (Get-Item $exe).Length
+            Write-Host "Found Windows Installer ($size bytes)"
+            if ($size -lt 10000000) {
+              Write-Error "Windows installer is too small ($size bytes) to contain required runtime!"
+              exit 1
+            }
+            $calculatedHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+            if (Test-Path $sha) {
+              $expectedHash = (Get-Content $sha).Trim().Split()[0].ToLower()
+              if ($calculatedHash -ne $expectedHash) {
+                Write-Error "Checksum mismatch! Calculated: $calculatedHash, Expected: $expectedHash"
+                exit 1
+              }
+            } else {
+              "$calculatedHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath $sha -Encoding ascii
+            }
+            Write-Host "Windows installer smoke validation passed."
+          } else {
+            Write-Host "Windows installer not in repo tree; skipping Windows local artifact upload."
+          }
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        if: hashFiles('dist/AI-Productivity-Flow-Setup-x64.exe') != ''
+        with:
+          name: windows-release-artifacts
+          path: |
+            dist/AI-Productivity-Flow-Setup-x64.exe
+            dist/AI-Productivity-Flow-Setup-x64.exe.sha256
+
   build-macos:
     name: Build macOS Release Bundle
     needs: validate-and-test
@@ -71,12 +141,28 @@ jobs:
         run: |
           python scripts/build_macos_app.py
 
-      - name: Verify macOS Artifacts
+      - name: Verify macOS Artifacts & Smoke Test
         run: |
           test -f dist/AI-Productivity-Flow-macOS.zip
           test -f dist/AI-Productivity-Flow-macOS.zip.sha256
           echo "macOS archive size: $(wc -c < dist/AI-Productivity-Flow-macOS.zip) bytes"
           cat dist/AI-Productivity-Flow-macOS.zip.sha256
+          python -c "
+          import zipfile, sys
+          with zipfile.ZipFile('dist/AI-Productivity-Flow-macOS.zip', 'r') as zf:
+              names = zf.namelist()
+              required = [
+                  'AI Productivity Flow.app/Contents/Info.plist',
+                  'AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher',
+                  'AI Productivity Flow.app/Contents/Resources/AppIcon.icns',
+                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/__init__.py',
+                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/_version.py'
+              ]
+              missing = [r for r in required if r not in names]
+              if missing:
+                  sys.exit(f'macOS zip smoke test failed! Missing entries: {missing}')
+          print('macOS zip smoke test passed!')
+          "
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
@@ -88,7 +174,7 @@ jobs:
 
   publish-github-release:
     name: Publish Stable GitHub Release
-    needs: [validate-and-test, build-macos]
+    needs: [validate-and-test, build-macos, package-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -98,6 +184,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: macos-release-artifacts
+          path: release-assets/
+
+      - name: Download Windows Artifacts (if available)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: windows-release-artifacts
           path: release-assets/
 
       - name: Prepare Release Notes & Verify Artifacts

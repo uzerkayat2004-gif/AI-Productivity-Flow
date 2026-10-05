@@ -349,8 +349,13 @@ def test_nemotron_stream_transcriber_discard():
     assert res == ""
 
 
-@pytest.mark.parametrize("empty_final", [False, True])
-def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatch, empty_final):
+@pytest.mark.parametrize(
+    ("empty_final_at_intake", "empty_final_at_drain"),
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_nemotron_finalization_does_not_publish_hello_without_welcome(
+    monkeypatch, empty_final_at_intake, empty_final_at_drain
+):
     """An unfinalized 'hello welcome' interim must trigger whole-audio recovery."""
     class _FakeEngine:
         rec_handle = ctypes.c_void_p(1)
@@ -382,7 +387,7 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
             return 0
 
         def nemo_speech_asr_stream_next(self, _stream, output):
-            if self.finished and empty_final and not self.drain_emitted:
+            if self.finished and empty_final_at_drain and not self.drain_emitted:
                 self.drain_emitted = True
                 output._obj.value = 103
                 return 0
@@ -390,8 +395,12 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
                 output._obj.value = 101
                 return 0
             if not self.finished and self.push_count >= 3:
-                output._obj.value = 102
-                return 0
+                if self.push_count == 3:
+                    output._obj.value = 102
+                    return 0
+                if self.push_count == 4 and empty_final_at_intake:
+                    output._obj.value = 103
+                    return 0
             return 1
 
         def nemo_speech_asr_stream_finish(self, _stream):
@@ -423,6 +432,7 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(monkeypatc
         np.array([0.001, 0.002, 0.003], dtype=np.float32),
         np.linspace(-0.08, 0.08, 160, dtype=np.float32),
         np.array([0.002, 0.001, 0.0005], dtype=np.float32),
+        np.array([0.0004, 0.0003], dtype=np.float32),
     ]
     for frame in frames:
         session.submit_frame(frame, native_sr=16000)
@@ -529,11 +539,14 @@ def test_nemotron_long_buffer_segmentation_keeps_short_final_tail(monkeypatch):
     assert all(len(segment) >= int(0.2 * engine.sample_rate) for segment in segments)
 
 
-def test_nemotron_stream_transcriber_fallback_when_invalid_model():
+def test_nemotron_stream_transcriber_fallback_when_invalid_model(monkeypatch):
     """Verify NemotronStreamTranscriber gracefully marks failure if model cannot be loaded."""
     from voice_flow.nemotron_engine import NemotronStreamTranscriber
 
+    monkeypatch.setattr(nemotron_engine, "get_nemotron_engine", lambda _ref: None)
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: None)
     streamer = NemotronStreamTranscriber()
     streamer.start_session(model_ref="nonexistent/fake-model-12345")
+    assert streamer._done.wait(1.0)
     assert streamer.had_failures() is True
     assert streamer.collect(timeout=0.1) == ""

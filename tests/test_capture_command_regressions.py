@@ -168,6 +168,33 @@ def test_concurrent_startup_flush_has_a_single_replay_owner() -> None:
     assert delivered == pytest.approx([0.1, 0.2, 0.3])
 
 
+def test_replay_work_is_capped_when_sink_generates_one_frame_per_frame(monkeypatch) -> None:
+    monkeypatch.setattr("voice_flow.audio.MAX_STARTUP_STREAM_BUFFER_SECONDS", 40 / 16000)
+    recorder = AudioRecorder()
+    recorder._native_sr = 16000
+    recorder._recording = True
+    recorder.begin_stream_input_buffering()
+    recorder._audio_callback(np.full((4, 1), 0.1, dtype=np.float32), 4, None, None)
+
+    delivered: list[float] = []
+
+    def self_feeding_sink(frame: np.ndarray, _sample_rate: int) -> None:
+        delivered.append(float(frame[0, 0]))
+        if len(delivered) < 1000:
+            value = (len(delivered) + 1) / 1000
+            recorder._audio_callback(np.full((4, 1), value, dtype=np.float32), 4, None, None)
+
+    recorder.on_audio_frame = self_feeding_sink
+    owner = threading.Thread(target=recorder.flush_stream_input_buffer)
+    owner.start()
+    owner.join(timeout=1.0)
+
+    assert not owner.is_alive(), "replay must stop when cumulative handoff audio reaches its cap"
+    assert len(delivered) <= 10
+    assert recorder.stream_input_incomplete is True
+    assert len(np.concatenate(recorder._buffer)) > len(delivered) * 4
+
+
 def test_dictation_opens_capture_before_stream_setup(monkeypatch) -> None:
     session = DictationSession(123, "Editor", "smart_clean", "smart_clean", 0.0)
     app = object.__new__(VoiceFlowApp)

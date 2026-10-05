@@ -1692,6 +1692,7 @@ class VoiceFlowApp:
             if post_release_deadline is None:
                 post_release_deadline = time.monotonic() + POST_RELEASE_WORK_BUDGET_SECONDS
             complete_recording_deadline = time.monotonic() + _complete_recording_budget_seconds(duration)
+            stream_closed = False
             try:
                 # App/style context belongs to the session, never current foreground.
                 with self._state_lock:
@@ -1741,6 +1742,12 @@ class VoiceFlowApp:
                         log.warning(
                             "[STREAM STT] recorder reports incomplete stream input; using whole-buffer transcription."
                         )
+                        # Stop work on known-incomplete audio before recovery
+                        # starts competing for the same CPU. Keep the original
+                        # use_streaming flag so the finally path remains the
+                        # fallback cleanup if this call ever raises.
+                        self._end_stream_session(discard=True, owner=session)
+                        stream_closed = True
 
                 if use_streaming and not stream_input_incomplete:
                     # A full-frame WebSocket session is one coherent provider
@@ -2120,7 +2127,7 @@ class VoiceFlowApp:
 
                 if success:
                     polishing_enabled = _polishing_enabled()
-                    if effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_format", "local_preserved"}:
+                    if effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_model", "local_format", "local_preserved"}:
                         # Spec §50: never silently pretend a transformation ran.
                         label = f" — {effective.label}" if effective.label else ""
                         detail = (
@@ -2129,6 +2136,8 @@ class VoiceFlowApp:
                             else _polish_outcome_label(polish_outcome["value"])
                         )
                         self._overlay_call("show_error", f"{detail}{label}")
+                    elif effective is not None and effective.label and polish_outcome["value"] == "local_model":
+                        self._overlay_call("show_done", f"Local model polished — {effective.label}")
                     elif effective is not None and effective.label and polish_outcome["value"] == "ai_accepted":
                         self._overlay_call("show_done", f"AI polished — {effective.label}")
                     else:
@@ -2149,7 +2158,7 @@ class VoiceFlowApp:
                 # Every return/exception path closes the stream epoch and
                 # releases the processing state.  ``discard`` also fences off
                 # a late worker result from the next dictation.
-                if use_streaming:
+                if use_streaming and not stream_closed:
                     self._end_stream_session(discard=True, owner=session)
                 self._release_session_model_resource(session)
                 pending = getattr(self, "_pending_recovery", None)

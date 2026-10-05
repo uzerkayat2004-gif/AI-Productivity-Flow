@@ -140,9 +140,11 @@ _UNPUNCTUATED_INTENT_END_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_UNPUNCTUATED_COMMAND_WORDS = 18
+_POLITE_COMMAND_PREFIX_RE = re.compile(r"^\s*(?:can|could|would)\s+you\s+(?:please\s+)?", re.I)
 _COMMAND_START_WORDS = {
     "please", "make", "turn", "use", "write", "create", "rewrite", "summarize", "summarise",
     "fix", "shorten", "clean", "polish", "convert", "send", "generate", "draft",
+    "remove", "don't", "tighten", "expand",
 }
 _COMMAND_SYNTAX_WORDS = {
     "this", "it", "as", "into", "a", "an", "the", "my", "usual", "normal", "regular",
@@ -157,7 +159,7 @@ _COMMAND_INTENT_WORDS = {
     "message", "chat", "msg", "text", "short", "shorter", "concise", "brief", "tighten", "detailed",
     "longer", "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly",
     "conversational", "confident", "persuasive", "playful", "excited", "summarize", "summarise",
-    "grammar", "repetition", "repetitive",
+    "grammar", "repetition", "repetitive", "don't",
 }
 _COMMAND_FORMAT_WORDS = {
     "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
@@ -255,10 +257,15 @@ _REWRITE_RE = re.compile(r"^\s*(?:please\s+)?(?:rewrite|polish|clean\s+up)\b", r
 _INSTRUCTIONS_RE = re.compile(r"\bas\s+(?:clear\s+)?instructions\b", re.I)
 _COMMAND_SHAPE_RE = re.compile(
     r"^\s*(?:please\s+)?(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|"
-    r"shorten|clean(?:\s+up)?|polish|convert|send|generate|draft)\b"
+    r"shorten|clean(?:\s+up)?|polish|convert|send|generate|draft|tighten|expand)\b"
     # A verified ASR substitution for "make this" used by the voice-log alias.
     r"|^\s*may\s+this\b"
     r"|^\s*keep\s+my\s+(?:wording|words|phrasing)\b"
+    r"|^\s*remove\s+(?:the\s+)?repetit(?:ion|ive)\b"
+    r"|^\s*don['’]t\s+rewrite\b"
+    r"|^\s*(?:can|could|would)\s+you\s+(?:please\s+)?"
+    r"(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|shorten|clean(?:\s+up)?|"
+    r"polish|convert|send|generate|draft|tighten|expand)\b"
     r"|^\s*(?:always|from\s+now\s+on|remember\s+(?:this|that)|"
     r"save\s+(?:this|that)(?:\s+style)?)\s+(?:please\s+)?"
     r"(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|shorten|"
@@ -399,6 +406,18 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
     wake phrase.  A command with no safe boundary remains unsplit, which is
     preferable to silently losing dictated text.
     """
+    polite_prefix = _POLITE_COMMAND_PREFIX_RE.match(after_wake)
+    if polite_prefix:
+        suffix = after_wake[polite_prefix.end():]
+        # Accept one explicit polite wrapper. Repeated wrappers are not a
+        # natural command shape; preserve them whole instead of recursively
+        # walking an unbounded user-controlled prefix chain.
+        if _POLITE_COMMAND_PREFIX_RE.match(suffix):
+            return after_wake.strip(), ""
+        suffix_command, content = _split_unpunctuated_command(suffix)
+        if suffix_command and _has_any_intent(_parse_command(suffix_command)):
+            return after_wake[:polite_prefix.end()] + suffix_command, content
+
     tokens = list(re.finditer(r"[A-Za-z]+(?:'[A-Za-z]+)?", after_wake))
     if not tokens or tokens[0].group(0).casefold() not in _COMMAND_START_WORDS:
         return after_wake.strip(), ""

@@ -242,7 +242,24 @@ def test_null_backend_reports_no_permissions():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not IS_WINDOWS or bool(os.environ.get("CI")), reason="Requires interactive Windows desktop session")
+def _can_access_clipboard() -> bool:
+    if not IS_WINDOWS or bool(os.environ.get("CI")):
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        if user32.OpenClipboard(None):
+            user32.CloseClipboard()
+            return True
+        return False
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not _can_access_clipboard(),
+    reason="Requires interactive Windows desktop session with clipboard access",
+)
 def test_windows_clipboard_roundtrip_preserves_user_clipboard():
     backend = get_backend()
     saved = backend.read_clipboard()

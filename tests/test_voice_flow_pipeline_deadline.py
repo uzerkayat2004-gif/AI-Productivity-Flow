@@ -22,11 +22,13 @@ from voice_flow.main import DictationSession, DictationState, VoiceFlowApp
 class _CompleteStream:
     def __init__(self) -> None:
         self.collect_timeouts: list[float] = []
+        self.collect_lifecycle: list[tuple[int, int]] = []
         self.ended = 0
         self.discarded = 0
 
     def collect(self, timeout: float = 0.0) -> str:
         self.collect_timeouts.append(timeout)
+        self.collect_lifecycle.append((self.ended, self.discarded))
         return "complete streamed transcript"
 
     def pending_count(self) -> int:
@@ -57,6 +59,12 @@ class _HelloStream(_CompleteStream):
     def collect(self, timeout: float = 0.0) -> str:
         self.collect_timeouts.append(timeout)
         return "hello"
+
+
+class _BrokenAudioCompletenessProbe:
+    @property
+    def stream_input_incomplete(self) -> bool:
+        raise OSError("recorder state unavailable")
 
 
 def _app(session: DictationSession) -> VoiceFlowApp:
@@ -289,6 +297,7 @@ def test_stream_harvest_has_one_bounded_post_release_wait_and_deadline(monkeypat
 
     assert stream.collect_timeouts
     assert max(stream.collect_timeouts) <= main_module.POST_RELEASE_WORK_BUDGET_SECONDS
+    assert stream.collect_lifecycle == [(0, 0)]
     assert not whole_buffer_calls
     assert seen_deadlines and seen_deadlines[0] is not None
     assert app.state == DictationState.IDLE
@@ -337,7 +346,12 @@ def test_stream_failure_probe_forces_complete_whole_buffer_fallback(monkeypatch)
     assert app.state == DictationState.IDLE
 
 
-def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "recorder",
+    [SimpleNamespace(stream_input_incomplete=True), _BrokenAudioCompletenessProbe()],
+    ids=["known-incomplete", "probe-failed"],
+)
+def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(monkeypatch, recorder) -> None:
     session = DictationSession(
         target_hwnd=123,
         app_title="Editor",
@@ -354,12 +368,17 @@ def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(mo
     app = _app(session)
     stream = _HelloStream()
     app._stream_stt = stream
-    app.audio = SimpleNamespace(stream_input_incomplete=True)
+    app.audio = recorder
     archive = object()
     whole_buffer_calls: list[object] = []
-    app.transcriber = SimpleNamespace(
-        transcribe=lambda audio, **_kwargs: whole_buffer_calls.append(audio) or "hello welcome"
-    )
+    lifecycle_at_recovery: list[tuple[int, int]] = []
+
+    def transcribe(audio, **_kwargs):
+        whole_buffer_calls.append(audio)
+        lifecycle_at_recovery.append((stream.ended, stream.discarded))
+        return "hello welcome"
+
+    app.transcriber = SimpleNamespace(transcribe=transcribe)
     pasted: list[str] = []
     app.injector = SimpleNamespace(paste_text=lambda text, *_args, **_kwargs: pasted.append(text) or True)
     monkeypatch.setattr(
@@ -377,10 +396,87 @@ def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(mo
     app._process_dictation_pipeline(session, archive, 1.0, record_id=1, use_streaming=True)
 
     assert whole_buffer_calls == [archive]
+    assert lifecycle_at_recovery == [(1, 1)]
     assert stream.collect_timeouts == []
     assert pasted == ["hello welcome"]
     assert stream.ended == 1
     assert stream.discarded == 1
+
+
+@pytest.mark.parametrize(
+    ("transcript", "outcome", "expected_done", "expected_error"),
+    [
+        (
+            "Hey Voice Flow make this a professional email. We launch Monday.",
+            "local_model",
+            "Local model polished — Email / Professional",
+            None,
+        ),
+        (
+            "Hey Voice Flow make this short. We launch Monday.",
+            "provider_failure",
+            None,
+            "AI unavailable — basic cleanup applied — Short",
+        ),
+        (
+            "Hey Voice Flow make this short. We launch Monday.",
+            "command_unfulfilled",
+            None,
+            "Voice command could not be completed — basic cleanup applied — Short",
+        ),
+    ],
+    ids=["fulfilled-local-model", "provider-failure", "command-unfulfilled"],
+)
+def test_command_overlay_reports_validated_local_model_success_only(
+    monkeypatch, transcript, outcome, expected_done, expected_error
+) -> None:
+    session = DictationSession(
+        target_hwnd=123,
+        app_title="Editor",
+        app_category="smart_clean",
+        style_id="smart_clean",
+        started_at=0.0,
+        resolved_style=SimpleNamespace(
+            app_name="Editor",
+            category="smart_clean",
+            style_id="smart_clean",
+            instruction="clean up lightly",
+        ),
+    )
+    app = _app(session)
+    app.transcriber = SimpleNamespace(transcribe=lambda _audio, **_kwargs: transcript)
+    done: list[str] = []
+    errors: list[str] = []
+    app.overlay.show_done = lambda message: done.append(message)
+    app.overlay.show_error = lambda message: errors.append(message)
+    app._defer_history_insert = lambda *_args, **_kwargs: None
+
+    def fake_finalize(_text, _session, _resolved_style=None, *, effective, command, outcome_callback, **_kwargs):
+        assert effective.requires_ai
+        assert effective.label == ("Email / Professional" if outcome == "local_model" else "Short")
+        assert command is not None
+        outcome_callback(outcome)
+        return "Hello,\n\nWe launch Monday.\n\nBest."
+
+    app._finalize_text = fake_finalize
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: {
+        "polishing_enabled": True,
+        "style_email": "email_formal",
+        "voice_flow_polish_speed_mode": "balanced",
+    }.get(key, default))
+    monkeypatch.setattr(main_module.storage, "update_dictation", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
+    monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
+    monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
+
+    app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=False)
+
+    if expected_done:
+        assert done == [expected_done]
+        assert errors == []
+    else:
+        assert done == []
+        assert errors == [expected_error]
 
 
 def test_stream_harvest_reserves_time_for_complete_recording_recovery(monkeypatch) -> None:

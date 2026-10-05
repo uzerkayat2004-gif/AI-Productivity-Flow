@@ -130,20 +130,42 @@ def bundle_runtime_dependencies() -> None:
     """Bundle dependencies into Contents/Resources/runtime/site-packages if present."""
     runtime_dir = RESOURCES_DIR / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    # If a private venv or site-packages exists in build environment, copy dependencies
+    target_sp = runtime_dir / "site-packages"
+    if target_sp.exists():
+        return
+
+    # 1. If a private venv exists in repo root, copy dependencies
     venv_site = REPO_ROOT / ".venv" / "lib"
     if venv_site.is_dir():
         for py_dir in venv_site.glob("python3*"):
             sp = py_dir / "site-packages"
             if sp.is_dir():
-                target_sp = runtime_dir / "site-packages"
-                if not target_sp.exists():
-                    print(f"Bundling dependencies from {sp}...")
-                    shutil.copytree(
-                        sp,
-                        target_sp,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
-                    )
+                print(f"Bundling dependencies from {sp}...")
+                shutil.copytree(
+                    sp,
+                    target_sp,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
+                )
+                return
+
+    # 2. If running inside a virtualenv, bundle from active environment
+    if sys.prefix != sys.base_prefix:
+        import site
+        try:
+            sp_list = site.getsitepackages()
+        except Exception:
+            sp_list = [sys.prefix + "/lib/python" + f"{sys.version_info.major}.{sys.version_info.minor}" + "/site-packages"]
+        for sp_str in sp_list:
+            sp = Path(sp_str)
+            if sp.is_dir() and "site-packages" in sp.name:
+                print(f"Bundling dependencies from active virtualenv {sp}...")
+                shutil.copytree(
+                    sp,
+                    target_sp,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
+                )
+                return
+
 
 
 def package_zip() -> Path:

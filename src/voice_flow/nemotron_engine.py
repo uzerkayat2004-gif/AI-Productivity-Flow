@@ -1168,7 +1168,7 @@ class NemotronStreamTranscriber:
                             if is_fin:
                                 if t:
                                     committed_transcripts.append(t)
-                                interim_latest = ""
+                                    interim_latest = ""
                             else:
                                 interim_latest = t
                         finally:

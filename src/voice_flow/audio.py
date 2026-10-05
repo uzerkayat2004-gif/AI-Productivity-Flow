@@ -421,7 +421,6 @@ class AudioRecorder:
                 if not frames and not chunks:
                     self._replaying_stream_input = False
                     return
-                batch_samples = sum(int(frame.shape[0]) for frame in frames)
 
             # Invoke consumers outside the recorder lock. They may enqueue
             # work or synchronously fail, neither of which may stall mic
@@ -442,11 +441,6 @@ class AudioRecorder:
                     with self._lock:
                         self._stream_input_failed = True
                     log.debug("[AUDIO] Buffered chunk dispatch failed: %s", exc)
-            if batch_samples:
-                with self._lock:
-                    self._startup_stream_buffered_samples = max(
-                        0, self._startup_stream_buffered_samples - batch_samples
-                    )
 
     def discard_stream_input_buffer(self) -> None:
         """Forget a startup buffer when stream setup fails or is cancelled."""
@@ -539,6 +533,9 @@ class AudioRecorder:
                 if pending_frames is None:
                     pending_frames = self._pending_live_frames = []
                 max_pending_samples = int(MAX_STARTUP_STREAM_BUFFER_SECONDS * max(1, self._native_sr))
+                # This is cumulative for the startup handoff, not just the
+                # current queue depth, so a slow replay sink cannot sustain an
+                # unbounded loop by causing one replacement frame per frame.
                 buffered_samples = int(getattr(self, "_startup_stream_buffered_samples", 0))
                 if (
                     not getattr(self, "_startup_stream_overflow", False)

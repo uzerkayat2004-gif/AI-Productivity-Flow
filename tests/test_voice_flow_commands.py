@@ -134,6 +134,72 @@ class TestCommandDetection(unittest.TestCase):
         self.assertEqual(email_result.content, "Launch is Monday")
         self.assertEqual(email_result.command.format, "email")
 
+    def test_explicit_dedupe_preserve_and_length_commands_keep_payload(self):
+        cases = (
+            (
+                "Hey Voice Flow remove repetition. We need to ship the installer and test suite.",
+                {"dedupe": "remove"},
+                False,
+                "We need to ship the installer and test suite.",
+            ),
+            (
+                "Hey Voice Flow don't rewrite. The launch is Monday.",
+                {},
+                True,
+                "The launch is Monday.",
+            ),
+            (
+                "Hey Voice Flow tighten this. The launch starts at ten and ends at eleven.",
+                {"length": "short"},
+                False,
+                "The launch starts at ten and ends at eleven.",
+            ),
+            (
+                "Hey Voice Flow expand this. The launch starts at ten.",
+                {"length": "detailed"},
+                False,
+                "The launch starts at ten.",
+            ),
+        )
+        for text, overrides, preserve_wording, content in cases:
+            with self.subTest(text=text):
+                result = detect_voice_command(text)
+                self.assertIsNotNone(result.command)
+                self.assertEqual(result.command.overrides, overrides)
+                self.assertEqual(result.command.preserve_wording, preserve_wording)
+                self.assertEqual(result.content, content)
+
+    def test_polite_make_email_command_splits_only_known_intent(self):
+        for text in (
+            "Hey Voice Flow can you make this an email Launch is Monday",
+            "Hey Voice Flow can you make this an email. Launch is Monday.",
+        ):
+            with self.subTest(text=text):
+                result = detect_voice_command(text)
+                self.assertEqual(result.content, "Launch is Monday" if " Monday." not in text else "Launch is Monday.")
+                self.assertEqual(result.command.format, "email")
+
+        for text in (
+            "Hey Voice Flow could you make this as a prompt Build a bakery website",
+            "Hey Voice Flow could you make this as a prompt. Build a bakery website.",
+        ):
+            with self.subTest(text=text):
+                result = detect_voice_command(text)
+                expected = "Build a bakery website." if text.endswith("website.") else "Build a bakery website"
+                self.assertEqual(result.content, expected)
+                self.assertEqual(result.command.operation, "prompt_generation")
+
+        mention = "Hey Voice Flow can you tell me about an email from Morgan"
+        result = detect_voice_command(mention)
+        self.assertIsNone(result.command)
+        self.assertEqual(result.content, mention)
+
+    def test_repeated_polite_prefixes_are_preserved_without_recursion(self):
+        text = "Hey Voice Flow " + "can you " * 1100 + "make this an email Launch Monday"
+        result = detect_voice_command(text)
+        self.assertIsNone(result.command)
+        self.assertEqual(result.content, text)
+
     def test_begin_prompt_generation(self):
         r = detect_voice_command("Hey Voice Flow, make this a proper prompt. Build a landing page using orange and cream.")
         self.assertEqual(r.content, "Build a landing page using orange and cream.")
