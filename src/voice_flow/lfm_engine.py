@@ -6,6 +6,7 @@ disfluency removal, and transcript cleanup.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import threading
@@ -14,6 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from voice_flow import downloadable_models
+from voice_flow.local_model_resources import (
+    LOCAL_MODEL_IDLE_SECONDS,
+    acquire_model_use,
+    cleanup_is_forced,
+    idle_time,
+    notify_models_available,
+    register_idle_cleanup,
+)
 
 log = logging.getLogger(__name__)
 
@@ -31,10 +40,43 @@ LFM_ALIASES = {
 # answer with an analysis instead of the rewritten sentence.
 LFM_SYSTEM_PROMPT = (
     "Rewrite the user text removing filler words and fixing grammar. "
+    "Preserve the speaker's perspective (do not change 'I' or 'we' to 'you'). "
     "Reply with only the rewritten text, nothing else."
 )
 
 _LLM_LOCK = threading.Lock()
+
+
+def _release_cached_lfm(llm: Any) -> None:
+    """Ask the native runtime to release a replaced resident model promptly."""
+    for method_name in ("close", "free"):
+        method = getattr(llm, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:
+                pass
+            return
+
+
+def _release_idle_lfm(now: float) -> bool:
+    if not _LLM_LOCK.acquire(blocking=False):
+        return False
+    try:
+        last_used = getattr(polish_with_lfm, "_last_used", now)
+        llm = getattr(polish_with_lfm, "_cached_llm", None)
+        if llm is not None and (
+            cleanup_is_forced("polish") or now - last_used >= LOCAL_MODEL_IDLE_SECONDS
+        ):
+            _release_cached_lfm(llm)
+            setattr(polish_with_lfm, "_cached_llm", None)
+            setattr(polish_with_lfm, "_cached_llm_path", None)
+            log.info("[LFM] Released inactive polishing model memory")
+        return True
+    finally:
+        _LLM_LOCK.release()
+
+
 _TEMPLATE_PATCHED = False
 _LFM_CONTEXT_TOKENS = 2048
 _LFM_OUTPUT_CAP_TOKENS = 1024
@@ -83,27 +125,65 @@ def _trusted_instruction(instruction: str, embedded_system: str | None) -> str:
     """Keep a compact trusted style/task directive, never the cloud policy."""
     candidate = str(instruction or "").strip()
     if not candidate and embedded_system:
-        match = re.search(r"(?:^|\\n)\\s*style instruction:\s*([^\\n]+)", embedded_system, re.IGNORECASE)
+        trusted_prefix = re.split(
+            r"^\s*<input_transcript>\s*$", embedded_system,
+            maxsplit=1, flags=re.IGNORECASE | re.MULTILINE,
+        )[0]
+        match = re.search(r"^\s*style instruction:\s*(.*?)\s*\Z", trusted_prefix, re.IGNORECASE | re.MULTILINE | re.DOTALL)
         candidate = match.group(1).strip() if match else ""
-    return re.sub(r"\\s+", " ", candidate)[:320].strip()
+    return re.sub(r"\s+", " ", candidate).strip()
 
 
 def _local_system_prompt(instruction: str) -> str:
-    prompt = "Rewrite the transcript. Remove filler words and fix grammar. Reply only with the rewrite."
+    prompt = (
+        "Rewrite the transcript. Remove filler words and fix grammar. Keep every factual detail. "
+        "Preserve the speaker's perspective (do not change 'I' or 'we' to 'you'). "
+        "Do not invent names, placeholders, or extra content. Reply only with the rewrite."
+    )
     if instruction:
+        # Long profile prose is counterproductive for this 350M model.  Its
+        # measured command success improves substantially when one concrete
+        # task is stated in a short imperative; the caller still validates
+        # every response before delivery.
+        lowered = instruction.casefold()
+        if "email" in lowered:
+            if "very casual" in lowered or "minimal punctuation" in lowered or "informal email" in lowered:
+                register = "very casual"
+            elif "casual email" in lowered or "casual, relaxed" in lowered or "friendly, direct" in lowered:
+                register = "casual"
+            elif "enthusiastic" in lowered or "excited" in lowered or "upbeat" in lowered:
+                register = "enthusiastic"
+            else:
+                register = "formal"
+            instruction = (
+                f"Write a concise {register} email. Keep the result short. Preserve the user's original wording and every fact. Do not invent a subject, "
+                "names, placeholders, greeting, or sign-off. Output only the email"
+            )
+        elif "bullet list" in lowered:
+            instruction = "Write a bullet list. Keep every fact. Output only the list"
+        elif "keep the result short" in lowered or "be concise" in lowered:
+            instruction = "Make this shorter. Keep every fact. Output only the rewritten text"
+        elif "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
+            instruction = "Write an AI prompt from this request. Keep every fact. Do not answer it. Output only the prompt"
+        elif "casual" in lowered:
+            instruction = "Rewrite this casually. Keep every fact. Output only the rewrite"
+        elif "formal" in lowered or "professional" in lowered:
+            instruction = "Rewrite this formally. Keep every fact. Output only the rewrite"
         prompt += f" Apply this trusted style or task: {instruction}."
     return prompt
 
 
-def _completion_token_budget(llm: Any, user_text: str) -> int:
+def _completion_token_budget(llm: Any, user_text: str, system_prompt: str) -> int:
     """Avoid the old fixed 256-token cut-off while reserving model context."""
-    desired = min(_LFM_OUTPUT_CAP_TOKENS, max(64, len(user_text.split()) * 2 + 32))
+    # Transformations such as email/prompt generation can legitimately expand
+    # a short dictation.  The model may still stop earlier; this is a ceiling.
+    desired = min(_LFM_OUTPUT_CAP_TOKENS, max(192, len(user_text.split()) * 2 + 32))
     try:
-        input_tokens = len(llm.tokenize(user_text.encode("utf-8"), add_bos=False))
+        input_tokens = len(llm.tokenize(f"{system_prompt}\n{user_text}".encode("utf-8"), add_bos=False))
     except Exception:
-        input_tokens = len(user_text.split()) * 2
+        input_tokens = (len(user_text.split()) + len(system_prompt.split())) * 2
     available = _LFM_CONTEXT_TOKENS - input_tokens - 128
-    return min(desired, available) if available >= 64 else 0
+    return min(desired, available) if available >= 192 else 0
 
 
 def _strip_annotation_lines(text: str) -> str:
@@ -195,7 +275,18 @@ def _extract_transcript(text: str) -> tuple[str, str | None]:
     """Extract raw transcript text and any embedded system prompt."""
     if not text:
         return text, None
-    match = re.search(r"<input_transcript>(.*?)</input_transcript>", text, re.DOTALL | re.IGNORECASE)
+    # The cloud command policy itself mentions ``<input_transcript>`` in a
+    # sentence.  Only the line-delimited wrapper emitted by the caller marks
+    # real dictated text; otherwise an email command feeds policy prose to
+    # LFM and loses the style directive.
+    match = re.search(
+        r"^\s*<input_transcript>\s*$\s*^(.*?)^\s*</input_transcript>\s*$",
+        text, re.DOTALL | re.IGNORECASE | re.MULTILINE,
+    )
+    if not match:
+        # Compatibility for direct callers that supply a compact one-line
+        # wrapper, which cannot be confused with the policy sentence above.
+        match = re.search(r"<input_transcript>([^\n]*?)</input_transcript>", text, re.IGNORECASE)
     if match:
         raw = match.group(1).strip()
         sys_p = text[:match.start()].strip() or None
@@ -227,10 +318,15 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
     model_path = get_lfm_model_path()
     if not model_path or not is_lfm_runtime_available() or timeout_seconds <= 0:
         return False
-    if not _LLM_LOCK.acquire(timeout=float(timeout_seconds)):
+    t_sec = float(timeout_seconds)
+    t_sec = 300.0 if (math.isinf(t_sec) or t_sec > 300.0) else max(0.0, t_sec)
+    if not _LLM_LOCK.acquire(timeout=t_sec):
         return False
     try:
+        _patch_chat_template_parser()
+        register_idle_cleanup("lfm", _release_idle_lfm, kind="polish")
         if getattr(polish_with_lfm, "_cached_llm_path", None) == str(model_path):
+            setattr(polish_with_lfm, "_last_used", idle_time())
             return True
         from llama_cpp import Llama  # type: ignore
 
@@ -238,8 +334,12 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
             model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
             n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
         )
+        old_llm = getattr(polish_with_lfm, "_cached_llm", None)
+        if old_llm is not None:
+            _release_cached_lfm(old_llm)
         setattr(polish_with_lfm, "_cached_llm", llm)
         setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
+        setattr(polish_with_lfm, "_last_used", idle_time())
         return True
     except Exception as exc:
         log.warning("[LFM] Could not warm local model: %s", exc)
@@ -248,7 +348,7 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
         _LLM_LOCK.release()
 
 
-def polish_with_lfm(
+def _polish_with_lfm_impl(
     text: str,
     instruction: str = "",
     *,
@@ -265,6 +365,7 @@ def polish_with_lfm(
     """
     if not text or not text.strip():
         return text
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
 
     model_path = get_lfm_model_path()
     if not model_path:
@@ -298,41 +399,50 @@ def polish_with_lfm(
     if callable(mock_runner):
         return mock_runner(text, instruction)
 
-    try:
-        from llama_cpp import Llama  # type: ignore
-    except Exception:
-        # No inference runtime: this model cannot run, so it must not be
-        # reported as having polished anything.
-        log.info("[LFM] llama-cpp runtime unavailable; the local model cannot run.")
+    # Importing llama-cpp can itself take longer than a short interactive
+    # budget; do not begin it after the call has already expired.
+    if time.monotonic() >= deadline:
         return None
-
-    _patch_chat_template_parser()
 
     try:
         # Keep the model resident between dictations.  A context is not safe
         # for concurrent use, so waiting for one is bounded by this request's
         # deadline instead of queuing a stale dictation indefinitely.
-        remaining = max(0.0, float(timeout_seconds))
-        if not _LLM_LOCK.acquire(timeout=remaining):
+        rem = deadline - time.monotonic()
+        rem = 300.0 if (math.isinf(rem) or rem > 300.0) else max(0.0, rem)
+        if not _LLM_LOCK.acquire(timeout=rem):
             log.info("[LFM] Timed out waiting for the local model lock.")
             return None
-        deadline = time.monotonic() + remaining
         try:
+            try:
+                from llama_cpp import Llama  # type: ignore
+            except Exception:
+                # No inference runtime: this model cannot run, so it must not
+                # be reported as having polished anything.
+                log.info("[LFM] llama-cpp runtime unavailable; the local model cannot run.")
+                return None
+            _patch_chat_template_parser()
             llm = getattr(polish_with_lfm, "_cached_llm", None)
             cached_path = getattr(polish_with_lfm, "_cached_llm_path", None)
             if llm is None or cached_path != str(model_path):
-                llm = Llama(
+                replacement = Llama(
                     model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
                     n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
                 )
+                if llm is not None:
+                    _release_cached_lfm(llm)
+                llm = replacement
                 setattr(polish_with_lfm, "_cached_llm", llm)
                 setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
-            max_tokens = _completion_token_budget(llm, user_text)
+            register_idle_cleanup("lfm", _release_idle_lfm, kind="polish")
+            setattr(polish_with_lfm, "_last_used", idle_time())
+            local_system = _local_system_prompt(local_instruction)
+            max_tokens = _completion_token_budget(llm, user_text, local_system)
             if max_tokens <= 0 or time.monotonic() >= deadline:
                 return None
             resp = llm.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": _local_system_prompt(local_instruction)},
+                    {"role": "system", "content": local_system},
                     {"role": "user", "content": user_text},
                 ],
                 max_tokens=max_tokens,
@@ -374,7 +484,10 @@ def polish_with_lfm(
                 return None
             content = "".join(chunks).strip()
         finally:
-            _LLM_LOCK.release()
+            try:
+                setattr(polish_with_lfm, "_last_used", idle_time())
+            finally:
+                _LLM_LOCK.release()
         # A tiny model occasionally appends a stray newline or trailing spaces.
         content = content.strip().strip('"').strip()
         # It may also echo the wrapping tags it saw in the prompt.
@@ -392,6 +505,29 @@ def polish_with_lfm(
     except Exception as exc:
         log.warning("[LFM] Error during LFM voice polishing: %s", exc)
         return None
+
+
+def polish_with_lfm(
+    text: str,
+    instruction: str = "",
+    *,
+    timeout_seconds: float = 5.0,
+    system_prompt: str | None = None,
+) -> str | None:
+    """Run one demand-scoped local polish and promptly release its model."""
+    if not text or not text.strip():
+        return text
+    lease = acquire_model_use("polish")
+    try:
+        return _polish_with_lfm_impl(
+            text,
+            instruction,
+            timeout_seconds=timeout_seconds,
+            system_prompt=system_prompt,
+        )
+    finally:
+        lease.release()
+        notify_models_available("polish")
 
 
 def get_catalog_entry() -> dict[str, Any]:

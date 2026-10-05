@@ -108,13 +108,30 @@ def get_mcp_server_info(profile: str | None = None) -> dict[str, Any]:
     except Exception:
         has_master_token = False
 
+    online_verified = None
+    verification_status = "unauthenticated"
+    if has_creds:
+        try:
+            from .login_flow import verify_online
+            verification = verify_online(profile=profile)
+            verification_status = str(verification.get("status") or verification_status)
+            if verification.get("authenticated"):
+                online_verified = True
+            elif verification_status in ("unauthenticated", "revoked", "expired"):
+                online_verified = False
+        except Exception:
+            verification_status = "network_error"
+
     return {
         "available": available,
         "mcp_path": str(mcp_path) if mcp_path else None,
         "config_path": str(cfg_path),
         "config_exists": configured,
         "profile": profile,
-        "authenticated": has_creds,
+        "authenticated": bool(has_creds and online_verified is True),
+        "account_saved": has_creds,
+        "online_verified": online_verified,
+        "status": "ok" if (has_creds and online_verified is True) else verification_status,
         "master_token_present": has_master_token,
         "storage_path": str(st_path),
     }

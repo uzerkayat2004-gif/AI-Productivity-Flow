@@ -114,6 +114,7 @@ def test_storage_state_read_resilience_and_lock_retry(monkeypatch, tmp_path: Pat
         "notebooklm": {"account": {"email": "user@example.com"}},
     }
     storage_file.write_text(json.dumps(valid_payload), encoding="utf-8")
+    monkeypatch.setattr(api_server.storage, "get_setting", lambda key, default=None: default)
 
     monkeypatch.setenv("NOTEBOOKLM_HOME", str(tmp_path / ".notebooklm"))
     with patch("pathlib.Path.home", return_value=tmp_path):
@@ -142,6 +143,7 @@ def test_storage_state_backup_fallback(monkeypatch, tmp_path: Path):
         "account": {"email": "backup@example.com"},
     }
     backup.write_text(json.dumps(backup_payload), encoding="utf-8")
+    monkeypatch.setattr(api_server.storage, "get_setting", lambda key, default=None: default)
 
     monkeypatch.setenv("NOTEBOOKLM_HOME", str(tmp_path / ".notebooklm"))
     with patch("pathlib.Path.home", return_value=tmp_path):
@@ -150,8 +152,8 @@ def test_storage_state_backup_fallback(monkeypatch, tmp_path: Path):
         assert email == "backup@example.com"
 
 
-def test_verify_online_network_error_does_not_revoke_cookies(monkeypatch, tmp_path: Path):
-    """Test that online verification errors (timeouts, network hiccups) do not mark valid local session unauthenticated."""
+def test_verify_online_network_error_keeps_saved_account_retryable(monkeypatch, tmp_path: Path):
+    """A transient renewal failure preserves the account without claiming it is online."""
     from voice_flow.video_flow_engine.notebooklm import login_flow
 
     monkeypatch.setattr(
@@ -159,11 +161,9 @@ def test_verify_online_network_error_does_not_revoke_cookies(monkeypatch, tmp_pa
         "_read_notebooklm_storage_state",
         lambda profile: (True, "test@example.com", str(tmp_path / "storage_state.json"), {"cookies_count": 5}),
     )
-    monkeypatch.setattr(
-        login_flow,
-        "verify_online",
-        lambda profile=None, force=False: {"authenticated": False, "status": "error", "message": "Connection timed out"},
-    )
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.get_session_refresh_state", lambda profile=None: {
+        "state": "transient_error", "in_progress": False, "message": "Connection timed out"
+    })
     monkeypatch.setattr(login_flow, "master_token_present", lambda profile: True)
     monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.resolve_notebooklm_cli", lambda *a, **k: tmp_path / "cli.exe")
 
@@ -176,10 +176,9 @@ def test_verify_online_network_error_does_not_revoke_cookies(monkeypatch, tmp_pa
         req = urllib.request.Request(f"{base}/api/video-flow/notebooklm/status?verify=1")
         with urllib.request.urlopen(req, timeout=5) as res:
             data = json.loads(res.read().decode("utf-8"))
-            # Local session is valid, online check had network error -> authenticated MUST stay True!
-            assert data["authenticated"] is True
-            assert data["status"] == "ok"
-            # Non-definitive network error must NOT report online_verified as False
+            assert data["authenticated"] is False
+            assert data["account_saved"] is True
+            assert data["status"] == "transient_error"
             assert data.get("online_verified") is None
     finally:
         server.shutdown()
@@ -276,8 +275,8 @@ def test_ui_contract_and_stepper_integrity():
     # Ensure the buggy resurrection line 'latestFailedAuth' is removed from video-flow.js!
     assert "latestFailedAuth" not in js
 
-    # Ensure isAuth does not mistakenly overwrite authenticated state on transient network error
-    assert "data.authenticated !== undefined ? Boolean(data.authenticated)" in js
+    # Only an online-verified response may paint the account as connected.
+    assert "authenticated: onlineVerified === true" in js
 
 
 def test_verify_online_real_auth_expiry_revokes_auth_and_returns_unauthenticated(monkeypatch, tmp_path: Path):
@@ -289,16 +288,10 @@ def test_verify_online_real_auth_expiry_revokes_auth_and_returns_unauthenticated
         "_read_notebooklm_storage_state",
         lambda profile: (True, "test@example.com", str(tmp_path / "storage_state.json"), {"cookies_count": 5}),
     )
-    monkeypatch.setattr(
-        login_flow,
-        "verify_online",
-        lambda profile=None, force=False: {
-            "authenticated": False,
-            "status": "error",
-            "message": "Google session is no longer valid — sign in again",
-            "details_message": "Token fetch failed: Authentication expired or invalid.",
-        },
-    )
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.get_session_refresh_state", lambda profile=None: {
+        "state": "sign_in_required", "in_progress": False, "definitive": True,
+        "message": "Google session is no longer valid — sign in again",
+    })
     monkeypatch.setattr(login_flow, "master_token_present", lambda profile: False)
     monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.resolve_notebooklm_cli", lambda *a, **k: tmp_path / "cli.exe")
 
@@ -313,7 +306,7 @@ def test_verify_online_real_auth_expiry_revokes_auth_and_returns_unauthenticated
             data = json.loads(res.read().decode("utf-8"))
             assert data["authenticated"] is False
             assert data["online_verified"] is False
-            assert data["status"] == "unauthenticated"
+            assert data["status"] == "sign_in_required"
     finally:
         server.shutdown()
         server.server_close()

@@ -341,7 +341,18 @@ class VideoFlowProviderService:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            Path(self.db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(self.db_path, timeout=30)
+        except Exception:
+            try:
+                from voice_flow.storage import resolve_active_db_path
+                self.db_path = os.fspath(resolve_active_db_path())
+                Path(self.db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+                self._init_db()
+                conn = sqlite3.connect(self.db_path, timeout=30)
+            except Exception:
+                raise
         conn.row_factory = sqlite3.Row
         try:
             yield conn

@@ -182,7 +182,13 @@ def _request_polish(
     if model_ref in ("local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0") or model == "lfm2.5-350m-qad-q4_0":
         from voice_flow import lfm_engine
         if lfm_engine.is_lfm_downloaded():
-            return lfm_engine.polish_with_lfm(prompt, timeout_seconds=timeout_seconds)
+            # The bridge receives the cloud-shaped request.  LFM gets its own
+            # compact policy plus this trusted style/task directive.
+            return lfm_engine.polish_with_lfm(
+                prompt,
+                instruction=lfm_engine._trusted_instruction("", prompt),
+                timeout_seconds=timeout_seconds,
+            )
         return None
 
     if provider == "local":

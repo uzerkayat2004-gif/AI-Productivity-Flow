@@ -39,8 +39,40 @@ def apply_spoken_punctuation(text: str) -> str:
 
 _FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
 _PROTECTED_CLEANUP_SPAN_RE = re.compile(
-    r"(`[^`]*`|\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w))"
+    r"(``[\s\S]*?``|`[^`\n]*`|\[[^\]]+\]\([^\)]+\)|"
+    r"(?:https?|ftp)://[^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\bwww\.[^\s<>]+|"
+    r"(?:[A-Za-z]:[\\/]|\\\\|(?:\.{1,2}/|/))[^\s<>]*|\$\w+|--[\w-]+|\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b|"
+    r"\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w))"
 )
+_DICTATED_EMAIL_SALUTATION_RE = re.compile(
+    r"^\s*(?P<salutation>(?:(?:dear|hi|hello)\s+[A-Za-z][A-Za-z .'-]{0,50}|(?!(?:please|tomorrow|however|therefore|first|second|finally|yes|no)\b)[A-Z][A-Za-z'-]{1,40})),[ \t]+(?P<body>\S[\s\S]*?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _repair_unambiguous_agreement(segment: str) -> str:
+    """Repair only agreement errors with one clear grammatical outcome.
+
+    This is intentionally not a general grammar checker.  It handles a small
+    set of common ASR errors locally, without changing wording or attempting
+    subject/noun inference.  The caller applies it only to unprotected spans,
+    so quoted text, code, links, paths, and email addresses remain literal.
+    """
+    for pattern, replacement in (
+        (r"\bi\s+is\b", "I am"),
+        (r"\bi\s+has\b", "I have"),
+        (r"\bi\s+does\b", "I do"),
+        (r"\b(you|we|they)\s+is\b", r"\1 are"),
+        (r"\b(you|we|they)\s+was\b", r"\1 were"),
+        (r"\b(you|we|they)\s+has\b", r"\1 have"),
+        (r"\b(you|we|they)\s+does\b", r"\1 do"),
+        (r"\b(he|she|it)\s+are\b", r"\1 is"),
+        (r"\b(he|she|it)\s+were\b", r"\1 was"),
+        (r"\b(this|that)\s+are\b", r"\1 is"),
+        (r"\b(these|those)\s+is\b", r"\1 are"),
+    ):
+        segment = re.sub(pattern, replacement, segment, flags=re.IGNORECASE)
+    return re.sub(r"\bi\b", "I", segment, flags=re.IGNORECASE)
 
 
 def _strip_filler(match: "re.Match[str]") -> str:
@@ -57,11 +89,11 @@ def _strip_filler(match: "re.Match[str]") -> str:
     return ""
 
 
-def cleanup_text(text: str, level: str) -> str:
+def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> str:
     """Independent Cleanup layer: handles spoken fillers and hesitation disfluencies."""
-    text = text.strip()
     if level == "cleanup_none":
         return text
+    text = text.strip()
 
     def clean_unprotected(segment: str) -> str:
         segment = _FILLER_RE.sub(_strip_filler, segment)
@@ -75,9 +107,15 @@ def cleanup_text(text: str, level: str) -> str:
         # A doubled first-person pronoun is a common ASR stutter. Keep all
         # other single-word repetitions because they can carry meaning.
         segment = re.sub(r"\b(I)(?:[ \t]+\1\b)+", r"\1", segment, flags=re.I)
-        segment = collapse_echo_repeats(segment)
+        if not preserve_repetitions:
+            segment = collapse_echo_repeats(segment)
         if level in ("cleanup_medium", "cleanup_high"):
             segment = re.sub(r"\b(\w+(?:\s+\w+){0,5})\s+(?:I mean|rather),?\s+\1\b", r"\1", segment, flags=re.I)
+        segment = _repair_unambiguous_agreement(segment)
+        # Explicit punctuation often reaches this layer as a symbol before
+        # deterministic cleanup.  Removing only its preceding whitespace is
+        # safe and preserves every dictated word and line boundary.
+        segment = re.sub(r"[ \t]+([,.;:?!])", r"\1", segment)
         # Newlines are dictated structure. Normalize horizontal spacing only.
         return re.sub(r"[ \t]+", " ", segment)
 
@@ -85,6 +123,22 @@ def cleanup_text(text: str, level: str) -> str:
     for index in range(0, len(parts), 2):
         parts[index] = clean_unprotected(parts[index])
     return "".join(parts).strip()
+
+
+def format_dictated_email(text: str) -> str | None:
+    """Lay out an already-dictated email salutation without inventing content.
+
+    This intentionally does not create a subject, greeting, sign-off, sender,
+    or new wording. It is only a deterministic fallback when a requested AI
+    email transformation could not be safely accepted.
+    """
+    match = _DICTATED_EMAIL_SALUTATION_RE.match(text or "")
+    if not match:
+        return None
+    body = match.group("body")
+    if body[:1].islower():
+        body = body[:1].upper() + body[1:]
+    return f"{match.group('salutation')},\n\n{body}"
 
 
 def collapse_echo_repeats(text: str) -> str:

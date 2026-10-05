@@ -89,7 +89,7 @@ _QUOTED_SPAN_RE = re.compile(
 # explicit prefix so ordinary mentions of a voice log remain dictation.
 _WAKE_RE = re.compile(
     r"(?<![\w])(?:"
-    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice)"
+    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice)"
     # A verified STT error for "Hey Voice Flow".  Keep this deliberately
     # literal and require a command continuation below; it is not fuzzy wake
     # matching for arbitrary speech that happens to contain similar words.
@@ -112,6 +112,57 @@ _PREFIX_ONLY_WAKE_CONTINUATION_RE = re.compile(
 )
 _SENTENCE_END_RE = re.compile(r"[.!?](?:\s+|$)")
 _LEADING_FILLER_RE = re.compile(r"^(?:um+|uh+|well|so|okay|ok)[,.\s]+", re.IGNORECASE)
+# A wake phrase quoted as an example without quotation marks is still ordinary
+# dictation.  The parser must not consume the rest of a report merely because
+# it contains the words a user would say to Voice Flow.
+_REPORTED_WAKE_PREFIX_RE = re.compile(
+    r"\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
+    r"(?:say|said|says|mention|mentioned|use|used|hear|heard)\s*$",
+    re.IGNORECASE,
+)
+# ASR commonly omits the full stop between a leading command and the dictated
+# text.  Stop the command at a recognised intent word rather than treating the
+# whole utterance as guidance.  This deliberately contains only command words;
+# an unknown following word stays in the user's content.
+_UNPUNCTUATED_INTENT_END_RE = re.compile(
+    r"\b(?:"
+    r"e-?mail|bullets?|bullet(?:ed)?\s+list|linkedin\s+post|"
+    r"work\s+(?:message|chat|msg)|personal\s+(?:message|msg|text)|"
+    r"(?:normal|casual)\s+(?:message|msg|text)|"
+    r"(?:proper\s+|coding\s+|well[-\s]?structured\s+)?prompts?|"
+    r"(?:make|create|turn|write)\s+(?:this\s+)?(?:into\s+)?(?:a\s+)?notes?|"
+    r"summari[sz]e|short(?:er)?|concise|brief|tighten|detailed|longer|expand|"
+    r"clearer|simpler|professional|formal|casual|friendly|conversational|"
+    r"confident|persuasive|playful|excited|"
+    r"keep\s+my\s+(?:wording|words|phrasing)|don'?t\s+rewrite|"
+    r"fix\s+(?:the\s+)?grammar|remove\s+(?:the\s+)?repetit(?:ion|ive)"
+    r")\b",
+    re.IGNORECASE,
+)
+_MAX_UNPUNCTUATED_COMMAND_WORDS = 18
+_COMMAND_START_WORDS = {
+    "please", "make", "turn", "use", "write", "create", "rewrite", "summarize", "summarise",
+    "fix", "shorten", "clean", "polish", "convert", "send", "generate", "draft",
+}
+_COMMAND_SYNTAX_WORDS = {
+    "this", "it", "as", "into", "a", "an", "the", "my", "usual", "normal", "regular",
+    "proper", "coding", "well", "structured", "work", "personal", "linkedin", "post", "message",
+    "chat", "msg", "text", "bullet", "bullets", "bulleted", "list", "email", "mail", "note", "notes",
+    "prompt", "short", "shorter", "concise", "brief", "tighten", "detailed", "longer", "more",
+    "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly", "conversational",
+    "confident", "persuasive", "playful", "excited", "grammar", "repetition", "repetitive",
+}
+_COMMAND_INTENT_WORDS = {
+    "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
+    "message", "chat", "msg", "text", "short", "shorter", "concise", "brief", "tighten", "detailed",
+    "longer", "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly",
+    "conversational", "confident", "persuasive", "playful", "excited", "summarize", "summarise",
+    "grammar", "repetition", "repetitive",
+}
+_COMMAND_FORMAT_WORDS = {
+    "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
+    "message", "chat", "msg", "text",
+}
 
 
 def _mask_quoted(text: str) -> str:
@@ -123,6 +174,15 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
     """'Hey/Ok Voice Flow' always wakes (mishearings tolerated); a bare
     'voice flow' needs a command continuation immediately after it (comma or
     imperative verb) and must not carry a trailing 's'."""
+    sentence_start = max(text.rfind(".", 0, match.start()), text.rfind("!", 0, match.start()), text.rfind("?", 0, match.start())) + 1
+    sentence_prefix = text[sentence_start:match.start()]
+    if _REPORTED_WAKE_PREFIX_RE.search(sentence_prefix) or re.search(
+        r"\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
+        r"(?:say|said|says|mention|mentioned|use|used|hear|heard)\b",
+        sentence_prefix,
+        re.IGNORECASE,
+    ):
+        return False
     matched = match.group(0).lower()
     if re.match(r"^\s*(?:hay|hey)\s+voiced\s+what\b", matched):
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
@@ -198,6 +258,9 @@ _PERSISTENT_RE = re.compile(
 )
 _SCOPE_NEXT_RE = re.compile(r"\b(?:what|whatever)\s+(?:i|i'll)\s+(?:say|speak|dictate)\s+next\b", re.I)
 _KEEP_WORDING_RE = re.compile(r"\bkeep\s+my\s+(?:wording|words|phrasing)\b|\bdon'?t\s+rewrite\b", re.I)
+_NEGATED_KEEP_WORDING_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|never)\s+keep\s+my\s+(?:wording|words|phrasing)\b", re.I
+)
 # Corrective markers: later register words override earlier ones (spec §24).
 _CORRECTION_RE = re.compile(r"\b(?:actually|no\s+wait|I\s+mean|instead)\b", re.I)
 # A plain "and" between a formality and a tone word is a genuine contradiction
@@ -228,6 +291,9 @@ def _parse_command(clause: str) -> VoiceCommand:
     """Parse one command clause (wake phrase already removed) into a schema object."""
     text = clause.strip()
     lowered = text.lower()
+    preserve_wording = bool(_KEEP_WORDING_RE.search(lowered)) and not bool(
+        _NEGATED_KEEP_WORDING_RE.search(lowered)
+    )
 
     overrides: dict[str, str] = {}
     ambiguous = False
@@ -291,7 +357,7 @@ def _parse_command(clause: str) -> VoiceCommand:
             else:
                 overrides["tone"] = _TONE_WORDS.get(word, word)
 
-    has_intent = bool(fmt or context_ref or overrides or operation != "rewrite")
+    has_intent = bool(fmt or context_ref or overrides or operation != "rewrite" or preserve_wording)
     if not has_intent:
         # Wake phrase with no recognizable intent: treat as plain dictation.
         return VoiceCommand(raw_phrase=text)
@@ -305,8 +371,65 @@ def _parse_command(clause: str) -> VoiceCommand:
         overrides=overrides,
         persistent_change=bool(_PERSISTENT_RE.search(lowered)),
         ambiguous=ambiguous,
-        preserve_wording=bool(_KEEP_WORDING_RE.search(lowered)),
+        preserve_wording=preserve_wording,
     )
+
+
+def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
+    """Split an ASR run-on ``command content`` without deleting content.
+
+    We only split after a known intent and only while it remains close to the
+    wake phrase.  A command with no safe boundary remains unsplit, which is
+    preferable to silently losing dictated text.
+    """
+    tokens = list(re.finditer(r"[A-Za-z]+(?:'[A-Za-z]+)?", after_wake))
+    if not tokens or tokens[0].group(0).casefold() not in _COMMAND_START_WORDS:
+        return after_wake.strip(), ""
+
+    consumed_end = 0
+    saw_intent = False
+    saw_format = False
+    index = 0
+    while index < len(tokens) and index < _MAX_UNPUNCTUATED_COMMAND_WORDS:
+        token = tokens[index].group(0).casefold()
+        if token in _COMMAND_SYNTAX_WORDS or token in _COMMAND_START_WORDS:
+            # Once a format is complete, only an explicit continuation such
+            # as "but keep my wording" may extend it.  This is what prevents
+            # "email Alex the short report" from swallowing user content.
+            if saw_format and token not in {"list", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+                if token in {"but", "and", "actually", "instead", "rather"}:
+                    next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
+                    if next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+                        break
+                else:
+                    break
+            consumed_end = tokens[index].end()
+            saw_intent = saw_intent or token in _COMMAND_INTENT_WORDS
+            saw_format = saw_format or token in _COMMAND_FORMAT_WORDS
+            index += 1
+            continue
+        if token in {"but", "and", "actually", "instead", "rather"}:
+            next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
+            if not saw_intent or next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+                break
+            consumed_end = tokens[index].end()
+            index += 1
+            continue
+        if token == "keep" and saw_intent:
+            following = [tokens[pos].group(0).casefold() for pos in range(index + 1, min(index + 3, len(tokens)))]
+            if following[:1] == ["my"] and len(following) > 1 and following[1] in {"wording", "words", "phrasing"}:
+                consumed_end = tokens[index + 2].end()
+                index += 3
+                continue
+        break
+
+    if not saw_intent or not consumed_end:
+        return after_wake.strip(), ""
+    head = after_wake[:consumed_end].strip(" ,:;.-")
+    parsed = _parse_command(head)
+    if not _has_any_intent(parsed):
+        return after_wake.strip(), ""
+    return head, after_wake[consumed_end:].lstrip(" ,:;.-")
 
 
 # --------------------------------------------------------------------------
@@ -349,23 +472,27 @@ def detect_voice_command(transcript: str) -> CommandDetection:
         after_wake = text[wake.end():].lstrip(" ,.:!-—")
         sentence = _SENTENCE_END_RE.search(after_wake)
         if sentence:
-            clause = after_wake[:sentence.end()].strip()
-            content = after_wake[sentence.end():].strip()
+            sentence_clause = after_wake[:sentence.end()].strip()
+            clause, implicit_content = _split_unpunctuated_command(sentence_clause)
+            content = " ".join(part for part in (implicit_content, after_wake[sentence.end():].strip()) if part)
         else:
-            clause = after_wake.strip()
-            content = ""
+            clause, content = _split_unpunctuated_command(after_wake)
     else:
         # Ending (or mid) command: the clause runs from the wake phrase to the
         # end of the dictation; everything before it is content.
         before = text[:wake.start()].strip()
         after_wake = text[wake.end():].lstrip(" ,.:!-—")
         sentence = _SENTENCE_END_RE.search(after_wake)
-        clause = after_wake[:sentence.end()].strip() if sentence else after_wake.strip()
+        if sentence:
+            clause = after_wake[:sentence.end()].strip()
+            trailing_unpunctuated = ""
+        else:
+            clause, trailing_unpunctuated = _split_unpunctuated_command(after_wake)
         if sentence and after_wake[sentence.end():].strip():
             # Wake phrase in the middle: keep trailing content after the clause.
             content = (before + " " + after_wake[sentence.end():].strip()).strip()
         else:
-            content = before
+            content = " ".join(part for part in (before, trailing_unpunctuated) if part)
         if not content:
             # Nothing before the wake phrase: it is effectively a begin command.
             starts_begin = True

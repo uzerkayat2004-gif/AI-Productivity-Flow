@@ -9,7 +9,7 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from voice_flow.polisher import TextPolisher
+from voice_flow.polisher import TextPolisher, _candidate_preserves_content
 
 
 def _polisher(monkeypatch: pytest.MonkeyPatch, response: str | None) -> TextPolisher:
@@ -69,3 +69,27 @@ def test_api_cannot_drop_symbolic_term_content(monkeypatch: pytest.MonkeyPatch) 
     engine = _polisher(monkeypatch, "Run C now.")
 
     assert engine.polish("run C++ now") == "Run C++ now."
+
+
+def test_long_plain_polish_cannot_change_one_dictated_action() -> None:
+    source = (
+        "First of all I is preparing the launch update for the team. "
+        "The design review is complete and the test results are ready for everyone. "
+        "Another thing we need to tell Alex about the delivery date and explain the remaining risks. "
+        "Finally we will meet on Friday to choose the next release date and share it with customers."
+    )
+    candidate = (
+        "First of all, I am preparing the launch update for the team. "
+        "The design review is complete and test results are ready for everyone. "
+        "Another task requires communication with Alex regarding the delivery date and remaining risks. "
+        "Finally, we will meet on Friday to discuss the next release date and share it with customers."
+    )
+
+    assert not _candidate_preserves_content(source, candidate, task="cleanup")
+
+
+def test_prompt_cannot_invent_customizable_reminders() -> None:
+    source = "Build a calendar with offline support and reminders."
+    candidate = "Create a calendar that supports offline access and includes customizable reminders for each event."
+
+    assert not _candidate_preserves_content(source, candidate, task="prompt", command_format="prompt")

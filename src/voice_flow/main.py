@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from typing import Any
+from pathlib import Path
 import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
 
@@ -40,7 +41,7 @@ from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher
 from voice_flow.storage import storage
 from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, smart_format, split_press_enter
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
@@ -210,16 +211,29 @@ def _polish_deadline(
     return time.monotonic() + budget
 
 
+def _polishing_enabled() -> bool:
+    """Read the persisted switch without treating legacy string values as true."""
+    try:
+        value = storage.get_setting("polishing_enabled", True)
+    except Exception:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+        return value.strip().lower() == "true"
+    return value == 1
+
 
 def _warm_voice_gemini_transport(model_ref: object) -> None:
-    """Hide native Gemini TLS setup under recording without delaying capture."""
-    if not str(model_ref or "").strip().lower().startswith("gemini/"):
-        return
+    """Warm only the selected remote Gemini transport after capture is live."""
     try:
-        if not storage.get_setting("polishing_enabled", True):
+        if not _polishing_enabled():
             return
-        from voice_flow.voice_gemini_transport import warm_gemini_connection
-        threading.Thread(target=warm_gemini_connection, name="voice-gemini-prewarm", daemon=True).start()
+        selected = str(model_ref or "").strip()
+        if selected.lower().startswith("gemini/"):
+            from voice_flow.voice_gemini_transport import warm_gemini_connection
+            threading.Thread(target=warm_gemini_connection, name="voice-gemini-prewarm", daemon=True).start()
+            return
     except Exception:
         return
 
@@ -280,6 +294,7 @@ class DictationSession:
     stt_model_ref: str | None = None
     polish_model_ref: str | None = None
     polish_speed_mode: str | None = None
+    model_resource_lease: Any = None
 
 
 from voice_flow.tts_engine import tts_engine
@@ -314,11 +329,139 @@ def _polish_outcome_label(outcome: str) -> str:
         "ai_accepted": "AI polished",
         "local": "Cleaned locally",
         "local_model": "Cleaned locally (offline model)",
+        "local_format": "Formatted locally",
+        "local_paragraphs": "Paragraphs added locally",
+        "local_preserved": "Wording preserved locally",
         "disabled": "Basic cleanup applied",
         "timeout": "AI timed out — basic cleanup applied",
         "provider_failure": "AI unavailable — basic cleanup applied",
         "fidelity_reject": "AI output rejected — basic cleanup applied",
+        "command_unfulfilled": "Voice command could not be completed — basic cleanup applied",
     }.get(str(outcome or ""), "AI unavailable — basic cleanup applied")
+
+
+_LOCAL_BULLET_BREAK_RE = re.compile(
+    r"(?:\n+|;\s*|,\s+(?:and\s+)?(?=(?:we\s+)?(?:need\s+to\s+)?"
+    r"(?:send|review|schedule|prepare|draft|share|confirm|call|follow\s+up)\b))",
+    re.IGNORECASE,
+)
+
+
+def _format_dictated_bullets(text: str) -> str | None:
+    """Add bullets only around explicit dictated list items; never re-author."""
+    pieces = [piece.strip(" ,;\t") for piece in _LOCAL_BULLET_BREAK_RE.split(text or "")]
+    pieces = [piece for piece in pieces if piece]
+    if len(pieces) < 2:
+        return None
+    return "\n".join(f"- {piece}" for piece in pieces)
+
+
+def _format_dictated_prompt(text: str) -> str | None:
+    """Give a request a safe prompt wrapper without inventing requirements."""
+    body = (text or "").strip()
+    return f"Task:\n{body}" if body else None
+
+
+_PARAGRAPH_MARKER_RE = re.compile(
+    r"\s+((?:and\s+also|and\s+first\s+of\s+all|and\s+another\s+thing|and\s+finally|"
+    r"also|first\s+of\s+all|another\s+thing|"
+    r"on\s+top\s+of\s+that|finally)\b)",
+    re.IGNORECASE,
+)
+_PARAGRAPH_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _format_safe_paragraphs(text: str) -> str:
+    """Add readable paragraphs to long plain dictation without changing words."""
+    source = text or ""
+    if (
+        len(source.split()) < 35
+        or "\n" in source
+        or "`" in source
+        or re.search(r"[\"“”][^\"“”]{2,}[\"“”]", source)
+    ):
+        return source
+    marked = _PARAGRAPH_MARKER_RE.sub(lambda match: "\n\n" + match.group(1), source)
+    if marked != source:
+        return marked
+    sentences = _PARAGRAPH_SENTENCE_RE.split(source)
+    return "\n\n".join(part.strip() for part in sentences) if len(sentences) >= 3 else source
+
+
+def _processing_metadata(
+    *,
+    polish_outcome: str,
+    polish_elapsed: float,
+    resolved_style: Any,
+    effective_style: Any,
+    command: Any,
+    polishing_enabled: bool,
+    dictionary_trace: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Build the stable, user-readable record of one dictation's outcome."""
+    outcome = str(polish_outcome or "provider_failure")
+    style_applied = outcome in {"ai_accepted", "local", "local_model", "local_format", "local_preserved"}
+    command_label = ""
+    if command is not None:
+        try:
+            command_label = str(command.label() or "")
+        except Exception:
+            command_label = ""
+    if not polishing_enabled:
+        command_status = "disabled"
+    elif command is None:
+        command_status = "not_detected"
+    elif style_applied:
+        command_status = "applied"
+    else:
+        command_status = "not_applied"
+
+    base_style_id = getattr(resolved_style, "style_id", "") or ""
+    effective_style_id = getattr(effective_style, "style_id", None) or base_style_id
+    effective_label = getattr(effective_style, "label", "") or ""
+    trace = [
+        {"from": str(item.get("from", "")), "to": str(item.get("to", ""))}
+        for item in (dictionary_trace or [])
+        if isinstance(item, dict) and item.get("from") and item.get("to")
+    ]
+    return {
+        "schema_version": 1,
+        "polish": {
+            "outcome": outcome,
+            "display": _polish_outcome_label(outcome),
+            "duration_ms": max(0, round(float(polish_elapsed) * 1000)),
+        },
+        "style": {
+            "requested_id": str(base_style_id),
+            "effective_id": str(effective_style_id),
+            "label": str(effective_label),
+            "applied": style_applied,
+        },
+        "command": {
+            "label": command_label,
+            "status": command_status,
+        },
+        "dictionary": {"count": len(trace), "replacements": trace},
+    }
+
+
+def _command_only_processing_metadata(
+    *, resolved_style: Any, command: Any, status: str, display: str
+) -> dict[str, Any]:
+    """Persist command-only outcomes without claiming text was polished."""
+    style_id = getattr(resolved_style, "style_id", "") or ""
+    command_label = ""
+    try:
+        command_label = str(command.label() or "")
+    except Exception:
+        pass
+    return {
+        "schema_version": 1,
+        "polish": {"outcome": "command_only", "display": str(display), "duration_ms": 0},
+        "style": {"requested_id": str(style_id), "effective_id": str(style_id), "label": "", "applied": False},
+        "command": {"label": command_label, "status": status},
+        "dictionary": {"count": 0, "replacements": []},
+    }
 
 
 class VoiceFlowApp:
@@ -336,6 +479,32 @@ class VoiceFlowApp:
         self._selection_generation = 0
         self.archive = AudioArchive()
         self.archive.purge_expired()
+
+        self.overlay = FloatingOverlayBar()
+        try:
+            self.overlay.load_saved_position()
+        except Exception as _pos_err:
+            log.debug("Could not load saved overlay position: %s", _pos_err)
+        self.overlay._main_thread_id = threading.get_ident()
+        try:
+            self.overlay._create_window()
+        except Exception as _tk_err:
+            log.debug("Early overlay window creation skipped: %s", _tk_err)
+        self.injector = ClipboardInjector()
+        self.processing_lock = threading.Lock()
+        self._audio_summary_generation = 0
+        self._active_summary_player_token: str | None = None
+        self.video_stage = ""
+
+        # Ensure local REST API server is always active in background immediately for UI & signaling
+        self._api_server_thread: threading.Thread | None = None
+        try:
+            from voice_flow.gui.api_server import start_api_server, register_runtime_controller
+            register_runtime_controller(self)
+            self._api_server_thread = threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer")
+            self._api_server_thread.start()
+        except Exception as exc:
+            log.warning("Could not start embedded API server: %s", exc)
 
         # Load SQLite dictation history into recent_dictations to prevent Audio Flow from ever reading dictations
         try:
@@ -364,8 +533,28 @@ class VoiceFlowApp:
             # silently dropping it.
             saved_mic = storage.get_setting("selected_microphone", None)
         if saved_mic not in (None, ""):
-            config.selected_mic_device = saved_mic
-            log.info("Loaded saved microphone preference: %s", saved_mic)
+            mic_valid = False
+            try:
+                import sounddevice as _sd
+                all_devs = _sd.query_devices()
+                if isinstance(saved_mic, int) and 0 <= saved_mic < len(all_devs):
+                    mic_valid = all_devs[saved_mic].get("max_input_channels", 0) > 0
+                elif isinstance(saved_mic, str):
+                    mic_valid = any(
+                        saved_mic.lower() in d.get("name", "").lower()
+                        for d in all_devs
+                        if d.get("max_input_channels", 0) > 0
+                    )
+            except Exception:
+                mic_valid = True
+            if mic_valid:
+                config.selected_mic_device = saved_mic
+                log.info("Loaded saved microphone preference: %s", saved_mic)
+            else:
+                log.warning("Configured mic '%s' not present in active input devices; resetting to default.", saved_mic)
+                config.selected_mic_device = None
+                storage.save_setting("selected_mic_device", None)
+                storage.save_setting("selected_microphone", None)
         self.transcriber = Transcriber()
         self.audio = AudioRecorder()
         # Streaming dictation: transcribe silence-delimited chunks while the
@@ -383,22 +572,7 @@ class VoiceFlowApp:
                 log.info("[LEARNING] promoted %d auto-captured terms to suggestions", migrated)
         except Exception:
             log.exception("[LEARNING] vocabulary migration failed")
-        self.overlay = FloatingOverlayBar()
-        self.injector = ClipboardInjector()
-        self.processing_lock = threading.Lock()
-        self._audio_summary_generation = 0
-        self._active_summary_player_token: str | None = None
-        self.video_stage = ""
-
-        # Ensure local REST API server is always active in background for video playback and UI
-        self._api_server_thread: threading.Thread | None = None
-        try:
-            from voice_flow.gui.api_server import start_api_server, register_runtime_controller
-            register_runtime_controller(self)
-            self._api_server_thread = threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer")
-            self._api_server_thread.start()
-        except Exception as exc:
-            log.warning("Could not start embedded API server: %s", exc)
+        self._selection_generation = 0
 
         # Start NotebookLM background keepalive & silent session auto-refresh daemon
         try:
@@ -627,6 +801,62 @@ class VoiceFlowApp:
         except Exception:
             return True
 
+    def _set_session_model_resource_lease(self, session: Any, lease: Any) -> Any:
+        """Attach one speech-demand lease without losing immutable session data."""
+        if session is None:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                release()
+            raise RuntimeError("Cannot attach model demand to a missing dictation session")
+        if hasattr(session, "__dataclass_fields__"):
+            try:
+                owned = replace(session, model_resource_lease=lease)
+                if getattr(owned, "model_resource_lease", None) is lease:
+                    return owned
+            except (TypeError, ValueError):
+                pass
+        if isinstance(session, dict):
+            session["model_resource_lease"] = lease
+            if session.get("model_resource_lease") is lease:
+                return session
+        else:
+            try:
+                setattr(session, "model_resource_lease", lease)
+                if getattr(session, "model_resource_lease", None) is lease:
+                    return session
+            except Exception:
+                pass
+        release = getattr(lease, "release", None)
+        if callable(release):
+            release()
+        raise RuntimeError("Dictation session cannot own its speech-model demand")
+
+    @staticmethod
+    def _release_session_model_resource(session: Any) -> None:
+        """Idempotently end one session's model demand, including test/plugin sessions."""
+        if session is None:
+            return
+        lease = (
+            session.get("model_resource_lease")
+            if isinstance(session, dict)
+            else getattr(session, "model_resource_lease", None)
+        )
+        release = getattr(lease, "release", None)
+        if callable(release):
+            try:
+                release()
+            except Exception:
+                log.debug("Could not release session model demand", exc_info=True)
+        if isinstance(session, dict):
+            session["model_resource_lease"] = None
+        else:
+            try:
+                setattr(session, "model_resource_lease", None)
+            except Exception:
+                # Frozen dataclasses retain the already-released idempotent
+                # token so dataclasses.replace continues to preserve ownership.
+                pass
+
     def _on_stream_chunk_closed(self, chunk: Any, native_sr: int, *, overlap_prefix_seconds: float = 0.0) -> None:
         """Audio-callback thread -> background transcription of a closed chunk."""
         try:
@@ -695,6 +925,7 @@ class VoiceFlowApp:
                 return False
             self.state = DictationState.IDLE
             self.session = None
+            self._processing_start_time = 0.0
         self._set_hotkeys_recording_state(False)
         if hasattr(self, "audio") and self.audio is not None:
             self.audio.split_silence_seconds = 0.35
@@ -776,22 +1007,43 @@ class VoiceFlowApp:
             enabled = True
         if not enabled:
             log.info("Voice Flow dictation is disabled via the feature toggle.")
+            self._set_hotkeys_recording_state(False)
             return False
 
-        if self.state == DictationState.PROCESSING:
-            log.info("Cancelling stale PROCESSING session to service new dictation request.")
-            self._on_dictation_cancel()
-        elif self.state == DictationState.ERROR:
-            self._reset_to_idle()
+        # Invalidate any pending text selection checks so Audio Flow cannot pop up
+        # or inject Ctrl+C during dictation
+        self._selection_generation = getattr(self, "_selection_generation", 0) + 1
+
+        # Suppress Audio Flow selection widget and pause any active audio playback
+        # so Voice Flow dictation is not disturbed and mic does not pick up audio
+        try:
+            audio_flow_widget.hide()
+            self._stop_audio_flow_pipeline()
+        except Exception as _af_err:
+            log.debug("Audio flow suppression on dictation start skipped: %s", _af_err)
 
         with self._state_lock:
+            if self.state == DictationState.PROCESSING:
+                proc_start = getattr(self, "_processing_start_time", 0.0)
+                elapsed = time.monotonic() - proc_start if proc_start > 0 else 999.0
+                if elapsed < 15.0:
+                    log.info("Refusing new dictation start: active session is currently PROCESSING (elapsed %.2fs < 15.0s)", elapsed)
+                    self._set_hotkeys_recording_state(False)
+                    return False
+                log.warning("Cancelling genuinely stale PROCESSING session (elapsed %.2fs >= 15.0s) to service new dictation request.", elapsed)
+                self._on_dictation_cancel()
+            elif self.state == DictationState.ERROR:
+                self._reset_to_idle()
+
             if self.state != DictationState.IDLE:
                 log.info("Refusing start dictation while in state %s", self.state)
+                self._set_hotkeys_recording_state(False)
                 return False
             try:
                 session = self._capture_session()
             except Exception as exc:
                 log.error("[START ERROR] Could not capture dictation context: %s", exc, exc_info=True)
+                self._set_hotkeys_recording_state(False)
                 return False
             self.session = session
             self.state = DictationState.RECORDING
@@ -803,17 +1055,6 @@ class VoiceFlowApp:
         audio_started = False
         try:
             self._set_hotkeys_recording_state(True)
-
-            watchdog = getattr(self, "_record_watchdog", None)
-            if watchdog:
-                watchdog.cancel()
-                self._record_watchdog = None
-
-            # The timer carries this immutable session so a later recording cannot
-            # be finished by a stale twenty-minute watchdog.
-            self._record_watchdog = threading.Timer(20 * 60, self._finish_if_current, args=(self.session,))
-            self._record_watchdog.daemon = True
-            self._record_watchdog.start()
 
             # Start capture before provider/model preparation. The recorder
             # holds initial frames and closed chunks until the stream is armed.
@@ -833,6 +1074,37 @@ class VoiceFlowApp:
                 self._reset_to_idle(session)
                 self._overlay_call("show_error", "Microphone hardware failed to open")
                 return False
+
+            from voice_flow.local_model_resources import acquire_model_use
+            lease = acquire_model_use("speech")
+            owned_session = self._set_session_model_resource_lease(session, lease)
+            with self._state_lock:
+                if getattr(self, "session", None) is session and self.state == DictationState.RECORDING:
+                    self.session = owned_session
+                    session = owned_session
+                else:
+                    # Capture ownership changed while the device was opening.
+                    # End only this stale demand; a newer session may already
+                    # own the shared recorder and hotkey state.
+                    self._release_session_model_resource(owned_session)
+                    return False
+
+            prepare_model = getattr(getattr(self, "transcriber", None), "prepare_model_async", None)
+            if callable(prepare_model):
+                prepare_model(
+                    getattr(session, "stt_model_ref", None)
+                    or (session.get("stt_model_ref") if isinstance(session, dict) else None),
+                    lease=lease,
+                )
+
+            # The timer carries the final immutable session (including its
+            # lease), so a later recording cannot be finished by a stale timer.
+            watchdog = getattr(self, "_record_watchdog", None)
+            if watchdog:
+                watchdog.cancel()
+            self._record_watchdog = threading.Timer(20 * 60, self._finish_if_current, args=(session,))
+            self._record_watchdog.daemon = True
+            self._record_watchdog.start()
 
             self._start_stream_for_session(session)
             flush_buffer = getattr(self.audio, "flush_stream_input_buffer", None)
@@ -864,6 +1136,7 @@ class VoiceFlowApp:
                     self.audio.stop()
                 except Exception:
                     pass
+            self._release_session_model_resource(session)
             discard_buffer = getattr(self.audio, "discard_stream_input_buffer", None)
             if callable(discard_buffer):
                 discard_buffer()
@@ -889,6 +1162,7 @@ class VoiceFlowApp:
                     return False
                 session = getattr(self, "session", None)
                 self.state = DictationState.PROCESSING
+                self._processing_start_time = time.monotonic()
 
             # Resolve active external window at the instant dictation finishes
             current_ext = self._get_current_external_window()
@@ -1009,6 +1283,7 @@ class VoiceFlowApp:
                     error_message="No usable audio was captured",
                     insertion_status="not_attempted",
                 )
+                self._release_session_model_resource(session)
                 self._reset_to_idle(session)
                 self._overlay_call("show_error", "No usable audio was captured")
                 return False
@@ -1033,6 +1308,7 @@ class VoiceFlowApp:
         except Exception as e:
             log.error("[FINISH ERROR] %s", e, exc_info=True)
             self._end_stream_session(discard=True)
+            self._release_session_model_resource(session)
             if getattr(self, "_post_release_deadline", None) == post_release_deadline:
                 self._post_release_deadline = None
             self._reset_to_idle(session)
@@ -1073,6 +1349,7 @@ class VoiceFlowApp:
             except Exception as exc:
                 log.debug("[CANCELLED] audio stop failed: %s", exc)
         self._end_stream_session(discard=True, owner=session)
+        self._release_session_model_resource(session)
 
         # Cancellation is terminal user-visible work too.  Archive and
         # history stay off the hotkey path, but retain the recording and its
@@ -1180,6 +1457,7 @@ class VoiceFlowApp:
         status: str,
         error_message: str | None = None,
         insertion_status: str = "not_attempted",
+        processing_metadata: dict[str, Any] | None = None,
     ) -> None:
         """Write one accurate history row after the user-facing outcome.
 
@@ -1214,6 +1492,7 @@ class VoiceFlowApp:
                     raw_text, polished_text, app_title, duration, category,
                     status=status, audio_path=audio_path,
                     error_message=error_message, insertion_status=insertion_status,
+                    processing_metadata=processing_metadata,
                 )
             except Exception as exc:
                 log.warning("Could not persist dictation history: %s", exc)
@@ -1230,6 +1509,7 @@ class VoiceFlowApp:
         command: Any = None,
         outcome_callback: Any = None,
         speed_mode: str | None = None,
+        dictionary_trace: list[dict[str, str]] | None = None,
     ) -> str:
         """Fidelity-first order: polish (AI pool or deterministic) -> style."""
         level = getattr(session, "cleanup_level", None) or (session.get("cleanup_level") if isinstance(session, dict) else "cleanup_light")
@@ -1255,28 +1535,126 @@ class VoiceFlowApp:
 
         def _notify_outcome(outcome: str) -> None:
             observed_outcome["value"] = str(outcome)
-            if outcome_callback is not None:
-                outcome_callback(outcome)
+
+        def _emit_final_outcome() -> None:
+            if outcome_callback is not None and observed_outcome["value"] is not None:
+                outcome_callback(observed_outcome["value"])
+
+        # "Keep my wording" with no companion transformation is a request to
+        # preserve content, not to re-author it. For an LFM selection, take
+        # the deterministic lane immediately: it performs the normal local
+        # cleanup and dictionary pass without paying model latency or risking
+        # a rewrite. The privacy switch remains authoritative.
+        selected_model = getattr(session, "polish_model_ref", None) or (
+            session.get("polish_model_ref") if isinstance(session, dict) else None
+        )
+        selected_lfm = False
+        try:
+            from voice_flow.lfm_engine import is_lfm_model_ref
+            selected_lfm = is_lfm_model_ref(selected_model)
+        except Exception:
+            pass
+        command_format = getattr(command, "format", None) if command is not None else None
+        command_context = getattr(command, "context_reference", None) if command is not None else None
+        command_operation = getattr(command, "operation", "rewrite") if command is not None else ""
+        pure_keep_wording = (
+            selected_lfm
+            and command is not None
+            and bool(getattr(command, "preserve_wording", False))
+            and command_format is None
+            and command_context is None
+            and command_operation == "rewrite"
+            and not command_overrides
+        )
+        polishing_enabled = _polishing_enabled() if pure_keep_wording else False
+        deterministic_preserve = pure_keep_wording and polishing_enabled
 
         polished = _call_with_optional_deadline(
             polisher.polish,
             raw_action_text,
             deadline=deadline,
-            model_ref=getattr(session, "polish_model_ref", None) or (session.get("polish_model_ref") if isinstance(session, dict) else None),
+            model_ref="local/deterministic" if deterministic_preserve else selected_model,
             style_instruction=style_instruction,
             cleanup_level=level,
-            force_ai=force_ai,
-            task=task,
+            force_ai=False if deterministic_preserve else force_ai,
+            task="cleanup" if deterministic_preserve else task,
             overrides=command_overrides,
+            command_format=command_format,
             outcome_callback=_notify_outcome,
+            dictionary_trace=dictionary_trace,
             speed_mode=_normalize_polish_speed_mode(speed_mode or getattr(session, "polish_speed_mode", None) or (session.get("polish_speed_mode") if isinstance(session, dict) else None)),
         )
+        if deterministic_preserve and observed_outcome["value"] == "local":
+            observed_outcome["value"] = "local_preserved"
         # The polisher's deterministic fallback has already applied safe
         # cleanup and dictionary replacements. Do not run style formatting
         # after a disabled/failed AI attempt, because a style or command did
         # not actually run; do deliver the safe fallback instead of throwing
         # it away and pasting the raw transcript.
-        if observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "disabled"}:
+        if observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "command_unfulfilled", "disabled"}:
+            overrides = command_overrides if isinstance(command_overrides, dict) else {}
+            supported_email_overrides = set(overrides).issubset({"tone", "formality"})
+            can_use_local_structure = (
+                observed_outcome["value"] != "disabled"
+                and level != "cleanup_none"
+                and effective is not None
+                and task in {"rewrite", "format"}
+            )
+            effective_format = getattr(effective, "format", None) if effective is not None else None
+            if can_use_local_structure and effective_format == "email" and supported_email_overrides:
+                locally_formatted = format_dictated_email(polished)
+                if locally_formatted is not None:
+                    # The content and layout are already fixed above; apply
+                    # only the user's selected deterministic register so this
+                    # fallback honours their saved email style without asking
+                    # a model to invent a subject, sign-off, or new facts.
+                    locally_formatted = smart_format(locally_formatted, post_style_id, context)
+                    try:
+                        locally_formatted = dictionary_engine.restore_dictionary_spelling(locally_formatted)
+                    except Exception:
+                        log.debug("[DICTIONARY] local email vocabulary guard failed", exc_info=True)
+                    observed_outcome["value"] = "local_format"
+                    _emit_final_outcome()
+                    return locally_formatted
+            if can_use_local_structure and effective_format == "bullet_list" and not overrides:
+                locally_formatted = _format_dictated_bullets(polished)
+                if locally_formatted is not None:
+                    try:
+                        locally_formatted = dictionary_engine.restore_dictionary_spelling(locally_formatted)
+                    except Exception:
+                        log.debug("[DICTIONARY] local bullet vocabulary guard failed", exc_info=True)
+                    observed_outcome["value"] = "local_format"
+                    _emit_final_outcome()
+                    return locally_formatted
+            if (
+                observed_outcome["value"] != "disabled"
+                and level != "cleanup_none"
+                and effective is not None
+                and effective_format == "prompt"
+                and task == "prompt"
+                and not overrides
+            ):
+                locally_formatted = _format_dictated_prompt(polished)
+                if locally_formatted is not None:
+                    try:
+                        locally_formatted = dictionary_engine.restore_dictionary_spelling(locally_formatted)
+                    except Exception:
+                        log.debug("[DICTIONARY] local prompt vocabulary guard failed", exc_info=True)
+                    observed_outcome["value"] = "local_format"
+                    _emit_final_outcome()
+                    return locally_formatted
+            # Plain polishing may fail or time out on a long run-on
+            # dictation.  While polishing is ON, adding paragraph boundaries
+            # around explicit discourse markers is safe and useful; it never
+            # deletes or rewrites a word.  Do not relabel a failed command as
+            # successful local formatting.
+            if command is None and observed_outcome["value"] != "disabled":
+                paragraph_formatted = _format_safe_paragraphs(polished)
+                if paragraph_formatted != polished:
+                    observed_outcome["value"] = "local_paragraphs"
+                    _emit_final_outcome()
+                    return paragraph_formatted
+            _emit_final_outcome()
             return polished
         formatted = smart_format(polished, post_style_id, context)
         # Style formatters may lowercase casual text after the polisher has
@@ -1284,10 +1662,17 @@ class VoiceFlowApp:
         # correction rules again could turn an earlier replacement into a
         # new trigger and change the user's meaning.
         try:
-            return dictionary_engine.restore_dictionary_spelling(formatted)
+            formatted = dictionary_engine.restore_dictionary_spelling(formatted)
         except Exception:
             log.debug("[DICTIONARY] final vocabulary guard failed", exc_info=True)
-            return formatted
+        # When ON polishing successfully returns a long single block, keep the
+        # accepted wording but add only safe paragraph boundaries.  This is
+        # deliberately restricted to ordinary dictation: a command's result
+        # already has its own required structure and must retain its outcome.
+        if command is None:
+            formatted = _format_safe_paragraphs(formatted)
+        _emit_final_outcome()
+        return formatted
 
     def _process_dictation_pipeline(self, session: Any, audio_buffer: Any, duration: float, record_id: int | None = None, use_streaming: bool = False, recovery: dict[str, Any] | None = None) -> None:
         if recovery is None:
@@ -1418,6 +1803,9 @@ class VoiceFlowApp:
                     except Exception as exc:
                         failure = exc
                 stt_elapsed = time.perf_counter() - stt_started
+                # Streaming harvest and complete-buffer fallback are finished.
+                # End speech-model demand before any local polish inference.
+                self._release_session_model_resource(session)
                 if self._session_was_cancelled(session):
                     return
                 # A rejected stream is known incomplete. Never paste its prefix
@@ -1431,19 +1819,24 @@ class VoiceFlowApp:
                     self._overlay_call("show_error", reason[:90])
                     return
 
-                # Voice Flow command layer: deterministic wake-phrase command
-                # detection. The raw transcript is first repaired for known
-                # mis-hearings of the wake term ("Wiseflow" -> "Voice Flow");
-                # any failure here falls back to plain dictation — the user's
-                # words are never lost (spec §49).
+                # Voice commands are an AI-polishing feature.  With polishing
+                # disabled, preserve the entire utterance literally and clear
+                # any previously armed command so it cannot affect a later run.
+                # A settings read failure is deliberately fail-closed here.
+                polishing_enabled = _polishing_enabled()
                 command = None
                 command_content = raw_transcript
-                try:
-                    detection = detect_voice_command(dictionary_engine.repair_wake_term(raw_transcript))
-                    command_content = detection.content or ""
-                    command = detection.command
-                except Exception:
-                    log.exception("[COMMAND] detection failed; using plain dictation")
+                if polishing_enabled:
+                    # Deterministic wake-phrase command detection. The raw
+                    # transcript is first repaired for known mis-hearings.
+                    try:
+                        detection = detect_voice_command(dictionary_engine.repair_wake_term(raw_transcript))
+                        command_content = detection.content or ""
+                        command = detection.command
+                    except Exception:
+                        log.exception("[COMMAND] detection failed; using plain dictation")
+                else:
+                    self._pending_command = None
 
                 # A persistent command is a settings action, even when it has
                 # no dictated content. Apply it before deciding whether to arm
@@ -1475,14 +1868,16 @@ class VoiceFlowApp:
                         self._pending_command = None
                         if not persistent_applied:
                             detail = "Could not save this voice preference. Please try again."
-                            self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=detail, insertion_status="not_attempted")
-                            self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=detail)
+                            command_metadata = _command_only_processing_metadata(resolved_style=resolved_style, command=command, status="not_applied", display=detail)
+                            self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=detail, insertion_status="not_attempted", processing_metadata=command_metadata)
+                            self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=detail, processing_metadata=command_metadata)
                             self._reset_to_idle(session)
                             self._overlay_call("show_error", detail)
                             return
                         detail = persistent_applied
-                        self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=f"Persistent command saved: {detail}", insertion_status="not_attempted")
-                        self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=f"Persistent command saved: {detail}")
+                        command_metadata = _command_only_processing_metadata(resolved_style=resolved_style, command=command, status="saved", display=f"Voice preference saved: {detail}")
+                        self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=f"Persistent command saved: {detail}", insertion_status="not_attempted", processing_metadata=command_metadata)
+                        self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=f"Persistent command saved: {detail}", processing_metadata=command_metadata)
                         self._reset_to_idle(session)
                         self._overlay_call("show_done", f"Voice Flow: {detail}")
                         return
@@ -1509,12 +1904,15 @@ class VoiceFlowApp:
                     else:
                         self._pending_command = command
                         log.info("[COMMAND] %s — no content yet; armed for the next dictation.", command.label())
-                        self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=f"Command armed: {command.label()}", insertion_status="not_attempted")
-                        self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=f"Command armed: {command.label()}")
+                        command_metadata = _command_only_processing_metadata(resolved_style=resolved_style, command=command, status="armed", display=f"Voice command ready: {command.label()}")
+                        self._history_update(record_id, raw_text=raw_transcript, polished_text="", status="success", error_message=f"Command armed: {command.label()}", insertion_status="not_attempted", processing_metadata=command_metadata)
+                        self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, status="success", error_message=f"Command armed: {command.label()}", processing_metadata=command_metadata)
                         self._reset_to_idle(session)
                         self._overlay_call("show_done", f"Voice Flow: {command.label()} — dictate the content next")
                         return
-                if command is None:
+                if not polishing_enabled:
+                    self._pending_command = None
+                elif command is None:
                     pending = getattr(self, "_pending_command", None)
                     if pending is not None:
                         self._pending_command = None
@@ -1561,6 +1959,7 @@ class VoiceFlowApp:
                     # This closure is scoped to this pipeline invocation.
                     polish_outcome["value"] = str(outcome)
 
+                dictionary_trace: list[dict[str, str]] = []
                 polished_text = self._finalize_text(
                     text_to_polish,
                     session,
@@ -1573,8 +1972,18 @@ class VoiceFlowApp:
                     command=command,
                     outcome_callback=_record_polish_outcome,
                     speed_mode=speed_mode,
+                    dictionary_trace=dictionary_trace,
                 )
                 polish_elapsed = time.perf_counter() - polish_started
+                processing_metadata = _processing_metadata(
+                    polish_outcome=polish_outcome["value"],
+                    polish_elapsed=polish_elapsed,
+                    resolved_style=resolved_style,
+                    effective_style=effective,
+                    command=command,
+                    polishing_enabled=polishing_enabled,
+                    dictionary_trace=dictionary_trace,
+                )
                 polished_words = len(polished_text.split()) if polished_text else 0
                 log.info("Pipeline complete (%d words -> %d words, polish=%s): '%s'", len(raw_transcript.split()), polished_words, polish_outcome["value"], polished_text)
 
@@ -1592,7 +2001,7 @@ class VoiceFlowApp:
                     self._delivery_session = session
 
                 outcome_note = None if polish_outcome["value"] == "ai_accepted" else f"Polish fallback: {polish_outcome['value']}"
-                self._history_update(record_id, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=outcome_note, insertion_status="not_attempted")
+                self._history_update(record_id, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=outcome_note, insertion_status="not_attempted", processing_metadata=processing_metadata)
 
                 # Check if Deferred Click-to-Paste mode is enabled
                 click_to_paste = False
@@ -1611,7 +2020,7 @@ class VoiceFlowApp:
                     except Exception:
                         pass
                     self._history_update(record_id, insertion_status="ready_to_paste")
-                    self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=outcome_note, insertion_status="ready_to_paste")
+                    self._defer_history_insert(recovery, session, duration, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=outcome_note, insertion_status="ready_to_paste", processing_metadata=processing_metadata)
                     self._reset_to_idle(session)
                     prefix = _polish_outcome_label(polish_outcome["value"])
                     self._overlay_call("show_done", f"{prefix} — Ready to Paste")
@@ -1684,16 +2093,14 @@ class VoiceFlowApp:
                     status="success" if success else "paste_failed",
                     error_message=outcome_note if success else "Could not paste transcript into the original target; retrieve the text from history.",
                     insertion_status="pasted" if success else "failed",
+                    processing_metadata=processing_metadata,
                 )
 
                 self._reset_to_idle(session)
 
                 if success:
-                    try:
-                        polishing_enabled = storage.get_setting("polishing_enabled", True)
-                    except Exception:
-                        polishing_enabled = True
-                    if effective is not None and effective.requires_ai and polish_outcome["value"] != "ai_accepted":
+                    polishing_enabled = _polishing_enabled()
+                    if effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_format", "local_preserved"}:
                         # Spec §50: never silently pretend a transformation ran.
                         label = f" — {effective.label}" if effective.label else ""
                         detail = (
@@ -1702,7 +2109,7 @@ class VoiceFlowApp:
                             else _polish_outcome_label(polish_outcome["value"])
                         )
                         self._overlay_call("show_error", f"{detail}{label}")
-                    elif effective is not None and effective.label:
+                    elif effective is not None and effective.label and polish_outcome["value"] == "ai_accepted":
                         self._overlay_call("show_done", f"AI polished — {effective.label}")
                     else:
                         prefix = _polish_outcome_label(polish_outcome["value"])
@@ -1724,6 +2131,7 @@ class VoiceFlowApp:
                 # a late worker result from the next dictation.
                 if use_streaming:
                     self._end_stream_session(discard=True, owner=session)
+                self._release_session_model_resource(session)
                 pending = getattr(self, "_pending_recovery", None)
                 if isinstance(pending, dict):
                     pending.pop(id(session), None)
@@ -1775,7 +2183,10 @@ class VoiceFlowApp:
         return True, "Retry started"
 
     def _retry_history_worker(self, record_id: int, path: str) -> None:
+        lease = None
         try:
+            from voice_flow.local_model_resources import acquire_model_use
+            lease = acquire_model_use("speech")
             import wave, numpy as np
             with wave.open(path, "rb") as wf:
                 audio = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16).astype(np.float32) / 32767.0
@@ -1797,6 +2208,10 @@ class VoiceFlowApp:
             self._history_update(record_id, status="transcription_failed", error_message=str(exc), insertion_status="not_attempted")
             self._reset_to_idle()
             self._overlay_call("show_error", f"History retry failed: {exc}"[:90])
+        finally:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                release()
 
     def _on_mouse_release(self, x: int, y: int, drag_distance: float = 0.0, start_x: int = 0, start_y: int = 0) -> None:
         """Capture selected text and expose its actions on the persistent bar."""
@@ -1804,7 +2219,7 @@ class VoiceFlowApp:
         selection_generation = self._selection_generation
         audio_enabled = self._get_cached_setting("audio_flow_enabled", True)
         video_enabled = self._get_cached_setting("video_flow_enabled", True)
-        if (not audio_enabled and not video_enabled) or self.is_recording:
+        if (not audio_enabled and not video_enabled) or getattr(self, "state", DictationState.IDLE) != DictationState.IDLE or self.is_recording:
             self.overlay.clear_selected_text()
             audio_flow_widget.hide()
             return
@@ -1821,8 +2236,8 @@ class VoiceFlowApp:
 
         def _check():
             try:
-                # If dictation recording started in the meantime, abort text capture
-                if self.is_recording:
+                # If dictation recording or processing started in the meantime, abort text capture
+                if getattr(self, "state", DictationState.IDLE) != DictationState.IDLE or self.is_recording:
                     return
 
                 # Always use the CURRENT foreground window — never a stale target_hwnd
@@ -1865,7 +2280,17 @@ class VoiceFlowApp:
                     pass
 
                 selected = self.injector.get_selected_text_strict(target_hwnd=target_hwnd)
-                if selection_generation != self._selection_generation:
+                # The hook advances its lightweight epoch as soon as each
+                # release arrives.  This prevents a blocked clipboard read
+                # from publishing an older drag while a newer drag is merely
+                # pending in the bounded selection worker.
+                from voice_flow.mouse_hook import selection_event_is_current
+                if (
+                    selection_generation != self._selection_generation
+                    or not selection_event_is_current()
+                    or getattr(self, "state", DictationState.IDLE) != DictationState.IDLE
+                    or self.is_recording
+                ):
                     return
                 if selected and len(selected.strip()) > 1:
                     self.overlay.set_selected_text(selected, timeout_ms=6000)
@@ -1874,11 +2299,23 @@ class VoiceFlowApp:
                     self.overlay.clear_selected_text()
                     audio_flow_widget.hide()
             except Exception:
-                if selection_generation == self._selection_generation:
+                from voice_flow.mouse_hook import selection_event_is_current
+                if (
+                    selection_generation == self._selection_generation
+                    and selection_event_is_current()
+                    and getattr(self, "state", DictationState.IDLE) == DictationState.IDLE
+                ):
                     self.overlay.clear_selected_text()
                     audio_flow_widget.hide()
 
-        threading.Thread(target=_check, daemon=True).start()
+        # Win32MouseHook already serializes this callback on its bounded
+        # selection worker.  Starting another thread here used to create one
+        # thread per drag under load.  Direct callers (including alternate
+        # input integrations) retain the asynchronous behavior.
+        if threading.current_thread().name == "Win32MouseHookSelectionWorker":
+            _check()
+        else:
+            threading.Thread(target=_check, daemon=True).start()
 
     def _normalize_for_comparison(self, s: str) -> str:
         if not s:
@@ -1929,8 +2366,12 @@ class VoiceFlowApp:
         summary_depth: str | None = None,
     ) -> None:
         """Capture selected text and read aloud via Audio Flow TTS Engine or Audio Summary."""
-        self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
-        gen_token = self._audio_summary_generation
+        generation_lock = getattr(self, "_audio_flow_generation_lock", None)
+        if generation_lock is None:
+            generation_lock = self._audio_flow_generation_lock = threading.RLock()
+        with generation_lock:
+            self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
+            gen_token = self._audio_summary_generation
         try:
             from voice_flow.audio_summary_player import close_summary_audio_player
             close_summary_audio_player(getattr(self, "_active_summary_player_token", None))
@@ -1944,8 +2385,9 @@ class VoiceFlowApp:
             # the old read immediately, so Summary never requires a second click.
             if not text_override:
                 return
-            self._audio_summary_generation += 1
-            gen_token = self._audio_summary_generation
+            with generation_lock:
+                self._audio_summary_generation += 1
+                gen_token = self._audio_summary_generation
 
         if not storage.get_setting("audio_flow_enabled", True):
             audio_flow_widget.set_playing(False)
@@ -1979,12 +2421,16 @@ class VoiceFlowApp:
                 self.overlay.show_reading(snippet)
 
         def _on_done():
+            if self._audio_summary_generation != gen_token:
+                return
             audio_flow_widget.set_playing(False)
             audio_flow_widget.hide()
             self.overlay.clear_selected_text()
             self.overlay.show_ready()
 
         def _on_error(err_msg: str):
+            if self._audio_summary_generation != gen_token:
+                return
             audio_flow_widget.set_playing(False)
             audio_flow_widget.hide()
             self.overlay.clear_selected_text()
@@ -2012,6 +2458,11 @@ class VoiceFlowApp:
             depth = {"quick": "short", "standard": "balanced", "detailed": "deep_dive"}.get(depth, depth)
             if depth not in {"short", "balanced", "deep_dive"}:
                 depth = "balanced"
+            # Snapshot this setting for the complete job: a user changing the
+            # preference while NotebookLM is working must not change its route.
+            summary_style = str(storage.get_setting("audio_flow_summary_style", "single") or "single").strip().lower()
+            if summary_style not in {"single", "podcast"}:
+                summary_style = "single"
             history_id = f"ash_{uuid.uuid4().hex[:12]}"
             summary_title = storage._derive_audio_title(text_to_read)
             log.info("Audio Flow generating summary (%s depth) for text: '%s'", depth, snippet)
@@ -2040,7 +2491,17 @@ class VoiceFlowApp:
                         history_id,
                         status="cancelled",
                         progress=0,
+                        error="Cancelled by user",
                     )
+                    storage.record_audio_summary_to_history(
+                        audio_id=history_id,
+                        title=summary_title,
+                        text_snippet=text_to_read,
+                        status="cancelled",
+                        error_message="Cancelled by user",
+                    )
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
                 except Exception as cexc:
                     log.debug("Failed to update cancelled status: %s", cexc)
                 if hasattr(self.overlay, "clear_audio_summary_status"):
@@ -2051,7 +2512,10 @@ class VoiceFlowApp:
                 self.overlay.on_audio_summary_cancel = _on_cancel
 
             def _summary_worker():
+                retrying_podcast = False
+
                 def _progress(event):
+                    nonlocal retrying_podcast
                     if self._audio_summary_generation != gen_token:
                         return
                     progress_pct = 5
@@ -2069,11 +2533,26 @@ class VoiceFlowApp:
                             progress_pct = 40
                             stage_msg = "Source text ready"
                         elif state == "audio_start":
-                            progress_pct = 50
-                            stage_msg = "Starting audio generation"
+                            if retrying_podcast:
+                                progress_pct = 88
+                                stage_msg = "Shortening podcast summary"
+                            else:
+                                progress_pct = 50
+                                stage_msg = "Starting audio generation"
+                        elif state == "audio_retry":
+                            # A verified overlong podcast is regenerated once;
+                            # preserve progress rather than making it appear to
+                            # restart from the initial cloud submission.
+                            retrying_podcast = True
+                            progress_pct = 88
+                            stage_msg = "Shortening podcast summary"
                         elif state == "audio_poll":
-                            progress_pct = min(88, 50 + int(elapsed * 0.8))
-                            stage_msg = f"Synthesizing audio ({int(elapsed)}s)"
+                            if retrying_podcast:
+                                progress_pct = 88
+                                stage_msg = f"Shortening podcast summary ({int(elapsed)}s)"
+                            else:
+                                progress_pct = min(88, 50 + int(elapsed * 0.8))
+                                stage_msg = f"Synthesizing audio ({int(elapsed)}s)"
                         elif state == "audio_download":
                             progress_pct = 92
                             stage_msg = "Downloading summary audio"
@@ -2098,6 +2577,7 @@ class VoiceFlowApp:
                     result = audio_notebooklm_service.generate(
                         text_to_read,
                         depth=depth,
+                        style=summary_style,
                         cancelled=lambda: self._audio_summary_generation != gen_token,
                         on_progress=_progress,
                     )
@@ -2115,18 +2595,20 @@ class VoiceFlowApp:
                             self.overlay.clear_audio_summary_status()
                         return
 
-                    # Compute or estimate duration
-                    duration_sec = 0.0
-                    try:
-                        import wave
-                        with wave.open(audio_path, "rb") as wf:
-                            duration_sec = wf.getnframes() / float(wf.getframerate())
-                    except Exception:
+                    # NotebookLM validates podcast M4A duration before it is
+                    # returned. Prefer that exact value for history.
+                    duration_sec = float((result or {}).get("duration_sec") or 0.0)
+                    if not duration_sec:
                         try:
-                            sz = Path(audio_path).stat().st_size
-                            duration_sec = max(10.0, sz / 16000.0)
+                            import wave
+                            with wave.open(audio_path, "rb") as wf:
+                                duration_sec = wf.getnframes() / float(wf.getframerate())
                         except Exception:
-                            duration_sec = 0.0
+                            try:
+                                sz = Path(audio_path).stat().st_size
+                                duration_sec = max(10.0, sz / 16000.0)
+                            except Exception:
+                                duration_sec = 0.0
 
                     title_param = summary_title or (snippet[:40] if snippet else "Audio Summary")
                     self._active_summary_player_token = launch_summary_audio_player(
@@ -2135,6 +2617,7 @@ class VoiceFlowApp:
                         title=title_param,
                         token=history_id,
                     )
+                    history_ready = False
                     try:
                         storage.update_audio_summary_history(
                             history_id,
@@ -2152,13 +2635,7 @@ class VoiceFlowApp:
                             duration_sec=duration_sec,
                             status="success",
                         )
-                        try:
-                            from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
-                            clean_aname = safe_media_filename(title_param or text_to_read[:50], default="Audio_Summary", ext=".mp3")
-                            save_media_to_downloads(audio_path, clean_aname, copy_to_media_folder=True)
-                            storage.update_audio_summary_history(history_id, downloaded=1)
-                        except Exception:
-                            pass
+                        history_ready = True
                     except Exception as hexc:
                         log.debug("Failed to update audio summary history: %s", hexc)
 
@@ -2175,16 +2652,58 @@ class VoiceFlowApp:
                         self.overlay.clear_audio_summary_status()
                     if hasattr(self.overlay, "show_ready"):
                         self.overlay.show_ready()
+
+                    # Disk copies are optional.  Start playback, persist the
+                    # history item, and restore the overlay before exporting.
+                    # A slow or unavailable Downloads folder must not delay
+                    # the ready path.
+                    def _export_summary_copy() -> None:
+                        try:
+                            from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
+                            clean_aname = safe_media_filename(
+                                title_param or text_to_read[:50],
+                                default="Audio_Summary",
+                                ext=Path(audio_path).suffix or ".m4a",
+                            )
+                            saved_path, _ = save_media_to_downloads(
+                                audio_path,
+                                clean_aname,
+                                copy_to_media_folder=True,
+                            )
+                            if saved_path.is_file():
+                                storage.update_audio_summary_history(history_id, downloaded=1)
+                        except Exception as export_exc:
+                            log.debug("Optional audio summary export failed: %s", export_exc)
+
+                    if history_ready:
+                        threading.Thread(
+                            target=_export_summary_copy,
+                            name="AudioSummaryExport",
+                            daemon=True,
+                        ).start()
                 except Exception as exc:
+                    is_cancelled = (
+                        self._audio_summary_generation != gen_token
+                        or "cancelled" in str(exc).lower()
+                        or getattr(exc, "code", "") == "cancelled"
+                    )
+                    final_status = "cancelled" if is_cancelled else "failed"
+                    final_error = "Cancelled by user" if is_cancelled else str(exc)
                     try:
-                        storage.update_audio_summary_history(history_id, status="failed", error=str(exc))
+                        storage.update_audio_summary_history(
+                            history_id,
+                            status=final_status,
+                            error=final_error,
+                        )
                         storage.record_audio_summary_to_history(
                             audio_id=history_id,
                             title=summary_title,
                             text_snippet=text_to_read,
-                            status="error",
-                            error_message=str(exc),
+                            status=final_status,
+                            error_message=final_error,
                         )
+                        from voice_flow.gui.api_server import invalidate_history_cache
+                        invalidate_history_cache()
                     except Exception:
                         pass
                     if self._audio_summary_generation != gen_token:
@@ -2198,7 +2717,10 @@ class VoiceFlowApp:
                     if hasattr(self.overlay, "clear_selected_text"):
                         self.overlay.clear_selected_text()
                     if hasattr(self.overlay, "show_error"):
-                        self.overlay.show_error(f"NotebookLM summary: {exc}"[:90])
+                        if getattr(exc, "code", "") == "PODCAST_TOO_LONG":
+                            self.overlay.show_error("NotebookLM could not make this podcast short enough. Try again.")
+                        else:
+                            self.overlay.show_error(f"NotebookLM summary: {exc}"[:90])
                     log.warning("Audio summary unexpected error: %s", exc)
 
             threading.Thread(target=_summary_worker, daemon=True).start()
@@ -2210,15 +2732,46 @@ class VoiceFlowApp:
                 tts_engine.speak(text_to_read, **speak_kwargs)
             else:
                 log.info("Audio Flow reading selected text (Human Explanatory Narration): '%s'", snippet)
-                self.overlay.show_generating_audio()
-                from voice_flow.audio_explainer import audio_explainer
-                try:
-                    narrated = audio_explainer.transform_for_human_reading(text_to_read)
-                except Exception as err:
-                    log.warning("Audio explainer transform failed (%s); falling back to direct TTS", err)
-                    narrated = text_to_read
+                # An explanatory Read first prepares a conversational script.
+                # This can involve Gemini or a cache lookup, so it must never
+                # run on the Tk/hotkey thread.  The shared generation token is
+                # bumped by Stop and every new Audio Flow request, preventing a
+                # late worker from starting TTS for no-longer-selected text.
+                self.overlay.show_generating_audio("Preparing explanation...")
 
-                tts_engine.speak(narrated, **speak_kwargs)
+                def _explanatory_read_worker() -> None:
+                    narrated = text_to_read
+                    try:
+                        from voice_flow.audio_explainer import audio_explainer
+                        candidate = audio_explainer.transform_for_human_reading(text_to_read)
+                        if isinstance(candidate, str) and candidate.strip():
+                            narrated = candidate.strip()
+                        else:
+                            log.warning("Audio explainer returned no usable script; falling back to direct TTS")
+                    except Exception as err:
+                        log.warning("Audio explainer transform failed (%s); falling back to direct TTS", err)
+
+                    # Hold the token lock until TTS has accepted the request.
+                    # This closes the small race where a new selection arrives
+                    # immediately after the stale-token check.
+                    with generation_lock:
+                        if self._audio_summary_generation != gen_token:
+                            log.info("Audio explanatory Read token %d invalidated before TTS", gen_token)
+                            return
+
+                        # Keep Read available even if the explainer is unavailable;
+                        # the selected source text is the safe, lossless fallback.
+                        try:
+                            tts_engine.speak(narrated, **speak_kwargs)
+                        except Exception as err:
+                            if self._audio_summary_generation == gen_token:
+                                _on_error(str(err))
+
+                threading.Thread(
+                    target=_explanatory_read_worker,
+                    daemon=True,
+                    name="AudioFlowExplanatoryRead",
+                ).start()
 
     def _process_video_flow_pipeline(self, mode: str, text_override: str | None = None) -> None:
         """Open the primary system-wide composer for selected text."""
@@ -2401,7 +2954,11 @@ class VoiceFlowApp:
             time.sleep(0.4)
     def _stop_audio_flow_pipeline(self) -> None:
         """Stop active Audio Flow TTS playback and invalidate in-flight summary generation."""
-        self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
+        generation_lock = getattr(self, "_audio_flow_generation_lock", None)
+        if generation_lock is None:
+            generation_lock = self._audio_flow_generation_lock = threading.RLock()
+        with generation_lock:
+            self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
         try:
             from voice_flow.audio_summary_player import close_summary_audio_player
             close_summary_audio_player(getattr(self, "_active_summary_player_token", None))
@@ -2552,12 +3109,36 @@ class VoiceFlowApp:
         log.info("==========================================================")
 
         # Run Tkinter Floating Overlay Bar on the MAIN THREAD
-        try:
-            self.overlay.run_loop()
-        except Exception as e:
-            log.error("Overlay main loop error: %s", e)
-            while True:
+        while not getattr(self, "_shutdown_requested", False):
+            try:
+                self.overlay.run_loop()
+                break
+            except Exception as e:
+                log.error("Overlay main loop error: %s", e)
                 time.sleep(1.0)
+
+    def reset_state_and_refresh(self) -> None:
+        """Reset dictation/audio state, cancel any in-flight/stuck recordings, and restart/refresh overlay."""
+        try:
+            with self._state_lock:
+                self.state = DictationState.IDLE
+                self._pending_command = None
+                if hasattr(self, "audio") and hasattr(self.audio, "cancel"):
+                    try:
+                        self.audio.cancel()
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.debug("State lock error during reset_state_and_refresh: %s", e)
+
+        try:
+            if hasattr(self, "overlay") and self.overlay:
+                if hasattr(self.overlay, "restart_and_refresh"):
+                    self.overlay.restart_and_refresh()
+                elif hasattr(self.overlay, "show"):
+                    self.overlay.show()
+        except Exception as e:
+            log.debug("Overlay restart error during reset_state_and_refresh: %s", e)
 
     def stop(self) -> None:
         try:
@@ -2586,7 +3167,12 @@ def main() -> None:
             _ENGINE_MUTEX_HANDLE = kernel32.CreateMutexW(None, False, "Local\\VoiceFlowMainEngineMutex_v1")
             last_err = ctypes.get_last_error()
             if _ENGINE_MUTEX_HANDLE and last_err == ERROR_ALREADY_EXISTS:
-                log.info("Another instance of Voice Flow main engine is already running. Exiting duplicate instance.")
+                log.info("Another instance of Voice Flow main engine is already running. Signaling running instance to restore & refresh.")
+                try:
+                    from voice_flow.single_instance import signal_running_instance_to_restore
+                    signal_running_instance_to_restore()
+                except Exception as exc:
+                    log.debug("Signaling running instance error: %s", exc)
                 return
         except Exception:
             pass

@@ -82,6 +82,29 @@ def test_dictation_opens_capture_before_stream_setup(monkeypatch) -> None:
     assert events[:4] == ["buffer", "audio", "stream", "flush"]
 
 
+def test_selected_lfm_is_not_warmed_during_recording(monkeypatch) -> None:
+    from voice_flow import lfm_engine, main
+
+    calls: list[float] = []
+
+    class InlineThread:
+        def __init__(self, *, target, args=(), kwargs=None, **_unused):
+            self.target = target
+            self.args = args
+            self.kwargs = kwargs or {}
+
+        def start(self):
+            self.target(*self.args, **self.kwargs)
+
+    monkeypatch.setattr(main.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
+    monkeypatch.setattr(main.threading, "Thread", InlineThread)
+    monkeypatch.setattr(lfm_engine, "warm_lfm_model", lambda *, timeout_seconds: calls.append(timeout_seconds) or True)
+
+    main._warm_voice_gemini_transport(lfm_engine.LFM_MODEL_ID)
+
+    assert calls == []
+
+
 def test_failed_ai_outcomes_keep_input_and_have_truthful_labels(monkeypatch) -> None:
     from voice_flow import main
 

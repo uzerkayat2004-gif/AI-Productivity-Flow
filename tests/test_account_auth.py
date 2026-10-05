@@ -30,11 +30,23 @@ from voice_flow.storage import StorageEngine, storage
 def temp_env():
     """Create an isolated temporary environment for accounts and vaults."""
     temp_dir = Path(tempfile.mkdtemp(prefix="vf_auth_test_"))
-    yield temp_dir
+    old_account_manager = am_module._account_manager
     try:
-        shutil.rmtree(str(temp_dir), ignore_errors=True)
-    except Exception:
-        pass
+        yield temp_dir
+    finally:
+        try:
+            shutil.rmtree(str(temp_dir), ignore_errors=True)
+        except Exception:
+            pass
+        am_module._account_manager = old_account_manager
+        try:
+            from voice_flow.storage import resolve_active_db_path
+            active_db = os.fspath(resolve_active_db_path())
+            storage.switch_account(active_db)
+            from voice_flow.video_flow_providers import video_flow_provider_service
+            video_flow_provider_service.switch_account(active_db)
+        except Exception:
+            pass
 
 
 def test_password_hashing():

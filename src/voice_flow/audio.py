@@ -132,6 +132,37 @@ class AudioRecorder:
                 self._stream = None
 
             target_device = device if device is not None else config.selected_mic_device
+            if target_device is not None:
+                # Fast validation: check whether target_device exists among active input devices
+                # to prevent 10-20s driver hang when a disconnected Bluetooth/USB headset is selected.
+                device_valid = False
+                try:
+                    all_devs = sd.query_devices()
+                    if isinstance(target_device, int):
+                        if 0 <= target_device < len(all_devs) and all_devs[target_device].get("max_input_channels", 0) > 0:
+                            device_valid = True
+                    elif isinstance(target_device, str):
+                        for dev in all_devs:
+                            if dev.get("max_input_channels", 0) > 0 and target_device.lower() in dev.get("name", "").lower():
+                                device_valid = True
+                                break
+                    else:
+                        device_valid = True
+                except Exception as dev_err:
+                    log.debug("[AUDIO] Device query check exception: %s", dev_err)
+                    device_valid = True
+
+                if not device_valid:
+                    log.warning("[AUDIO] Configured mic '%s' not found in active input devices; falling back to default device immediately.", target_device)
+                    target_device = None
+                    config.selected_mic_device = None
+                    try:
+                        from voice_flow.storage import storage
+                        storage.save_setting("selected_mic_device", None)
+                        storage.save_setting("selected_microphone", None)
+                    except Exception:
+                        pass
+
             target_sr = int(getattr(config, "sample_rate", 16000) or 16000)
             target_ch = 1
             stream = None
@@ -162,6 +193,7 @@ class AudioRecorder:
                     try:
                         from voice_flow.storage import storage
                         storage.save_setting("selected_mic_device", None)
+                        storage.save_setting("selected_microphone", None)
                     except Exception:
                         pass
                     # Retry at 16000Hz on default device
@@ -315,6 +347,15 @@ class AudioRecorder:
                 self._level = 0.0
                 stream = getattr(self, "_stream", None)
                 self._stream = None
+                # close() is the shutdown path, unlike stop() which returns
+                # the complete recording for transcription.  Release every
+                # retained native-rate frame promptly on application exit.
+                for name in ("_buffer", "_chunk", "_pending_live_frames", "_pending_closed_chunks", "_pending_stream_events"):
+                    retained = getattr(self, name, None)
+                    if retained is not None:
+                        retained.clear()
+                self._startup_stream_buffered_samples = 0
+                self._startup_stream_overflow = False
             if stream is not None:
                 try:
                     stream.stop()
@@ -436,16 +477,23 @@ class AudioRecorder:
             # transient NaN/Inf must not poison the level meter, silence split,
             # or the archived buffer when a driver misbehaves.
             safe_indata = np.nan_to_num(indata, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
-            self._buffer.append(safe_indata.copy())
+            # The device owns ``indata`` and may overwrite it after return.
+            # Make one owned frame, then share that immutable reference between
+            # the archival and open-chunk views. Closed chunks concatenate into
+            # their own array before dispatch, so consumers cannot retain a
+            # mutable driver buffer.
+            captured_frame = safe_indata.copy()
+            captured_frame.setflags(write=False)
+            self._buffer.append(captured_frame)
             frame_sink = getattr(self, "on_audio_frame", None)
             if getattr(self, "_buffer_stream_input", False):
                 pending_frames = getattr(self, "_pending_live_frames", None)
                 if pending_frames is None:
                     pending_frames = self._pending_live_frames = []
-                pending_frames.append(safe_indata.copy())
+                pending_frames.append(captured_frame)
             elif frame_sink is not None:
                 try:
-                    frame_sink(safe_indata, self._native_sr)
+                    frame_sink(captured_frame, self._native_sr)
                 except Exception:
                     log.exception("Live audio intake failed; full recording retained")
             rms = float(np.sqrt(np.mean(safe_indata**2)))
@@ -461,7 +509,7 @@ class AudioRecorder:
                 self._chunk_start_mono = None
                 self._last_voice_mono = None
                 self._chunk_voice_samples = 0
-            self._chunk.append(safe_indata.copy())
+            self._chunk.append(captured_frame)
             if self._chunk_start_mono is None:
                 self._chunk_start_mono = now_mono
             chunk_secs = now_mono - self._chunk_start_mono

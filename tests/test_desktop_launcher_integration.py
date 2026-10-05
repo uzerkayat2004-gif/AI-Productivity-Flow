@@ -263,7 +263,7 @@ def test_api_server_overlay_show_get_and_post() -> None:
     handler.do_GET()
 
     mock_overlay.show.assert_called()
-    mock_overlay.reset_position.assert_called()
+    mock_overlay.reset_position.assert_not_called()  # saved position is preserved
     handler.send_json_response.assert_called_once()
 
 

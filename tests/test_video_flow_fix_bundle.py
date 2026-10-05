@@ -12,6 +12,9 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -350,6 +353,10 @@ def test_start_login_runs_master_token_mode(monkeypatch):
     monkeypatch.setattr(login_flow, "_storage_email", lambda: "user@example.com")
     monkeypatch.setattr(login_flow, "master_token_present", lambda profile=None: True)
     monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda profile, log_path: 0)
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **_kwargs: {"authenticated": True, "email": "user@example.com"},
+    )
     result = login_flow.start_login(mode="master-token", browser="chrome")
     assert result["launched"] is True
     assert result["mode"] == "master-token"
@@ -367,7 +374,7 @@ def test_start_login_runs_master_token_mode(monkeypatch):
     assert state["durable"] is True
 
 
-def test_start_login_message_is_one_time(monkeypatch):
+def test_start_login_message_describes_the_browser_sign_in(monkeypatch):
     from voice_flow.video_flow_engine.notebooklm import login_flow
 
     class _FakeThread:
@@ -383,7 +390,40 @@ def test_start_login_message_is_one_time(monkeypatch):
     monkeypatch.setattr(login_flow.threading, "Thread", _FakeThread)
     result = login_flow.start_login(mode="master-token")
     assert result["launched"] is True
-    assert "one-time" in result["message"].lower()
+    assert "sign-in window launched" in result["message"].lower()
+
+
+def test_auth_focus_endpoint_only_focuses_existing_login_window(monkeypatch):
+    """The manual fallback must never launch a second sign-in or browser."""
+    from voice_flow.gui import api_server
+    from voice_flow.video_flow_engine.notebooklm import login_flow
+
+    calls = []
+    monkeypatch.setattr(
+        login_flow,
+        "bring_login_window_forward",
+        lambda profile=None: calls.append(profile) or True,
+    )
+    monkeypatch.setattr(login_flow, "start_login", lambda **_kwargs: pytest.fail("focus must not start login"))
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), api_server.VoiceFlowApiHandler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/api/video-flow/notebooklm/auth/focus",
+            data=json.dumps({"profile": "focus-profile"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Connection": "close"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=5)
+
+    assert payload == {"success": True, "focused": True}
+    assert calls == ["focus-profile"]
 
 
 def test_start_login_without_email_uses_plain_browser(monkeypatch):
@@ -481,33 +521,45 @@ def test_master_token_present_and_self_heal(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert seen[-1][-3:] == ["refresh", "--verify", "--allow-headless"]
 
-    # Token file present -> direct headless re-mint from the durable token.
+    # A token file does not change the safe, CLI-owned headless refresh command.
     (profile_dir / "master_token.json").write_text("{}", encoding="utf-8")
     assert login_flow.master_token_present() is True
     result = login_flow.self_heal()
     assert result["ok"] is True
-    assert seen[-1][-1:] == ["--master-token-refresh"]
+    assert seen[-1][-3:] == ["refresh", "--verify", "--allow-headless"]
 
 
 def test_terminate_stale_login_scopes_to_profile(monkeypatch, tmp_path):
     """The stale-browser cleaner must only ever match processes whose command
     line carries OUR browser_profile path — never the user's daily browser."""
+    import sys
     from voice_flow.video_flow_engine.notebooklm import login_flow
 
-    calls = []
-    monkeypatch.setattr(login_flow.os, "name", "nt")
+    killed_pids = []
+    class FakeProcess:
+        def __init__(self, pid, command):
+            self.info = {"pid": pid, "name": "chrome.exe", "cmdline": command}
+        def kill(self):
+            killed_pids.append(self.info["pid"])
+
+    app_profile_dir = tmp_path / "profiles" / "p" / "browser_profile"
+    fake_psutil = SimpleNamespace(
+        NoSuchProcess=RuntimeError,
+        AccessDenied=PermissionError,
+        process_iter=lambda _attrs: [
+            FakeProcess(111, ["chrome.exe", f"--user-data-dir={app_profile_dir}"]),
+            FakeProcess(222, ["chrome.exe", "--user-data-dir=C:/Users/test/Chrome/User Data"]),
+        ],
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
     monkeypatch.setattr(
-        login_flow.subprocess, "run",
-        lambda *a, **k: calls.append(a) or SimpleNamespace(stdout="111\n222\n", returncode=0),
+        login_flow, "_profile_browser_dir",
+        lambda _profile: app_profile_dir,
     )
 
     killed = login_flow._terminate_stale_login_processes("p", tmp_path / "log.txt")
-    assert killed == 2
-    kinds = [c[0][0] for c in calls]
-    assert kinds[0] == "powershell"
-    ps_script = " ".join(calls[0][0])
-    assert "browser_profile" in ps_script  # scoping marker present
-    assert all(c[0][0] == "taskkill" for c in calls[1:])
+    assert killed == 1
+    assert killed_pids == [111]
 
 
 def test_redact_command_for_log_hides_oauth_token():
@@ -554,9 +606,8 @@ def test_watch_login_master_token_success(monkeypatch, tmp_path):
     assert state["note"] == "Signed in as stored@gmail.com"
 
 
-def test_watch_login_falls_back_to_plain_on_mint_failure(monkeypatch, tmp_path):
-    """If the durable setup fails, the plain login still restores the session —
-    and the state says honestly that the durable setup didn't finish."""
+def test_watch_login_does_not_open_a_second_browser_on_mint_failure(monkeypatch, tmp_path):
+    """A failed CLI login ends the attempt instead of opening a second browser."""
     from voice_flow.video_flow_engine.notebooklm import login_flow
 
     commands = []
@@ -575,12 +626,12 @@ def test_watch_login_falls_back_to_plain_on_mint_failure(monkeypatch, tmp_path):
         "video-flow-experiment", "master-token", "stored@gmail.com",
         "chrome", 300, tmp_path / "log.txt",
     )
-    assert len(commands) == 2
-    assert "--master-token" in commands[0] and "--master-token" not in commands[1]
+    assert len(commands) == 1
+    assert "--master-token" in commands[0]
     state = login_flow.get_login_state()
-    assert state["success"] is True
+    assert state["success"] is False
     assert state["durable"] is False
-    assert "durable" in (state["note"] or "").lower()
+    assert "boom" in (state["error"] or "")
 
 
 def test_parse_reset_time_extracts_eta():
@@ -767,10 +818,16 @@ def test_watch_login_without_email_runs_plain(monkeypatch, tmp_path):
     monkeypatch.setattr(login_flow, "_run_login_once", fake_run_once)
     monkeypatch.setattr(login_flow, "_storage_email", lambda: None)
     monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda profile, log_path: 0)
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **_kwargs: {"authenticated": True, "email": "plain@gmail.com"},
+    )
 
     login_flow._watch_login(
         "video-flow-experiment", "browser", None,
         "chrome", 300, tmp_path / "log.txt",
     )
     assert len(commands) == 1 and "--master-token" not in commands[0]
-    assert login_flow.get_login_state()["success"] is True
+    state = login_flow.get_login_state()
+    assert state["success"] is True
+    assert state["email"] == "plain@gmail.com"

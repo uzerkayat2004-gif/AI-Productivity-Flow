@@ -279,7 +279,11 @@ def is_internal_window(hwnd: int | None, overlay_hwnd: int | None = None) -> boo
             if c_lower in _SHELL_CLASSES:
                 return True
             if c_lower in ("windows.ui.core.corewindow", "xamlexplorerhostislandwindow", "startmenuexperiencehost"):
-                if proc_name in _SHELL_PROCESSES or not proc_name:
+                if any("whatsapp" in t.lower() for t in titles) or "whatsapp" in proc_name.lower():
+                    return False
+                if proc_name in _SHELL_PROCESSES:
+                    return True
+                if not proc_name and any(t.lower() in ("start", "search", "startmenuexperiencehost") for t in titles):
                     return True
 
         return False
@@ -345,9 +349,93 @@ def is_same_window_hierarchy(hwnd1: int | None, hwnd2: int | None) -> bool:
         owner2 = user32.GetAncestor(hwnd2, 3) or hwnd2
         if owner1 == owner2 or owner1 == hwnd2 or owner2 == hwnd1:
             return True
+        if user32.GetParent(hwnd1) == hwnd2 or user32.GetParent(hwnd2) == hwnd1:
+            return True
+
+        # Process ID match: if both windows belong to the same process, they belong to the same hierarchy
+        pid1 = wintypes.DWORD()
+        pid2 = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd1, ctypes.byref(pid1))
+        user32.GetWindowThreadProcessId(hwnd2, ctypes.byref(pid2))
+        if pid1.value and pid1.value == pid2.value:
+            return True
+
+        # UWP host / child relationship: ApplicationFrameWindow and hosted UWP application
+        class1 = get_window_class_name(hwnd1).lower()
+        class2 = get_window_class_name(hwnd2).lower()
+        if class1 == "applicationframewindow" or class2 == "applicationframewindow":
+            frame_h = hwnd1 if class1 == "applicationframewindow" else hwnd2
+            other_h = hwnd2 if class1 == "applicationframewindow" else hwnd1
+            other_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(other_h, ctypes.byref(other_pid))
+            is_child_found = False
+
+            def _check_child(ch, _):
+                nonlocal is_child_found
+                if ch == other_h:
+                    is_child_found = True
+                    return False
+                if other_pid.value:
+                    ch_pid = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(ch, ctypes.byref(ch_pid))
+                    if ch_pid.value and ch_pid.value == other_pid.value:
+                        is_child_found = True
+                        return False
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumChildWindows(frame_h, WNDENUMPROC(_check_child), 0)
+            if is_child_found:
+                return True
     except Exception:
         pass
     return False
+
+
+def _find_uwp_frame_window(hwnd: int) -> int | None:
+    """Find the ApplicationFrameWindow hosting a UWP window, if applicable."""
+    if not IS_WINDOWS or not hwnd:
+        return None
+    try:
+        user32 = getattr(ctypes, "windll", windll).user32
+        target_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(target_pid))
+
+        p = user32.GetParent(hwnd)
+        if p and get_window_class_name(p).lower() == "applicationframewindow":
+            return p
+        a = user32.GetAncestor(hwnd, 2)
+        if a and get_window_class_name(a).lower() == "applicationframewindow":
+            return a
+
+        frame_match = None
+        def _enum_top(top_h, _):
+            nonlocal frame_match
+            if get_window_class_name(top_h).lower() == "applicationframewindow":
+                has_child = False
+                def _enum_sub(ch, _):
+                    nonlocal has_child
+                    if ch == hwnd:
+                        has_child = True
+                        return False
+                    if target_pid.value:
+                        p_sub = wintypes.DWORD()
+                        user32.GetWindowThreadProcessId(ch, ctypes.byref(p_sub))
+                        if p_sub.value and p_sub.value == target_pid.value:
+                            has_child = True
+                            return False
+                    return True
+                SUBENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+                user32.EnumChildWindows(top_h, SUBENUMPROC(_enum_sub), 0)
+                if has_child:
+                    frame_match = top_h
+                    return False
+            return True
+        OPENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows(OPENUMPROC(_enum_top), 0)
+        return frame_match
+    except Exception:
+        return None
 
 
 def focus_target_window(hwnd: int) -> None:
@@ -364,11 +452,13 @@ def focus_target_window(hwnd: int) -> None:
             return
         current_foreground = user32.GetForegroundWindow()
         if is_same_window_hierarchy(current_foreground, hwnd):
-            user32.SetFocus(hwnd)
+            # Already in same window hierarchy; do NOT call SetFocus() which clears XAML caret focus
             return
 
-        # Top-level root ancestor is required for SetForegroundWindow
-        root_target = user32.GetAncestor(hwnd, 2) or hwnd
+        # Top-level root ancestor is required for SetForegroundWindow.
+        # For UWP apps, target the host ApplicationFrameWindow so Windows activates the app cleanly.
+        uwp_frame = _find_uwp_frame_window(hwnd)
+        root_target = uwp_frame or user32.GetAncestor(hwnd, 2) or hwnd
 
         # Restore if minimized
         if user32.IsIconic(root_target):
@@ -388,11 +478,14 @@ def focus_target_window(hwnd: int) -> None:
 
         user32.BringWindowToTop(root_target)
         user32.SetForegroundWindow(root_target)
-        if hwnd != root_target:
-            user32.BringWindowToTop(hwnd)
-            user32.SetFocus(hwnd)
-        else:
-            user32.SetFocus(root_target)
+        cname = get_window_class_name(hwnd).lower()
+        is_uwp = "corewindow" in cname or "applicationframewindow" in cname
+        if not is_uwp:
+            if hwnd != root_target:
+                user32.BringWindowToTop(hwnd)
+                user32.SetFocus(hwnd)
+            else:
+                user32.SetFocus(root_target)
 
         if target_thread != curr_thread:
             user32.AttachThreadInput(curr_thread, target_thread, False)
@@ -794,14 +887,25 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
                 time.sleep(0.05)
                 _send_win32_enter()
 
-            # Restore previous clipboard content asynchronously so the caller does not block
+            # Restore previous clipboard content asynchronously so the caller does not block.
+            # WhatsApp and UWP apps read clipboard asynchronously over WinRT/COM, so extend delay to >=400ms.
             global _clipboard_restore_token
             with _clipboard_token_lock:
                 _clipboard_restore_token += 1
                 token = _clipboard_restore_token
 
-            def _restore_clipboard_async(orig_clip=original_clipboard, expected_token=token):
-                delay = getattr(config, "clipboard_restore_delay_ms", 180) / 1000.0
+            restore_delay_ms = getattr(config, "clipboard_restore_delay_ms", 180)
+            is_uwp_or_whatsapp = (
+                "whatsapp" in active_title.lower()
+                or "whatsapp" in active_class.lower()
+                or "corewindow" in active_class.lower()
+                or "applicationframewindow" in active_class.lower()
+            )
+            if is_uwp_or_whatsapp:
+                restore_delay_ms = max(400, restore_delay_ms)
+
+            def _restore_clipboard_async(orig_clip=original_clipboard, expected_token=token, delay_val_ms=restore_delay_ms):
+                delay = delay_val_ms / 1000.0
                 time.sleep(max(0.01, delay))
                 with _clipboard_token_lock:
                     if _clipboard_restore_token != expected_token:

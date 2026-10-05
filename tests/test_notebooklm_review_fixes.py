@@ -14,7 +14,8 @@ def test_video_flow_js_has_no_hardcoded_fake_email():
     assert js_path.is_file()
     content = js_path.read_text(encoding="utf-8")
     assert "naeem.kayat2004@gmail.com" not in content
-    assert 'status: "unauthenticated", email: null' in content
+    assert "authenticated: false" in content
+    assert "online_verified: null" in content
 
 
 def test_video_flow_js_is_auth_error_handles_cookie_errors():
@@ -60,7 +61,7 @@ def test_mcp_client_is_available_with_master_token(tmp_path):
         assert client.is_available() is True
 
 
-def test_self_heal_fallback_on_master_token_refresh_error(tmp_path):
+def test_self_heal_uses_single_cli_refresh_for_master_token_profiles(tmp_path):
     fake_cli = tmp_path / "notebooklm.exe"
     fake_cli.touch()
 
@@ -68,11 +69,10 @@ def test_self_heal_fallback_on_master_token_refresh_error(tmp_path):
 
     def fake_run_login_once(cmd, log_path, timeout):
         calls.append(list(cmd))
-        if "--master-token-refresh" in cmd:
-            return 1, "Master token expired or invalid"
         return 0, None
 
     with patch("voice_flow.video_flow_engine.notebooklm.login_flow.resolve_notebooklm_cli", return_value=fake_cli), \
+         patch("voice_flow.video_flow_engine.notebooklm.config.is_profile_disconnected", return_value=False), \
          patch("voice_flow.video_flow_engine.notebooklm.login_flow._master_token_json_path") as mock_mt, \
          patch("voice_flow.video_flow_engine.notebooklm.login_flow._run_login_once", side_effect=fake_run_login_once), \
          patch("voice_flow.video_flow_engine.notebooklm.login_flow._login_log_path", return_value=tmp_path / "login.log"):
@@ -80,9 +80,9 @@ def test_self_heal_fallback_on_master_token_refresh_error(tmp_path):
 
         res = login_flow.self_heal(profile="test-profile")
         assert res["ok"] is True
-        assert len(calls) == 2
-        assert "--master-token-refresh" in calls[0]
-        assert "auth" in calls[1] and "refresh" in calls[1]
+        assert calls == [[
+            str(fake_cli), "--profile", "test-profile", "auth", "refresh", "--verify"
+        ]]
 
 
 def test_api_server_status_verify_flips_auth_false_on_verification_error():

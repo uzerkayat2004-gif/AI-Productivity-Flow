@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -400,13 +401,44 @@ def has_valid_storage_state(profile: str | None = None) -> bool:
     return False
 
 
+def _private_runtime_script_candidates(command: str) -> list[Path]:
+    """Return private, application-owned console-script candidates.
+
+    This deliberately excludes user home/experiment locations.  A packaged app
+    must use its bundled Python runtime first; development uses the active
+    interpreter's environment. Explicit settings and environment variables are
+    handled by the public resolvers before this helper is consulted.
+    """
+    suffixes = (".exe", "") if os.name == "nt" else ("", ".exe")
+    roots: list[Path] = []
+    try:
+        from voice_flow.runtime_env import runtime_root
+        runtime = runtime_root()
+        if runtime is not None:
+            roots.append(runtime / "python" / "Scripts")
+    except Exception:
+        pass
+
+    active = Path(sys.executable).resolve().parent
+    roots.extend((active / "Scripts", active))
+    candidates: list[Path] = []
+    for root in roots:
+        for suffix in suffixes:
+            candidate = root / f"{command}{suffix}"
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
 def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | None:
     r"""Resolve the NotebookLM executable path in strict precedence order.
     
     1. Explicit path argument
     2. Application setting (video_flow_notebooklm_cli)
     3. Environment variable (NOTEBOOKLM_CLI)
-    4. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm.exe)
+    4. Installed app private runtime
+    5. Active Python environment
+    6. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm.exe)
     """
     if explicit_path:
         path = Path(explicit_path).expanduser().resolve()
@@ -430,6 +462,10 @@ def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | No
         if path.is_file():
             return path
 
+    for path in _private_runtime_script_candidates("notebooklm"):
+        if path.is_file():
+            return path
+
     if ISOLATED_CLI_PATH.is_file():
         return ISOLATED_CLI_PATH
 
@@ -437,7 +473,7 @@ def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | No
 
 
 def resolve_notebooklm_profile(explicit_profile: str | None = None) -> str:
-    """Resolve the NotebookLM profile name with credential-aware fallback.
+    """Resolve one deterministic NotebookLM profile name.
     
     Precedence:
     1. Explicit profile argument
@@ -445,9 +481,10 @@ def resolve_notebooklm_profile(explicit_profile: str | None = None) -> str:
     3. Environment variable (NOTEBOOKLM_PROFILE)
     4. Default 'video-flow-experiment'
     
-    Fallback behavior:
-    If the candidate profile has no valid storage_state.json, check if
-    'video-flow-experiment' or 'default' has valid credentials and alias/fallback seamlessly.
+    The resolver deliberately does not select a different profile merely because
+    it finds credentials there.  Status checks, keepalive, and MCP commands must
+    all address the profile the caller selected; silently falling back can run an
+    operation against a different Google account.
     """
     candidate: str | None = None
 
@@ -471,20 +508,6 @@ def resolve_notebooklm_profile(explicit_profile: str | None = None) -> str:
     if not candidate:
         candidate = DEFAULT_PROFILE
 
-    # If the candidate has valid credentials, use it directly
-    if has_valid_storage_state(candidate):
-        return candidate
-
-    # Seamless alias/fallback check:
-    # 1. Try canonical DEFAULT_PROFILE ("video-flow-experiment") if different from candidate
-    if candidate != DEFAULT_PROFILE and has_valid_storage_state(DEFAULT_PROFILE):
-        return DEFAULT_PROFILE
-
-    # 2. Try FALLBACK_PROFILE ("default") if different from candidate and not DEFAULT_PROFILE
-    if candidate != FALLBACK_PROFILE and candidate != DEFAULT_PROFILE and has_valid_storage_state(FALLBACK_PROFILE):
-        return FALLBACK_PROFILE
-
-    # If neither fallback has credentials, return the candidate
     return candidate
 
 
@@ -494,9 +517,11 @@ def resolve_notebooklm_mcp(explicit_path: Path | str | None = None) -> Path | No
     1. Explicit path argument
     2. Application setting (video_flow_notebooklm_mcp)
     3. Environment variable (NOTEBOOKLM_MCP)
-    4. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm-mcp.exe)
-    5. Sibling of resolved CLI path
-    6. System PATH lookup (shutil.which)
+    4. Installed app private runtime
+    5. Active Python environment
+    6. Isolated experiment path (%USERPROFILE%\notebooklm-experiment\.venv\Scripts\notebooklm-mcp.exe)
+    7. Sibling of resolved CLI path
+    8. System PATH lookup (shutil.which)
     """
     if explicit_path:
         path = Path(explicit_path).expanduser().resolve()
@@ -517,6 +542,10 @@ def resolve_notebooklm_mcp(explicit_path: Path | str | None = None) -> Path | No
     env_path = os.environ.get("NOTEBOOKLM_MCP")
     if env_path:
         path = Path(env_path).expanduser().resolve()
+        if path.is_file():
+            return path
+
+    for path in _private_runtime_script_candidates("notebooklm-mcp"):
         if path.is_file():
             return path
 
@@ -614,4 +643,3 @@ def is_session_near_expiry(profile: str | None = None, *, threshold_seconds: flo
         return False
     except Exception:
         return True
-

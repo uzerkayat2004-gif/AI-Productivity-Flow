@@ -77,7 +77,7 @@ def test_hover_enter_draws_interactive_and_leave_returns_to_rest() -> None:
 
     canvas.calls.clear()
     bar._on_motion(SimpleNamespace(x=5, y=5))  # mouse enters
-    assert "#ffffff" in canvas.fills
+    assert bar.WHITE.lower() in canvas.fills
     assert bar.BG_REST.lower() not in canvas.fills
     assert bar._is_mouse_over is True
     assert (bar.width, bar.height) == (bar.ready_actions_width, bar.hover_height)
@@ -85,7 +85,7 @@ def test_hover_enter_draws_interactive_and_leave_returns_to_rest() -> None:
     canvas.calls.clear()
     bar._on_leave(SimpleNamespace(x=0, y=0))  # mouse leaves, no feature active
     assert bar.BG_REST.lower() in canvas.fills
-    assert "#ffffff" not in canvas.fills
+    assert bar.WHITE.lower() not in canvas.fills
     assert (bar.width, bar.height) == (48, 10)
 
 
@@ -177,12 +177,11 @@ def test_dock_position_used_when_no_user_pos() -> None:
     assert "+700+" not in geo  # docked bottom-center, not a stale user pos
 
 
-def test_resume_resets_user_position_to_default() -> None:
+def test_resume_keeps_user_position() -> None:
     bar = _bar_with_window()
     bar._user_pos = (100, 100)
     bar.set_dock("bottom")
     assert bar._user_pos is None  # explicit dock change resets
     bar._user_pos = (100, 100)
-    bar._handle_resume()  # system woke from sleep
-    assert bar._user_pos is None
-    assert "+100+100" not in bar.win.geometry_calls[-1]
+    bar._handle_resume()  # system woke from sleep: position is kept
+    assert bar._user_pos == (100, 100)

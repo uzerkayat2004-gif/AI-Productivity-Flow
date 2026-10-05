@@ -302,8 +302,8 @@ class AudioFlowSettingsDialog:
         self.win = tk.Toplevel(master) if master is not None else tk.Tk()
         self.win.withdraw()
         self.win.title("Audio Flow Settings & Voice Catalog")
-        self.win.geometry("420x520")
-        self.win.minsize(380, 460)
+        self.win.geometry("420x600")
+        self.win.minsize(380, 520)
         self.win.config(bg=BG_LIGHT)
         self._rendered_bg = BG_LIGHT
         self.win.attributes("-topmost", True)
@@ -346,7 +346,7 @@ class AudioFlowSettingsDialog:
                 self.win,
                 parent=anchor,
                 default_w=420,
-                default_h=520,
+                default_h=600,
                 gap=10,
             )
             self.win.geometry(f"{w}x{h}+{x}+{y}")
@@ -362,11 +362,21 @@ class AudioFlowSettingsDialog:
     def _get_active_voice(self) -> str:
         return storage.get_setting("exec_audio_policy_model", "edge/en-US-AvaNeural") or "edge/en-US-AvaNeural"
 
+    def _get_summary_style(self) -> str:
+        style = str(storage.get_setting("audio_flow_summary_style", "single") or "single").strip().lower()
+        return style if style in ("single", "podcast") else "single"
+
     def _set_speed(self, speed: float) -> None:
         storage.save_setting("audio_flow_speed", speed)
         if self.on_speed_change:
             self.on_speed_change(speed)
         self._refresh_speed_pills()
+
+    def _set_summary_style(self, style: str) -> None:
+        if style not in ("single", "podcast"):
+            return
+        storage.save_setting("audio_flow_summary_style", style)
+        self._refresh_summary_style_buttons()
 
     def _select_voice(self, model_id: str) -> None:
         storage.save_setting("exec_audio_policy_model", model_id)
@@ -394,6 +404,7 @@ class AudioFlowSettingsDialog:
             try:
                 storage.save_setting("audio_flow_speed", self._get_current_speed())
                 storage.save_setting("exec_audio_policy_model", self._get_active_voice())
+                storage.save_setting("audio_flow_summary_style", self._get_summary_style())
                 if self.on_speed_change:
                     self.on_speed_change(self._get_current_speed())
                 if self.on_voice_change:
@@ -459,7 +470,33 @@ class AudioFlowSettingsDialog:
         self.speed_buttons: list[tk.Button] = []
         self._refresh_speed_pills()
 
-        # 2. Voice Model Catalog Section
+        # 2. Summary format, shared with the Audio Flow dashboard.
+        summary_header = tk.Label(
+            body,
+            text="🎧 SUMMARY FORMAT",
+            bg=BG_LIGHT,
+            fg=ORANGE_DEEP,
+            font=("Segoe UI", 8, "bold"),
+            anchor="w",
+        )
+        summary_header.pack(fill="x", pady=(0, 6))
+        self.summary_style_frame = tk.Frame(body, bg=BG_LIGHT)
+        self.summary_style_frame.pack(fill="x", pady=(0, 4))
+        self.summary_style_buttons: dict[str, tk.Button] = {}
+        self._refresh_summary_style_buttons()
+        summary_help = tk.Label(
+            body,
+            text="Both formats consider source size and depth. Single narrator is NotebookLM Brief: one speaker, under ~2 min. Podcast is NotebookLM Deep Dive: two hosts; duration is approximate.",
+            bg=BG_LIGHT,
+            fg=GRAY,
+            font=("Segoe UI", 7),
+            anchor="w",
+            justify="left",
+            wraplength=370,
+        )
+        summary_help.pack(fill="x", pady=(0, 14))
+
+        # 3. Voice Model Catalog Section
         cat_header = tk.Frame(body, bg=BG_LIGHT)
         cat_header.pack(fill="x", pady=(0, 6))
 
@@ -580,6 +617,36 @@ class AudioFlowSettingsDialog:
 
             btn.pack(side="left", expand=True, fill="x", padx=2)
             self.speed_buttons.append(btn)
+
+    def _refresh_summary_style_buttons(self) -> None:
+        for widget in self.summary_style_frame.winfo_children():
+            widget.destroy()
+        self.summary_style_buttons.clear()
+        active_style = self._get_summary_style()
+        for style, label in (("single", "Single narrator"), ("podcast", "Podcast conversation")):
+            is_active = style == active_style
+            button = tk.Button(
+                self.summary_style_frame,
+                text=label,
+                bg=ORANGE if is_active else WHITE,
+                fg=BTN_TEXT if is_active else INK,
+                activebackground=ORANGE_DEEP,
+                activeforeground=BTN_TEXT,
+                font=("Segoe UI", 8, "bold"),
+                bd=0,
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground=ORANGE_DEEP if is_active else BORDER,
+                cursor="hand2",
+                command=lambda value=style: self._set_summary_style(value),
+                padx=8,
+                pady=6,
+            )
+            if not is_active:
+                button.bind("<Enter>", lambda e, b=button: b.config(bg=ORANGE_FAINT, fg=ORANGE_DEEP, highlightbackground=ORANGE))
+                button.bind("<Leave>", lambda e, b=button: b.config(bg=WHITE, fg=INK, highlightbackground=BORDER))
+            button.pack(side="left", expand=True, fill="x", padx=2)
+            self.summary_style_buttons[style] = button
 
     def _render_models_list(self) -> None:
         for w in self._list_inner.winfo_children():

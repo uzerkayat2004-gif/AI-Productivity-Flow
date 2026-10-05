@@ -103,3 +103,20 @@ test('dictionary refresh cannot replace a newer list with a late response', asyn
   await oldLoad;
   assert.deepEqual(rendered, ['NewSpelling']);
 });
+
+test('NotebookLM summary badge distinguishes verified, saved, and expired sessions', () => {
+  const context = vm.createContext({});
+  vm.runInContext(section('function _afMapNlmState', 'function updateAudioSummaryConnectionUI'), context);
+
+  const expired = context._afMapNlmState({ authenticated: true, online_verified: false });
+  assert.equal(expired.key, 'attention');
+  assert.equal(expired.label, 'Sign-in required');
+
+  const saved = context._afMapNlmState({ authenticated: true, email: 'reader@example.com' });
+  assert.equal(saved.key, 'saved');
+  assert.equal(saved.label, 'Account saved · reader@example.com · online sign-in unverified');
+
+  const verified = context._afMapNlmState({ authenticated: true, online_verified: true });
+  assert.equal(verified.key, 'connected');
+  assert.equal(verified.label, 'Connected');
+});

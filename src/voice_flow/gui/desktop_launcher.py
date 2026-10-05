@@ -43,14 +43,10 @@ if sys.platform != "win32":
                 pass
 
 webview = None  # type: ignore[assignment]
-pystray = None  # type: ignore[assignment]
-Image = None  # type: ignore[assignment]
 
 if not os.environ.get("CI"):
     try:
         import webview
-        import pystray
-        from PIL import Image
     except Exception:  # missing desktop dependency falls back to browser launcher
         import traceback
         try:
@@ -152,19 +148,21 @@ def _is_pid_alive(pid: int) -> bool:
 
 def _poke_overlay_show() -> None:
     """Signal the background main engine to unhide, reset dock position, and bring the floating bar to front."""
-    try:
-        import urllib.request
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{PORT}/api/overlay/show",
-            data=b"{}",
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=1.0):
-            pass
-        _launcher_log("Sent /api/overlay/show to restore floating bar")
-    except Exception as e:
-        _launcher_log(f"/api/overlay/show ping error: {e}")
+    for endpoint in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh", "/api/overlay/show"):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{PORT}{endpoint}",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=1.0) as res:
+                if res.status == 200:
+                    _launcher_log(f"Sent {endpoint} to restore floating bar & refresh UI")
+                    return
+        except Exception as e:
+            _launcher_log(f"{endpoint} ping error: {e}")
 
 
 def _poke_keepalive_refresh() -> None:
@@ -188,17 +186,8 @@ def _poke_keepalive_refresh() -> None:
 def _is_backend_running() -> bool:
     """Check if Voice Flow watchdog or main engine is already running."""
     try:
-        import psutil
-        current_pid = os.getpid()
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                if proc.info["pid"] == current_pid:
-                    continue
-                cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-                if "voice_flow.watchdog" in cmdline or "voice_flow.main" in cmdline:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
+        if is_api_server_ready(timeout=0.1):
+            return True
     except Exception:
         pass
 
@@ -211,6 +200,23 @@ def _is_backend_running() -> bool:
                 pid = int(pid_str)
                 if pid != os.getpid() and _is_pid_alive(pid):
                     return True
+    except Exception:
+        pass
+
+    try:
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                if proc.info["pid"] == current_pid:
+                    continue
+                pname = (proc.info.get("name") or "").lower()
+                if "python" in pname:
+                    cmdline = " ".join(proc.cmdline() or []).lower()
+                    if "voice_flow.watchdog" in cmdline or "voice_flow.main" in cmdline:
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     except Exception:
         pass
 
@@ -414,16 +420,18 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
     except Exception as exc:
         _launcher_log(f"Auto-startup initialization warning: {exc}")
 
-    # Ensure background engine / floating overlay bar is running
-    backend_spawned = bool(ensure_backend_running())
+    # Fast-path: Check if background API server is ALREADY active and ready
+    backend_spawned = False
+    if not is_api_server_ready(timeout=0.15):
+        # Background engine / watchdog not responding yet; ensure it is started
+        backend_spawned = bool(ensure_backend_running())
 
-    # Poll up to 45 seconds until API server responds cleanly from background engine
-    # (faster-whisper and torch cold imports on Windows boot take ~10-25 seconds)
-    poll_iterations = 450 if (backend_spawned or _is_backend_running()) else 150
-    for _ in range(poll_iterations):
-        if is_api_server_ready(timeout=0.2):
-            break
-        time.sleep(0.1)
+        # Poll until API server responds cleanly from background engine
+        poll_iterations = 200 if (backend_spawned or _is_backend_running()) else 40
+        for _ in range(poll_iterations):
+            if is_api_server_ready(timeout=0.1):
+                break
+            time.sleep(0.05)
 
     # If backend engine is ready, send signal to reset dock and ensure floating bar is 100% visible
     if is_api_server_ready(timeout=0.5):
@@ -433,12 +441,13 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         # Never bind the API-only fallback while a cold watchdog/engine is
         # alive; doing so steals its port and leaves dictation unavailable.
         if not is_api_server_ready() and not (backend_spawned or _is_backend_running()):
-            server_thread = threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer")
-            server_thread.start()
-            for _ in range(20):
-                if is_api_server_ready():
-                    break
-                time.sleep(0.1)
+            if start_api_server is not None:
+                server_thread = threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer")
+                server_thread.start()
+                for _ in range(20):
+                    if is_api_server_ready():
+                        break
+                    time.sleep(0.05)
 
     if not is_api_server_ready(timeout=0.5):
         # A Voice Flow engine the probe could not classify is still better than
@@ -447,9 +456,19 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             _launcher_log("backend probe failed but a Voice Flow engine is running - browser fallback")
             _fallback_to_browser(f"http://127.0.0.1:{PORT}/index.html", on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
             return
-        raise RuntimeError(
-            f"Voice Flow could not start its current backend. Port {PORT} is still owned by an incompatible process."
-        )
+        if start_api_server is not None:
+            try:
+                server_thread = threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer")
+                server_thread.start()
+                for _ in range(20):
+                    if is_api_server_ready():
+                        break
+                    time.sleep(0.05)
+            except Exception:
+                pass
+        if not is_api_server_ready(timeout=0.2):
+            _fallback_to_browser(f"http://127.0.0.1:{PORT}/index.html", on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+            return
 
     try:
         from voice_flow.storage import storage
@@ -529,6 +548,15 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
                     on_quit_callback()
                 except Exception:
                     pass
+            _launcher_log("webview window closed by user - exiting launcher process")
+            try:
+                global _LAUNCHER_MUTEX_HANDLE
+                if _LAUNCHER_MUTEX_HANDLE:
+                    ctypes.windll.kernel32.CloseHandle(_LAUNCHER_MUTEX_HANDLE)
+                    _LAUNCHER_MUTEX_HANDLE = None
+            except Exception:
+                pass
+            os._exit(0)
 
         try:
             window.events.closed += on_closed
@@ -563,22 +591,7 @@ def _focus_existing_window() -> bool:
         if hasattr(user32, "IsWindow") and not user32.IsWindow(hwnd):
             return False
 
-        # Reject zombie windows: a dead webview loop leaves a ghost window
-        # parked off-screen by Windows (left/top == -32000) or collapsed to a
-        # sliver. Focusing such a hwnd shows nothing, so launch a fresh one.
-        try:
-            import ctypes.wintypes as _wt
-            rect = _wt.RECT()
-            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                width = rect.right - rect.left
-                height = rect.bottom - rect.top
-                if rect.left <= -30000 or rect.top <= -30000 or width < 250 or height < 150:
-                    _launcher_log(f"ignoring ghost window hwnd={hwnd} rect=({rect.left},{rect.top},{width}x{height})")
-                    return False
-        except Exception:
-            pass
-
-        # If minimized, restore it
+        # If minimized, restore it first
         if hasattr(user32, "IsIconic") and user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, 9)  # 9 = SW_RESTORE
 
@@ -589,16 +602,49 @@ def _focus_existing_window() -> bool:
         # Verify the window is truly open, visible and on-screen
         if hasattr(user32, "IsWindowVisible") and not user32.IsWindowVisible(hwnd):
             return False
+
+        # Reject dead zombie windows: only if NOT iconic and collapsed offscreen
         try:
             import ctypes.wintypes as _wt
             rect = _wt.RECT()
-            if user32.GetWindowRect(hwnd, ctypes.byref(rect)) and rect.left <= -30000:
-                return False
+            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                width = rect.right - rect.left
+                height = rect.bottom - rect.top
+                is_iconic = hasattr(user32, "IsIconic") and user32.IsIconic(hwnd)
+                if not is_iconic and (rect.left <= -20000 or rect.top <= -20000 or width < 100 or height < 50):
+                    _launcher_log(f"ignoring ghost window hwnd={hwnd} rect=({rect.left},{rect.top},{width}x{height})")
+                    return False
         except Exception:
             pass
 
-        if hasattr(user32, "SetForegroundWindow"):
-            user32.SetForegroundWindow(hwnd)
+        # Bring window to foreground with thread attachment
+        try:
+            user32.AllowSetForegroundWindow(-1)
+        except Exception:
+            pass
+        try:
+            kernel32 = ctypes.windll.kernel32
+            fg_hwnd = user32.GetForegroundWindow()
+            fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None)
+            cur_tid = kernel32.GetCurrentThreadId()
+            target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+            if fg_tid and fg_tid != cur_tid:
+                user32.AttachThreadInput(cur_tid, fg_tid, True)
+                if target_tid and target_tid != cur_tid:
+                    user32.AttachThreadInput(cur_tid, target_tid, True)
+                user32.BringWindowToTop(hwnd)
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                if target_tid and target_tid != cur_tid:
+                    user32.AttachThreadInput(cur_tid, target_tid, False)
+                user32.AttachThreadInput(cur_tid, fg_tid, False)
+            else:
+                user32.BringWindowToTop(hwnd)
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            if hasattr(user32, "SetForegroundWindow"):
+                user32.SetForegroundWindow(hwnd)
 
         # Ensure window has the correct icon applied
         ico_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "icon.ico"))
@@ -617,13 +663,8 @@ def _focus_existing_window() -> bool:
 _LAUNCHER_MUTEX_NAME = "Local\\VoiceFlowDesktopLauncherMutex_v1"
 _LAUNCHER_MUTEX_HANDLE = None
 
-# How long a second launcher waits for the first launcher's window before
-# giving up and starting its own suite. Must comfortably exceed the 45s
-# backend/API poll in launch_desktop_gui: at Windows boot the engine spawns a
-# second launcher while the first one is still waiting for the cold API to
-# create its window, so a short wait produced two windows.
-_DUPLICATE_LAUNCH_WAIT_SECONDS = 60.0
-_DUPLICATE_LAUNCH_POLL_INTERVAL = 0.25
+_DUPLICATE_LAUNCH_WAIT_SECONDS = 5.0
+_DUPLICATE_LAUNCH_POLL_INTERVAL = 0.1
 
 
 def _get_kernel32():

@@ -1,6 +1,9 @@
 import json
+import os
 import tempfile
+import time
 import unittest
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +12,15 @@ from voice_flow.video_flow_engine.notebooklm import (
     NotebookLMVideoProvider,
     VideoRequest,
 )
+
+
+@pytest.fixture(autouse=True)
+def simulated_provider_auth_refresh(monkeypatch):
+    """Legacy expiry tests explicitly simulate failed renewal, never real CLI."""
+    monkeypatch.setattr(
+        "voice_flow.video_flow_engine.notebooklm.login_flow.self_heal",
+        lambda **kwargs: {"ok": False, "classification": "sign_in_required"},
+    )
 
 
 class FakeRunner:
@@ -80,6 +92,36 @@ class NotebookLMProviderTests(unittest.TestCase):
             self.assertEqual(result.status, "ok")
             self.assertTrue(result.authenticated)
             self.assertEqual(fake.commands, [])  # Zero CLI subprocesses spawned
+
+    def test_fast_valid_session_skips_proactive_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            provider = provider_with(FakeRunner([]), root)
+            stale_time = time.time() - 90_000
+            os.utime(root / "storage_state.json", (stale_time, stale_time))
+            provider.sync_storage_state = lambda *args, **kwargs: self.fail("valid fast auth must not refresh")
+
+            result = provider.check_auth(fast_valid_session=True)
+
+            self.assertTrue(result.authenticated)
+
+    def test_fast_auth_keeps_expired_session_on_recovery_path(self):
+        class SyncReached(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            provider = provider_with(FakeRunner([]), root)
+            storage_file = root / "storage_state.json"
+            state = json.loads(storage_file.read_text(encoding="utf-8"))
+            for cookie in state["cookies"]:
+                if cookie["name"] == "SID":
+                    cookie["expires"] = time.time() - 1
+            storage_file.write_text(json.dumps(state), encoding="utf-8")
+            provider.sync_storage_state = lambda *args, **kwargs: (_ for _ in ()).throw(SyncReached())
+
+            with self.assertRaises(SyncReached):
+                provider.check_auth(fast_valid_session=True)
 
     def test_auth_online_uses_profile_and_json(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -314,9 +356,10 @@ class NotebookLMProviderTests(unittest.TestCase):
             old_env = os.environ.get("NOTEBOOKLM_PROFILES_DIR")
             try:
                 os.environ["NOTEBOOKLM_PROFILES_DIR"] = str(profiles_dir)
-                # Requesting "custom-empty" should seamlessly fallback to "video-flow-experiment"
+                # A selected empty profile must stay selected; falling back would
+                # silently run against the experiment account.
                 res = resolve_notebooklm_profile("custom-empty")
-                self.assertEqual(res, "video-flow-experiment")
+                self.assertEqual(res, "custom-empty")
             finally:
                 if old_env is not None:
                     os.environ["NOTEBOOKLM_PROFILES_DIR"] = old_env
@@ -967,6 +1010,27 @@ class NotebookLMProviderTests(unittest.TestCase):
             profile_ok = {"target_duration_seconds": 120.0}
             self.assertFalse(provider._verify_duration(profile_ok, 90.0, job_id="job-ok"))
             self.assertNotIn("duration_undershoot", profile_ok)
+
+
+def test_transient_auth_renewal_does_not_switch_generation_engine(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock, patch
+    fake = FakeRunner([{
+        "returncode": 1, "stderr": "Authentication expired. Run notebooklm login.", "payload": {},
+    }])
+    provider = provider_with(fake, tmp_path)
+    monkeypatch.setattr(
+        "voice_flow.video_flow_engine.notebooklm.login_flow.self_heal",
+        lambda **kwargs: {"ok": False, "classification": "transient_error"},
+    )
+    local_engine = MagicMock()
+    with patch("voice_flow.video_flow_engine.engine.VideoFlowEngine", return_value=local_engine):
+        with pytest.raises(NotebookLMVideoError) as caught:
+            provider.generate(VideoRequest(
+                title="Temporary auth outage", source_text="An example source.", prompt="Explain",
+                output_path=tmp_path / "result.mp4", allow_local_fallback=True,
+            ))
+    assert caught.value.code == "auth_unavailable"
+    local_engine.run.assert_not_called()
 
 
 if __name__ == "__main__":

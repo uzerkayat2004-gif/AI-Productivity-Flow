@@ -145,13 +145,28 @@ class NotebookLMMcpClient:
         except Exception:
             durable = False
 
-        status_str = "ok" if ((has_creds or durable) and (mcp_avail or cli_avail)) else "unauthenticated"
+        online_verified = None
+        verification_status = "unauthenticated"
+        if has_creds and cli_avail:
+            try:
+                from .login_flow import verify_online
+                verification = verify_online(profile=self.profile)
+                verification_status = str(verification.get("status") or verification_status)
+                if verification.get("authenticated"):
+                    online_verified = True
+                elif verification_status in ("unauthenticated", "revoked", "expired"):
+                    online_verified = False
+            except Exception:
+                verification_status = "network_error"
+        status_str = "ok" if (has_creds and online_verified is True and (mcp_avail or cli_avail)) else verification_status
         return {
             "status": status_str,
             "profile": self.profile,
             "mcp_available": mcp_avail,
             "cli_available": cli_avail,
-            "authenticated": bool(has_creds or durable),
+            "authenticated": bool(has_creds and online_verified is True),
+            "account_saved": has_creds,
+            "online_verified": online_verified,
             "durable": durable,
             "master_token_present": durable,
             "mcp_path": str(self.mcp_path) if self.mcp_path else None,

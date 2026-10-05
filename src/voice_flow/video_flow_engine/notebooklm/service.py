@@ -58,19 +58,22 @@ class NotebookLMService:
         """Comprehensive status report of NotebookLM integration health."""
         cli_path = resolve_notebooklm_cli()
         mcp_path = resolve_notebooklm_mcp()
-        has_auth = has_valid_storage_state(self.profile)
+        account_saved = has_valid_storage_state(self.profile)
         durable = master_token_present(self.profile)
         keepalive_stat = get_keepalive_status()
 
         online_verified = None
-        if verify and cli_path:
+        verification_status = "unauthenticated"
+        if account_saved and cli_path:
             try:
                 verification = verify_online(profile=self.profile, force=force)
-                online_verified = bool(verification.get("authenticated"))
-                if not online_verified and not durable:
-                    has_auth = False
+                verification_status = str(verification.get("status") or verification_status)
+                if verification.get("authenticated"):
+                    online_verified = True
+                elif verification_status in ("unauthenticated", "revoked", "expired"):
+                    online_verified = False
             except Exception:
-                pass
+                verification_status = "network_error"
 
         try:
             from voice_flow.storage import StorageEngine
@@ -81,15 +84,17 @@ class NotebookLMService:
 
         return {
             "available": bool(cli_path or mcp_path),
-            "authenticated": has_auth,
+            "authenticated": bool(account_saved and online_verified is True),
+            "account_saved": account_saved,
             "online_verified": online_verified,
+            "status": "ok" if (account_saved and online_verified is True) else verification_status,
             "durable": durable,
             "master_token_present": durable,
             "profile": self.profile,
             "email": email,
             "cli_path": str(cli_path) if cli_path else None,
             "mcp_path": str(mcp_path) if mcp_path else None,
-            "keepalive": keepalive_stat,
+            "keepalive": get_keepalive_status(self.profile),
             "login_state": get_login_state(),
         }
 
@@ -99,7 +104,7 @@ class NotebookLMService:
         switch_account: bool = False,
         direct: bool = True,
         port: int | None = None,
-        mode: str = "playwright",
+        mode: str = "cli",
     ) -> dict[str, Any]:
         """Initiate NotebookLM authentication."""
         return start_login(

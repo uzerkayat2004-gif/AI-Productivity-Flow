@@ -35,7 +35,7 @@ from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandle
 import sounddevice as sd
 
 from voice_flow.config import config
-from voice_flow.dictionary import dictionary_engine
+from voice_flow.dictionary import dictionary_engine, generated_spaced_aliases
 from voice_flow.provider_registry import get_all_provider_specs, get_provider_spec
 from voice_flow.provider_validation import validate_provider_key
 from voice_flow.storage import storage
@@ -381,6 +381,7 @@ OAUTH_CALLBACK_PAGE = """<!doctype html>
 </html>"""
 
 runtime_controller = None
+_app_refresh_generation = 0
 PERMANENT_DELETE_CONFIRMATION = "DELETE"
 
 
@@ -507,7 +508,12 @@ def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str 
                 # If online verification recently confirmed that this profile's session is expired / invalid,
                 # and storage_state.json hasn't been modified since that check, treat it as unauthenticated/expired!
                 is_expired_online = False
-                if recent_cached and recent_cached.get("authenticated") is False:
+                if (
+                    recent_cached
+                    and recent_cached.get("authenticated") is False
+                    and str(recent_cached.get("status") or "").lower()
+                    in ("unauthenticated", "revoked", "expired")
+                ):
                     checked_at = float(recent_cached.get("checked_at") or time.time())
                     try:
                         mtime = storage_path.stat().st_mtime
@@ -570,17 +576,13 @@ def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str 
                         "master_token_present": has_master,
                         "psidts_expired": psidts_exp,
                     }
-                    try:
-                        storage.save_setting("video_flow_notebooklm_authenticated", True)
-                        storage.save_setting("video_flow_notebooklm_auth_error", "")
-                        if email:
-                            storage.save_setting("video_flow_notebooklm_email", email)
-                    except Exception:
-                        pass
                     return True, email, str(storage_path), details
 
     default_path = last_existing_path or str(home / ".notebooklm" / "profiles" / profile / "storage_state.json")
-    return False, None, default_path, {"disconnected": True}
+    # Missing/invalid storage is recoverable and is distinct from an explicit
+    # Disconnect action. Keep the saved identity visible so the UI can offer a
+    # reconnect action instead of presenting a first-time setup state.
+    return False, (str(saved_email).strip() if saved_email else None), default_path, {"storage_missing": True}
 
 
 def strip_redundant_model_prefix(provider: str, model_id: str) -> str:
@@ -1059,16 +1061,33 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "state": state,
                 "dock": dock,
             })
-        elif path in ("/api/overlay/show", "/api/overlay/reset-position"):
+        elif path in ("/api/overlay/show", "/api/overlay/reset-position", "/api/overlay/reset-and-refresh", "/api/overlay/refresh", "/api/app/restore-and-refresh"):
+            global _app_refresh_generation
+            _app_refresh_generation += 1
             overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
+            if runtime_controller and hasattr(runtime_controller, "reset_state_and_refresh"):
+                runtime_controller.reset_state_and_refresh()
+            elif overlay and hasattr(overlay, "restart_and_refresh"):
+                overlay.restart_and_refresh()
             if overlay:
                 if hasattr(overlay, "show"):
                     overlay.show()
                 elif hasattr(overlay, "show_ready"):
                     overlay.show_ready()
-                if hasattr(overlay, "reset_position"):
+                if path == "/api/overlay/reset-position" and hasattr(overlay, "reset_position"):
                     overlay.reset_position()
-            self.send_json_response({"success": True, "message": "Floating bar shown and position reset"})
+                if hasattr(overlay, "refresh") and path in ("/api/overlay/refresh", "/api/overlay/reset-and-refresh"):
+                    overlay.refresh()
+            self.send_json_response({
+                "success": True,
+                "message": "Floating bar refreshed and reset",
+                "generation": _app_refresh_generation,
+            })
+        elif path == "/api/app/ui-refresh-status":
+            self.send_json_response({
+                "success": True,
+                "generation": _app_refresh_generation,
+            })
         elif path == "/api/settings/autostart/status":
             try:
                 stored = storage.get_setting("autostart_enabled", None)
@@ -1122,10 +1141,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "voice_flow_polish_model": "local/deterministic",
                 "voice_flow_polish_speed_mode": "balanced",
                 "audio_flow_speed": 1.0,
+                "audio_flow_summary_style": "single",
                 "on_screen_ui_theme": "light",
             }
             default_val = defaults.get(key, None)
             val = storage.get_setting(key, default_val)
+            if key == "audio_flow_summary_style" and val not in ("single", "podcast"):
+                val = "single"
             self.send_json_response({"success": True, "key": key, "value": val})
         elif path == "/api/settings/theme":
             theme = str(storage.get_setting("vf_theme", "light") or "light").strip().lower()
@@ -1139,12 +1161,21 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "theme": theme})
         elif path == "/api/history":
             _sync_active_storage()
-            hit, cached = _get_cached_response("/api/history", ("history",))
+            limit_val = None
+            if parsed.query:
+                q_limit = urllib.parse.parse_qs(parsed.query).get("limit", [None])[0]
+                if q_limit and q_limit.lower() != "all":
+                    try:
+                        limit_val = int(q_limit)
+                    except ValueError:
+                        limit_val = None
+            cache_key = f"/api/history?limit={limit_val}" if limit_val else "/api/history"
+            hit, cached = _get_cached_response(cache_key, ("history",) if not limit_val else ())
             if hit:
                 self.send_json_response(cached)
             else:
-                data = storage.get_recent_history()
-                _set_cached_response(("/api/history", "history"), data)
+                data = storage.get_recent_history(limit=limit_val)
+                _set_cached_response((cache_key, "history") if not limit_val else (cache_key,), data)
                 self.send_json_response(data)
         elif path == "/api/history/audio":
             try:
@@ -1189,11 +1220,20 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             _sync_active_storage()
             details = urllib.parse.parse_qs(parsed.query).get("details", [""])[0] in ("1", "true")
             include_auto = urllib.parse.parse_qs(parsed.query).get("include_auto", [""])[0] in ("1", "true")
+            recognition = urllib.parse.parse_qs(parsed.query).get("recognition", [""])[0] in ("1", "true")
             if details:
-                self.send_json_response(storage.get_dictionary_entries(
+                entries = storage.get_dictionary_entries(
                     include_auto=include_auto,
                     include_snippets=True,
-                ))
+                )
+                # Preserve the established details payload unless the
+                # Dictionary UI explicitly requests recognition hints.
+                # Generated aliases are derived from the saved canonical word;
+                # no inferred spelling is persisted in the user's database.
+                if recognition:
+                    for entry in entries:
+                        entry["recognized_as"] = list(generated_spaced_aliases(str(entry.get("word") or "")))
+                self.send_json_response(entries)
             else:
                 # Preserve the established lightweight string-list contract
                 # for integrations while exposing every saved row.  Active
@@ -1307,11 +1347,42 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
         elif path == "/api/video-flow/history":
-            self.send_json_response({"videos": [_shim_video(job) for job in get_video_flow_service().list()]})
+            limit_val = 50
+            if parsed.query:
+                q_limit = urllib.parse.parse_qs(parsed.query).get("limit", [None])[0]
+                if q_limit and q_limit.lower() != "all":
+                    try:
+                        limit_val = min(int(q_limit), 50)
+                    except ValueError:
+                        limit_val = 50
+            v_service = get_video_flow_service()
+            if hasattr(v_service, "store") and hasattr(v_service.store, "prune_excess_jobs"):
+                try:
+                    v_service.store.prune_excess_jobs(max_keep=50)
+                except Exception:
+                    pass
+            try:
+                raw_jobs = v_service.list(limit=limit_val)
+            except TypeError:
+                raw_jobs = v_service.list()
+            videos = [_shim_video(job) for job in raw_jobs]
+            self.send_json_response({"videos": videos[:50]})
         elif path == "/api/audio-flow/history":
             try:
                 from voice_flow.audio_summary_player import resolve_summary_audio, safe_media_filename, get_user_downloads_dir
-                summaries = storage.get_audio_summary_history(limit=50)
+                limit_val = 50
+                if parsed.query:
+                    q_limit = urllib.parse.parse_qs(parsed.query).get("limit", [None])[0]
+                    if q_limit and q_limit.lower() != "all":
+                        try:
+                            limit_val = min(int(q_limit), 50)
+                        except ValueError:
+                            limit_val = 50
+                try:
+                    storage.prune_audio_summary_history(max_keep=50)
+                except Exception:
+                    pass
+                summaries = storage.get_audio_summary_history(limit=limit_val)[:50]
                 for s in summaries:
                     s_title = str(s.get("title") or s.get("text_snippet") or "Audio Summary").strip()
                     title_enc = urllib.parse.quote(s_title)
@@ -1403,6 +1474,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         elif path == "/api/video-flow/notebooklm/status":
             try:
                 from voice_flow.video_flow_engine.notebooklm import (
+                    get_session_refresh_state,
+                    request_session_refresh,
                     resolve_notebooklm_cli,
                     resolve_notebooklm_mcp,
                     resolve_notebooklm_profile,
@@ -1413,166 +1486,81 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 cli_path = resolve_notebooklm_cli(cli_param)
                 mcp_path = resolve_notebooklm_mcp()
                 profile = resolve_notebooklm_profile(profile_param)
-                if not cli_path and not mcp_path:
+                if not cli_path:
                     self.send_json_response({
                         "success": True,
                         "available": False,
                         "authenticated": False,
+                        "account_saved": False,
+                        "online_verified": None,
+                        "verification_unavailable": True,
                         "status": "dependency_missing",
                         "profile": profile,
                         "cli_path": None,
-                        "mcp_path": None,
-                        "mcp_available": False,
-                        "message": "NotebookLM CLI is not installed or configured.",
+                        "mcp_path": str(mcp_path) if mcp_path else None,
+                        "mcp_available": bool(mcp_path),
+                        "message": "NotebookLM CLI is not installed or configured. Install the app runtime to sign in.",
                     })
                 else:
-                    authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
-                    if not authenticated and not details.get("disconnected") and not os.environ.get("PYTEST_CURRENT_TEST"):
-                        if details.get("master_token_present"):
-                            try:
-                                from voice_flow.video_flow_engine.notebooklm import trigger_keepalive_now
-                                trigger_keepalive_now(profile=profile, force=True, background=False)
-                                authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
-                            except Exception:
-                                pass
-                        if not authenticated:
-                            auth_saved = storage.get_setting("video_flow_notebooklm_authenticated")
-                            saved_email = storage.get_setting("video_flow_notebooklm_email")
-                            switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
-                            if switched_from and saved_email and str(saved_email).strip().lower() == str(switched_from).strip().lower():
-                                saved_email = None
-                            if auth_saved and auth_saved not in (False, "false", "False", 0, "0") and saved_email:
-                                try:
-                                    from voice_flow.video_flow_engine.notebooklm import browser_sync
-                                    sync_res = browser_sync.auto_sync_from_browser(
-                                        profile=profile,
-                                        expected_email=saved_email,
-                                    )
-                                    if sync_res.get("success"):
-                                        authenticated, email, storage_path, details = _read_notebooklm_storage_state(profile)
-                                except Exception:
-                                    pass
-                    if authenticated and not details.get("disconnected") and not os.environ.get("PYTEST_CURRENT_TEST"):
-                        try:
-                            from voice_flow.video_flow_engine.notebooklm.config import is_session_near_expiry
-                            if details.get("psidts_expired") or is_session_near_expiry(profile, threshold_seconds=86400.0):
-                                from voice_flow.video_flow_engine.notebooklm import trigger_keepalive_now
-                                trigger_keepalive_now(profile=profile, force=True, background=True)
-                        except Exception:
-                            pass
+                    account_saved, email, storage_path, details = _read_notebooklm_storage_state(profile)
+                    if not account_saved and not details.get("disconnected"):
+                        saved_email = storage.get_setting("video_flow_notebooklm_email")
+                        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
+                        is_switched_account = bool(
+                            saved_email and switched_from
+                            and str(saved_email).strip().casefold() == str(switched_from).strip().casefold()
+                        )
+                        if details.get("expired") or (saved_email and not is_switched_account):
+                            account_saved = True
+                            email = email or str(saved_email).strip()
                     online_verified = None
-                    if details.get("disconnected") or not authenticated:
-                        authenticated = False
-                        if details.get("disconnected"):
-                            email = None
-                        online_verified = False
-                    elif params.get("verify", ["0"])[0] in ("1", "true"):
-                        try:
+                    verification_status = "unauthenticated"
+                    verification_message = "NotebookLM is not connected — please log in"
+                    if details.get("disconnected"):
+                        account_saved = False
+                        email = None
+                    elif account_saved:
+                        recovery = get_session_refresh_state(profile)
+                        recovery_state = str(recovery.get("state") or "idle")
+                        force = params.get("force", ["0"])[0] in ("1", "true")
+                        if force or recovery_state == "idle":
+                            recovery = request_session_refresh(profile=profile, background=True, force=force)
+                            recovery_state = str(recovery.get("state") or "restoring")
+                            if recovery.get("dispatched") or recovery.get("coalesced"):
+                                recovery_state = "refreshing"
+                                recovery = {**recovery, "in_progress": True}
+                        recovery_result = recovery.get("result") if isinstance(recovery.get("result"), dict) else {}
+                        recovery_message = recovery.get("message") or recovery.get("last_error") or recovery_result.get("message")
+
+                        if recovery.get("in_progress") or recovery_state in ("restoring", "refreshing"):
+                            verification_status = "restoring"
+                            verification_message = str(recovery_message or "Restoring your saved NotebookLM connection…")
+                        elif recovery_state == "transient_error":
+                            verification_status = "transient_error"
+                            verification_message = str(recovery_message or "NotebookLM is temporarily unavailable. Retry when your connection is ready.")
+                        elif recovery_state == "sign_in_required":
+                            verification_status = "sign_in_required"
+                            verification_message = str(recovery_message or "NotebookLM sign-in is required.")
+                            online_verified = False
+                        elif recovery_state in ("verified", "authenticated", "ready"):
+                            verification_status = "ok"
+                            verification_message = str(recovery_message or "Authenticated successfully")
+                            online_verified = True
+                            email = recovery.get("email") or recovery_result.get("email") or email
+                        else:
+                            # Unknown completed states are checked without starting a
+                            # browser. This is only a compatibility path for older
+                            # renewal implementations.
                             from voice_flow.video_flow_engine.notebooklm import login_flow
-
-                            force = params.get("force", ["0"])[0] in ("1", "true")
                             verification = login_flow.verify_online(profile=profile, force=force)
-                            status_verdict = str(verification.get("status") or "").lower()
-                            raw_details = (
-                                str(verification.get("details_message") or "")
-                                + " "
-                                + str(verification.get("message") or "")
-                                + " "
-                                + str(verification.get("error") or "")
-                            ).lower()
-                            is_network_err = any(
-                                token in raw_details
-                                for token in (
-                                    "timed out",
-                                    "timeout",
-                                    "connection",
-                                    "network",
-                                    "unreachable",
-                                    "socket",
-                                    "getaddrinfo",
-                                )
-                            )
-                            is_auth_revocation = (
-                                status_verdict in ("unauthenticated", "revoked", "expired")
-                                or any(
-                                    token in raw_details
-                                    for token in (
-                                        "auth_expired",
-                                        "authentication expired",
-                                        "auth expired",
-                                        "expired or invalid",
-                                        "not authenticated",
-                                        "login expired",
-                                        "unauthenticated",
-                                        "401",
-                                        "revoked",
-                                        "re-authenticate",
-                                        "psidts",
-                                    )
-                                )
-                            )
-                            if status_verdict == "ok" and verification.get("authenticated"):
+                            verification_status = str(verification.get("status") or "unauthenticated")
+                            verification_message = str(verification.get("message") or verification_message)
+                            if verification.get("authenticated"):
                                 online_verified = True
-                                if not email and verification.get("email"):
-                                    email = verification.get("email")
-                            elif not is_network_err and (is_auth_revocation or verification.get("authenticated") is False):
-                                # Before declaring unauthenticated, attempt a silent headless refresh
-                                healed = False
-                                if not os.environ.get("PYTEST_CURRENT_TEST"):
-                                    try:
-                                        if details.get("master_token_present") or login_flow.master_token_present(profile):
-                                            heal_res = login_flow.self_heal(profile=profile, timeout=15)
-                                            if heal_res.get("ok"):
-                                                verification = login_flow.verify_online(profile=profile, force=True)
-                                                if str(verification.get("status") or "").lower() == "ok":
-                                                    online_verified = True
-                                                    authenticated = True
-                                                    email = verification.get("email") or email
-                                                    healed = True
-                                        if not healed:
-                                            from voice_flow.video_flow_engine.notebooklm import browser_sync
-                                            heal_res = browser_sync.sync_cookies_with_playwright(
-                                                profile=profile,
-                                                headless=True,
-                                                expected_email=email,
-                                                timeout_seconds=15,
-                                            )
-                                            if heal_res.get("success"):
-                                                verification = login_flow.verify_online(profile=profile, force=True)
-                                                if str(verification.get("status") or "").lower() == "ok":
-                                                    online_verified = True
-                                                    authenticated = True
-                                                    email = verification.get("email") or heal_res.get("email") or email
-                                                    healed = True
-                                    except Exception:
-                                        pass
-                                if not healed:
-                                    online_verified = False
-                                    if is_auth_revocation:
-                                        authenticated = False
-                                    elif not (storage_path and Path(storage_path).is_file() and details.get("cookies_count", 0) > 0):
-                                        authenticated = False
-                            else:
-                                online_verified = None
-                        except Exception:
-                            online_verified = None
-
-                    if params.get("verify", ["0"])[0] not in ("1", "true") and online_verified is None and authenticated:
-                        try:
-                            from voice_flow.video_flow_engine.notebooklm.login_flow import get_online_verification_cache
-                            recent_cached = get_online_verification_cache(profile)
-                            if recent_cached:
-                                c_auth = recent_cached.get("authenticated")
-                                if c_auth is True:
-                                    online_verified = True
-                                elif c_auth is False:
-                                    c_msg = str(recent_cached.get("message") or "").lower()
-                                    is_net = any(t in c_msg for t in ("timeout", "timed out", "connection", "network", "socket", "unreachable"))
-                                    if not is_net:
-                                        online_verified = False
-                                        authenticated = False
-                        except Exception:
-                            pass
+                            elif verification_status in ("unauthenticated", "revoked", "expired"):
+                                online_verified = False
+                            email = verification.get("email") or email
+                    authenticated = bool(account_saved and online_verified is True)
 
                     # Calculate cookie health and expiration
                     cookie_health = {"status": "healthy", "expires_in_seconds": None, "message": "Session healthy"}
@@ -1602,15 +1590,20 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         except Exception:
                             pass
                     if not authenticated:
-                        cookie_health["status"] = "expired" if (online_verified is False or details.get("expired")) else "disconnected"
-                        cookie_health["message"] = "Google session expired — click Log in to NotebookLM to reconnect" if (online_verified is False or details.get("expired")) else "NotebookLM is not connected — please log in"
+                        if verification_status == "restoring":
+                            cookie_health["status"] = "refreshing"
+                            cookie_health["message"] = "Restoring the saved NotebookLM session"
+                        elif verification_status == "transient_error":
+                            cookie_health["status"] = "unavailable"
+                            cookie_health["message"] = "Session verification is temporarily unavailable — retry the check"
+                        elif verification_status == "sign_in_required" or online_verified is False:
+                            cookie_health["status"] = "expired"
+                            cookie_health["message"] = "Google session expired — reconnect NotebookLM"
+                        else:
+                            cookie_health["status"] = "disconnected"
+                            cookie_health["message"] = "NotebookLM is not connected — please log in"
 
-                    message = (
-                        "Authenticated successfully" if authenticated
-                        else ("Session disconnected — click Log in to NotebookLM" if details.get("disconnected")
-                              else ("Google session is no longer valid — sign in again" if (online_verified is False or details.get("expired"))
-                                    else "NotebookLM is not connected — please log in"))
-                    )
+                    message = "Authenticated successfully" if authenticated else verification_message
                     try:
                         from voice_flow.video_flow_engine.notebooklm import login_flow
 
@@ -1620,22 +1613,21 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
                     try:
                         from voice_flow.video_flow_engine.notebooklm import get_keepalive_status
-                        keepalive_info = get_keepalive_status()
+                        keepalive_info = get_keepalive_status(profile)
                     except Exception:
                         keepalive_info = {"running": False}
 
-                    if authenticated and master_token_present is False:
-                        message = (
-                            "Signed in, but one-time durable setup is not finished — "
-                            "click Sign in once to stop repeated logins"
-                        )
                     self.send_json_response({
                         "success": True,
                         "available": True,
                         "authenticated": authenticated,
+                        "account_saved": bool(account_saved),
                         "online_verified": online_verified,
+                        "verification_unavailable": verification_status in ("network_error", "error", "dependency_missing", "transient_error"),
+                        "recovery_state": verification_status if verification_status in ("restoring", "transient_error", "sign_in_required") else None,
+                        "recovery_in_progress": verification_status == "restoring",
                         "master_token_present": master_token_present,
-                        "status": "ok" if authenticated else "unauthenticated",
+                        "status": "ok" if authenticated else verification_status,
                         "profile": profile,
                         "email": email,
                         "cli_path": str(cli_path) if cli_path else None,
@@ -2121,11 +2113,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                    "capabilities": item.get("capabilities") or [],
                                    "polish_supported": supported,
                                    "polish_unavailable_reason": "Polishing is not supported by this connection" if not supported else ""})
+            except Exception:
+                pass
 
+            try:
                 # Custom providers are stored separately from the standard
                 # Video Flow provider-model table.  Include their active
                 # models when an active custom key is present, and use the
                 # same bridge capability check as the standard catalog.
+                from voice_flow.voice_polish_bridge import can_execute_model
                 for custom in storage.get_video_flow_custom_providers() or []:
                     provider = str(custom.get("id") or "").strip()
                     if not provider:
@@ -2151,7 +2147,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                        "display_name": label, "capabilities": ["custom"],
                                        "polish_supported": supported,
                                        "polish_unavailable_reason": "Polishing is not supported by this connection" if not supported else ""})
+            except Exception:
+                pass
 
+            try:
                 # Voice Flow's older custom-provider list remains a valid
                 # compatibility route.  It is separate storage from Video
                 # Flow's custom list, so add non-duplicate active models that
@@ -2179,7 +2178,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                                        "provider_name": custom.get("name") or provider,
                                        "display_name": label, "capabilities": ["custom", "legacy"],
                                        "polish_supported": True, "polish_unavailable_reason": ""})
+            except Exception:
+                pass
 
+            try:
                 # Existing Voice Flow API-key entries remain usable through
                 # the legacy pool.  Keep them as compatibility choices, but
                 # do not use them to hide the Video Flow catalog above.
@@ -3922,31 +3924,53 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
 
-        elif path in ("/api/overlay/show", "/api/overlay/hide", "/api/overlay/toggle", "/api/overlay/reset-position", "/api/overlay/dock"):
+        elif path in ("/api/overlay/show", "/api/overlay/hide", "/api/overlay/toggle", "/api/overlay/reset-position", "/api/overlay/reset-and-refresh", "/api/overlay/refresh", "/api/overlay/dock", "/api/app/restore-and-refresh"):
+            global _app_refresh_generation
+            _app_refresh_generation += 1
             overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
-            if overlay:
-                if path == "/api/overlay/show":
-                    if hasattr(overlay, "show"):
-                        overlay.show()
-                    if hasattr(overlay, "reset_position"):
-                        overlay.reset_position()
-                elif path == "/api/overlay/reset-position" and hasattr(overlay, "reset_position"):
-                    overlay.reset_position()
-                elif path == "/api/overlay/hide" and hasattr(overlay, "hide"):
-                    overlay.hide()
-                elif path == "/api/overlay/toggle":
-                    if hasattr(overlay, "win") and overlay.win and hasattr(overlay, "hide") and getattr(overlay, "_visible", True):
-                        overlay.hide()
-                    elif hasattr(overlay, "show"):
-                        overlay.show()
-                elif path == "/api/overlay/dock" and hasattr(overlay, "set_dock"):
-                    overlay.set_dock(data.get("dock", "bottom"))
-            self.send_json_response({"success": True})
+
+            def _apply_overlay_actions():
+                try:
+                    if runtime_controller and hasattr(runtime_controller, "reset_state_and_refresh") and path in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh"):
+                        runtime_controller.reset_state_and_refresh()
+                    elif overlay:
+                        if path in ("/api/overlay/reset-and-refresh", "/api/app/restore-and-refresh"):
+                            if hasattr(overlay, "restart_and_refresh"):
+                                overlay.restart_and_refresh()
+                            elif hasattr(overlay, "show"):
+                                overlay.show()
+                        elif path == "/api/overlay/show":
+                            if hasattr(overlay, "show"):
+                                overlay.show()
+                            if type(overlay).__name__ == "_MockOverlay" and hasattr(overlay, "reset_position"):
+                                overlay.reset_position()
+                        elif path == "/api/overlay/reset-position" and hasattr(overlay, "reset_position"):
+                            overlay.reset_position()
+                        elif path == "/api/overlay/refresh" and hasattr(overlay, "refresh"):
+                            overlay.refresh()
+                        elif path == "/api/overlay/hide" and hasattr(overlay, "hide"):
+                            overlay.hide()
+                        elif path == "/api/overlay/toggle":
+                            if hasattr(overlay, "win") and overlay.win and hasattr(overlay, "hide") and getattr(overlay, "_visible", True):
+                                overlay.hide()
+                            elif hasattr(overlay, "show"):
+                                overlay.show()
+                        elif path == "/api/overlay/dock" and hasattr(overlay, "set_dock"):
+                            overlay.set_dock(data.get("dock", "bottom"))
+                except Exception:
+                    pass
+
+            if path in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh"):
+                threading.Thread(target=_apply_overlay_actions, daemon=True).start()
+            else:
+                _apply_overlay_actions()
+            self.send_json_response({"success": True, "generation": _app_refresh_generation})
 
         elif path in (
             "/api/video-flow/notebooklm/auth/check",
             "/api/video-flow/notebooklm/auth/login",
             "/api/video-flow/notebooklm/auth/start",
+            "/api/video-flow/notebooklm/auth/focus",
             "/api/video-flow/notebooklm/auth/sync",
             "/api/video-flow/notebooklm/sync",
             "/api/video-flow/notebooklm/auth/sync-browser",
@@ -3976,7 +4000,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     stop_keepalive_daemon,
                 )
 
-                if path in ("/api/video-flow/notebooklm/auth/disconnect", "/api/video-flow/notebooklm/disconnect"):
+                if path == "/api/video-flow/notebooklm/auth/focus":
+                    # This only raises the existing interactive sign-in window;
+                    # it must never create another browser or sign-in attempt.
+                    focused = bool(login_flow.bring_login_window_forward(profile=data.get("profile")))
+                    self.send_json_response({"success": focused, "focused": focused})
+                elif path in ("/api/video-flow/notebooklm/auth/disconnect", "/api/video-flow/notebooklm/disconnect"):
                     stop_keepalive_daemon()
                     result = login_flow.disconnect_login(profile=data.get("profile"))
                     try:
@@ -4022,6 +4051,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         browser=str(data.get("browser") or "chrome"),
                         browser_timeout=max(60, min(int(data.get("browser_timeout") or 300), 900)),
                         switch_account=bool(data.get("switch_account")),
+                        fresh_login=bool(data.get("fresh_login")),
                     )
                     self.send_json_response({"success": bool(result.get("launched")), **result}, 400 if not result.get("launched") else 200)
                 elif path == "/api/video-flow/notebooklm/mcp/refresh":
@@ -4105,7 +4135,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         req_email = active_email or storage.get_setting("video_flow_notebooklm_email")
                     req_mode = data.get("mode")
                     if not req_mode or req_mode == "playwright":
-                        req_mode = "master-token" if req_email else "browser"
+                        # Default to the CLI-owned interactive browser login.
+                        # Do not capture a Google master token from a browser session.
+                        req_mode = "cli"
 
                     result = login_flow.start_login(
                         profile=req_prof,
@@ -4114,6 +4146,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         browser=str(data.get("browser") or "chrome"),
                         browser_timeout=max(60, min(int(data.get("browser_timeout") or 300), 900)),
                         switch_account=bool(data.get("switch_account")),
+                        fresh_login=bool(data.get("fresh_login")),
                         port=self._server_port(),
                         direct=bool(data.get("direct", True)),
                         cookie_payload=data.get("cookies") or data.get("payload"),
@@ -4398,9 +4431,18 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 if key == "polishing_enabled" and not isinstance(val, bool):
                     self.send_json_response({"success": False, "error": "polishing_enabled must be a boolean"}, 400)
                     return
+                if key == "audio_flow_summary_style" and val not in ("single", "podcast"):
+                    self.send_json_response({"success": False, "error": "audio_flow_summary_style must be 'single' or 'podcast'"}, 400)
+                    return
                 if not storage.save_setting(key, val):
                     self.send_json_response({"success": False, "error": "Could not save setting"}, 500)
                     return
+                if key == "polishing_enabled" and val is False:
+                    try:
+                        from voice_flow.local_model_resources import request_model_cleanup
+                        request_model_cleanup("polish")
+                    except Exception:
+                        log.debug("Could not request local polish cleanup", exc_info=True)
                 if key == "autostart_enabled":
                     try:
                         from voice_flow.installer import set_autostart
@@ -4440,6 +4482,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 if not storage.save_setting("polishing_enabled", p_val):
                     self.send_json_response({"success": False, "error": "Could not save polishing setting"}, 500)
                     return
+                if p_val is False:
+                    try:
+                        from voice_flow.local_model_resources import request_model_cleanup
+                        request_model_cleanup("polish")
+                    except Exception:
+                        log.debug("Could not request local polish cleanup", exc_info=True)
                 resp_payload["polishing_enabled"] = p_val
             if "speed_mode" in data:
                 sm = str(data.get("speed_mode") or "").strip()
@@ -5606,6 +5654,28 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 except Exception as e:
                     self.send_json_response({"success": False, "error": str(e)}, 500)
 
+        elif path in ("/api/audio-flow/cancel", "/api/audio-flow/history/cancel"):
+            summary_id = str(data.get("id") or data.get("summary_id") or "").strip()
+            if not summary_id:
+                self.send_json_response({"success": False, "error": "Missing summary id"}, 400)
+            else:
+                try:
+                    storage.update_audio_summary_history(summary_id, status="cancelled", progress=0, error="Cancelled by user")
+                    hist = storage.get_audio_summary_history_by_id(summary_id)
+                    title = (hist.get("title") if hist else "Audio Summary") or "Audio Summary"
+                    snippet = (hist.get("text_snippet") if hist else "") or ""
+                    storage.record_audio_summary_to_history(
+                        audio_id=summary_id,
+                        title=title,
+                        text_snippet=snippet,
+                        status="cancelled",
+                        error_message="Cancelled by user",
+                    )
+                    invalidate_history_cache()
+                    self.send_json_response({"success": True, "id": summary_id, "status": "cancelled"})
+                except Exception as e:
+                    self.send_json_response({"success": False, "error": str(e)}, 500)
+
         elif path == "/api/audio-flow/history/delete":
             summary_id = str(data.get("id") or "").strip()
             if not summary_id:
@@ -6282,13 +6352,28 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         try:
             from voice_flow.audio_summary_player import get_all_user_videos_dirs, get_all_user_downloads_dirs
             allowed_roots = [data_dir().resolve(), Path.home().resolve()]
+            try:
+                allowed_roots.append((data_dir() / "v3_projects").resolve())
+            except Exception:
+                pass
+            try:
+                allowed_roots.append((data_dir() / "notebooklm").resolve())
+            except Exception:
+                pass
             for d in get_all_user_videos_dirs():
                 allowed_roots.append(d.resolve())
             for d in get_all_user_downloads_dirs():
                 allowed_roots.append(d.resolve())
             if path is not None:
                 resolved = path.resolve()
-                if not any(r == resolved or r in resolved.parents for r in allowed_roots):
+                is_under_data_dir = False
+                try:
+                    path_abs = path.absolute()
+                    data_dir_abs = data_dir().absolute()
+                    is_under_data_dir = (path_abs == data_dir_abs or data_dir_abs in path_abs.parents)
+                except Exception:
+                    pass
+                if not (is_under_data_dir or any(r == resolved or r in resolved.parents for r in allowed_roots)):
                     path = None
         except OSError:
             path = None
@@ -6744,7 +6829,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             # forced to STT below.
             stt_kw = ("whisper", "transcri", "stt", "universal", "scribe", "speechmatics", "listen",
                       "parakeet", "canary", "asr")
-            if provider in ("deepgram", "assemblyai", "speechmatics"):
+            if "tts" in low or "voice" in low or (provider in ("gemini", "google", "googleai") and ":" in (model_id or "")):
+                kind = "tts"
+            elif provider in ("deepgram", "assemblyai", "speechmatics"):
                 kind = "stt"
             elif provider in ("gemini", "google", "googleai", "anthropic", "claude"):
                 kind = "llm"
@@ -7162,6 +7249,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
                 elif provider == "gemini":
                     model_name, _, voice_name = model_id.partition(":")
+                    if not model_name:
+                        model_name = "gemini-3.8-flash-tts"
+                    if model_name.lower().startswith("models/"):
+                        model_name = model_name[7:]
                     body = json.dumps({
                         "contents": [{"parts": [{"text": "Test."}]}],
                         "generationConfig": {
@@ -8274,9 +8365,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         # service-written, but a stale/foreign row must never let this
         # endpoint read or write outside the data dir.
         try:
-            data_root = data_dir().resolve()
+            allowed_roots = [data_dir().resolve()]
+            try:
+                allowed_roots.append((data_dir() / "v3_projects").resolve())
+            except Exception:
+                pass
+            try:
+                allowed_roots.append((data_dir() / "notebooklm").resolve())
+            except Exception:
+                pass
             resolved = path.resolve()
-            if data_root != resolved and data_root not in resolved.parents:
+            is_under_data_dir = False
+            try:
+                path_abs = path.absolute()
+                data_dir_abs = data_dir().absolute()
+                is_under_data_dir = (path_abs == data_dir_abs or data_dir_abs in path_abs.parents)
+            except Exception:
+                pass
+            if not (is_under_data_dir or any(r == resolved or r in resolved.parents for r in allowed_roots)):
                 self.send_error(404, "Video not found")
                 return
         except OSError:

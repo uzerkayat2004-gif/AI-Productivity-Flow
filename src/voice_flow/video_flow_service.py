@@ -118,6 +118,10 @@ class VideoFlowStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._init_db()
+        try:
+            self.prune_excess_jobs(max_keep=50)
+        except Exception:
+            pass
 
     def _init_db(self) -> None:
         with contextlib.closing(self._connection()) as conn, conn:
@@ -141,6 +145,10 @@ class VideoFlowStore:
             self.db_path = Path(new_db_path)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_db()
+            try:
+                self.prune_excess_jobs(max_keep=50)
+            except Exception:
+                pass
 
     def repoint_if_needed(self) -> bool:
         """Repoint video flow store to active account database if changed."""
@@ -168,7 +176,76 @@ class VideoFlowStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def prune_excess_jobs(self, max_keep: int = 50) -> list[str]:
+        """Prune oldest video jobs so total jobs does not exceed max_keep (FIFO)."""
+        pruned_ids: list[str] = []
+        if max_keep <= 0:
+            return pruned_ids
+        with self._lock, self._connection() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM video_flow_jobs").fetchone()
+            count = int(row[0]) if row else 0
+            if count > max_keep:
+                excess = count - max_keep
+                rows = conn.execute(
+                    "SELECT job_id, meta_json FROM video_flow_jobs ORDER BY created_at ASC, rowid ASC LIMIT ?",
+                    (excess,),
+                ).fetchall()
+                for r in rows:
+                    jid = r["job_id"]
+                    pruned_ids.append(jid)
+                    try:
+                        from voice_flow.paths import data_dir
+                        import shutil
+                        proj_dir = data_dir() / "v3_projects" / jid
+                        if proj_dir.is_dir():
+                            shutil.rmtree(proj_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                    try:
+                        if r["meta_json"]:
+                            m = json.loads(r["meta_json"])
+                            for fld in ("output_path", "video_path"):
+                                op = m.get(fld)
+                                if op and Path(op).is_file():
+                                    Path(op).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                if pruned_ids:
+                    placeholders = ",".join("?" for _ in pruned_ids)
+                    conn.execute(f"DELETE FROM video_flow_jobs WHERE job_id IN ({placeholders})", tuple(pruned_ids))
+                    try:
+                        conn.execute(f"DELETE FROM history WHERE app_name = 'Video Flow' AND insertion_status IN ({placeholders})", tuple(pruned_ids))
+                    except Exception:
+                        pass
+            try:
+                conn.execute(
+                    """
+                    DELETE FROM history
+                    WHERE app_name = 'Video Flow'
+                    AND id NOT IN (
+                        SELECT id FROM (
+                            SELECT id FROM history
+                            WHERE app_name = 'Video Flow'
+                            ORDER BY id DESC
+                            LIMIT ?
+                        )
+                    )
+                    """,
+                    (max_keep,),
+                )
+            except Exception:
+                pass
+            conn.commit()
+            if pruned_ids:
+                try:
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
+        return pruned_ids
+
     def create(self, job: JobV3) -> JobV3:
+        self.prune_excess_jobs(max_keep=49)
         now = time.time()
         with self._lock, self._connection() as conn:
             conn.execute(
@@ -204,6 +281,7 @@ class VideoFlowStore:
                 pass
         except Exception:
             pass
+        self.prune_excess_jobs(max_keep=50)
         return job
 
     def get(self, job_id: str) -> JobV3 | None:
@@ -213,13 +291,24 @@ class VideoFlowStore:
             ).fetchone()
         return _job_from_row(row) if row else None
 
-    def list(self, limit: int = 100) -> list[JobV3]:
-        limit = max(1, min(int(limit), 500))
+    def list(self, limit: int | None = None) -> list[JobV3]:
+        try:
+            self.prune_excess_jobs(max_keep=50)
+        except Exception:
+            pass
+        parsed_limit = 50
+        if limit is not None:
+            try:
+                val = int(limit)
+                if val > 0:
+                    parsed_limit = min(val, 50)
+            except (ValueError, TypeError):
+                parsed_limit = 50
         with self._lock, self._connection() as conn:
             rows = conn.execute(
                 "SELECT job_id, state, progress, message, meta_json FROM video_flow_jobs "
                 "ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                (parsed_limit,),
             ).fetchall()
         return [_job_from_row(row) for row in rows]
 
@@ -316,7 +405,7 @@ class VideoFlowStore:
                     prompt=prompt,
                     output_path=str(out_p) if out_p else None,
                     duration_sec=dur,
-                    status="success" if state == "complete" else "error",
+                    status="success" if state == "complete" else ("cancelled" if state == "cancelled" else "error"),
                     error_message=message if state != "complete" else None,
                     created_at=now,
                 )
@@ -895,11 +984,22 @@ class VideoFlowService:
     def get(self, job_id: str) -> JobV3 | None:
         return self.store.get(job_id)
 
-    def list(self, limit: int = 100) -> list[JobV3]:
+    def list(self, limit: int | None = None) -> list[JobV3]:
         return self.store.list(limit)
 
     def update_meta(self, job_id: str, meta_updates: dict[str, Any]) -> JobV3 | None:
         return self.store.update_meta(job_id, meta_updates)
+
+    def delete(self, job_id: str) -> bool:
+        try:
+            from voice_flow.paths import data_dir
+            import shutil
+            proj_dir = data_dir() / "v3_projects" / job_id
+            if proj_dir.is_dir():
+                shutil.rmtree(proj_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return self.store.delete(job_id)
 
     def cancel(self, job_id: str) -> JobV3 | None:
         job = self.store.get(job_id)

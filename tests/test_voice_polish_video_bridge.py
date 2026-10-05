@@ -29,7 +29,7 @@ def test_disabled_polishing_blocks_force_ai_remote_path(monkeypatch):
     monkeypatch.setattr(engine, "_polish_with_api_pool", lambda *_args, **_kwargs: called.append(True) or "remote")
     monkeypatch.setattr("voice_flow.polisher.dictionary_engine.apply_dictionary_post_processing", lambda text: text)
 
-    assert engine.polish("um keep this local", force_ai=True) == "Um keep this local."
+    assert engine.polish("um keep this local", force_ai=True) == "Keep this local."
     assert called == []
 
 

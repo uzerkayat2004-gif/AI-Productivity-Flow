@@ -45,6 +45,29 @@ class TestCommandDetection(unittest.TestCase):
         self.assertEqual(r.content, "We are meeting Friday.")
         self.assertEqual(r.command.format, "email")
 
+    def test_unpunctuated_prefix_keeps_content_even_at_sentence_end(self):
+        r = detect_voice_command(
+            "Hey Voice Flow make this an email Alex please send the report by Friday."
+        )
+        self.assertEqual(r.content, "Alex please send the report by Friday.")
+        self.assertEqual(r.command.format, "email")
+
+    def test_unpunctuated_prefix_stops_at_first_format_not_later_content_words(self):
+        r = detect_voice_command(
+            "Hey Voice Flow make this an email Please email Alex the short report"
+        )
+        self.assertEqual(r.content, "Please email Alex the short report")
+        self.assertEqual(r.command.format, "email")
+
+    def test_spoken_command_example_cannot_activate_a_later_wake_phrase(self):
+        text = (
+            "If I say hey voice flow make this as an email hey voice flow make this casual "
+            "it should keep all words."
+        )
+        r = detect_voice_command(text)
+        self.assertIsNone(r.command)
+        self.assertEqual(r.content, text)
+
     def test_quoted_wake_phrase_is_plain_dictation(self):
         text = "My manager said 'Hey Voice Flow, make this casual.' so I did"
         r = detect_voice_command(text)
@@ -61,6 +84,13 @@ class TestCommandDetection(unittest.TestCase):
         self.assertEqual(r.command.format, "email")
         self.assertEqual(r.command.overrides.get("formality"), "professional")
         plain = detect_voice_command("The voice log from yesterday is ready.")
+        self.assertIsNone(plain.command)
+
+    def test_voice_law_alias_requires_deliberate_prefix(self):
+        r = detect_voice_command("Hey voice law make this a professional email. We are meeting Friday.")
+        self.assertEqual(r.content, "We are meeting Friday.")
+        self.assertEqual(r.command.format, "email")
+        plain = detect_voice_command("The voice law from yesterday is ready.")
         self.assertIsNone(plain.command)
 
     def test_quoted_voice_log_alias_is_plain_dictation(self):
@@ -159,6 +189,26 @@ class TestCommandDetection(unittest.TestCase):
         r = detect_voice_command("Hey Voice Flow, make this a professional email but keep my wording. The budget is approved.")
         self.assertTrue(r.command.preserve_wording)
         self.assertEqual(r.command.format, "email")
+
+    def test_standalone_keep_my_wording_command(self):
+        r = detect_voice_command(
+            "Hey Voice Flow, keep my wording. I can send the report tomorrow, but I cannot promise it today."
+        )
+        self.assertIsNotNone(r.command)
+        self.assertTrue(r.command.preserve_wording)
+        self.assertEqual(r.content, "I can send the report tomorrow, but I cannot promise it today.")
+
+    def test_negated_keep_my_wording_remains_dictation(self):
+        text = "Hey Voice Flow, don't keep my wording. I can send the report tomorrow."
+        r = detect_voice_command(text)
+        self.assertIsNone(r.command)
+        self.assertEqual(r.content, text)
+
+    def test_quoted_standalone_keep_my_wording_remains_dictation(self):
+        text = 'She said "Hey Voice Flow, keep my wording." during the review.'
+        r = detect_voice_command(text)
+        self.assertIsNone(r.command)
+        self.assertEqual(r.content, text)
 
     def test_summarize(self):
         r = detect_voice_command("We planned three phases today. Hey Voice Flow, summarize this.")

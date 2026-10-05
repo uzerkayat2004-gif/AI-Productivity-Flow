@@ -41,10 +41,28 @@ def test_audio_flow_dialog_renders_complete_catalog_and_groups() -> None:
             dialog.win.destroy()
 
 
-def test_audio_flow_dialog_speed_and_voice_selection_callbacks() -> None:
+def test_audio_flow_dialog_speed_and_voice_selection_callbacks(monkeypatch) -> None:
     root = _get_or_create_root()
     if not root:
         return
+    values = {
+        "audio_flow_speed": 1.0,
+        "exec_audio_policy_model": "edge/en-US-AvaNeural",
+    }
+    real_get_setting = storage.get_setting
+
+    def get_setting(key, default=None):
+        if key in values:
+            return values[key]
+        return real_get_setting(key, default)
+
+    def save_setting(key, value):
+        if key in values:
+            values[key] = value
+        return True
+
+    monkeypatch.setattr(storage, "get_setting", get_setting)
+    monkeypatch.setattr(storage, "save_setting", save_setting)
     speed_calls = []
     voice_calls = []
     dialog = AudioFlowSettingsDialog(
@@ -55,11 +73,42 @@ def test_audio_flow_dialog_speed_and_voice_selection_callbacks() -> None:
     try:
         dialog._set_speed(1.5)
         assert speed_calls == [1.5]
-        assert float(storage.get_setting("audio_flow_speed", 1.0)) == 1.5
+        assert float(values["audio_flow_speed"]) == 1.5
 
         dialog._select_voice("deepgram/aura-zeus-en")
         assert voice_calls == ["deepgram/aura-zeus-en"]
-        assert storage.get_setting("exec_audio_policy_model", "") == "deepgram/aura-zeus-en"
+        assert values["exec_audio_policy_model"] == "deepgram/aura-zeus-en"
+    finally:
+        if dialog.win and dialog.win.winfo_exists():
+            dialog.win.destroy()
+
+
+def test_audio_flow_dialog_saves_summary_format_preference(monkeypatch) -> None:
+    root = _get_or_create_root()
+    if not root:
+        return
+    values = {"audio_flow_summary_style": "single"}
+    real_get_setting = storage.get_setting
+
+    def get_setting(key, default=None):
+        if key == "audio_flow_summary_style":
+            return values.get(key, default)
+        return real_get_setting(key, default)
+
+    def save_setting(key, value):
+        if key == "audio_flow_summary_style":
+            values[key] = value
+            return True
+        return True
+
+    monkeypatch.setattr(storage, "get_setting", get_setting)
+    monkeypatch.setattr(storage, "save_setting", save_setting)
+    dialog = AudioFlowSettingsDialog(root)
+    try:
+        dialog._set_summary_style("podcast")
+        assert values["audio_flow_summary_style"] == "podcast"
+        dialog._set_summary_style("not-a-style")
+        assert values["audio_flow_summary_style"] == "podcast"
     finally:
         if dialog.win and dialog.win.winfo_exists():
             dialog.win.destroy()

@@ -250,8 +250,8 @@ def test_lifecycle_restart_suite_spawns_detached_worker(monkeypatch: pytest.Monk
     ok = lifecycle.restart_suite(runtime_controller=mock_controller)
     assert ok is True
 
-    # Check that overlay reset_position was called
-    mock_controller.overlay.reset_position.assert_called_once()
+    # Restart keeps the persisted bar position
+    mock_controller.overlay.reset_position.assert_not_called()
     # Check that audio stop was called
     mock_controller.audio.stop.assert_called_once()
 
@@ -422,7 +422,7 @@ def test_api_overlay_controls(test_server) -> None:
     status, _, body = _post(f"{base_url}/api/overlay/show", {})
     assert status == 200
     mock_overlay.show.assert_called_once()
-    mock_overlay.reset_position.assert_called_once()
+    mock_overlay.reset_position.assert_not_called()  # show keeps the saved position
 
     # 2. Hide
     status, _, body = _post(f"{base_url}/api/overlay/hide", {})
@@ -511,6 +511,29 @@ def test_api_settings_additional_defaults(test_server) -> None:
     assert status == 200
     assert body["value"] == 1.0
 
+    status, _, body = _get(f"{base_url}/api/settings/get?key=audio_flow_summary_style")
+    assert status == 200
+    assert body["value"] == "single"
+
+
+def test_audio_flow_summary_style_setting_only_accepts_supported_formats(test_server) -> None:
+    base_url = test_server["base_url"]
+
+    status, _, body = _post(f"{base_url}/api/settings/update", {
+        "key": "audio_flow_summary_style",
+        "value": "podcast",
+    })
+    assert status == 200
+    assert body["success"] is True
+    assert body["value"] == "podcast"
+
+    status, _, body = _post(f"{base_url}/api/settings/update", {
+        "key": "audio_flow_summary_style",
+        "value": "three_hosts",
+    })
+    assert status == 400
+    assert body["success"] is False
+
 
 def test_lifecycle_terminate_suite_processes_kills_children_and_listeners(monkeypatch: pytest.MonkeyPatch) -> None:
     p_main = MagicMock()
@@ -566,5 +589,4 @@ def test_desktop_launcher_initializes_autostart_when_missing(monkeypatch: pytest
     desktop_launcher.launch_desktop_gui()
     assert set_calls == [True]
     assert test_storage.get_setting("autostart_enabled") is True
-
 

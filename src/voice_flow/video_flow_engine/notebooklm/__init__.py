@@ -5,6 +5,9 @@ from .keepalive import (
     NotebookLMKeepaliveService,
     get_keepalive_service,
     get_keepalive_status,
+    get_session_refresh_state,
+    request_session_refresh,
+    reset_session_refresh_state,
     start_keepalive_daemon,
     stop_keepalive_daemon,
     trigger_keepalive_now,
@@ -41,6 +44,7 @@ from .document_profiler import (
 from .provenance import probe_media_file, write_notebooklm_provenance
 from .provider import NotebookLMVideoProvider
 from .service import NotebookLMService, get_notebooklm_service
+from .login_flow import get_session_generation
 from .browser_sync import (
     auto_sync_from_browser,
     discover_browser_profiles,
@@ -81,6 +85,8 @@ __all__ = [
     "generate_mcp_config",
     "get_keepalive_service",
     "get_keepalive_status",
+    "get_session_refresh_state",
+    "get_session_generation",
     "get_mcp_server_info",
     "get_notebooklm_service",
     "import_cookies",
@@ -89,6 +95,8 @@ __all__ = [
     "resolve_notebooklm_cli",
     "resolve_notebooklm_mcp",
     "resolve_notebooklm_profile",
+    "request_session_refresh",
+    "reset_session_refresh_state",
     "start_keepalive_daemon",
     "stop_keepalive_daemon",
     "sync_cookies_with_playwright",

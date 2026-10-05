@@ -225,6 +225,12 @@ class AudioFlowFloatingWidget:
             style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             style |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                None,
+                0, 0, 0, 0,
+                0x0002 | 0x0001 | 0x0004 | 0x0010 | 0x0020,  # SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+            )
         except Exception:
             pass
 
@@ -363,6 +369,7 @@ class AudioFlowFloatingWidget:
 
         self.canvas.config(width=w, height=h)
         self.win.geometry(f"{w}x{h}+{self._pos_x}+{self._pos_y}")
+        self._apply_win32_noactivate()
         self.win.deiconify()
         self.win.lift()
         self.win.attributes("-topmost", True)
@@ -629,7 +636,7 @@ class AudioFlowFloatingWidget:
 
         font = _get_font(int(9.5 * scale), bold=True)
 
-        # Two actions only: verbatim Read and NotebookLM Summary. Settings is
+        # Two actions only: explanatory Read and NotebookLM Summary. Settings is
         # deliberately an icon, not a third Audio Flow mode.
         pills = [
             (4, 106, 0),
@@ -757,7 +764,7 @@ class AudioFlowFloatingWidget:
         )
 
         font_notice = _get_font(int(11.4 * scale), bold=True)
-        notice_text = "💡 Summary is for long docs · Use Read for short text"
+        notice_text = "💡 Read explains · Summary is for long docs"
         bbox_n = draw.textbbox((0, 0), notice_text, font=font_notice)
         tw_n = bbox_n[2] - bbox_n[0]
         th_n = bbox_n[3] - bbox_n[1]
@@ -1301,7 +1308,7 @@ class AudioFlowFloatingWidget:
             banner_bg = "#372c25" if is_dark else "#FFF8F0"
             banner_fg = "#e6b092" if is_dark else "#7D3C0F"
             self._rrect(c, 6, 6, w - 6, 46, 6, banner_bg)
-            c.create_text(w / 2, 26, text="💡 Summary is for long docs · Use Read for short text", fill=banner_fg, font=("Segoe UI", 11, "bold"), anchor="center")
+            c.create_text(w / 2, 26, text="💡 Read explains · Summary is for long docs", fill=banner_fg, font=("Segoe UI", 11, "bold"), anchor="center")
             self._draw_pill(c, 6, 186, 90, hovered=self._hover == 0, base_color="#d49474" if is_dark else "#FFB482", hover_color=accent_col)
             c.create_text(96, 71, text="⚡ Use Read", fill=btn_txt if self._hover == 0 else accent_col, font=("Segoe UI", 10, "bold"), anchor="center")
             self._draw_pill(c, 192, w - 6, 90, hovered=self._hover == 1, base_color=border_col, hover_color=accent_col)
@@ -1452,7 +1459,7 @@ class AudioFlowFloatingWidget:
 
         if self._stage == self.STAGE_PLAYBACK_CONTROL:
             if event.x <= 44:
-                # Verbatim Read has no resumable transport: Pause means stop.
+                # Explanatory Read has no resumable transport: Pause means stop.
                 self._is_paused = False
                 if self.on_pause_toggle:
                     self.on_pause_toggle()
@@ -1485,7 +1492,7 @@ class AudioFlowFloatingWidget:
 
         if self._stage == self.STAGE_MODE_SELECT:
             if event.x <= 108:
-                # Read exactly the selected text with the app's native TTS.
+                # Read prepares an explanatory script, then speaks it with native TTS.
                 self.hide()
                 if self.on_trigger:
                     self.on_trigger(text, mode="read")

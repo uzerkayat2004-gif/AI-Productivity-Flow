@@ -73,6 +73,21 @@ def test_echoed_prompt_still_passes_fidelity_and_is_accepted():
     assert outcomes == ["ai_accepted"]
 
 
+def test_accepted_ai_output_still_gets_conservative_cleanup():
+    """A successful model may echo fillers; delivery must still be readable."""
+    polisher = TextPolisher()
+    outcomes = []
+    with (
+        patch("voice_flow.polisher.storage.get_setting", side_effect=_settings),
+        patch("voice_flow.polisher.storage.get_all_api_keys", return_value={"gemini": "k"}),
+        patch.object(polisher, "_polish_with_api_pool", return_value="Um, send the report uh today."),
+        patch("voice_flow.lfm_engine.is_lfm_downloaded", return_value=False),
+    ):
+        result = polisher.polish("Send the report today.", force_ai=True, outcome_callback=outcomes.append)
+    assert result == "send the report today."
+    assert outcomes == ["ai_accepted"]
+
+
 # --------------------------------------------------------------------------
 # Local model honesty
 # --------------------------------------------------------------------------
@@ -190,6 +205,31 @@ def test_local_model_success_is_reported_as_local_not_ai():
     ):
         polisher.polish(source, force_ai=True, outcome_callback=outcomes.append)
     assert outcomes == ["local_model"]
+
+
+def test_selected_lfm_failure_does_not_run_the_same_model_twice():
+    """The selected LFM bridge already spent its one bounded model attempt."""
+    polisher = TextPolisher()
+    outcomes = []
+
+    def failed_bridge(*_args, **_kwargs):
+        polisher._last_lfm_bridge_attempted = True
+        return None
+
+    with (
+        patch("voice_flow.polisher.storage.get_setting", side_effect=_settings),
+        patch("voice_flow.polisher.storage.get_all_api_keys", return_value={}),
+        patch.object(polisher, "_polish_with_api_pool", side_effect=failed_bridge),
+        patch("voice_flow.lfm_engine.is_lfm_downloaded", return_value=True),
+        patch("voice_flow.lfm_engine.polish_with_lfm", side_effect=AssertionError("must not retry selected LFM")),
+    ):
+        result = polisher.polish(
+            "Um, send the report today",
+            model_ref=lfm_engine.LFM_MODEL_ID,
+            outcome_callback=outcomes.append,
+        )
+    assert result == "Send the report today."
+    assert outcomes == ["provider_failure"]
 
 
 # --------------------------------------------------------------------------

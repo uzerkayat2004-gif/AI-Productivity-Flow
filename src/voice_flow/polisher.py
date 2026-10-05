@@ -487,6 +487,7 @@ def _candidate_preserves_content(
     *,
     task: str = "cleanup",
     allow_compression: bool = False,
+    command_format: str | None = None,
 ) -> bool:
     """Validate that candidate preserves essential tokens from source without unrelated substitutions, truncations, or drops.
 
@@ -555,6 +556,11 @@ def _candidate_preserves_content(
     if non_filler_src:
         if allow_compression:
             floor = 0.25
+        elif command_format == "bullet_list":
+            # The bullet-specific anchor check below still requires the
+            # concrete items, while list formatting can remove connective
+            # sentence scaffolding without losing a requested fact.
+            floor = 0.50
         elif task == "prompt" and _prompt_restructure_preserves_anchors(source, candidate):
             # Prompt mode can deliberately remove conversational framing while
             # retaining the actual task.  This narrower floor is available
@@ -597,10 +603,27 @@ def _candidate_preserves_content(
         cand_stems = {t[:5] for t in cand_tokens}
         stem_matched = sum(1 for t in non_filler_src if t[:5] in cand_stems)
         stem_ratio = stem_matched / float(n_src)
-        stem_floor = 0.35 if allow_compression else 0.70
+        # A bullet list legitimately removes sentence scaffolding ("we need
+        # to") while retaining each action, object, and date.  Its separate
+        # content-anchor check below protects those facts before this modest
+        # structural allowance applies.
+        stem_floor = 0.35 if allow_compression else (0.45 if command_format == "bullet_list" else 0.70)
         if stem_ratio < stem_floor:
             log.info("[POLISH SAFETY] Stemmed word overlap too low (%.2f < %.2f); candidate rejected.", stem_ratio, stem_floor)
             return False
+
+        # Plain polishing of a long dictation is cleanup, not a rewrite.
+        # A high overall overlap can still hide a changed action in one
+        # sentence (for example, "choose the date" becoming "discuss the
+        # date"). Preserve nearly all substantive words here; requested
+        # rewrite, summary, and formatting commands use their own gates.
+        if task == "cleanup" and not allow_compression and n_src >= 30:
+            salient = [token for token in non_filler_src if len(token) >= 4]
+            if len(salient) >= 12:
+                salient_overlap = sum(token[:5] in cand_stems for token in salient) / len(salient)
+                if salient_overlap < 0.90:
+                    log.info("[POLISH SAFETY] Long cleanup changed too many substantive words (%.2f); rejected.", salient_overlap)
+                    return False
 
         # Hard truncation loses the closing words; a faithful polish keeps the
         # ending. Require at least one of the last few substantive source
@@ -619,6 +642,79 @@ def _candidate_preserves_content(
             log.info("[POLISH SAFETY] Candidate contains too many unrelated words (%.2f > 0.65); candidate rejected.", unrelated_count / float(len(cand_tokens)))
             return False
 
+    if command_format == "bullet_list":
+        weak = {"need", "needs", "send", "sends", "review", "reviews", "schedule", "schedules"}
+        anchors = [token for token in non_filler_src if len(token) >= 4 and token not in weak]
+        candidate_stems = {token[:4] for token in cand_tokens}
+        if anchors and sum(token[:4] in candidate_stems for token in anchors) / len(anchors) < 0.8:
+            log.info("[POLISH SAFETY] Bullet output dropped too many content anchors; rejected.")
+            return False
+
+    if task == "prompt" and not allow_compression:
+        # A short generated prompt must not quietly add capabilities. The
+        # small local model has, for example, turned plain "reminders" into
+        # "customizable reminders for each event". Generic prompt framing is
+        # fine; several new substantive words or one long new modifier are
+        # evidence that the model wrote requirements the speaker did not say.
+        source_stems = {token[:5] for token in src_tokens}
+        framing = {"create", "write", "task", "objective", "requirements", "context", "assistant", "provide", "ensure", "generate", "output"}
+        novel = {
+            token for token in cand_tokens
+            if len(token) >= 6 and token[:5] not in source_stems and token not in framing
+        }
+        if len(novel) > max(2, len(src_tokens) // 12) or any(len(token) >= 10 for token in novel):
+            log.info("[POLISH SAFETY] Prompt output introduced unsupported requirements; rejected.")
+            return False
+
+    return True
+
+
+_EMAIL_TEMPLATE_RE = re.compile(
+    r"\[\s*(?:your|sender|name|position|contact)[^\]]*\]|"
+    r"\bi hope this (?:message|email) finds you well\b|"
+    r"\b(?:best|kind) regards\b|\bsign-?off\b",
+    re.IGNORECASE,
+)
+_BULLET_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+\S", re.MULTILINE)
+_PROMPT_LABEL_RE = re.compile(r"^\s*(?:task|objective|requirements?|context)\s*:", re.IGNORECASE | re.MULTILINE)
+
+
+def _fulfills_command(
+    source: str,
+    candidate: str,
+    *,
+    task: str,
+    overrides: dict[str, object],
+    command_format: str | None,
+) -> bool:
+    """Require visible command fulfillment in addition to fidelity.
+
+    The content gate prevents loss; it cannot tell that a model silently
+    returned the original paragraph after a "make this short" command.
+    """
+    if command_format == "bullet_list" and not _BULLET_LINE_RE.search(candidate):
+        return False
+    if command_format == "email":
+        if _EMAIL_TEMPLATE_RE.search(candidate):
+            return False
+        if "subject:" in candidate.casefold() and "subject:" not in source.casefold():
+            return False
+        # A line break shows that the result is actually an email layout;
+        # otherwise a model merely cleaned the source sentence.
+        if "\n" not in candidate:
+            return False
+    if task == "prompt":
+        stripped = candidate.strip()
+        if not _PROMPT_LABEL_RE.search(stripped):
+            if stripped.endswith("?") or re.match(r"^(?:sure|okay|yes|no)\b", stripped, re.IGNORECASE):
+                return False
+            if not re.match(r"^(?:create|build|write|improve|make|design|develop|implement|generate)\b", stripped, re.IGNORECASE):
+                return False
+    if overrides.get("length") == "short":
+        source_words = len(_tokenize_for_fidelity(source))
+        candidate_words = len(_tokenize_for_fidelity(candidate))
+        if source_words >= 9 and candidate_words >= source_words * 0.9:
+            return False
     return True
 
 
@@ -648,18 +744,41 @@ def _command_system_prompt(task: str, allow_compression: bool) -> str:
     )
 
 
-def _apply_dictionary_safely(text: str) -> str:
+def _apply_dictionary_safely(
+    text: str, trace: list[dict[str, str]] | None = None,
+) -> str:
     """Apply the active dictionary without ever losing the transcript.
 
     Dictionary reads are normally cached, but a full/locked SQLite database
     must not turn a usable deterministic fallback into a failed dictation.
     """
     try:
-        result = dictionary_engine.apply_dictionary_post_processing(text)
+        try:
+            result = dictionary_engine.apply_dictionary_post_processing(text, trace=trace)
+        except TypeError as exc:
+            # Lightweight legacy/test dictionary adapters may not yet expose
+            # the optional evidence seam; never make their replacement fail.
+            if "trace" not in str(exc).lower():
+                raise
+            result = dictionary_engine.apply_dictionary_post_processing(text)
         return result if isinstance(result, str) else text
     except Exception as exc:
         log.warning("[POLISH SAFETY] Dictionary post-processing unavailable: %s", exc)
         return text
+
+
+def _apply_dictionary_with_trace(text: str, trace: list[dict[str, str]] | None) -> str:
+    """Keep legacy one-argument dictionary adapters compatible."""
+    if trace is None:
+        return _apply_dictionary_safely(text)
+    try:
+        return _apply_dictionary_safely(text, trace)
+    except TypeError as exc:
+        # Older integrations can replace this helper with a one-argument
+        # adapter. Preserve their dictionary pass even without trace support.
+        if "positional argument" not in str(exc) and "were given" not in str(exc):
+            raise
+        return _apply_dictionary_safely(text)
 
 
 def _timeout_status(exc: BaseException) -> str:
@@ -693,6 +812,15 @@ class TextPolisher:
     @_last_attempt_status.setter
     def _last_attempt_status(self, value: object) -> None:
         self._attempt_state.status = str(value or "")
+
+    @property
+    def _last_lfm_bridge_attempted(self) -> bool:
+        """Whether this thread already gave the selected LFM one bridge try."""
+        return bool(getattr(self._attempt_state, "lfm_bridge_attempted", False))
+
+    @_last_lfm_bridge_attempted.setter
+    def _last_lfm_bridge_attempted(self, value: object) -> None:
+        self._attempt_state.lfm_bridge_attempted = bool(value)
 
     @staticmethod
     def _notify_outcome(callback: Any, outcome: str) -> None:
@@ -767,14 +895,21 @@ class TextPolisher:
             return ""
 
         outcome_callback = kwargs.get("outcome_callback")
+        dictionary_trace = kwargs.get("dictionary_trace")
+        if not isinstance(dictionary_trace, list):
+            dictionary_trace = None
         task = str(kwargs.get("task") or "cleanup").strip().lower()
         if task not in {"cleanup", "rewrite", "summarize", "prompt", "format"}:
             task = "cleanup"
         overrides = kwargs.get("overrides") or {}
+        command_format = kwargs.get("command_format")
+        if not isinstance(command_format, str):
+            command_format = None
         allow_compression = task == "summarize" or (
             isinstance(overrides, dict) and overrides.get("length") == "short"
         )
         self._last_attempt_status = ""
+        self._last_lfm_bridge_attempted = False
 
         # Extract instruction and level
         if hasattr(style_instruction, "instruction"):
@@ -783,6 +918,23 @@ class TextPolisher:
             instruction = style_instruction
         else:
             instruction = kwargs.get("style", "") or ""
+
+        # Direct callers predate the structured command metadata.  Recover
+        # only visible format/length requirements from their trusted style
+        # text so an unchanged model echo cannot be reported as fulfilled.
+        instruction_lower = str(instruction).casefold()
+        if command_format is None:
+            if "email" in instruction_lower:
+                command_format = "email"
+            elif "bullet list" in instruction_lower:
+                command_format = "bullet_list"
+            elif "prompt" in instruction_lower and task == "prompt":
+                command_format = "prompt"
+        if not isinstance(overrides, dict):
+            overrides = {}
+        elif not overrides and ("keep the result short" in instruction_lower or "be concise" in instruction_lower):
+            overrides = {"length": "short"}
+        allow_compression = task == "summarize" or overrides.get("length") == "short"
 
         level = cleanup_level or kwargs.get("level") or "cleanup_medium"
         if level not in {"cleanup_none", "cleanup_light", "cleanup_medium", "cleanup_high"}:
@@ -797,7 +949,7 @@ class TextPolisher:
                 if float(deadline) - time.monotonic() <= AI_POLISH_DETERMINISTIC_RESERVE_SECONDS:
                     cleaned = self._deterministic_cleanup(raw_text, "", level)
                     self._notify_outcome(outcome_callback, "timeout")
-                    return _apply_dictionary_safely(cleaned)
+                    return _apply_dictionary_with_trace(cleaned, dictionary_trace)
             except (TypeError, ValueError):
                 # Treat an invalid deadline as absent for backwards
                 # compatibility; callers that pass a real float get the hard
@@ -817,9 +969,9 @@ class TextPolisher:
         # Basic deterministic cleanup and explicit dictionary rules remain
         # local, fast, and useful; do not apply a selected writing style here.
         if not polishing_enabled:
-            cleaned = self._deterministic_cleanup(raw_text, "", level)
+            cleaned = self._deterministic_cleanup(raw_text, "", level, preserve_repetitions=True)
             self._notify_outcome(outcome_callback, "disabled")
-            return _apply_dictionary_safely(cleaned)
+            return _apply_dictionary_with_trace(cleaned, dictionary_trace)
 
         # A frozen session model and an explicit AI transformation are execution
         # requests.  They must not be silently replaced by the short local lane.
@@ -833,7 +985,7 @@ class TextPolisher:
         if explicit_model == "local/deterministic":
             self._last_attempt_status = "local"
             self._notify_outcome(outcome_callback, "local")
-            return _apply_dictionary_safely(self._deterministic_cleanup(raw_text, instruction, level))
+            return _apply_dictionary_with_trace(self._deterministic_cleanup(raw_text, instruction, level), dictionary_trace)
         # Ultra-short transcripts bypass LLM API calls only when the caller did
         # not explicitly request an AI model or an AI-only transformation.
         try:
@@ -842,7 +994,7 @@ class TextPolisher:
                 log.info("[POLISH] Short transcript (%d words); bypassing AI API.", len(words))
                 cleaned = self._deterministic_cleanup(raw_text, instruction, level)
                 self._notify_outcome(outcome_callback, "local")
-                return _apply_dictionary_safely(cleaned)
+                return _apply_dictionary_with_trace(cleaned, dictionary_trace)
         except Exception:
             pass
 
@@ -898,15 +1050,22 @@ class TextPolisher:
                 pool_result, raw_text, preserve_terminal=(task == "cleanup"),
                 instruction=instruction,
             )
-            if not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
+            sanitized = cleanup_text(sanitized, level)
+            safe_candidate = not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
                 raw_text, sanitized, task=task, allow_compression=allow_compression,
-            ):
+                command_format=command_format,
+            )
+            fulfilled = safe_candidate and _fulfills_command(
+                raw_text, sanitized, task=task, overrides=overrides,
+                command_format=command_format,
+            )
+            if fulfilled:
                 log.info("[POLISH] API polished successfully: '%s' -> '%s'", raw_text, sanitized)
                 self._record_polish_latency(explicit_model, attempt_started)
                 self._notify_outcome(outcome_callback, "ai_accepted")
-                return _apply_dictionary_safely(sanitized)
+                return _apply_dictionary_with_trace(sanitized, dictionary_trace)
             log.warning("[POLISH SAFETY] API output failed fidelity checks; using deterministic cleanup.")
-            attempt_outcome = "fidelity_reject"
+            attempt_outcome = "command_unfulfilled" if task != "cleanup" else "fidelity_reject"
         else:
             attempt_outcome = "timeout" if self._last_attempt_status == "timeout" else "provider_failure"
 
@@ -922,6 +1081,10 @@ class TextPolisher:
                 local_model_budget > LOCAL_MODEL_MIN_BUDGET_SECONDS
                 and lfm_engine.is_lfm_downloaded()
                 and explicit_model != "local/deterministic"
+                and not (
+                    self._last_lfm_bridge_attempted
+                    and lfm_engine.is_lfm_model_ref(explicit_model)
+                )
             ):
                 lfm_started = time.perf_counter()
                 lfm_result = lfm_engine.polish_with_lfm(
@@ -932,9 +1095,16 @@ class TextPolisher:
                         lfm_result, raw_text, preserve_terminal=(task == "cleanup"),
                         instruction=instruction,
                     )
-                    if not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
+                    sanitized = cleanup_text(sanitized, level)
+                    safe_candidate = not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
                         raw_text, sanitized, task=task, allow_compression=allow_compression,
-                    ):
+                        command_format=command_format,
+                    )
+                    fulfilled = safe_candidate and _fulfills_command(
+                        raw_text, sanitized, task=task, overrides=overrides,
+                        command_format=command_format,
+                    )
+                    if fulfilled:
                         # A local model does not honour the requested register on
                         # its own, so apply the style the deterministic path
                         # would (e.g. very-casual lowercase, no trailing period).
@@ -944,17 +1114,19 @@ class TextPolisher:
                             lfm_engine.LFM_MODEL_ID, lfm_started, is_local=True,
                         )
                         self._notify_outcome(outcome_callback, "local_model")
-                        return _apply_dictionary_safely(sanitized)
+                        return _apply_dictionary_with_trace(sanitized, dictionary_trace)
+                    if task != "cleanup":
+                        attempt_outcome = "command_unfulfilled"
         except Exception:
             pass
 
         # Step 2: Built-in instant zero-latency NLP polisher fallback
         # The selected AI/style pass did not complete. Deliver only safe local
         # cleanup rather than silently applying a style or voice command.
-        cleaned = self._deterministic_cleanup(raw_text, "", level)
+        cleaned = self._apply_style_register(self._deterministic_cleanup(raw_text, "", level), instruction)
         log.info("Polished cleanup (%s): '%s' -> '%s'", level, raw_text, cleaned)
         self._notify_outcome(outcome_callback, attempt_outcome)
-        return _apply_dictionary_safely(cleaned)
+        return _apply_dictionary_with_trace(cleaned, dictionary_trace)
 
     @staticmethod
     def _apply_style_register(text: str, style_instruction: Any) -> str:
@@ -1003,8 +1175,8 @@ class TextPolisher:
             pass
 
     @staticmethod
-    def _deterministic_cleanup(raw_text: str, style_instruction: str, level: str) -> str:
-        cleaned = cleanup_text(raw_text, level)
+    def _deterministic_cleanup(raw_text: str, style_instruction: str, level: str, preserve_repetitions: bool = False) -> str:
+        cleaned = cleanup_text(raw_text, level, preserve_repetitions=preserve_repetitions)
         # ``cleanup_none`` is an explicit verbatim preference. Dictionary
         # processing is applied by the caller, but local cleanup must not add
         # sentence case, punctuation, or a style transformation.
@@ -1359,6 +1531,12 @@ class TextPolisher:
                 remaining = remaining_provider_budget()
                 bridge_timeout = min(preferred_timeout, remaining)
                 if bridge_runnable and remaining >= AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS:
+                    try:
+                        from voice_flow.lfm_engine import is_lfm_model_ref
+                        if is_lfm_model_ref(selected_video_model_ref):
+                            self._last_lfm_bridge_attempted = True
+                    except Exception:
+                        pass
                     bridge_result = self._run_bridge_with_timeout(
                         call_bridge,
                         bridge_timeout,

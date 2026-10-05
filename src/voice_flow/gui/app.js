@@ -1509,6 +1509,30 @@ async function loadHistory() {
   }
 }
 
+function historyProcessingMetadata(r) {
+  const meta = r.processing_metadata;
+  if (!meta || typeof meta !== "object") return "";
+  const parts = [];
+  if (meta.polish && (meta.polish.display || meta.polish.outcome)) {
+    const disp = meta.polish.display || (meta.polish.outcome === "provider_failure" ? "AI unavailable" : meta.polish.outcome);
+    parts.push(`<span class="meta-tag meta-polish">${escapeHtml(disp)}</span>`);
+  }
+  if (meta.command && (meta.command.label || meta.command.status)) {
+    const statusText = meta.command.status === "not_applied" ? "Not applied" : (meta.command.status || "");
+    const labelText = meta.command.label ? `${escapeHtml(meta.command.label)}: ` : "";
+    parts.push(`<span class="meta-tag meta-command">${labelText}${escapeHtml(statusText)}</span>`);
+  } else if (meta.style) {
+    const stLabel = meta.style.label ? `${escapeHtml(meta.style.label)}: ` : "";
+    const stApplied = meta.style.applied ? "Applied" : "Not applied";
+    parts.push(`<span class="meta-tag meta-style">${stLabel}${stApplied}</span>`);
+  }
+  if (meta.dictionary && Array.isArray(meta.dictionary.replacements) && meta.dictionary.replacements.length > 0) {
+    const repItems = meta.dictionary.replacements.map(rep => `${escapeHtml(rep.from)} → ${escapeHtml(rep.to)}`).join(", ");
+    parts.push(`<span class="meta-tag meta-dict">Dictionary: ${repItems}</span>`);
+  }
+  return parts.length > 0 ? `<div class="history-meta-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 11px;">${parts.join("")}</div>` : "";
+}
+
 function renderDictationCardHtml(r) {
   const timeStr = r.timestamp && r.timestamp.includes(" ") ? r.timestamp.split(" ")[1].substring(0, 5) : "";
   const isPinned = Boolean(r.is_pinned);
@@ -1552,8 +1576,16 @@ function renderDictationCardHtml(r) {
           ${isPinned ? `<span class="pinned-badge"><svg class="lucide" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg> Pinned</span>` : ""}
           ${metaDetails}
         </div>
-        <div class="dictation-text" style="${(isVideo || isAudio) ? "font-weight: 600;" : ""}">${escapeHtml(titleText)}</div>
-        ${promptSubtitle}
+        ${(isVideo || isAudio) ? `
+          <div class="dictation-text" style="font-weight: 600;">${escapeHtml(titleText)}</div>
+          ${promptSubtitle}
+        ` : (r.raw_text && r.raw_text !== r.polished_text ? `
+          <div class="dictation-text"><span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; margin-right: 4px;">Delivered:</span>${escapeHtml(titleText)}</div>
+          <div class="dictation-heard" style="font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;"><span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; margin-right: 4px;">Heard:</span>${escapeHtml(r.raw_text)}</div>
+        ` : `
+          <div class="dictation-text">${escapeHtml(titleText)}</div>
+        `)}
+        ${historyProcessingMetadata(r)}
       </div>
       <div class="dictation-actions">
         ${mediaActions}
@@ -6241,12 +6273,27 @@ function _afMapNlmState(data) {
   if (data.available === false || data.status === "dependency_missing") {
     return { key: "setup", label: "Setup needed — open Manage to finish setup" };
   }
+  const email = data.email || data.account_email || (details.account && details.account.email) || "";
+  if (data.recovery_state === "restoring") {
+    return { key: "checking", label: "Checking connection…" };
+  }
+  if (data.recovery_state === "transient_error") {
+    return { key: "attention", label: "Temporarily offline" };
+  }
+  if (data.recovery_state === "sign_in_required" || data.online_verified === false) {
+    return { key: "attention", label: "Sign-in required" };
+  }
+  if (data.online_verified === true) {
+    return { key: "connected", label: email ? `Connected · ${email}` : "Connected" };
+  }
+  if (data.account_saved || data.authenticated === true) {
+    return {
+      key: "saved",
+      label: email ? `Account saved · ${email} · online sign-in unverified` : "Account saved · online sign-in unverified",
+    };
+  }
   if (details.disconnected || data.authenticated === false) {
     return { key: "not-connected", label: "Not connected" };
-  }
-  if (data.authenticated === true) {
-    const email = data.email || data.account_email || (details.account && details.account.email) || "";
-    return { key: "connected", label: email ? `Connected · ${email}` : "Connected" };
   }
   return null;
 }

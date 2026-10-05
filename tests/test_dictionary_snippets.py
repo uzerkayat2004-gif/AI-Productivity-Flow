@@ -142,6 +142,16 @@ def test_dictionary_exact_casing_and_no_fuzzy_false_positive(store):
     assert engine.apply_dictionary_post_processing("voice floe is ready") == "voice floe is ready"
 
 
+def test_storage_backed_joined_vocabulary_recognizes_spoken_space_form(store):
+    """The real persistence path gives explicit joined terms a safe alias."""
+    assert store.add_dictionary_word("HyperKube")
+    engine = DictionaryEngine(store)
+    trace: list[dict[str, str]] = []
+
+    assert engine.apply_dictionary_post_processing("Please send the Hyper Kube update.", trace) == "Please send the HyperKube update."
+    assert trace == [{"from": "Hyper Kube", "to": "HyperKube"}]
+
+
 def test_dictionary_multiword_correction_and_punctuation(store):
     store.add_dictionary_correction("john doe", "John Doe")
     assert DictionaryEngine(store).apply_dictionary_post_processing("I spoke to JOHN DOE.") == "I spoke to John Doe."
@@ -322,6 +332,18 @@ def test_api_dictionary_details_shows_auto_rows_with_provenance(store, monkeypat
         status, words = get(url, "/api/dictionary")
         assert status == 200
     assert words == ["PersonalTerm", "LearnedTerm"]
+
+
+def test_api_dictionary_recognition_details_exposes_only_safe_generated_aliases(store, monkeypatch):
+    assert store.add_dictionary_word("HyperKube")
+    assert store.add_dictionary_word("Here")
+    with api_server(store, monkeypatch) as url:
+        status, entries = get(url, "/api/dictionary?details=1&include_auto=1&recognition=1")
+    assert status == 200
+    assert [(entry["word"], entry["recognized_as"]) for entry in entries] == [
+        ("HyperKube", ["Hyper Kube"]),
+        ("Here", []),
+    ]
 
 
 def test_api_rejects_origin_before_body_and_oversized_body(store, monkeypatch):

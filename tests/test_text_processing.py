@@ -7,7 +7,7 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, collapse_echo_repeats, split_press_enter
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, collapse_echo_repeats, format_dictated_email, split_press_enter
 
 
 def test_spoken_punctuation_converts_explicit_terms_without_rewriting_words() -> None:
@@ -49,3 +49,23 @@ def test_echo_cleanup_does_not_cross_sentence_boundaries() -> None:
 def test_cleanup_preserves_quoted_code_and_line_structure() -> None:
     text = 'um I I need "um" and `uh`\nuh send it now'
     assert cleanup_text(text, "cleanup_light") == 'I need "um" and `uh`\nsend it now'
+
+
+def test_local_cleanup_fixes_only_unambiguous_agreement_and_punctuation() -> None:
+    text = 'um i has the update , and they was ready . Keep "i has" and `they was`.'
+    assert cleanup_text(text, "cleanup_light") == 'I have the update, and they were ready. Keep "i has" and `they was`.'
+
+
+def test_cleanup_none_is_verbatim_before_dictionary_processing() -> None:
+    text = "  um i has this , exactly  \n"
+    assert cleanup_text(text, "cleanup_none") == text
+
+
+def test_cleanup_keeps_fillers_inside_urls_emails_paths_and_identifiers() -> None:
+    text = r"Um, open https://uh.example.com and email me@uh.com from /um/data using uh.client with $uh --um and \\server\uh"
+    assert cleanup_text(text, "cleanup_light") == r"open https://uh.example.com and email me@uh.com from /um/data using uh.client with $uh --um and \\server\uh"
+
+
+def test_local_email_layout_requires_an_existing_likely_recipient() -> None:
+    assert format_dictated_email("Alex, please send the report by Friday.") == "Alex,\n\nPlease send the report by Friday."
+    assert format_dictated_email("Tomorrow, please send the report by Friday.") is None

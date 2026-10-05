@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -81,6 +82,10 @@ def test_complete_notebooklm_flow_success(monkeypatch, tmp_path):
         "voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path",
         lambda prof=None: test_storage_dir / "storage_state.backup.json",
     )
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": "user.test2026@gmail.com"},
+    )
 
     with patch("voice_flow.google_auth._provider_token_exchange", return_value=mock_tokens):
         with patch("voice_flow.google_auth._provider_userinfo", return_value=mock_userinfo):
@@ -117,6 +122,10 @@ def test_notebooklm_switch_account(monkeypatch, tmp_path):
         "voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path",
         lambda prof=None: tmp_path / "storage_state.backup.json",
     )
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": None},
+    )
 
     flow1 = start_notebooklm_browser_flow(port=8991, profile="video-flow-experiment")
     with patch("voice_flow.google_auth._provider_token_exchange", return_value={"access_token": "tok1"}):
@@ -152,6 +161,10 @@ def test_notebooklm_disconnect(monkeypatch, tmp_path):
         lambda prof=None: storage_file,
     )
 
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": "connected@gmail.com"},
+    )
     login_flow.record_successful_login("connected@gmail.com")
     assert login_flow.get_login_state()["success"] is True
 
@@ -182,6 +195,13 @@ def test_notebooklm_api_server_endpoints_integration(monkeypatch, tmp_path):
     """End-to-end HTTP integration test for NotebookLM status, auth/start, /callback, and disconnect."""
     monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
     monkeypatch.setattr("voice_flow.google_auth.open_system_browser", lambda url: True)
+    monkeypatch.setattr(
+        login_flow, "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": "api.user@example.com"},
+    )
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.resolve_notebooklm_cli", lambda explicit=None: fake_cli)
 
     db_path = str(tmp_path / "vf_nlm_test.db")
     test_storage = StorageEngine(db_path)
@@ -213,7 +233,7 @@ def test_notebooklm_api_server_endpoints_integration(monkeypatch, tmp_path):
         # 1. Start auth via POST /api/video-flow/notebooklm/auth/start
         req_start = urllib.request.Request(
             f"{base_url}/api/video-flow/notebooklm/auth/start",
-            data=json.dumps({"profile": "video-flow-experiment"}).encode("utf-8"),
+            data=json.dumps({"profile": "video-flow-experiment", "mode": "browser"}).encode("utf-8"),
             headers={"Content-Type": "application/json", "Connection": "close"},
         )
         with urllib.request.urlopen(req_start, timeout=10) as resp:
@@ -353,6 +373,55 @@ def test_login_command_fresh_on_switch_account():
     assert "--force" in cmd_mt
 
 
+def test_login_command_fresh_on_explicit_reconnect():
+    """An explicit reconnect carries --fresh without invoking account switch."""
+    from voice_flow.video_flow_engine.notebooklm.login_flow import _login_command
+
+    cmd = _login_command(
+        Path("C:/fake/notebooklm.exe"), "test-prof", mode="browser",
+        account_email=None, browser="chrome", browser_timeout=300,
+        fresh_login=True,
+    )
+    assert "--fresh" in cmd
+
+
+def test_failed_reconnect_opens_one_browser_only(tmp_path, monkeypatch):
+    """An unsuccessful Google sign-in must not launch a second browser."""
+    commands = []
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: Path("C:/fake/notebooklm.exe"))
+    monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda *a, **k: 0)
+    monkeypatch.setattr(login_flow, "_prepare_browser_profile", lambda *a, **k: None)
+    monkeypatch.setattr(
+        login_flow, "_run_login_once",
+        lambda command, *_: (commands.append(command) or 1, ""),
+    )
+
+    login_flow._watch_login(
+        "test-prof", "browser", None, "chrome", 60,
+        tmp_path / "login.log", fresh_login=True,
+    )
+
+    assert len(commands) == 1
+    assert "--fresh" in commands[0]
+    assert "chromium" not in commands[0]
+    state = login_flow.get_login_state()
+    assert state["success"] is False
+    assert "sign-in did not finish" in state["error"].lower()
+
+
+def test_start_login_rejects_profile_path_before_switch_cleanup(monkeypatch):
+    monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
+    monkeypatch.setattr(
+        login_flow, "_clean_account_state_for_switch",
+        lambda *_: pytest.fail("must reject unsafe profile before cleanup"),
+    )
+
+    result = login_flow.start_login(profile="../../outside", mode="cli", switch_account=True)
+
+    assert result["launched"] is False
+    assert result["error"] == "Invalid NotebookLM profile name"
+
+
 def test_complete_notebooklm_flow_cleans_mismatched_master_token_on_account_switch(monkeypatch, tmp_path):
     """Verify account switch cleans mismatched master_token.json from old account."""
     opened_urls = []
@@ -469,7 +538,7 @@ def test_start_login_opens_auth_system_when_direct_false(monkeypatch):
     opened_urls = []
     monkeypatch.setattr("voice_flow.google_auth.open_system_browser", lambda url: opened_urls.append(url) or True)
 
-    res = login_flow.start_login(profile="video-flow-experiment", port=8991, direct=False)
+    res = login_flow.start_login(profile="video-flow-experiment", mode="browser", port=8991, direct=False)
     assert res["launched"] is True
     assert res["mode"] == "browser"
     assert len(opened_urls) == 1
@@ -547,6 +616,182 @@ def test_start_login_cli_mode_launches_watcher(monkeypatch):
     assert "chrome" in commands[0]
 
 
+def test_run_login_once_starts_one_foreground_handoff_for_cli_login(tmp_path, monkeypatch):
+    """The background CLI launch still gives its new browser one foreground chance."""
+    calls = []
+
+    class FakeProcess:
+        pid = 421
+
+        def wait(self, timeout):
+            calls.append(("wait", timeout))
+            return 0
+
+    monkeypatch.setattr(login_flow.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(
+        login_flow,
+        "_start_login_foreground_handoff",
+        lambda command, pid, baseline, stop_event, watch_seconds: calls.append(
+            ("handoff", command, pid, baseline, stop_event, watch_seconds)
+        ),
+    )
+
+    code, error = login_flow._run_login_once(
+        ["C:/fake/notebooklm.exe", "--profile", "test-profile", "login", "--browser", "chrome"],
+        tmp_path / "login.log",
+        60,
+    )
+
+    assert (code, error) == (0, "")
+    assert [call[0] for call in calls] == ["handoff", "wait"]
+    assert calls[0][1][2] == "test-profile"
+    assert calls[0][2] == 421
+    assert isinstance(calls[0][3], set)
+    assert isinstance(calls[0][4], threading.Event)
+    assert calls[0][4].is_set()
+    assert calls[0][5] == 60.0
+
+
+def test_run_login_once_kills_and_reaps_timed_out_cli(tmp_path, monkeypatch):
+    events = []
+
+    class TimedOutProcess:
+        pid = 422
+
+        def wait(self, timeout):
+            events.append(("wait", timeout))
+            if len([event for event in events if event[0] == "wait"]) == 1:
+                raise subprocess.TimeoutExpired("notebooklm", timeout)
+            return 124
+
+        def kill(self):
+            events.append(("kill",))
+
+    monkeypatch.setattr(login_flow.subprocess, "Popen", lambda *args, **kwargs: TimedOutProcess())
+    monkeypatch.setattr(login_flow, "_start_login_foreground_handoff", lambda *_args: None)
+
+    code, error = login_flow._run_login_once(
+        ["C:/fake/notebooklm.exe", "--profile", "test-profile", "login"],
+        tmp_path / "login.log",
+        60,
+    )
+
+    assert code == 124
+    assert "timed out" in error
+    assert events == [("wait", 60), ("kill",), ("wait", 5)]
+
+
+def test_profile_user_data_dir_requires_an_exact_argument_boundary():
+    marker = "c:/users/test/.notebooklm/profiles/p/browser_profile"
+    assert login_flow._matches_profile_user_data_dir(
+        f"chrome.exe --user-data-dir={marker} --no-first-run", marker, "p"
+    )
+    assert not login_flow._matches_profile_user_data_dir(
+        f"chrome.exe --user-data-dir={marker}_evil", marker, "p"
+    )
+
+
+def test_foreground_fallback_uses_kernel32_thread_id():
+    import inspect
+
+    source = inspect.getsource(login_flow._bring_hwnd_forward)
+    assert "kernel32.GetCurrentThreadId" in source
+    assert "user32.GetCurrentThreadId" not in source
+
+
+def test_bring_login_window_forward_only_targets_exact_profile(monkeypatch):
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_profile", lambda p=None: p or "test-profile")
+    monkeypatch.setattr(login_flow, "_profile_browser_pids", lambda p: {41})
+    monkeypatch.setattr(
+        login_flow,
+        "_visible_top_level_windows",
+        lambda: [(100, 40, "Personal Chrome", "Chrome_WidgetWin_1"), (101, 41, "NotebookLM", "Chrome_WidgetWin_1")],
+    )
+    focused = []
+    monkeypatch.setattr(login_flow, "_bring_hwnd_forward", lambda hwnd: focused.append(hwnd) or True)
+
+    assert login_flow.bring_login_window_forward("test-profile") is True
+    assert focused == [101]
+
+
+def test_login_handoff_only_brings_new_windows_security_prompt_after_profile_browser(monkeypatch):
+    windows = iter([
+        [(100, 40, "Personal Chrome", "Chrome_WidgetWin_1")],
+        [(101, 41, "NotebookLM", "Chrome_WidgetWin_1")],
+        [
+            (101, 41, "NotebookLM", "Chrome_WidgetWin_1"),
+            (102, 900, "Windows Security", "Credential Dialog Xaml Host"),
+        ],
+    ])
+    monotonic = iter([0.0, 0.2, 0.4, 7.0])
+    monkeypatch.setattr(login_flow, "_visible_top_level_windows", lambda: next(windows))
+    monkeypatch.setattr(login_flow, "_profile_browser_pids", lambda _profile: {41})
+    monkeypatch.setattr(login_flow.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(login_flow.time, "sleep", lambda _seconds: None)
+    focused = []
+    monkeypatch.setattr(login_flow, "_bring_hwnd_forward", lambda hwnd: focused.append(hwnd) or True)
+
+    login_flow._handoff_login_windows("test-profile", 421)
+
+    assert focused == [101, 102]
+
+
+def test_login_handoff_accepts_a_prelaunch_baseline_for_fast_credential_prompt(monkeypatch):
+    monotonic = iter([0.0, 0.2, 7.0])
+    monkeypatch.setattr(
+        login_flow,
+        "_visible_top_level_windows",
+        lambda: [
+            (101, 41, "NotebookLM", "Chrome_WidgetWin_1"),
+            (102, 900, "Windows Security", "Credential Dialog Xaml Host"),
+        ],
+    )
+    monkeypatch.setattr(login_flow, "_profile_browser_pids", lambda _profile: {41})
+    monkeypatch.setattr(login_flow.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(login_flow.time, "sleep", lambda _seconds: None)
+    focused = []
+    monkeypatch.setattr(login_flow, "_bring_hwnd_forward", lambda hwnd: focused.append(hwnd) or True)
+
+    login_flow._handoff_login_windows("test-profile", 421, initial_hwnds={100})
+
+    assert focused == [101, 102]
+
+
+def test_login_handoff_can_focus_a_late_prompt_without_rescanning_browser_processes(monkeypatch):
+    windows = iter([
+        [(101, 41, "NotebookLM", "Chrome_WidgetWin_1")],
+        [
+            (101, 41, "NotebookLM", "Chrome_WidgetWin_1"),
+            (102, 900, "Windows Security", "Credential Dialog Xaml Host"),
+        ],
+    ])
+    monotonic = iter([0.0, 0.2, 120.0, 301.0])
+    scans = []
+    monkeypatch.setattr(login_flow, "_visible_top_level_windows", lambda: next(windows))
+    monkeypatch.setattr(login_flow, "_profile_browser_pids", lambda _profile: scans.append(1) or {41})
+    monkeypatch.setattr(login_flow.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(login_flow.time, "sleep", lambda _seconds: None)
+    focused = []
+    monkeypatch.setattr(login_flow, "_bring_hwnd_forward", lambda hwnd: focused.append(hwnd) or True)
+
+    login_flow._handoff_login_windows(
+        "test-profile", 421, initial_hwnds={100}, credential_watch_seconds=300.0,
+    )
+
+    assert focused == [101, 102]
+    assert scans == [1]
+
+
+def test_login_handoff_stops_promptly_when_cli_exits(monkeypatch):
+    stopped = threading.Event()
+    stopped.set()
+    monkeypatch.setattr(
+        login_flow, "_visible_top_level_windows", lambda: pytest.fail("stopped watcher must not inspect windows")
+    )
+
+    login_flow._handoff_login_windows("test-profile", 421, stop_event=stopped)
+
+
 def test_prepare_browser_profile_disables_picker_and_first_run(tmp_path, monkeypatch):
     """Verify _prepare_browser_profile writes First Run and suppresses profile picker and default browser check."""
     prof_dir = tmp_path / "profiles" / "test-prep-prof"
@@ -569,30 +814,31 @@ def test_prepare_browser_profile_disables_picker_and_first_run(tmp_path, monkeyp
 
 
 def test_terminate_stale_login_processes_optional_log_and_normalization(tmp_path, monkeypatch):
-    """Verify _terminate_stale_login_processes works without log_path and normalizes path separators."""
+    """The stale-browser cleaner uses one psutil scan, never a PowerShell CIM scan."""
+    import sys
     from types import SimpleNamespace
 
-    calls = []
-    monkeypatch.setattr(login_flow.os, "name", "nt")
-    monkeypatch.setattr(
-        login_flow.subprocess, "run",
-        lambda *a, **k: calls.append(a) or SimpleNamespace(stdout="4321\n", returncode=0),
+    killed = []
+    class FakeProcess:
+        info = {"pid": 4321, "name": "chrome.exe", "cmdline": []}
+        def kill(self):
+            killed.append(self.info["pid"])
+
+    fake_psutil = SimpleNamespace(
+        NoSuchProcess=RuntimeError,
+        AccessDenied=PermissionError,
+        process_iter=lambda _attrs: [FakeProcess()],
     )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
 
     fake_b_dir = tmp_path / "fake_prof" / "browser_profile"
     fake_b_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(login_flow, "_profile_browser_dir", lambda p: fake_b_dir)
+    FakeProcess.info["cmdline"] = ["chrome.exe", f"--user-data-dir={fake_b_dir}"]
 
-    # Call with log_path omitted (defaults to None)
     killed = login_flow._terminate_stale_login_processes("my-test-profile")
     assert killed == 1
-    assert len(calls) >= 2
-    ps_cmd = calls[0][0]
-    assert ps_cmd[0] == "powershell"
-    script = " ".join(ps_cmd)
-    assert "--user-data-dir=" in script
-    assert "my-test-profile" in script
-    assert "\\" not in script.split("$marker = '")[1].split("'")[0]  # normalized to forward slashes
+    assert "powershell" not in login_flow._terminate_stale_login_processes.__code__.co_consts
 
 
 def test_clean_account_state_for_switch_wipes_all_state_and_browser_dir(tmp_path, monkeypatch):
@@ -684,8 +930,3 @@ def test_watch_login_rejects_identical_switched_from_account(tmp_path, monkeypat
     assert state["running"] is False
     assert state["success"] is False
     assert "Account switch failed: still signed in as same.user@gmail.com" in (state["error"] or "")
-
-
-
-
-

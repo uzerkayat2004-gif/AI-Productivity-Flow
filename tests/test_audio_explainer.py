@@ -1,13 +1,47 @@
 import pytest
-from voice_flow.audio_explainer_prompts import build_audio_explainer_prompt, sanitize_explanation_text
+import json
+from voice_flow.audio_explainer_prompts import build_audio_explainer_prompt, build_human_reading_prompt, sanitize_explanation_text
 from voice_flow.local_summarizer import local_spoken_summarizer
 from voice_flow.audio_summary import audio_summary_service
 from voice_flow.structured_reader import PAUSE_SECTION, PAUSE_PARAGRAPH
 
 def test_prompt_generation():
     prompt = build_audio_explainer_prompt("Please review this PR.")
-    assert "Explain the following selected text to me conversationally" in prompt
+    assert "walk through all major themes in source order" in prompt
     assert "Please review this PR." in prompt
+
+
+def test_human_reading_prompt_sets_coverage_and_word_target_for_article():
+    source = "Sentence about a distinct theme. " * 64
+    prompt = build_human_reading_prompt(source)
+    assert "roughly 176 to 240 spoken words" in prompt
+    assert "do not enumerate every implementation detail" in prompt
+    assert "named framework or mechanism" in prompt
+    assert "geographic qualifier" in prompt
+
+
+def test_summary_gemini_transport_keeps_its_existing_request_contract(monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"candidates": [{"content": {"parts": [{"text": "summary"}]}}]}'
+
+    def fake_open(request, timeout):
+        captured["payload"] = json.loads(request.data.decode())
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("voice_flow.audio_summary.urllib.request.urlopen", fake_open)
+    assert audio_summary_service._call_gemini("gemini-test", "test-key", "prompt") == "summary"
+    assert captured["timeout"] == 30
+    assert captured["payload"]["generationConfig"]["maxOutputTokens"] == 16384
 
 def test_sanitize_chatter():
     dirty = "Sure, here is an explanation: The feature is ready."

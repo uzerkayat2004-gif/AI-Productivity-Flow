@@ -18,6 +18,15 @@ from voice_flow.config import config
 from voice_flow.dictionary import dictionary_engine
 from voice_flow import nemotron_engine
 from voice_flow import stt_engines
+from voice_flow.local_model_resources import (
+    LOCAL_MODEL_IDLE_SECONDS,
+    ModelUseLease,
+    acquire_model_use,
+    cleanup_is_forced,
+    idle_time,
+    notify_models_available,
+    register_idle_cleanup,
+)
 from voice_flow.voice_enhance import enhance_for_stt, vad_threshold_for, calibrate_vad_parameters
 
 log = logging.getLogger(__name__)
@@ -115,16 +124,45 @@ class Transcriber:
         self._loading = False
         self._loaded_model_ref: str | None = None
         self._loading_model_ref: str | None = None
+        # Most recent selection requested while a model is loading.  The
+        # loader publishes only this selection; an older completion is
+        # discarded instead of becoming a hidden resident model.
+        self._requested_model_ref: str | None = None
         self._lock = threading.Lock()
         self._transcribe_lock = threading.Lock()
         self._whisper_models: dict[str, WhisperModel] = {}
+        self._last_whisper_use = idle_time()
+        register_idle_cleanup(f"whisper-{id(self)}", self._release_idle_whisper, kind="speech")
         self._mic_profile_cache: tuple[str, float] | None = None
         # Cloud-to-local failover tracking: lets the UI know when a fallback
         # happened so it can display a notification and offer a "retry cloud" button.
         self._last_failover: dict | None = None  # {cloud_model, reason, timestamp}
         self._failover_lock = threading.Lock()
-        # Start pre-warming the active speech model asynchronously in background
-        threading.Thread(target=self._load_active_model_bg, daemon=True).start()
+    def _release_idle_whisper(self, now: float) -> bool:
+        if not self._transcribe_lock.acquire(blocking=False):
+            return False
+        try:
+            if not self._lock.acquire(blocking=False):
+                return False
+            try:
+                warming = getattr(self, "_whisper_warm_thread", None)
+                native = getattr(self, "nemotron_engine", None)
+                if self._loading or (warming is not None and warming.is_alive()) or getattr(native, "_active_streams", 0):
+                    return False
+                if not cleanup_is_forced("speech") and now - getattr(self, "_last_whisper_use", now) < LOCAL_MODEL_IDLE_SECONDS:
+                    return True
+                if self.model is None and not self._whisper_models:
+                    return True
+                self.model = None
+                self._whisper_models.clear()
+                if not nemotron_engine.is_nemotron_model(self._loaded_model_ref):
+                    self._loaded_model_ref = None
+                log.info("[MODEL] Released inactive Whisper model memory")
+                return True
+            finally:
+                self._lock.release()
+        finally:
+            self._transcribe_lock.release()
 
     def _load_active_model_bg(self) -> None:
         """Pre-warm whichever local speech model is currently set in storage."""
@@ -150,6 +188,30 @@ class Transcriber:
                 pass
         requested = self._local_model_name(active_stt) if active_stt else None
         self._load_model_bg(requested)
+
+    def prepare_model_async(
+        self, model_ref: str | None, *, lease: ModelUseLease | None = None
+    ) -> ModelUseLease:
+        """Hold speech demand and prewarm a selected local model during capture."""
+        demand = lease or acquire_model_use("speech")
+        selected = str(model_ref or "").strip()
+        provider, separator, _model = selected.partition("/")
+        if separator and provider.casefold() != "local":
+            return demand
+        worker = threading.Thread(
+            target=self._load_model_bg,
+            args=(model_ref,),
+            kwargs={"_lease": demand},
+            name="vf-model-prepare",
+            daemon=True,
+        )
+        try:
+            worker.start()
+        except Exception:
+            demand.release()
+            notify_models_available("speech")
+            raise
+        return demand
 
     @staticmethod
     def _local_model_name(model_ref: str | None = None) -> str:
@@ -192,15 +254,78 @@ class Transcriber:
                 pass
         return selected or str(config.model_size)
 
-    def _load_model_bg(self, model_ref: str | None = None) -> None:
+    def _finish_model_load_locked(self, requested_model: str) -> str | None:
+        """End a load and return a newer request that superseded it."""
+        self._loading = False
+        self._loading_model_ref = None
+        latest = getattr(self, "_requested_model_ref", requested_model)
+        return latest if latest and latest != requested_model else None
+
+    def _load_latest_after(self, requested_model: str | None) -> None:
+        """Continue with one newer selection after releasing old model refs."""
+        if requested_model:
+            threading.Thread(
+                target=self._load_model_bg,
+                kwargs={"_use_latest_request": True},
+                name="vf-model-latest",
+                daemon=True,
+            ).start()
+
+    def _publish_whisper_model(self, requested_model: str, cache_key: str, model: WhisperModel) -> None:
+        """Publish one selected Whisper model, retaining no historical cache."""
+        next_request: str | None = None
+        with self._lock:
+            if getattr(self, "_requested_model_ref", requested_model) != requested_model:
+                next_request = self._finish_model_load_locked(requested_model)
+            else:
+                # A Whisper instance can retain several gigabytes.  Keep the
+                # active one warm, but release every superseded selection.
+                self._whisper_models = {cache_key: model}
+                self.model = model
+                self._last_whisper_use = idle_time()
+                self.nemotron_engine = None
+                self._loaded_model_ref = requested_model
+                self._finish_model_load_locked(requested_model)
+        self._load_latest_after(next_request)
+
+    def _load_model_bg(
+        self,
+        model_ref: str | None = None,
+        *,
+        _use_latest_request: bool = False,
+        _lease: ModelUseLease | None = None,
+    ) -> None:
+        # The worker owns an independent lease. The session's borrowed lease
+        # may be released by cancellation while a native constructor is still
+        # running; publication must remain protected until this method exits.
+        demand = acquire_model_use("speech")
+        try:
+            self._load_model_bg_impl(model_ref, _use_latest_request=_use_latest_request)
+        finally:
+            demand.release()
+            notify_models_available("speech")
+
+    def _load_model_bg_impl(self, model_ref: str | None = None, *, _use_latest_request: bool = False) -> None:
         requested_model = self._local_model_name(model_ref)
         with self._lock:
+            if _use_latest_request and getattr(self, "_requested_model_ref", None):
+                # The handoff deliberately re-reads the newest request under
+                # the lock.  Reusing a captured older argument here could
+                # overwrite a third, newer selection made between finish and
+                # the background handoff beginning.
+                requested_model = self._requested_model_ref
+            else:
+                self._requested_model_ref = requested_model
             if getattr(self, "_loaded_model_ref", None) == requested_model:
-                if nemotron_engine.is_nemotron_model(requested_model) and getattr(self, "nemotron_engine", None) is not None:
+                if nemotron_engine.is_nemotron_model(requested_model):
+                    active_engine = getattr(self, "nemotron_engine", None)
+                    if active_engine is not None and getattr(active_engine, "is_warm", False):
+                        return
+                elif getattr(self, "model", None) is not None:
                     return
-                if getattr(self, "model", None) is not None:
-                    return
-            if self._loading and self._loading_model_ref == requested_model:
+            # A single loader owns construction.  A different request records
+            # itself above and is started by the current loader on completion.
+            if self._loading:
                 return
             self._loading = True
             self._loading_model_ref = requested_model
@@ -212,12 +337,23 @@ class Transcriber:
             if nemotron_engine.is_nemotron_model(requested_model):
                 eng = nemotron_engine.get_nemotron_engine(requested_model)
                 if eng and eng.is_warm:
+                    next_request: str | None = None
                     with self._lock:
-                        self.nemotron_engine = eng
-                        self._loaded_model_ref = requested_model
-                        self._loading = False
-                        self._loading_model_ref = None
+                        if getattr(self, "_requested_model_ref", requested_model) != requested_model:
+                            next_request = self._finish_model_load_locked(requested_model)
+                        else:
+                            # Nemotron plus its one Whisper fallback is the
+                            # only intentional dual-model residency.
+                            self.nemotron_engine = eng
+                            self.model = None
+                            self._whisper_models = {}
+                            self._loaded_model_ref = requested_model
+                            self._finish_model_load_locked(requested_model)
+                    if next_request:
+                        self._load_latest_after(next_request)
+                        return
                     log.info("[MODEL] Ultra-fast Nemotron GGUF speech engine ready (warm in memory)!")
+
                     return
                 else:
                     log.warning("[MODEL] Nemotron GGUF engine unavailable for '%s', falling back to whisper", requested_model)
@@ -241,11 +377,7 @@ class Transcriber:
                     self._whisper_models = {}
                 cached_model = self._whisper_models.get(cache_key)
             if cached_model is not None:
-                with self._lock:
-                    self.model = cached_model
-                    self._loaded_model_ref = requested_model
-                    self._loading = False
-                    self._loading_model_ref = None
+                self._publish_whisper_model(requested_model, cache_key, cached_model)
                 log.info("[MODEL] Reused cached Whisper model ('%s')", cache_key)
                 return
 
@@ -267,20 +399,30 @@ class Transcriber:
                 cpu_threads=config.cpu_threads,
                 local_files_only=is_local,
             )
-            with self._lock:
-                self._whisper_models[cache_key] = model_inst
-                self.model = model_inst
-                self._loaded_model_ref = requested_model
-                self._loading = False
-                self._loading_model_ref = None
+            self._publish_whisper_model(requested_model, cache_key, model_inst)
             log.info("[MODEL] Ultra-fast speech engine ready!")
         except Exception as e:
             log.error("[MODEL ERROR] Failed to load speech model: %s", e, exc_info=True)
             with self._lock:
-                self._loading = False
-                self._loading_model_ref = None
+                next_request = self._finish_model_load_locked(requested_model)
+            self._load_latest_after(next_request)
 
     def transcribe(
+        self,
+        audio: NDArray[np.float32],
+        is_chunk: bool = False,
+        deadline: float | None = None,
+        model_ref: str | None = None,
+    ) -> str:
+        """Keep speech resources leased for the entire transcription call."""
+        demand = acquire_model_use("speech")
+        try:
+            return self._transcribe_impl(audio, is_chunk, deadline, model_ref)
+        finally:
+            demand.release()
+            notify_models_available("speech")
+
+    def _transcribe_impl(
         self,
         audio: NDArray[np.float32],
         is_chunk: bool = False,
@@ -639,9 +781,38 @@ class Transcriber:
                     with self._lock:
                         whisper_dict = getattr(self, "_whisper_models", {}) or {}
                         self.model = whisper_dict.get("base.en") or next(iter(whisper_dict.values()), None)
+                    if getattr(self, "model", None) is None and getattr(self, "_whisper_warm_thread", None) and self._whisper_warm_thread.is_alive():
+                        try:
+                            self._whisper_warm_thread.join(timeout=3.0)
+                            with self._lock:
+                                whisper_dict = getattr(self, "_whisper_models", {}) or {}
+                                self.model = whisper_dict.get("base.en") or next(iter(whisper_dict.values()), None)
+                        except Exception:
+                            pass
+                    if getattr(self, "model", None) is None:
+                        try:
+                            log.info("[STT] Lazily loading local Whisper fallback model on demand...")
+                            from voice_flow import runtime_env
+                            bundled = runtime_env.whisper_model_path()
+                            w_ref = str(bundled) if bundled is not None else "base.en"
+                            inst = WhisperModel(
+                                w_ref,
+                                device="cpu",
+                                compute_type=config.compute_type,
+                                cpu_threads=config.cpu_threads,
+                            )
+                            with self._lock:
+                                self._whisper_models = {w_ref: inst}
+                                self.model = inst
+                                self._last_whisper_use = idle_time()
+                        except Exception as load_err:
+                            log.warning("[STT] Failed to lazily load Whisper fallback: %s", load_err)
                     if getattr(self, "model", None) is None:
                         log.info("[STT] Local Whisper fallback not loaded; skipping second pass.")
                         return ""
+                # Ensure Whisper fallback has enough time to decode if Nemotron consumed the deadline
+                if deadline is not None and _deadline_remaining(deadline) < 3.0:
+                    deadline = time.monotonic() + 3.5
 
         vad_params = getattr(self, "_last_vad_parameters", None)
         if not vad_params:
@@ -655,6 +826,8 @@ class Transcriber:
         result = ""
         # Guard: constructors that bypass __init__ (e.g. tests) may lack the lock;
         # create it lazily so transcription is always thread-safe.
+        if not hasattr(self, "_lock"):
+            self._lock = threading.Lock()
         if not hasattr(self, "_transcribe_lock"):
             self._transcribe_lock = threading.Lock()
         # Streaming workers may reach local fallback concurrently. Whisper's
@@ -672,8 +845,15 @@ class Transcriber:
             log.warning("[STT] Local decode skipped because its deadline elapsed while waiting for the model lock.")
             return ""
         try:
+            # Hold a local reference for this entire decode.  A concurrent
+            # model switch may release the transcriber's old cache entry, but
+            # cannot free an instance still executing inference.
+            with self._lock:
+                model = self.model
+            if model is None:
+                return ""
             try:
-                segments, _ = self.model.transcribe(
+                segments, _ = model.transcribe(
                     clean_audio,
                     beam_size=config.beam_size,
                     temperature=config.temperature,
@@ -704,7 +884,7 @@ class Transcriber:
             if not result and _has_audible_audio(audio) and _deadline_remaining(deadline) > 0.0:
                 log.info("[FALLBACK] Running direct audio pass without VAD filter...")
                 try:
-                    fallback_segments, _ = self.model.transcribe(
+                    fallback_segments, _ = model.transcribe(
                         clean_audio,
                         beam_size=config.beam_size,
                         temperature=config.temperature,
@@ -719,7 +899,12 @@ class Transcriber:
                     log.error("[FALLBACK] Direct transcription pass failed: %s", e)
 
         finally:
-            lock.release()
+            try:
+                with self._lock:
+                    self._last_whisper_use = idle_time()
+            finally:
+                lock.release()
+                notify_models_available("speech")
 
         # Trigger->replacement post-processing on the local path (Nemotron +
         # faster-whisper, both passes): an explicit dictionary entry such as a
@@ -748,4 +933,3 @@ class Transcriber:
         if not isinstance(breakers, dict) or not breakers:
             return 0.0
         return max((v[1] for v in breakers.values()), default=0.0)
-

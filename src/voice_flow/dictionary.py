@@ -56,12 +56,48 @@ _STOPWORDS = {
     "is", "are", "was", "were", "be", "been",
 }
 
+# A saved product or proper name such as ``HyperKube`` has an unambiguous
+# spoken form ("Hyper Kube").  Speech engines commonly insert that space,
+# while a literal casing rule can only see the joined form.  These aliases are
+# deliberately narrow: they come only from an explicit, alphabetic camel- or
+# Pascal-cased vocabulary entry.  They are in-memory matching aids, never
+# stored as corrections and never inferred from ordinary words such as
+# ``Here`` or ``Hey``.
+_CAMEL_WORD_BOUNDARY_RE = re.compile(
+    r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+
 
 @dataclass(frozen=True)
 class _Rule:
     trigger: str
     replacement: str
     snippet: bool = False
+
+
+def generated_spaced_aliases(value: str) -> tuple[str, ...]:
+    """Return safe spoken-space aliases for one explicit vocabulary term.
+
+    ``HyperKube`` becomes ``Hyper Kube`` and ``OpenAI`` becomes ``Open AI``.
+    The strict alphabetic/single-token gate keeps this from becoming fuzzy
+    matching: terms containing spaces, punctuation, digits, snippets, and
+    ordinary words have no generated alias.  Users retain full control over
+    other mishearings through explicit Heard-as corrections.
+    """
+    if not isinstance(value, str):
+        return ()
+    term = value.strip()
+    if not term or not term.isalpha() or not any(char.islower() for char in term) or not any(char.isupper() for char in term):
+        return ()
+    alias = _CAMEL_WORD_BOUNDARY_RE.sub(" ", term)
+    if alias == term or " " not in alias:
+        return ()
+    # A one-letter leading fragment (for example iPhone) is a meaningful
+    # brand spelling but its spoken form is too broad to rewrite automatically.
+    # The user can still add an explicit Heard-as correction for it.
+    if any(len(part) < 2 for part in alias.split()):
+        return ()
+    return (alias,)
 
 
 def _split_entry(value: str) -> tuple[str, str | None]:
@@ -251,6 +287,22 @@ class DictionaryEngine:
                 seen.add(key)
                 rules.append(_Rule(trigger, expansion if expansion is not None else trigger, expansion is not None))
 
+            # Explicit casing terms may safely recognize their normal spoken
+            # spaced form (HyperKube -> Hyper Kube).  Do not generate aliases
+            # for snippets or overwrite an explicit entry/correction.  The
+            # combined substitution below still makes this one pass, so an
+            # alias replacement cannot trigger another vocabulary rule.
+            canonical_rules = tuple(rules)
+            for rule in canonical_rules:
+                if rule.snippet:
+                    continue
+                for alias in generated_spaced_aliases(rule.trigger):
+                    alias_key = alias.casefold()
+                    if alias_key in seen:
+                        continue
+                    seen.add(alias_key)
+                    rules.append(_Rule(alias, rule.replacement))
+
             # Longer triggers win. Casefold tie-breaking keeps behavior stable even
             # if SQLite returns rows in a different order.
             rules.sort(key=lambda rule: (-len(rule.trigger), rule.trigger.casefold(), rule.trigger))
@@ -320,7 +372,11 @@ class DictionaryEngine:
         return prompt
 
     @staticmethod
-    def _apply_segment(segment: str, rules: tuple[_Rule, ...]) -> str:
+    def _apply_segment(
+        segment: str,
+        rules: tuple[_Rule, ...],
+        trace: list[dict[str, str]] | None = None,
+    ) -> str:
         if not segment or not rules:
             return segment
         combined, usable_rules = _combined_pattern(rules)
@@ -329,13 +385,25 @@ class DictionaryEngine:
         def replace(match: re.Match[str]) -> str:
             for index, rule in enumerate(usable_rules, start=1):
                 if match.group(index) is not None and _rule_matches(match, rule):
+                    original = match.group(0)
+                    if trace is not None and original != rule.replacement:
+                        trace.append({"from": original, "to": rule.replacement})
                     return rule.replacement
             return match.group(0)
 
         return combined.sub(replace, segment)
 
-    def apply_dictionary_post_processing(self, text: str) -> str:
-        """Apply explicit literal terms/corrections once; fuzzy matching is opt-in."""
+    def apply_dictionary_post_processing(
+        self,
+        text: str,
+        trace: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Apply explicit literal terms/corrections once; fuzzy matching is opt-in.
+
+        Passing an empty ``trace`` list records only substitutions actually
+        made during this single pass.  It provides truthful UI/history
+        evidence without deriving guesses from a raw/final text diff.
+        """
         if not text:
             return text
         self._ensure_loaded()
@@ -350,10 +418,10 @@ class DictionaryEngine:
         output: list[str] = []
         cursor = 0
         for protected in _PROTECTED_RE.finditer(text):
-            output.append(self._apply_segment(text[cursor:protected.start()], combined_rules))
+            output.append(self._apply_segment(text[cursor:protected.start()], combined_rules, trace))
             output.append(protected.group(0))
             cursor = protected.end()
-        output.append(self._apply_segment(text[cursor:], combined_rules))
+        output.append(self._apply_segment(text[cursor:], combined_rules, trace))
         result = "".join(output)
         if result != text:
             log.info("Applied explicit dictionary rules to dictated text")

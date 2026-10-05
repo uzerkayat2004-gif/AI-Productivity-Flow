@@ -214,6 +214,11 @@ def test_record_successful_login_updates_storage_state_and_clears_switched_from(
 
     monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_state_path", lambda p: st_file)
     monkeypatch.setattr("voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path", lambda p: b_file)
+    monkeypatch.setattr(
+        login_flow,
+        "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": "new_account@gmail.com"},
+    )
 
     login_flow.record_successful_login("new_account@gmail.com", profile="prof-success")
 
@@ -227,4 +232,3 @@ def test_record_successful_login_updates_storage_state_and_clears_switched_from(
     state = login_flow.get_login_state()
     assert state["email"] == "new_account@gmail.com"
     assert state["success"] is True
-

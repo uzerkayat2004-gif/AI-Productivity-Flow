@@ -76,6 +76,38 @@ class MockCliRunner:
         )
 
 
+@pytest.fixture(autouse=True)
+def isolated_notebooklm_runtime(tmp_path, monkeypatch):
+    """Keep auth globals and profile paths independent for every test."""
+    monkeypatch.setenv("VOICE_FLOW_DATA_DIR", str(tmp_path / "voice-flow"))
+    monkeypatch.setenv("NOTEBOOKLM_HOME", str(tmp_path / "notebooklm"))
+    monkeypatch.setenv("NOTEBOOKLM_EXPERIMENT_DIR", str(tmp_path / "experiment"))
+    monkeypatch.setenv("VOICE_FLOW_LOGIN_LOG", str(tmp_path / "login.log"))
+
+    from voice_flow.video_flow_engine.notebooklm import keepalive, login_flow
+
+    for service in list(keepalive._GLOBAL_KEEPALIVES.values()):
+        service.stop(timeout=1)
+    keepalive._GLOBAL_KEEPALIVES.clear()
+    keepalive._GLOBAL_KEEPALIVE = None
+    with login_flow._STATE_LOCK:
+        login_flow._STATE.update(
+            running=False, mode=None, started_at=None, finished_at=None, success=None,
+            error=None, note=None, durable=None, log_path=None,
+        )
+        login_flow._ONLINE_CACHE.clear()
+        login_flow._SESSION_GENERATION.clear()
+        login_flow._SELF_HEAL_LOCKS.clear()
+        login_flow._SELF_HEAL_RESULTS.clear()
+    yield
+    for service in list(keepalive._GLOBAL_KEEPALIVES.values()):
+        service.stop(timeout=1)
+    keepalive._GLOBAL_KEEPALIVES.clear()
+    keepalive._GLOBAL_KEEPALIVE = None
+    with login_flow._STATE_LOCK:
+        login_flow._STATE["running"] = False
+
+
 # ==============================================================================
 # 1. Authentication Flow & Official Web URLs
 # ==============================================================================
@@ -109,7 +141,7 @@ def test_start_login_direct_mode(monkeypatch):
     opened_urls = []
     monkeypatch.setattr("voice_flow.google_auth.open_system_browser", lambda url: opened_urls.append(url) or True)
 
-    res = start_login(profile="video-flow-experiment", direct=True, switch_account=True)
+    res = start_login(profile="video-flow-experiment", mode="browser", direct=True, switch_account=True)
     assert res["launched"] is True
     assert res["mode"] == "browser"
     assert res["direct_login_url"] == NOTEBOOKLM_ACCOUNT_CHOOSER_URL
@@ -513,8 +545,19 @@ def test_api_server_mcp_endpoints(monkeypatch, tmp_path):
 
     db_path = str(tmp_path / "vf_mcp_test.db")
     test_storage = StorageEngine(db_path)
+    test_storage.save_setting("video_flow_notebooklm_email", "saved@example.com")
+    test_storage.save_setting("video_flow_notebooklm_authenticated", True)
+    test_storage.save_setting("video_flow_notebooklm_disconnected", False)
     monkeypatch.setattr(api_server, "storage", test_storage)
     monkeypatch.setattr("voice_flow.storage.storage", test_storage)
+    monkeypatch.setattr(
+        "voice_flow.video_flow_engine.notebooklm.login_flow.self_heal",
+        lambda profile=None, timeout=45: {"ok": True, "profile": profile, "classification": "authenticated"},
+    )
+    # Isolate the worker's saved-session boundary from the default app DB.
+    get_keepalive_service()._refresh_func = lambda profile=None: {
+        "ok": True, "profile": profile, "classification": "authenticated",
+    }
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), api_server.VoiceFlowApiHandler)
     server.daemon_threads = True
@@ -610,6 +653,7 @@ def test_keepalive_loop_clock_jump_triggers_refresh(monkeypatch):
 
     # Fake time progression: boot check, then a 10s jump on the next tick
     orig_time = time.time
+    orig_sleep = time.sleep
     t = [1000.0]
 
     def fake_time():
@@ -625,14 +669,15 @@ def test_keepalive_loop_clock_jump_triggers_refresh(monkeypatch):
     # Run loop directly in a worker thread and stop it once a wake refresh occurs
     thread = threading.Thread(target=service._run_loop, daemon=True)
     thread.start()
-
-    deadline = orig_time() + 2.0
-    while orig_time() < deadline and len(runs) < 2:
-        orig_time_mod = __import__("time")
-        orig_time_mod.sleep(0.05)
-
-    service.stop()
-    thread.join(timeout=1.0)
+    try:
+        deadline = orig_time() + 2.0
+        while orig_time() < deadline and len(runs) < 2:
+            orig_sleep(0.05)
+    finally:
+        # This test invokes _run_loop directly, so stop() has no registered
+        # service thread to signal. Explicitly stop and join the owned worker.
+        service._stop_event.set()
+        thread.join(timeout=1.0)
     assert len(runs) >= 2  # 1 boot check + 1 wake detection check
 
 

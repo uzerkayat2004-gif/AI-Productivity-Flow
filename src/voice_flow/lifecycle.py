@@ -564,15 +564,8 @@ def execute_restart_sequence(delay_seconds: float = 0.8) -> None:
 
 def restart_suite(runtime_controller: object | None = None) -> bool:
     """Trigger an asynchronous, detached deep restart of the entire Voice Flow suite."""
-    # 1. Reset floating overlay position if active
+    # 1. The floating bar keeps its persisted position across restarts.
     if runtime_controller is not None:
-        try:
-            overlay = getattr(runtime_controller, "overlay", None)
-            if overlay and hasattr(overlay, "reset_position"):
-                overlay.reset_position()
-        except Exception:
-            pass
-
         try:
             audio = getattr(runtime_controller, "audio", None)
             if audio and hasattr(audio, "stop"):

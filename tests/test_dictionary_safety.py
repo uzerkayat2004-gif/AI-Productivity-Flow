@@ -58,6 +58,38 @@ def test_explicit_term_preserves_casing_only_for_exact_match(monkeypatch: pytest
     assert engine.apply_dictionary_post_processing("voiceflows is ready") == "voiceflows is ready"
 
 
+def test_joined_explicit_term_recognizes_its_safe_spoken_space_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A saved product name handles its normal spaced STT rendering, not fuzzily."""
+    engine = _engine(monkeypatch, ["HyperKube", "Here", "Hey"])
+    trace: list[dict[str, str]] = []
+
+    assert engine.apply_dictionary_post_processing("Send the Hyper Kube update.", trace) == "Send the HyperKube update."
+    assert trace == [{"from": "Hyper Kube", "to": "HyperKube"}]
+    # Exact phrase boundaries and protected content still win over the
+    # generated alias; ordinary vocabulary remains non-fuzzy.
+    assert engine.apply_dictionary_post_processing("Hyper Kubectl is separate.") == "Hyper Kubectl is separate."
+    assert engine.apply_dictionary_post_processing("https://example.test/Hyper%20Kube `Hyper Kube` a@b.test") == "https://example.test/Hyper%20Kube `Hyper Kube` a@b.test"
+    assert engine.apply_dictionary_post_processing("Hear is different; heyday is different.") == "Hear is different; heyday is different."
+
+
+def test_generated_alias_is_one_pass_and_explicit_correction_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = _DictionarySource(["HyperKube"])
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_entries", source.entries)
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_revision", lambda: source.revision)
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_snapshot",
+        lambda: (source.revision, list(source.words), [{"wrong_text": "hyper kube", "correct_text": "CustomKube"}]),
+    )
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_corrections",
+        lambda *args, **kwargs: [{"wrong_text": "hyper kube", "correct_text": "CustomKube"}],
+    )
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_snippets", lambda *args, **kwargs: [])
+    engine = DictionaryEngine()
+
+    assert engine.apply_dictionary_post_processing("hyper kube") == "CustomKube"
+
+
 def test_snippet_uses_trigger_length_and_does_not_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = _engine(monkeypatch, [
         "a -> this is a long expansion",

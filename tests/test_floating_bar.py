@@ -215,10 +215,11 @@ def test_show_recovers_offscreen_position() -> None:
 
     bar.show()
 
-    # Offscreen user position is cleared back to visible dock
-    assert bar._user_pos is None
-    expected_x = (1920 - bar.width) // 2
-    assert f"+{expected_x}+" in bar.win.geometry_calls[-1]
+    # Off-screen anchor is clamped back onto the screen (never discarded, never hidden)
+    geo = bar.win.geometry_calls[-1]
+    x, y = (int(v) for v in geo.split("+")[1:3])
+    assert 0 <= x <= 1920 - bar.width
+    assert 0 <= y <= 1080 - bar.height
 
 
 def test_reset_position_snaps_back_to_dock_and_lifts() -> None:

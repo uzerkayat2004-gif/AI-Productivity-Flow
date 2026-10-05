@@ -82,6 +82,7 @@ SELECT
     MAX(insertion_status) AS insertion_status,
     MAX(updated_at)       AS updated_at,
     MAX(retry_count)      AS retry_count,
+    COALESCE(MAX(NULLIF(processing_metadata, '{}')), '{}') AS processing_metadata,
     -- Prefer a real application name if the copies ever disagree, so a
     -- "General App" copy can never win over an identified one.
     COALESCE(
@@ -157,6 +158,7 @@ class DictationRecord:
     insertion_status: str = "pasted"
     updated_at: str | None = None
     retry_count: int = 0
+    processing_metadata: dict[str, Any] | None = None
 
 
 def resolve_active_db_path() -> str:
@@ -414,6 +416,10 @@ class StorageEngine:
                 ("insertion_status", "TEXT NOT NULL DEFAULT 'pasted'"),
                 ("updated_at", "TEXT"),
                 ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+                # Versioned, per-dictation outcome data.  Keeping this as JSON
+                # makes the UI contract extensible without turning internal
+                # pipeline details into separate user-facing columns.
+                ("processing_metadata", "TEXT NOT NULL DEFAULT '{}'"),
             ]
             for col_name, col_def in history_migrations:
                 if col_name not in existing_history_cols:
@@ -623,6 +629,7 @@ class StorageEngine:
         self._migrate_audio_summary_history()
         self._seed_default_models()
         self._seed_tts_models()
+        self.auto_seed_history_vocabulary()
         try:
             self.sync_media_to_history()
         except Exception:
@@ -647,17 +654,35 @@ class StorageEngine:
                 ("en-US-Standard-A", "Google Cloud Standard A (Male)"),
             ],
             "gemini": [
+                # Gemini 3.8 Flash TTS (Latest generation - Studio-grade expressive TTS)
+                ("gemini-3.8-flash-tts:Kore", "Gemini 3.8 Flash TTS — Kore (Warm Female) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Puck", "Gemini 3.8 Flash TTS — Puck (Playful) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Zephyr", "Gemini 3.8 Flash TTS — Zephyr (Bright Female) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Orus", "Gemini 3.8 Flash TTS — Orus (Firm Male) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Aoede", "Gemini 3.8 Flash TTS — Aoede (Narrator) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Charon", "Gemini 3.8 Flash TTS — Charon (Deep Male) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Fenrir", "Gemini 3.8 Flash TTS — Fenrir (Authoritative Male) ⚡ Latest"),
+                ("gemini-3.8-flash-tts:Leda", "Gemini 3.8 Flash TTS — Leda (Youthful Female) ⚡ Latest"),
+
+                # Gemini 3.8 Flash-Lite TTS (High volume, ultra-fast & cost-efficient scale)
+                ("gemini-3.8-flash-lite-tts:Kore", "Gemini 3.8 Flash-Lite TTS — Kore (Warm Female) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Puck", "Gemini 3.8 Flash-Lite TTS — Puck (Playful) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Zephyr", "Gemini 3.8 Flash-Lite TTS — Zephyr (Bright Female) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Orus", "Gemini 3.8 Flash-Lite TTS — Orus (Firm Male) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Aoede", "Gemini 3.8 Flash-Lite TTS — Aoede (Narrator) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Charon", "Gemini 3.8 Flash-Lite TTS — Charon (Deep Male) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Fenrir", "Gemini 3.8 Flash-Lite TTS — Fenrir (Authoritative Male) ⚡ Fast & Light"),
+                ("gemini-3.8-flash-lite-tts:Leda", "Gemini 3.8 Flash-Lite TTS — Leda (Youthful Female) ⚡ Fast & Light"),
+
+                # Previous generation / Preview models
+                ("gemini-3.1-flash-tts-preview:Kore", "Gemini 3.1 Flash TTS — Kore (Warm Female)"),
+                ("gemini-3.1-flash-tts-preview:Puck", "Gemini 3.1 Flash TTS — Puck (Playful)"),
+                ("gemini-3.1-flash-tts-preview:Zephyr", "Gemini 3.1 Flash TTS — Zephyr (Bright Female)"),
+                ("gemini-3.1-flash-tts-preview:Orus", "Gemini 3.1 Flash TTS — Orus (Firm Male)"),
                 ("gemini-2.5-flash-preview-tts:Kore", "Gemini Flash TTS — Kore (Warm Female)"),
                 ("gemini-2.5-flash-preview-tts:Charon", "Gemini Flash TTS — Charon (Deep Male)"),
                 ("gemini-2.5-flash-preview-tts:Puck", "Gemini Flash TTS — Puck (Playful)"),
                 ("gemini-2.5-flash-preview-tts:Aoede", "Gemini Flash TTS — Aoede (Narrator)"),
-                # Latest generation (verified against ai.google.dev, Aug 2026):
-                # expressive audio tags + steerable prompts, lowest latency.
-                ("gemini-3.1-flash-tts-preview:Kore", "Gemini 3.1 Flash TTS — Kore (Warm Female) ⚡ Latest"),
-                ("gemini-3.1-flash-tts-preview:Puck", "Gemini 3.1 Flash TTS — Puck (Playful) ⚡ Latest"),
-                ("gemini-3.1-flash-tts-preview:Zephyr", "Gemini 3.1 Flash TTS — Zephyr (Bright Female) ⚡ Latest"),
-                ("gemini-3.1-flash-tts-preview:Orus", "Gemini 3.1 Flash TTS — Orus (Firm Male) ⚡ Latest"),
-                # Pro tier for highest-quality narration.
                 ("gemini-2.5-pro-preview-tts:Charon", "Gemini Pro TTS — Charon (Deep Male)"),
                 ("gemini-2.5-pro-preview-tts:Aoede", "Gemini Pro TTS — Aoede (Narrator)"),
                 ("gemini-2.5-pro-preview-tts:Leda", "Gemini Pro TTS — Leda (Youthful Female)"),
@@ -710,7 +735,8 @@ class StorageEngine:
             for p, models in tts_seeds.items():
                 for m_id, name in models:
                     conn.execute(
-                        "INSERT OR IGNORE INTO tts_models (provider, model_id, display_name, is_active) VALUES (?, ?, ?, 1)",
+                        "INSERT INTO tts_models (provider, model_id, display_name, is_active) VALUES (?, ?, ?, 1) "
+                        "ON CONFLICT(provider, model_id) DO UPDATE SET display_name = excluded.display_name",
                         (p, m_id, name)
                     )
             conn.commit()
@@ -820,29 +846,29 @@ class StorageEngine:
         error_message: str | None = None,
         audio_path: str | None = None,
         insertion_status: str = "pasted",
+        processing_metadata: dict[str, Any] | None = None,
     ) -> DictationRecord:
         words_list = polished_text.split()
         words = len(words_list)
         minutes = max(0.05, duration_sec / 60.0)
         wpm = int(words / minutes) if words > 0 else 0
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        metadata_json = json.dumps(processing_metadata or {}, ensure_ascii=False, separators=(",", ":"))
 
         with self._get_conn() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode, status, error_message, audio_path, insertion_status, updated_at, retry_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO history (timestamp, raw_text, polished_text, app_name, duration_sec, word_count, wpm_speed, style_mode, status, error_message, audio_path, insertion_status, updated_at, retry_count, processing_metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 """,
-                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode, status, error_message, audio_path, insertion_status, now_str),
+                (now_str, raw_text, polished_text, app_name, duration_sec, words, wpm, style_mode, status, error_message, audio_path, insertion_status, now_str, metadata_json),
             )
             conn.commit()
             record_id = cursor.lastrowid
 
-        # Dictation history is not authorization to rewrite future speech. Do
-        # not auto-learn from polished output; explicit dictionary additions are
-        # handled through the dictionary API.
-        if self.get_setting("dictionary_auto_learning_enabled", False):
-            self._auto_extract_dictionary_words(raw_text.split())
+        # Dictation history auto-learning: learn frequent proper nouns, names, and technical terms
+        if self.get_setting("dictionary_auto_learning_enabled", True):
+            self._auto_extract_dictionary_words(polished_text.split() + raw_text.split())
 
         return DictationRecord(
             id=record_id,
@@ -856,13 +882,14 @@ class StorageEngine:
             style_mode=style_mode,
             status=status, error_message=error_message, audio_path=audio_path,
             insertion_status=insertion_status, updated_at=now_str,
+            processing_metadata=processing_metadata or {},
         )
 
     def _auto_extract_dictionary_words(self, words: list[str]) -> None:
         """Frequency-based custom term learning.
-        Only adds words spoken 3+ times across dictation history (or explicit jargon).
+        Adds proper nouns, acronyms, and custom vocabulary spoken 2+ times across dictation history.
         """
-        # Stopwords filter
+        # Stopwords and common conversational words filter
         stopwords = {
             "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with", "he", "as",
             "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will",
@@ -874,38 +901,45 @@ class StorageEngine:
             "were", "been", "being", "has", "had", "having", "does", "did", "doing", "would", "should", "could", "ought",
             "here", "there", "where", "why", "how", "all", "any", "both", "each", "few", "more", "most", "other", "some",
             "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "can", "will", "just", "should",
-            "now", "today", "tomorrow", "yesterday", "please", "thanks", "thank", "hello", "hey", "hi", "ok", "okay"
+            "now", "today", "tomorrow", "yesterday", "please", "thanks", "thank", "hello", "hey", "hi", "ok", "okay",
+            "i'm", "i've", "i'll", "i'd", "you're", "we're", "they're", "it's", "don't", "doesn't", "didn't",
+            "can't", "won't", "wouldn't", "shouldn't", "couldn't", "let", "tell", "check", "continue",
+            "everything", "however", "sorry", "whatever", "video", "cloud", "wait", "need", "find",
+            "call", "try", "ask", "turn", "start", "show", "hear", "play", "move", "live", "write", "learn", "change",
+            "stop", "speak", "read", "allow", "spend", "grow", "open", "walk", "send", "stay", "fall", "reach",
+            "app", "code", "audio", "user", "file", "line", "text", "button", "card", "page",
+            "thing", "things", "stuff", "something", "nothing", "anyone", "someone", "everyone",
+            "morning", "evening", "night", "week", "month",
+            "voice", "flow",
         }
 
-        for word in words:
-            clean = re.sub(r"[^\w\-]", "", word, flags=re.UNICODE)
-            if not clean or len(clean) < 3 or clean.casefold() in stopwords:
-                continue
+        try:
+            deleted_terms = {t.casefold() for t in self.get_setting("dictionary_deleted_terms", [])}
+        except Exception:
+            deleted_terms = set()
 
-            # Only consider proper nouns, acronyms, technical terms, or camelCase.
-            # Sentence-initial capitalization alone is not enough evidence.
+        seen_batch: set[str] = set()
+        for word in words:
+            clean = re.sub(r"^[^\w\-]+|[^\w\-]+$", "", word, flags=re.UNICODE)
+            if not clean or len(clean) < 2 or clean.casefold() in stopwords or clean.casefold() in deleted_terms:
+                continue
+            if clean in seen_batch:
+                continue
+            seen_batch.add(clean)
+
+            # Acronyms (UI, API, AI, LLM), CamelCase (VoiceFlow, GitHub), or Capitalized Proper Nouns / Names (Google, Elon)
             is_jargon = (
-                clean.isupper() and len(clean) >= 4  # ALL CAPS acronym e.g. API, SQL (4+ to skip 3-letter words)
-            ) or (
-                sum(1 for c in clean if c.isupper()) >= 2 and any(c.islower() for c in clean)  # CamelCase e.g. VoiceFlow
-            ) or (
-                clean[0].isupper() and clean[1:].islower() and len(clean) >= 7  # Long proper noun e.g. HyperKube
+                (clean.isupper() and 2 <= len(clean) <= 10)
+                or (sum(1 for c in clean if c.isupper()) >= 2 and any(c.islower() for c in clean))
+                or (clean[0].isupper() and clean[1:].islower() and len(clean) >= 3)
             )
             if not is_jargon:
                 continue
 
-            # Learn only from exact token occurrences in raw dictation.  SQL
-            # substring matching made API match CAPITAL and let polished/AI
-            # output authorize future replacements.
             try:
                 with self._get_conn() as conn:
-                    # GROUP BY collapses the duplicate rows left behind by the
-                    # 2026-09-12 account consolidation. Without it every count
-                    # below is doubled, which effectively halves the >= 5
-                    # threshold and auto-captures jargon that was only said 3
-                    # times. Must match _DEDUP_HISTORY_SELECT's key.
                     rows = conn.execute(
-                        "SELECT raw_text FROM history "
+                        "SELECT raw_text, polished_text FROM history "
                         "GROUP BY timestamp, raw_text, polished_text"
                     ).fetchall()
                 token_pattern = re.compile(
@@ -913,13 +947,13 @@ class StorageEngine:
                     flags=re.IGNORECASE | re.UNICODE,
                 )
                 occurrences = sum(
-                    len(token_pattern.findall(str(row["raw_text"] or "")))
+                    len(token_pattern.findall(str(row["polished_text"] or "") + " " + str(row["raw_text"] or "")))
                     for row in rows
                 )
-                if occurrences >= 5:
-                    self.add_dictionary_word(clean, category="Auto-Captured")
+                if occurrences >= 2:
+                    self.add_dictionary_word(clean, category="Personal")
             except Exception:
-                log.exception("Could not evaluate auto-captured dictionary term %r", clean)
+                log.exception("Could not evaluate learned dictionary term %r", clean)
 
     @staticmethod
     def _dedup_key_for(conn: Any, record_id: int) -> tuple[Any, Any, Any] | None:
@@ -932,16 +966,40 @@ class StorageEngine:
             return None
         return (row["timestamp"], row["raw_text"], row["polished_text"])
 
-    def get_recent_history(self, limit: int = 50) -> list[dict[str, Any]]:
+    @staticmethod
+    def _history_row_for_api(row: dict[str, Any]) -> dict[str, Any]:
+        """Decode optional outcome metadata without making old history unreadable."""
+        raw_metadata = row.get("processing_metadata")
+        if isinstance(raw_metadata, str):
+            try:
+                raw_metadata = json.loads(raw_metadata)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raw_metadata = {}
+        row["processing_metadata"] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        return row
+
+    def get_recent_history(self, limit: int | None = None) -> list[dict[str, Any]]:
+        parsed_limit = None
+        if limit is not None:
+            try:
+                parsed_limit = int(limit)
+            except (ValueError, TypeError):
+                parsed_limit = None
         with self._get_conn() as conn:
             # Collapsed like every other read, so the transcript feed cannot
             # show the same dictation twice.
-            cursor = conn.execute(
-                f"SELECT * FROM ({_DEDUP_HISTORY_SELECT}) "
-                "ORDER BY is_pinned DESC, id DESC LIMIT ?",
-                (limit,),
-            )
-            return [dict(row) for row in cursor.fetchall()]
+            if parsed_limit is not None and parsed_limit > 0:
+                cursor = conn.execute(
+                    f"SELECT * FROM ({_DEDUP_HISTORY_SELECT}) "
+                    "ORDER BY is_pinned DESC, id DESC LIMIT ?",
+                    (parsed_limit,),
+                )
+            else:
+                cursor = conn.execute(
+                    f"SELECT * FROM ({_DEDUP_HISTORY_SELECT}) "
+                    "ORDER BY is_pinned DESC, id DESC",
+                )
+            return [self._history_row_for_api(dict(row)) for row in cursor.fetchall()]
 
     def toggle_history_pin(self, record_id: int) -> dict[str, Any]:
         """Toggle is_pinned for a history record across all of its copies."""
@@ -1559,30 +1617,67 @@ class StorageEngine:
         word_clean = word.strip()
         if not word_clean:
             return False
+
+        # Remember deleted terms so auto-learning does not re-add them
+        try:
+            deleted_list = list(self.get_setting("dictionary_deleted_terms", []))
+            folded = word_clean.casefold()
+            if folded not in deleted_list:
+                deleted_list.append(folded)
+                self.save_setting("dictionary_deleted_terms", deleted_list)
+        except Exception:
+            pass
+
         with self._get_conn() as conn:
+            # Also clean up from candidates
+            try:
+                conn.execute(
+                    "DELETE FROM lexicon_candidates WHERE term = ? COLLATE NOCASE OR variant = ? COLLATE NOCASE",
+                    (word_clean, word_clean),
+                )
+            except Exception:
+                pass
+
             rows = conn.execute("SELECT id, word FROM dictionary").fetchall()
             matching_ids = [
                 row["id"] for row in rows
                 if str(row["word"]).casefold() == word_clean.casefold()
             ]
-            if not matching_ids:
-                return False
-            placeholders = ",".join("?" for _ in matching_ids)
-            cursor = conn.execute(
-                f"DELETE FROM dictionary WHERE id IN ({placeholders})",
-                matching_ids,
-            )
-            # Their key rows must go too: an orphaned dictionary_keys row
-            # pointing at a deleted id makes the term un-re-addable (the
-            # case-variant migration then deletes the fresh word at startup).
-            conn.execute(
-                f"DELETE FROM dictionary_keys WHERE dictionary_id IN ({placeholders})",
-                matching_ids,
-            )
-            if cursor.rowcount:
+            if matching_ids:
+                placeholders = ",".join("?" for _ in matching_ids)
+                cursor = conn.execute(
+                    f"DELETE FROM dictionary WHERE id IN ({placeholders})",
+                    matching_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM dictionary_keys WHERE dictionary_id IN ({placeholders})",
+                    matching_ids,
+                )
+                if cursor.rowcount:
+                    self._bump_dictionary_revision(conn)
+                conn.commit()
+                return cursor.rowcount > 0
+
+            # If not in dictionary table, check if it's a snippet (e.g. "trigger -> expansion" or "trigger")
+            trig = word_clean
+            if "->" in word_clean or "=>" in word_clean:
+                parsed = self._parse_dictionary_value(word_clean)
+                if parsed:
+                    trig = parsed[0]
+            s_rows = conn.execute(
+                "SELECT id FROM snippets WHERE trigger = ? COLLATE NOCASE",
+                (trig,),
+            ).fetchall()
+            if s_rows:
+                s_ids = [r["id"] for r in s_rows]
+                placeholders = ",".join("?" for _ in s_ids)
+                conn.execute(f"DELETE FROM snippets WHERE id IN ({placeholders})", s_ids)
+                conn.execute(f"DELETE FROM snippet_keys WHERE snippet_id IN ({placeholders})", s_ids)
                 self._bump_dictionary_revision(conn)
-            conn.commit()
-            return cursor.rowcount > 0
+                conn.commit()
+                return True
+
+            return False
 
     def _remove_stale_auto_captured_words(self) -> None:
         """Drop auto-captured terms that no longer occur in raw history."""
@@ -3109,13 +3204,15 @@ class StorageEngine:
                 f"SELECT * FROM ({_DEDUP_HISTORY_SELECT}) WHERE {_DEDUP_KEY_WHERE}",
                 key,
             ).fetchone()
-            return dict(row) if row else None
+            return self._history_row_for_api(dict(row)) if row else None
 
     def update_dictation(self, record_id: int, **fields: Any) -> bool:
-        allowed = {"raw_text", "polished_text", "status", "error_message", "audio_path", "insertion_status", "retry_count", "word_count", "wpm_speed"}
+        allowed = {"raw_text", "polished_text", "status", "error_message", "audio_path", "insertion_status", "retry_count", "word_count", "wpm_speed", "processing_metadata"}
         values = {key: value for key, value in fields.items() if key in allowed}
         if not values:
             return False
+        if "processing_metadata" in values:
+            values["processing_metadata"] = json.dumps(values["processing_metadata"] or {}, ensure_ascii=False, separators=(",", ":"))
         if "polished_text" in values:
             words = len(str(values["polished_text"] or "").split())
             values["word_count"] = words
@@ -3297,6 +3394,10 @@ class StorageEngine:
                     normalized = row["word"].strip().casefold()
                     if not normalized or "->" in row["word"] or "=>" in row["word"]:
                         continue
+                    if normalized in {"voice", "flow"}:
+                        conn.execute("DELETE FROM dictionary WHERE id = ?", (row["id"],))
+                        changed = True
+                        continue
                     existing = keepers.get(normalized)
                     if existing is None:
                         keepers[normalized] = row["id"]
@@ -3319,6 +3420,84 @@ class StorageEngine:
             if changed:
                 self._touch_lexicon()
 
+    def auto_seed_history_vocabulary(self) -> int:
+        """Extract high-confidence proper nouns, technical acronyms, and names from dictation history."""
+        try:
+            if self.get_setting("history_vocab_seeded_v3", False):
+                return 0
+        except Exception:
+            pass
+
+        stopwords = {
+            "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with", "he", "as",
+            "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will",
+            "my", "one", "all", "would", "there", "their", "what", "so", "up", "out", "if", "about", "who", "get", "which",
+            "go", "me", "when", "make", "can", "like", "time", "no", "just", "him", "know", "take", "people", "into",
+            "year", "your", "good", "some", "could", "them", "see", "other", "than", "then", "now", "look", "only",
+            "come", "its", "over", "think", "also", "back", "after", "use", "two", "how", "our", "work", "first", "well",
+            "way", "even", "new", "want", "because", "any", "these", "give", "day", "most", "us", "is", "are", "was",
+            "were", "been", "being", "has", "had", "having", "does", "did", "doing", "would", "should", "could", "ought",
+            "here", "there", "where", "why", "how", "all", "any", "both", "each", "few", "more", "most", "other", "some",
+            "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "can", "will", "just", "should",
+            "now", "today", "tomorrow", "yesterday", "please", "thanks", "thank", "hello", "hey", "hi", "ok", "okay",
+            "i'm", "i've", "i'll", "i'd", "you're", "we're", "they're", "it's", "don't", "doesn't", "didn't",
+            "can't", "won't", "wouldn't", "shouldn't", "couldn't", "let", "tell", "check", "continue",
+            "everything", "however", "sorry", "whatever", "video", "cloud", "wait", "need", "find",
+            "call", "try", "ask", "turn", "start", "show", "hear", "play", "move", "live", "write", "learn", "change",
+            "stop", "speak", "read", "allow", "spend", "grow", "open", "walk", "send", "stay", "fall", "reach",
+            "app", "code", "audio", "user", "file", "line", "text", "button", "card", "page",
+            "thing", "things", "stuff", "something", "nothing", "anyone", "someone", "everyone",
+            "morning", "evening", "night", "week", "month",
+            "voice", "flow",
+        }
+
+        try:
+            deleted_terms = {t.casefold() for t in self.get_setting("dictionary_deleted_terms", [])}
+        except Exception:
+            deleted_terms = set()
+
+        seeded = 0
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT raw_text, polished_text FROM history WHERE status IN ('success', 'pasted') LIMIT 10000"
+                ).fetchall()
+                if not rows:
+                    self.save_setting("history_vocab_seeded_v3", True)
+                    return 0
+
+                freq: dict[str, int] = {}
+                for r in rows:
+                    text = r["polished_text"] or ""
+                    sentences = re.split(r"[\.\?!]\s+", text)
+                    for s in sentences:
+                        tokens = s.strip().split()
+                        if len(tokens) <= 1:
+                            continue
+                        for w in tokens[1:]:
+                            clean = re.sub(r"^[^\w\-]+|[^\w\-]+$", "", w, flags=re.UNICODE)
+                            if not clean or len(clean) < 2:
+                                continue
+                            lower = clean.lower()
+                            if lower in stopwords or lower in deleted_terms:
+                                continue
+                            is_acronym = clean.isupper() and 2 <= len(clean) <= 10
+                            is_camel = sum(1 for c in clean if c.isupper()) >= 2 and any(c.islower() for c in clean)
+                            is_proper = clean[0].isupper() and clean[1:].islower() and len(clean) >= 3
+                            if is_acronym or is_camel or is_proper:
+                                freq[clean] = freq.get(clean, 0) + 1
+
+                candidates = sorted([(w, c) for w, c in freq.items() if c >= 3], key=lambda x: -x[1])
+                for term, _ in candidates[:35]:
+                    if self.add_dictionary_word(term, category="Personal"):
+                        seeded += 1
+                self.save_setting("history_vocab_seeded_v3", True)
+                if seeded > 0:
+                    self._touch_lexicon(conn)
+        except Exception as exc:
+            log.warning("Could not auto-seed history vocabulary: %s", exc)
+        return seeded
+
     def _migrate_audio_summary_history(self) -> None:
         """Ensure title, status, error, and progress columns exist on audio_summary_history."""
         with self._get_conn_ctx() as conn:
@@ -3338,6 +3517,10 @@ class StorageEngine:
                     conn.commit()
             except Exception as exc:
                 log.debug("Audio summary history migration note: %s", exc)
+        try:
+            self.prune_audio_summary_history(max_keep=50)
+        except Exception:
+            pass
 
     def get_dictionary_snapshot(self) -> tuple[int, list[str], list[dict[str, Any]]]:
         """Read a dictionary/correction snapshot matching one revision."""
@@ -3769,6 +3952,55 @@ class StorageEngine:
         return "Audio Summary"
 
 
+    def prune_audio_summary_history(self, max_keep: int = 50) -> list[str]:
+        """Prune oldest audio summaries so total summaries does not exceed max_keep (FIFO)."""
+        pruned_ids: list[str] = []
+        if max_keep <= 0:
+            return pruned_ids
+        with self._get_conn_ctx() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM audio_summary_history").fetchone()
+            count = int(row[0]) if row else 0
+            if count > max_keep:
+                excess = count - max_keep
+                rows = conn.execute(
+                    "SELECT id, audio_path FROM audio_summary_history ORDER BY created_at ASC, rowid ASC LIMIT ?",
+                    (excess,),
+                ).fetchall()
+                for r in rows:
+                    aid, apath = r[0], r[1]
+                    pruned_ids.append(aid)
+                    if apath:
+                        try:
+                            from pathlib import Path
+                            p = Path(apath)
+                            if p.is_file():
+                                p.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+        for pid in pruned_ids:
+            self.delete_audio_summary_history(pid)
+        with self._get_conn_ctx() as conn:
+            try:
+                conn.execute(
+                    """
+                    DELETE FROM history
+                    WHERE app_name = 'Audio Flow'
+                    AND id NOT IN (
+                        SELECT id FROM (
+                            SELECT id FROM history
+                            WHERE app_name = 'Audio Flow'
+                            ORDER BY id DESC
+                            LIMIT ?
+                        )
+                    )
+                    """,
+                    (max_keep,),
+                )
+                conn.commit()
+            except Exception:
+                pass
+        return pruned_ids
+
     def add_audio_summary_history(
         self,
         text: str,
@@ -3788,6 +4020,13 @@ class StorageEngine:
         from datetime import datetime, timezone
         now = created_at or datetime.now(timezone.utc).isoformat()
         uid = item_id or f"ash_{uuid.uuid4().hex[:12]}"
+
+        # Prune oldest if adding a new summary and count >= 50
+        with self._get_conn_ctx() as conn:
+            exists = conn.execute("SELECT 1 FROM audio_summary_history WHERE id = ?", (uid,)).fetchone()
+        if not exists:
+            self.prune_audio_summary_history(max_keep=49)
+
         clean_text = (text or "").strip()
         summary_title = (title or "").strip() or self._derive_audio_title(clean_text)
         snippet = clean_text[:140] if clean_text else summary_title
@@ -3815,7 +4054,7 @@ class StorageEngine:
             ))
             conn.commit()
         try:
-            st = "success" if status_val == "ready" else ("processing" if status_val in ("in_progress", "generating") else "error")
+            st = "success" if status_val == "ready" else ("processing" if status_val in ("in_progress", "generating") else ("cancelled" if status_val == "cancelled" else "error"))
             self.record_audio_summary_to_history(
                 audio_id=uid,
                 title=summary_title,
@@ -3828,6 +4067,7 @@ class StorageEngine:
             )
         except Exception:
             pass
+        self.prune_audio_summary_history(max_keep=50)
         return {
             "id": uid,
             "title": summary_title,
@@ -3905,15 +4145,27 @@ class StorageEngine:
                 pass
         return updated
 
-    def get_audio_summary_history(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Retrieve recent audio summary history records."""
+    def get_audio_summary_history(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Retrieve audio summary history records (capped at 50, newest first)."""
+        try:
+            self.prune_audio_summary_history(max_keep=50)
+        except Exception:
+            pass
+        parsed_limit = 50
+        if limit is not None:
+            try:
+                val = int(limit)
+                if val > 0:
+                    parsed_limit = min(val, 50)
+            except (ValueError, TypeError):
+                parsed_limit = 50
         with self._get_conn_ctx() as conn:
             rows = conn.execute("""
                 SELECT id, title, text_snippet, full_text, depth, audio_path, duration_sec, status, error, progress, created_at, downloaded
                 FROM audio_summary_history
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (max(1, int(limit)),)).fetchall()
+            """, (parsed_limit,)).fetchall()
             return [
                 {
                     "id": r[0],

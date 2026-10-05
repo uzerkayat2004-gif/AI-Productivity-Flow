@@ -472,6 +472,42 @@ def get_app_info_for_hwnd(hwnd: int | None) -> tuple[str, str]:
                 except Exception:
                     pass
 
+            if exe_name.lower() == "applicationframehost.exe":
+                # UWP host frame: inspect child windows to find the actual hosted UWP process (e.g. WhatsApp.Root.exe)
+                child_pid = wintypes.DWORD(0)
+                def _enum_uwp_child(ch, lparam):
+                    p = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(ch, ctypes.byref(p))
+                    if p.value and p.value != lparam:
+                        child_pid.value = p.value
+                        return False
+                    return True
+                try:
+                    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+                    user32.EnumChildWindows(hwnd, WNDENUMPROC(_enum_uwp_child), pid.value)
+                    if child_pid.value:
+                        kernel32 = ctypes.windll.kernel32
+                        h_child_proc = kernel32.OpenProcess(0x1000, False, child_pid.value)
+                        if h_child_proc:
+                            c_buf = ctypes.create_unicode_buffer(1024)
+                            c_size = wintypes.DWORD(1024)
+                            if kernel32.QueryFullProcessImageNameW(h_child_proc, 0, c_buf, ctypes.byref(c_size)):
+                                exe_name = os.path.basename(c_buf.value)
+                            kernel32.CloseHandle(h_child_proc)
+                except Exception as uwp_err:
+                    log.debug("UWP child process detection failed: %s", uwp_err)
+
+        if not window_title:
+            try:
+                root_h = user32.GetAncestor(hwnd, 2)  # GA_ROOT = 2
+                if root_h and root_h != hwnd:
+                    r_len = user32.GetWindowTextLengthW(root_h)
+                    r_buf = ctypes.create_unicode_buffer(r_len + 1)
+                    user32.GetWindowTextW(root_h, r_buf, r_len + 1)
+                    window_title = r_buf.value.strip()
+            except Exception:
+                pass
+
         app_name = normalize_app_name(window_title, exe_name)
         return (app_name, exe_name)
     except Exception as err:

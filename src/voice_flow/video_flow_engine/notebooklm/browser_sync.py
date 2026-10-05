@@ -16,9 +16,11 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlparse
 
 from . import config
 
@@ -40,6 +42,8 @@ def resolve_notebooklm_profile(profile: str | None = None) -> str:
 
 
 logger = logging.getLogger(__name__)
+_PERSISTENT_RECOVERY_LOCKS_GUARD = threading.Lock()
+_PERSISTENT_RECOVERY_LOCKS: dict[str, threading.Lock] = {}
 
 
 def _atomic_write_text(target: Path, content: str) -> None:
@@ -505,6 +509,7 @@ def save_cookies_to_profile(
     profile: str | None = None,
     *,
     email: str | None = None,
+    notify_login_flow: bool = True,
 ) -> dict[str, Any]:
     """Persist validated cookies to storage_state.json and update application settings."""
     profile_name = resolve_notebooklm_profile(profile)
@@ -638,12 +643,13 @@ def save_cookies_to_profile(
         pass
 
     # Inform login_flow state cache
-    try:
-        from .login_flow import record_successful_login
+    if notify_login_flow:
+        try:
+            from .login_flow import record_successful_login
 
-        record_successful_login(resolved_email or "your Google account", profile_name)
-    except Exception:
-        pass
+            record_successful_login(resolved_email or "your Google account", profile_name)
+        except Exception:
+            pass
 
     logger.info("Successfully synced %d cookies for profile %s (email: %s)", len(cookies), profile_name, resolved_email)
     return {
@@ -1124,11 +1130,14 @@ def sync_cookies_with_playwright(
     timeout_seconds: int = 120,
     headless: bool = False,
     expected_email: str | None = None,
+    seed_saved_cookies: bool = True,
+    strict_browser_channel: bool = False,
+    notify_login_flow: bool = True,
 ) -> dict[str, Any]:
     """Capture or silently refresh live Google session cookies via Playwright.
 
-    When headless=True, silently loads NotebookLM in the background, rotating
-    session timestamp tokens (__Secure-1PSIDTS) so cookies never expire.
+    When headless=True, silently loads NotebookLM in the background and captures
+    any session timestamp tokens Google rotates during that navigation.
     """
     profile_name = resolve_notebooklm_profile(profile)
     browser_profile = get_profile_dir(profile_name) / "browser_profile"
@@ -1150,10 +1159,11 @@ def sync_cookies_with_playwright(
             channels_to_try: list[str | None] = []
             if browser in ("chrome", "msedge", "chromium"):
                 channels_to_try.append(browser)
-            for ch in ("chrome", "msedge"):
-                if ch not in channels_to_try:
-                    channels_to_try.append(ch)
-            channels_to_try.append(None)
+            if not strict_browser_channel:
+                for ch in ("chrome", "msedge"):
+                    if ch not in channels_to_try:
+                        channels_to_try.append(ch)
+                channels_to_try.append(None)
 
             context = None
             last_launch_err = None
@@ -1195,8 +1205,25 @@ def sync_cookies_with_playwright(
                             except Exception:
                                 continue
 
-                    if st_cookies:
+                    if st_cookies and seed_saved_cookies:
                         now_ts = time.time()
+                        live_keys: set[tuple[str, str, str]] = set()
+                        try:
+                            live_cookies = context.cookies(["https://accounts.google.com/", "https://notebooklm.google.com/"])
+                            for live in live_cookies:
+                                if not isinstance(live, dict):
+                                    continue
+                                live_exp = float(live.get("expires", -1) or -1)
+                                if live_exp <= 0 or live_exp > now_ts:
+                                    live_keys.add((
+                                        str(live.get("name") or ""),
+                                        str(live.get("domain") or ""),
+                                        str(live.get("path") or "/"),
+                                    ))
+                        except Exception:
+                            # Older/fake contexts may not expose cookies(); retain the
+                            # historical seed behavior in that compatibility case.
+                            live_keys = set()
                         for c in st_cookies:
                             if not isinstance(c, dict):
                                 continue
@@ -1215,6 +1242,8 @@ def sync_cookies_with_playwright(
                                 "secure": bool(c.get("secure", True)),
                                 "httpOnly": bool(c.get("httpOnly", False)),
                             }
+                            if (c_name, c_dom, entry["path"]) in live_keys:
+                                continue
                             ss = str(c.get("sameSite") or "").strip().capitalize()
                             if ss in ("Strict", "Lax", "None"):
                                 entry["sameSite"] = ss
@@ -1222,11 +1251,14 @@ def sync_cookies_with_playwright(
                             if exp is not None:
                                 try:
                                     exp_f = float(exp)
-                                    if exp_f <= now_ts:
+                                    if 0 < exp_f <= now_ts:
                                         # Skip expired cookies: seeding expired timestamp tokens
                                         # causes Google to reject rather than re-mint fresh cookies
                                         continue
-                                    entry["expires"] = exp_f
+                                    # Playwright represents session cookies by omitting
+                                    # expires (or with a non-positive value on capture).
+                                    if exp_f > 0:
+                                        entry["expires"] = exp_f
                                 except (ValueError, TypeError):
                                     pass
                             try:
@@ -1243,7 +1275,7 @@ def sync_cookies_with_playwright(
                 start_time = time.time()
                 while time.time() - start_time < timeout_seconds:
                     url = str(page.url or "").lower()
-                    if "notebooklm.google.com" in url or "notebook.google.com" in url:
+                    if (urlparse(url).hostname or "").lower() in {"notebooklm.google.com", "notebook.google.com"}:
                         break
                     # Allow at least 10 seconds for Google's session check redirect chain to settle
                     if headless and ("accounts.google.com" in url or "servicelogin" in url) and (time.time() - start_time > 10.0):
@@ -1293,7 +1325,14 @@ def sync_cookies_with_playwright(
                     except Exception:
                         pass
 
-                if expected_email and extracted_email:
+                if expected_email:
+                    if not extracted_email:
+                        return {
+                            "success": False,
+                            "error": "Could not verify which Google account owns the browser session.",
+                            "account_unverified": True,
+                            "profile": profile_name,
+                        }
                     if expected_email.lower().strip() != extracted_email.lower().strip():
                         return {
                             "success": False,
@@ -1321,8 +1360,22 @@ def sync_cookies_with_playwright(
                         "details": details,
                     }
 
+                final_host = (urlparse(str(page.url or "")).hostname or "").lower()
+                if final_host not in {"notebooklm.google.com", "notebook.google.com"}:
+                    return {
+                        "success": False,
+                        "error": "Browser did not finish on the NotebookLM host.",
+                        "invalid_destination": True,
+                        "profile": profile_name,
+                    }
+
                 resolved_email = extracted_email or expected_email
-                res = save_cookies_to_profile(google_cookies, profile=profile_name, email=resolved_email)
+                res = save_cookies_to_profile(
+                    google_cookies,
+                    profile=profile_name,
+                    email=resolved_email,
+                    notify_login_flow=notify_login_flow,
+                )
                 res["email"] = resolved_email
                 res["method"] = "playwright_headless" if headless else "playwright_interactive"
                 return res
@@ -1336,3 +1389,345 @@ def sync_cookies_with_playwright(
         return {"success": False, "error": str(exc), "profile": profile_name}
 
 
+def _run_bounded_process(command: list[str], timeout_seconds: float) -> tuple[int | None, str]:
+    """Run a credential-safe helper and tear down its process tree on timeout."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt":
+        flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    child_env = dict(os.environ)
+    # An inline auth jar would override the explicit staged storage path and
+    # could make a different account appear to pass candidate verification.
+    for key in (
+        "NOTEBOOKLM_AUTH_JSON",
+        "NOTEBOOKLM_BACKEND",
+        "NOTEBOOKLM_PROFILE",
+        "NOTEBOOKLM_STORAGE",
+        "NOTEBOOKLM_REFRESH_CMD",
+        "NOTEBOOKLM_HEADLESS_REAUTH_CDP_URL",
+    ):
+        child_env.pop(key, None)
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdin=subprocess.DEVNULL,
+        creationflags=flags,
+        env=child_env,
+    )
+    try:
+        output, _ = process.communicate(timeout=max(1.0, float(timeout_seconds)))
+        return process.returncode, output[-8192:]
+    except subprocess.TimeoutExpired:
+        try:
+            import psutil  # type: ignore
+
+            parent = psutil.Process(process.pid)
+            children = parent.children(recursive=True)
+            for child in children:
+                child.terminate()
+            parent.terminate()
+            _, alive = psutil.wait_procs(children + [parent], timeout=2.0)
+            for proc in alive:
+                proc.kill()
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        try:
+            process.communicate(timeout=2.0)
+        except Exception:
+            pass
+        return None, ""
+
+
+def _run_cli_headless_reauth(
+    *, profile: str, storage_path: Path, browser_profile: Path, timeout_seconds: int
+) -> dict[str, Any]:
+    """Drive notebooklm's pinned recovery code inside the CLI-owned runtime."""
+    try:
+        from .login_flow import resolve_notebooklm_cli
+
+        cli_path = resolve_notebooklm_cli()
+    except Exception:
+        cli_path = None
+    if not cli_path:
+        return {"success": False, "reason": "missing_runtime"}
+    cli_path = Path(cli_path)
+    python_name = "python.exe" if os.name == "nt" else "python"
+    interpreter_candidates = [cli_path.with_name(python_name)]
+    if cli_path.parent.name.lower() in {"scripts", "bin"}:
+        interpreter_candidates.append(cli_path.parent.parent / python_name)
+    python_path = next((candidate for candidate in interpreter_candidates if candidate.is_file()), None)
+    if python_path is None:
+        return {"success": False, "reason": "missing_runtime"}
+
+    runner = (
+        "import asyncio,json,sys; from pathlib import Path; "
+        "from notebooklm._auth.headless_reauth import attempt_headless_reauth; "
+        "r=attempt_headless_reauth(storage_path=Path(sys.argv[1]),allow_headless=True,"
+        "browser_profile=Path(sys.argv[2]),profile=sys.argv[3],browser='chrome',env={}); "
+        "email=None; "
+        "exec(\"async def _identity():\\n from notebooklm.client import NotebookLMClient\\n async with NotebookLMClient.from_storage(path=sys.argv[1],profile=sys.argv[3],allow_headless=False) as c:\\n  return await c.get_account_email(live_fallback=True)\"); "
+        "email=asyncio.run(_identity()) if str(getattr(r.status,'value',r.status)).lower()=='success' else None; "
+        "print(json.dumps({'status':str(getattr(r.status,'value',r.status)),'reason':r.reason,'detected_email':email}))"
+    )
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+    code, output = _run_bounded_process(
+        [str(python_path), "-I", "-c", runner, str(storage_path), str(browser_profile), profile],
+        max(0.1, deadline - time.monotonic()),
+    )
+    if code is None:
+        return {"success": False, "reason": "timeout"}
+    payload: dict[str, Any] = {}
+    for line in reversed(output.splitlines()):
+        try:
+            candidate = json.loads(line)
+            if isinstance(candidate, dict) and "status" in candidate:
+                payload = candidate
+                break
+        except Exception:
+            continue
+    status = str(payload.get("status") or "").lower()
+    if code != 0 or status != "success":
+        capture_reason = str(payload.get("reason") or "").strip()
+        reason_lower = capture_reason.lower()
+        if status == "unavailable":
+            typed_reason = "dependency_unavailable"
+        elif any(marker in reason_lower for marker in ("expired", "login required", "re-authenticate", "sign in")):
+            typed_reason = "needs_signin"
+        else:
+            typed_reason = "transient_browser_failure"
+        return {
+            "success": False,
+            "reason": typed_reason,
+            "capture_reason": capture_reason,
+        }
+
+    # Passive network verification is deliberately separate from capture. It
+    # cannot invoke refresh commands or modify the newly captured state.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return {"success": False, "reason": "timeout"}
+    verify_code, verify_output = _run_bounded_process(
+        [
+            str(cli_path), "--storage", str(storage_path), "--profile", profile,
+            "auth", "check", "--test", "--passive", "--json",
+        ],
+        remaining,
+    )
+    verify_payload: dict[str, Any] = {}
+    try:
+        parsed = json.loads(verify_output.strip())
+        if isinstance(parsed, dict):
+            verify_payload = parsed
+    except (ValueError, TypeError):
+        # Tolerate a diagnostic prefix while keeping the pretty-printed JSON
+        # object intact. Never authorize from a fragment or an inner account.
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"\{", verify_output):
+            try:
+                parsed, _end = decoder.raw_decode(verify_output[match.start():])
+                if isinstance(parsed, dict) and "status" in parsed:
+                    verify_payload = parsed
+                    break
+            except ValueError:
+                continue
+    verify_ok = verify_code == 0 and str(verify_payload.get("status") or "").lower() == "ok"
+    details = verify_payload.get("details") if isinstance(verify_payload.get("details"), dict) else {}
+    verify_account = details.get("account") if isinstance(details, dict) else {}
+    verified_email = (
+        str(verify_account.get("email") or "").strip()
+        if isinstance(verify_account, dict)
+        else ""
+    )
+    return {
+        "success": verify_ok,
+        "reason": "verified" if verify_ok else ("timeout" if verify_code is None else "passive_verify_failed"),
+        "detected_email": payload.get("detected_email"),
+        "verified_email": verified_email or None,
+        "verification": verify_output[-4096:] if verify_ok else "",
+    }
+
+
+def _refresh_from_persistent_browser_unlocked(
+    profile: str | None,
+    expected_email: str | None,
+    timeout_seconds: int = 35,
+) -> dict[str, Any]:
+    """Safely recover from this profile's live persistent Chrome session.
+
+    This path is intentionally narrower than :func:`auto_sync_from_browser`:
+    it never scans browsers/backups, seeds stored cookies, changes browser
+    channels, opens a visible window, or infers an unknown account identity.
+    """
+    profile_name = resolve_notebooklm_profile(profile)
+    expected = str(expected_email or "").strip().lower()
+    if not expected:
+        return {"success": False, "reason": "account_required", "profile": profile_name}
+    try:
+        from . import login_flow
+
+        if login_flow.get_login_state().get("running"):
+            return {"success": False, "reason": "login_in_progress", "profile": profile_name}
+        generation_getter = login_flow.get_session_generation
+        starting_generation = int(generation_getter(profile_name))
+    except Exception:
+        return {"success": False, "reason": "login_state_unavailable", "profile": profile_name}
+
+    browser_profile = get_profile_dir(profile_name) / "browser_profile"
+    if not browser_profile.is_dir():
+        return {
+            "success": False,
+            "reason": "needs_signin",
+            "capture_reason": "missing_profile",
+            "profile": profile_name,
+        }
+    storage_path = get_storage_state_path(profile_name)
+    try:
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        # The CLI derives context.json and master_token.json beside storage
+        # state. Give the candidate its own directory so those runtime files
+        # cannot read or overwrite metadata belonging to the canonical profile.
+        scratch_dir = Path(tempfile.mkdtemp(
+            prefix="storage_state.recovery.", dir=str(storage_path.parent)
+        ))
+        candidate_path = scratch_dir / "storage_state.json"
+    except Exception:
+        return {"success": False, "reason": "scratch_unavailable", "profile": profile_name}
+
+    try:
+        outcome = _run_cli_headless_reauth(
+            profile=profile_name,
+            storage_path=candidate_path,
+            browser_profile=browser_profile,
+            timeout_seconds=max(1, min(int(timeout_seconds), 60)),
+        )
+        if not outcome.get("success"):
+            return {"success": False, "profile": profile_name, **outcome}
+
+        try:
+            state = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"success": False, "reason": "invalid_capture", "profile": profile_name}
+        detected = str(outcome.get("detected_email") or "").strip().lower()
+        if not detected:
+            return {"success": False, "reason": "account_unverified", "profile": profile_name}
+        if detected != expected:
+            return {
+                "success": False,
+                "reason": "email_mismatch",
+                "profile": profile_name,
+                "expected_email": expected,
+                "detected_email": detected,
+            }
+        passively_verified_email = str(outcome.get("verified_email") or "").strip().lower()
+        if passively_verified_email and passively_verified_email != detected:
+            return {
+                "success": False,
+                "reason": "email_mismatch",
+                "profile": profile_name,
+                "expected_email": detected,
+                "detected_email": passively_verified_email,
+            }
+        cookies = state.get("cookies") if isinstance(state, dict) else None
+        valid, _message, details = validate_extracted_cookies(cookies if isinstance(cookies, list) else [])
+        if not valid:
+            return {"success": False, "reason": "invalid_capture", "profile": profile_name, "details": details}
+
+        state["notebooklm"] = {
+            "version": 1,
+            "account": {"authuser": 0, "email": detected},
+        }
+        state["account"] = {"email": detected}
+        from .config import is_profile_disconnected, write_storage_state_guarded
+
+        # Account switch/disconnect and interactive login mutate their state
+        # under this same lock. Hold it through the canonical write so a user
+        # action cannot land between the final generation check and commit.
+        with login_flow._STATE_LOCK:
+            if int(generation_getter(profile_name)) != starting_generation:
+                return {
+                    "success": False,
+                    "reason": "stale_generation",
+                    "transient": True,
+                    "profile": profile_name,
+                }
+            if login_flow.get_login_state().get("running"):
+                return {
+                    "success": False,
+                    "reason": "login_in_progress",
+                    "transient": True,
+                    "profile": profile_name,
+                }
+            if is_profile_disconnected(profile_name):
+                return {
+                    "success": False,
+                    "reason": "disconnected",
+                    "transient": True,
+                    "profile": profile_name,
+                }
+            commit = write_storage_state_guarded(
+                storage_path,
+                json.dumps(state, indent=2),
+                source="browser_sync.refresh_from_persistent_browser",
+            )
+        if not commit.get("written"):
+            return {"success": False, "reason": "commit_failed", "profile": profile_name}
+        return {
+            "success": True,
+            "reason": "verified",
+            "source": "persistent_browser_recovery",
+            "method": "persistent_browser_recovery",
+            "profile": profile_name,
+            "email": detected,
+            "cookies_count": len(cookies),
+            "storage_path": str(storage_path),
+        }
+    finally:
+        for scratch_path in (
+            candidate_path,
+            candidate_path.with_name(f".{candidate_path.name}.lock"),
+            candidate_path.with_name("context.json"),
+            candidate_path.with_name("context.json.lock"),
+            candidate_path.with_name(".context.json.lock"),
+            candidate_path.with_name("master_token.json"),
+            candidate_path.with_name("master_token.json.lock"),
+            candidate_path.with_name(".master_token.json.lock"),
+        ):
+            try:
+                scratch_path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("Could not remove recovery scratch path %s", scratch_path)
+        try:
+            candidate_path.parent.rmdir()
+        except OSError:
+            logger.debug("Could not remove recovery scratch directory %s", candidate_path.parent)
+
+
+def refresh_from_persistent_browser(
+    profile: str | None,
+    expected_email: str | None,
+    timeout_seconds: int = 35,
+) -> dict[str, Any]:
+    """Run one same-profile persistent-browser recovery at a time."""
+    profile_name = resolve_notebooklm_profile(profile)
+    with _PERSISTENT_RECOVERY_LOCKS_GUARD:
+        lock = _PERSISTENT_RECOVERY_LOCKS.setdefault(profile_name, threading.Lock())
+    if not lock.acquire(blocking=False):
+        return {
+            "success": False,
+            "reason": "recovery_in_progress",
+            "transient": True,
+            "profile": profile_name,
+        }
+    try:
+        result = _refresh_from_persistent_browser_unlocked(profile_name, expected_email, timeout_seconds)
+        if not result.get("success") and result.get("reason") not in {"needs_signin", "email_mismatch"}:
+            result.setdefault("transient", True)
+        return result
+    finally:
+        lock.release()

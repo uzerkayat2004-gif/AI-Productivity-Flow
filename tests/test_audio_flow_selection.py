@@ -4,9 +4,21 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from voice_flow import main as main_module
 from voice_flow.audio_flow_widget import AudioFlowFloatingWidget
 from voice_flow.main import DictationState, VoiceFlowApp
+
+
+def _wait_until(predicate, timeout: float = 1.0) -> bool:
+    """Keep async Audio Flow assertions bounded and deterministic."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return bool(predicate())
 
 
 class _Overlay:
@@ -30,8 +42,8 @@ class _Overlay:
     def show_reading(self, snippet: str) -> None:
         self.states.append(("reading", snippet))
 
-    def show_generating_audio(self) -> None:
-        self.states.append(("generating_audio", None))
+    def show_generating_audio(self, snippet: str = "Generating audio...") -> None:
+        self.states.append(("generating_audio", snippet))
 
     def show_summarizing(self, mode: str = "") -> None:
         self.states.append(("summarizing", mode))
@@ -148,10 +160,12 @@ def test_audio_pipeline_releases_action_state_on_done_error_and_rejection(monkey
     tts = TTS()
     monkeypatch.setattr(main_module, "tts_engine", tts)
     monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", lambda text: text)
     app._is_voice_flow_dictation = lambda _text: False
 
     app._process_audio_flow_pipeline(text_override="selected text")
-    assert tts.callbacks is not None
+    assert _wait_until(lambda: tts.callbacks is not None)
     tts.callbacks[1]()
     tts.callbacks[2]("synthesis failed")
 
@@ -178,12 +192,155 @@ def test_explicit_selection_bypasses_recent_dictation_guard(monkeypatch) -> None
     monkeypatch.setattr(main_module, "tts_engine", TTS())
     monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
     monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda _playing: None)
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", lambda text: text)
     app._is_voice_flow_dictation = lambda _text: True
 
     app._process_audio_flow_pipeline(text_override="intentionally selected dictation text")
 
-    assert spoken == ["intentionally selected dictation text"]
+    assert _wait_until(lambda: spoken == ["intentionally selected dictation text"])
     assert not any(state[0] == "error" for state in app.overlay.states)
+
+
+def test_explanatory_read_prepares_script_off_the_calling_thread(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    script_started = threading.Event()
+    release_script = threading.Event()
+    spoken: list[str] = []
+
+    class TTS:
+        def is_speaking(self) -> bool:
+            return False
+
+        def speak(self, text, **_callbacks) -> None:
+            spoken.append(text)
+
+        def stop(self) -> None:
+            pass
+
+    def slow_explanation(text: str) -> str:
+        script_started.set()
+        assert release_script.wait(1.0)
+        return f"Explained: {text}"
+
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(main_module, "tts_engine", TTS())
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: None)
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", slow_explanation)
+
+    started = time.monotonic()
+    app._process_audio_flow_pipeline(text_override="selected source")
+    assert time.monotonic() - started < 0.15
+    assert script_started.wait(0.5)
+    assert spoken == []
+    assert ("generating_audio", "Preparing explanation...") in app.overlay.states
+
+    release_script.set()
+    assert _wait_until(lambda: spoken == ["Explained: selected source"])
+
+
+def test_stop_during_explanatory_read_suppresses_stale_tts(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    script_started = threading.Event()
+    release_script = threading.Event()
+    spoken: list[str] = []
+
+    class TTS:
+        def is_speaking(self) -> bool:
+            return False
+
+        def speak(self, text, **_callbacks) -> None:
+            spoken.append(text)
+
+        def stop(self) -> None:
+            pass
+
+    def blocked_explanation(text: str) -> str:
+        script_started.set()
+        assert release_script.wait(1.0)
+        return f"Explained: {text}"
+
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(main_module, "tts_engine", TTS())
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: None)
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda _playing: None)
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", blocked_explanation)
+
+    app._process_audio_flow_pipeline(text_override="old selection")
+    assert script_started.wait(0.5)
+    app._stop_audio_flow_pipeline()
+    release_script.set()
+
+    assert _wait_until(lambda: not any(thread.name == "AudioFlowExplanatoryRead" and thread.is_alive() for thread in threading.enumerate()))
+    assert spoken == []
+
+
+def test_explanatory_read_falls_back_to_source_text_after_script_error(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    spoken: list[str] = []
+
+    class TTS:
+        def is_speaking(self) -> bool:
+            return False
+
+        def speak(self, text, **_callbacks) -> None:
+            spoken.append(text)
+
+        def stop(self) -> None:
+            pass
+
+    def failed_explanation(_text: str) -> str:
+        raise RuntimeError("provider unavailable")
+
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(main_module, "tts_engine", TTS())
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: None)
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", failed_explanation)
+
+    app._process_audio_flow_pipeline(text_override="reliable source text")
+
+    assert _wait_until(lambda: spoken == ["reliable source text"])
+
+
+def test_stale_tts_callbacks_cannot_replace_newer_read_state(monkeypatch) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    widget_calls: list[tuple[str, bool]] = []
+
+    class TTS:
+        def __init__(self) -> None:
+            self.callbacks = []
+
+        def is_speaking(self) -> bool:
+            return False
+
+        def speak(self, _text, **callbacks) -> None:
+            self.callbacks.append(callbacks)
+
+        def stop(self) -> None:
+            pass
+
+    from voice_flow.audio_explainer import audio_explainer
+    tts = TTS()
+    monkeypatch.setattr(main_module, "tts_engine", tts)
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: widget_calls.append(("hide", True)))
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda value: widget_calls.append(("playing", value)))
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", lambda text: text)
+
+    app._process_audio_flow_pipeline(text_override="first selection")
+    assert _wait_until(lambda: len(tts.callbacks) == 1)
+    app._process_audio_flow_pipeline(text_override="second selection")
+    assert _wait_until(lambda: len(tts.callbacks) == 2)
+
+    tts.callbacks[0]["on_done"]()
+    tts.callbacks[0]["on_error"]("late failure")
+
+    assert app.overlay.cleared == 0
+    assert not any(state[0] in {"ready", "error"} for state in app.overlay.states)
+    assert widget_calls == [("hide", True), ("hide", True)]
 
 
 def test_depth_selection_hitboxes_and_summarizing_transition() -> None:
@@ -217,15 +374,16 @@ def test_depth_selection_hitboxes_and_summarizing_transition() -> None:
     assert widget._is_visible is False
 
 
-def test_audio_summary_pipeline_worker_calls_summarize_with_fallback(monkeypatch) -> None:
+@pytest.mark.parametrize("saved_style", ["single", "podcast"])
+def test_audio_summary_pipeline_worker_forwards_saved_summary_style(monkeypatch, saved_style: str) -> None:
     app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
     generate_calls = []
     launched_tokens = []
     widget_states = []
 
     class FakeNotebookLMService:
-        def generate(self, text, depth="balanced", *, cancelled=None, on_progress=None):
-            generate_calls.append((text, depth))
+        def generate(self, text, depth="balanced", *, style="single", cancelled=None, on_progress=None):
+            generate_calls.append((text, depth, style))
             return {"audio_path": "/fake/audio.m4a", "depth": depth}
 
     class FakeTTS:
@@ -235,7 +393,14 @@ def test_audio_summary_pipeline_worker_calls_summarize_with_fallback(monkeypatch
         def speak(self, text, **kwargs):
             pass
 
-    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(
+        main_module.storage,
+        "get_setting",
+        lambda key, default=None: (
+            saved_style if key == "audio_flow_summary_style"
+            else default
+        ),
+    )
     monkeypatch.setattr(main_module, "tts_engine", FakeTTS())
     monkeypatch.setattr(main_module.audio_flow_widget, "show_summarizing", lambda: widget_states.append("summarizing"))
     monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda p: widget_states.append(f"playing_{p}"))
@@ -254,8 +419,78 @@ def test_audio_summary_pipeline_worker_calls_summarize_with_fallback(monkeypatch
 
     time.sleep(0.3)  # Allow worker thread to execute
     assert len(generate_calls) == 1
-    assert generate_calls[0] == ("Long document text for summary", "short")
+    assert generate_calls[0] == ("Long document text for summary", "short", saved_style)
     assert launched_tokens == ["short"]
+
+
+def test_summary_export_runs_after_ready_and_failed_copy_does_not_mark_downloaded(
+    tmp_path, monkeypatch
+) -> None:
+    app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
+    audio_path = tmp_path / "summary.m4a"
+    audio_path.write_bytes(b"m4a bytes")
+    export_started = threading.Event()
+    release_export = threading.Event()
+    export_finished = threading.Event()
+    events: list[str] = []
+    history_updates: list[dict] = []
+
+    class FakeNotebookLMService:
+        def generate(self, *_args, **_kwargs):
+            return {"audio_path": str(audio_path)}
+
+    class FakeTTS:
+        def is_speaking(self):
+            return False
+
+        def speak(self, *_args, **_kwargs):
+            pass
+
+    def update_history(_history_id, **kwargs):
+        history_updates.append(kwargs)
+
+    def blocked_export(*_args, **_kwargs):
+        export_started.set()
+        try:
+            assert release_export.wait(1.0)
+            raise OSError("Downloads unavailable")
+        finally:
+            export_finished.set()
+
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda _key, default=None: default)
+    monkeypatch.setattr(main_module.storage, "add_audio_summary_history", lambda **_kwargs: None)
+    monkeypatch.setattr(main_module.storage, "update_audio_summary_history", update_history)
+    monkeypatch.setattr(main_module.storage, "record_audio_summary_to_history", lambda **_kwargs: events.append("history"))
+    monkeypatch.setattr(main_module, "tts_engine", FakeTTS())
+    monkeypatch.setattr(main_module.audio_flow_widget, "show_summarizing", lambda: None)
+    monkeypatch.setattr(main_module.audio_flow_widget, "set_playing", lambda _playing: None)
+    monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: None)
+    monkeypatch.setattr(app.overlay, "show_ready", lambda: events.append("ready"))
+
+    from voice_flow import audio_notebooklm, audio_summary_player
+    monkeypatch.setattr(audio_notebooklm, "audio_notebooklm_service", FakeNotebookLMService())
+    monkeypatch.setattr(audio_summary_player, "close_summary_audio_player", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        audio_summary_player,
+        "launch_summary_audio_player",
+        lambda *_args, **_kwargs: (events.append("player") or "player-token"),
+    )
+    monkeypatch.setattr(audio_summary_player, "save_media_to_downloads", blocked_export)
+
+    try:
+        app._process_audio_flow_pipeline(
+            text_override="Long document text for summary",
+            mode="summary",
+            summary_depth="short",
+        )
+        assert export_started.wait(1.0), (events, app.overlay.states, history_updates)
+        assert events == ["player", "history", "ready"]
+        assert not any(update.get("downloaded") == 1 for update in history_updates)
+    finally:
+        release_export.set()
+        assert export_finished.wait(1.0)
+
+    assert not any(update.get("downloaded") == 1 for update in history_updates)
 
 
 def test_audio_summary_pipeline_worker_handles_tts_error_safely(monkeypatch) -> None:
@@ -263,7 +498,7 @@ def test_audio_summary_pipeline_worker_handles_tts_error_safely(monkeypatch) -> 
     widget_resets = []
 
     class BrokenNotebookLMService:
-        def generate(self, text, depth="balanced", *, cancelled=None, on_progress=None):
+        def generate(self, text, depth="balanced", *, style="single", cancelled=None, on_progress=None):
             raise RuntimeError("NotebookLM connection failed")
 
     class FakeTTS:
@@ -313,7 +548,7 @@ def test_mouse_release_never_invalidates_audio_summary_generation(monkeypatch) -
     assert app._audio_summary_generation == 42, "Mouse drag must not touch _audio_summary_generation"
 
 
-def test_pipeline_on_done_and_on_error_unconditionally_close_widget(monkeypatch) -> None:
+def test_pipeline_on_done_and_on_error_close_widget_for_the_current_generation(monkeypatch) -> None:
     app = _selection_app(SimpleNamespace(get_selected_text=lambda **_kwargs: ""))
     widget_calls = []
 
@@ -334,15 +569,14 @@ def test_pipeline_on_done_and_on_error_unconditionally_close_widget(monkeypatch)
 
     tts = TTS()
     monkeypatch.setattr(main_module, "tts_engine", tts)
+    from voice_flow.audio_explainer import audio_explainer
+    monkeypatch.setattr(audio_explainer, "transform_for_human_reading", lambda text: text)
 
     app._process_audio_flow_pipeline(text_override="testing close")
-    assert tts.callbacks is not None
+    assert _wait_until(lambda: tts.callbacks is not None)
     _on_start, _on_done, _on_error = tts.callbacks
 
-    # Invalidate token artificially to simulate concurrent actions
-    app._audio_summary_generation += 10
-
-    # _on_done MUST unconditionally close widget and clear overlay
+    # The active TTS callbacks close the widget and clear the overlay.
     widget_calls.clear()
     _on_done()
     assert ("set_playing", False) in widget_calls
@@ -350,7 +584,7 @@ def test_pipeline_on_done_and_on_error_unconditionally_close_widget(monkeypatch)
     assert app.overlay.cleared > 0
     assert any(s[0] == "ready" for s in app.overlay.states)
 
-    # _on_error MUST unconditionally close widget and clear overlay
+    # The active error callback follows the same completion cleanup.
     widget_calls.clear()
     _on_error("custom playback failure")
     assert ("set_playing", False) in widget_calls
@@ -417,4 +651,4 @@ def test_widget_hide_on_playback_completion_withdraws_immediately() -> None:
     widget.hide()
 
     assert widget._is_visible is False
-    assert withdrawn == [True]
+    assert withdrawn == [True]

@@ -36,8 +36,16 @@ log = logging.getLogger(__name__)
 # local-model contention. Cloud chunks still benefit from the overlap.
 STREAM_WORKER_COUNT = 2
 
-_Task = tuple[int, int, tuple[np.ndarray, int]]
+_Task = tuple[int, int, tuple[np.ndarray, int], int]
 _WORD_RE = re.compile(r"[\w']+", re.UNICODE)
+
+# Capture callbacks must never accumulate an unbounded amount of microphone
+# memory while a provider stalls.  These limits apply only to work waiting in
+# the queue; at most ``STREAM_WORKER_COUNT`` additional chunks can be in
+# workers.  A rejected chunk is terminally failed so the lossless whole-recording
+# fallback remains responsible for its words.
+STREAM_QUEUE_MAX_CHUNKS = 32
+STREAM_QUEUE_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _chunk_to_16k(chunk: np.ndarray, native_sr: int) -> np.ndarray:
@@ -86,7 +94,8 @@ class StreamTranscriber:
             # the conservative one-argument behavior for those callables.
             pass
 
-        self._queue: "queue.Queue[_Task | None]" = queue.Queue()
+        self._queue: "queue.Queue[_Task | None]" = queue.Queue(maxsize=STREAM_QUEUE_MAX_CHUNKS)
+        self._queued_bytes_by_epoch: dict[int, int] = {}
         self._workers: list[threading.Thread] = []
         # Compatibility for diagnostics/tests that used the old single worker
         # attribute.  It always points at the first live pool worker.
@@ -131,6 +140,44 @@ class StreamTranscriber:
         # under, so late results from a previous session can never leak into a
         # current transcript after cancel/restart.
         self._epoch = 0
+        self._unstarted_failures: set[int] = set()
+
+    def _release_queued_bytes_locked(self, epoch: int, byte_count: int) -> None:
+        """Release the reservation for a task removed from the queue."""
+        remaining = self._queued_bytes_by_epoch.get(epoch, 0) - byte_count
+        if remaining > 0:
+            self._queued_bytes_by_epoch[epoch] = remaining
+        else:
+            self._queued_bytes_by_epoch.pop(epoch, None)
+
+    def _advance_failed_starts_locked(self) -> None:
+        """Let the invocation-order gate skip tasks rejected before a worker."""
+        while self._started_seq + 1 in self._unstarted_failures:
+            self._started_seq += 1
+            self._unstarted_failures.remove(self._started_seq)
+
+    def _mark_unqueued_failure_locked(self, seq: int, epoch: int) -> None:
+        """Terminally account a chunk that could not enter the bounded queue."""
+        self._pending.pop(seq, None)
+        self._durations = [d for d in self._durations if d[0] != seq]
+        self._overlap_prefixes.pop(seq, None)
+        if epoch == self._epoch:
+            self._completed[seq] = ""
+            self._failed += 1
+            self._had_failures = True
+            self._unstarted_failures.add(seq)
+            self._advance_failed_starts_locked()
+            self._condition.notify_all()
+
+    def _discard_queued_tasks_locked(self) -> None:
+        """Remove queued tasks while the epoch transition excludes new intake."""
+        while True:
+            try:
+                queued = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if queued is not None:
+                self._release_queued_bytes_locked(queued[1], queued[3])
 
     # -- session lifecycle --
 
@@ -141,6 +188,10 @@ class StreamTranscriber:
     ) -> None:
         """Start a fresh ordered session and ensure the bounded pool is alive."""
         with self._condition:
+            # This must stay inside the epoch transition.  Draining after the
+            # lock would let a callback enqueue a new-session chunk which the
+            # old-session cleanup silently removes.
+            self._discard_queued_tasks_locked()
             self._completed.clear()
             self._results.clear()
             self._pending.clear()
@@ -154,19 +205,12 @@ class StreamTranscriber:
             self._had_failures = False
             self._last_emitted_text = ""
             self._epoch += 1
+            self._queued_bytes_by_epoch.clear()
+            self._unstarted_failures: set[int] = set()
             self._deadline = deadline
             self._model_ref = model_ref or None
             self._session_active = True
             self._condition.notify_all()
-
-        # Chunks queued by a cancelled previous session would otherwise be
-        # transcribed here and pollute this one (their epoch no longer matches,
-        # but the CPU/network work would still be wasted).
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
 
         with self._worker_lock:
             self._workers = [worker for worker in self._workers if worker.is_alive()]
@@ -222,25 +266,24 @@ class StreamTranscriber:
             seq = self._seq
             epoch = self._epoch
             duration = chunk.shape[0] / max(1, int(native_sr))
+            byte_count = int(getattr(chunk, "nbytes", 0))
             self._pending[seq] = duration
             self._durations.append((seq, duration))
             self._overlap_prefixes[seq] = max(0.0, float(overlap_prefix_seconds or 0.0))
-        try:
-            self._queue.put_nowait((seq, epoch, (chunk, native_sr)))
-        except Exception:
-            # Keep the sequence terminally accounted for if the queue ever
-            # rejects an item; otherwise a gap would hold every later result.
-            with self._condition:
-                self._pending.pop(seq, None)
-                self._durations = [d for d in self._durations if d[0] != seq]
-                self._overlap_prefixes.pop(seq, None)
-                if epoch == self._epoch:
-                    self._completed[seq] = ""
-                    self._failed += 1
-                    self._had_failures = True
-                    if seq == self._started_seq + 1:
-                        self._started_seq = seq
-                    self._condition.notify_all()
+            queued_bytes = self._queued_bytes_by_epoch.get(epoch, 0)
+            if byte_count > STREAM_QUEUE_MAX_BYTES or queued_bytes + byte_count > STREAM_QUEUE_MAX_BYTES:
+                self._mark_unqueued_failure_locked(seq, epoch)
+                return
+            try:
+                # This is deliberately inside the session lock: it makes the
+                # byte reservation and nonblocking enqueue one atomic intake
+                # decision with respect to cancellation/start-session cleanup.
+                self._queue.put_nowait((seq, epoch, (chunk, native_sr), byte_count))
+                self._queued_bytes_by_epoch[epoch] = queued_bytes + byte_count
+            except queue.Full:
+                self._mark_unqueued_failure_locked(seq, epoch)
+            except Exception:
+                self._mark_unqueued_failure_locked(seq, epoch)
 
     def pending_count(self) -> int:
         """Chunks accepted but not yet terminal (queued or running)."""
@@ -370,6 +413,9 @@ class StreamTranscriber:
     def discard(self) -> None:
         """Throw away everything queued and collected (session cancelled)."""
         with self._condition:
+            # Serialize removal with active-session/epoch mutation so a fresh
+            # start_session cannot have its accepted chunks removed here.
+            self._discard_queued_tasks_locked()
             self._session_active = False
             self._completed.clear()
             self._results.clear()
@@ -386,12 +432,9 @@ class StreamTranscriber:
             self._deadline = None
             self._model_ref = None
             self._epoch += 1
+            self._queued_bytes_by_epoch.clear()
+            self._unstarted_failures.clear()
             self._condition.notify_all()
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
 
     # -- worker --
 
@@ -415,7 +458,7 @@ class StreamTranscriber:
             item = self._queue.get()
             if item is None:
                 return
-            seq, epoch, (chunk, native_sr) = item
+            seq, epoch, (chunk, native_sr), byte_count = item
             text = ""
             chunk_exception = False
             try:
@@ -425,6 +468,7 @@ class StreamTranscriber:
                 # proceed immediately and perform the expensive call in
                 # parallel.
                 with self._condition:
+                    self._release_queued_bytes_locked(epoch, byte_count)
                     if epoch != self._epoch:
                         continue
                     while epoch == self._epoch and seq != self._started_seq + 1:
@@ -432,6 +476,11 @@ class StreamTranscriber:
                     if epoch != self._epoch:
                         continue
                     self._started_seq = seq
+                    # Queue admission can reject a run of later sequence
+                    # numbers.  Once this worker has opened the preceding
+                    # invocation gate, skip those terminal failures so a
+                    # subsequently admitted chunk cannot wait forever.
+                    self._advance_failed_starts_locked()
                     deadline = self._deadline
                     model_ref = self._model_ref
                     self._condition.notify_all()

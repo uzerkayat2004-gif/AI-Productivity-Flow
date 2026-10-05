@@ -278,13 +278,40 @@ class TTSEngine:
 
         audio_queue: queue.Queue[tuple[int, str | None, bool, str]] = queue.Queue(maxsize=10)
         temp_files_to_clean: list[str] = []
+        temp_files_lock = threading.Lock()
+        producer_stop = threading.Event()
+        pipeline_alias: str | None = None
+
+        def _producer_cancelled() -> bool:
+            return producer_stop.is_set() or _cancelled()
+
+        def _put(item: tuple[int, str | None, bool, str]) -> bool:
+            """Enqueue without letting a cancelled consumer strand producer state."""
+            while not _producer_cancelled():
+                try:
+                    audio_queue.put(item, timeout=0.05)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
+        def _cleanup_temp_files() -> None:
+            with temp_files_lock:
+                paths = list(temp_files_to_clean)
+                temp_files_to_clean.clear()
+            for path in paths:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
 
         def _producer():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 for idx, sentence in enumerate(sentences):
-                    if _cancelled():
+                    if _producer_cancelled():
                         break
 
                     # Classify the structural pause BEFORE stripping markers
@@ -292,20 +319,22 @@ class TTSEngine:
                     # Strip pause markers so TTS engine never sees them
                     synth_text = strip_pause_markers(sentence).strip()
                     if not synth_text:
-                        audio_queue.put((idx, None, idx == len(sentences) - 1, pause_class))
+                        if not _put((idx, None, idx == len(sentences) - 1, pause_class)):
+                            break
                         continue
 
                     valid_v = resolve_edge_voice(self._detect_voice_for_text(synth_text, voice_name))
                     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_f:
                         s_path = tmp_f.name
-                    temp_files_to_clean.append(s_path)
+                    with temp_files_lock:
+                        temp_files_to_clean.append(s_path)
 
                     data = bytearray()
                     try:
                         communicate = edge_tts.Communicate(synth_text, valid_v, rate=rate_str, pitch=pitch_str)
                         async def _get_chunk():
                             async for chunk in communicate.stream():
-                                if _cancelled():
+                                if _producer_cancelled():
                                     break
                                 if chunk.get("type") == "audio" and chunk.get("data"):
                                     data.extend(chunk["data"])
@@ -313,18 +342,25 @@ class TTSEngine:
                     except Exception as pe:
                         log.debug("Pipelined sentence synthesis warning for idx %d: %s", idx, pe)
 
-                    if _cancelled():
+                    if _producer_cancelled():
                         break
 
                     if data:
                         with open(s_path, "wb") as fp:
                             fp.write(data)
-                        audio_queue.put((idx, s_path, idx == len(sentences) - 1, pause_class))
+                        if not _put((idx, s_path, idx == len(sentences) - 1, pause_class)):
+                            break
                     else:
-                        audio_queue.put((idx, None, idx == len(sentences) - 1, pause_class))
+                        if not _put((idx, None, idx == len(sentences) - 1, pause_class)):
+                            break
             finally:
                 loop.close()
-                audio_queue.put((-1, None, True, "sentence"))
+                _put((-1, None, True, "sentence"))
+                # If the consumer has already stopped, it no longer owns any
+                # playback path.  This also covers a producer that finishes
+                # just after the bounded join below.
+                if producer_stop.is_set():
+                    _cleanup_temp_files()
 
         prod_thread = threading.Thread(target=_producer, daemon=True)
         prod_thread.start()
@@ -353,6 +389,7 @@ class TTSEngine:
                         on_start()
 
                 alias = f"vf_pipe_{time.time_ns()}_{idx}"
+                pipeline_alias = alias
                 self._active_mci_alias = alias
                 safe_path = s_path.replace("\\", "/")
 
@@ -372,7 +409,8 @@ class TTSEngine:
                         time.sleep(0.04)
 
                     winmm.mciSendStringW(f'close {alias}', None, 0, 0)
-                    self._active_mci_alias = None
+                    if self._active_mci_alias == alias:
+                        self._active_mci_alias = None
                     if not _cancelled() and not is_last:
                         # Context-aware pause: human-like breathing rhythm with speed scaling
                         pause_sec = self._get_inter_sentence_pause_sec(pause_class)
@@ -390,14 +428,24 @@ class TTSEngine:
 
             return played_any
         finally:
-            self._active_mci_alias = None
-            for p in temp_files_to_clean:
+            producer_stop.set()
+            # The shared alias may already belong to a replacement speak()
+            # session.  Close only the local alias this pipeline opened; never
+            # clear or close the replacement session's player.
+            if pipeline_alias:
                 try:
-                    if os.path.exists(p):
-                        time.sleep(0.02)
-                        os.remove(p)
+                    winmm.mciSendStringW(f'close {pipeline_alias}', None, 0, 0)
                 except Exception:
                     pass
+                if self._active_mci_alias == pipeline_alias:
+                    self._active_mci_alias = None
+            # The producer's puts have bounded waits and observe this event,
+            # so a full queue cannot retain a blocked producer after stop().
+            prod_thread.join(timeout=1.0)
+            if pipeline_alias and self._active_mci_alias == pipeline_alias:
+                self._active_mci_alias = None
+            if not prod_thread.is_alive():
+                _cleanup_temp_files()
 
     def _synthesize_and_play_single_progressive(
         self,
@@ -1138,15 +1186,18 @@ class TTSEngine:
             log.warning("Gemini TTS: No active API key configured, falling back to Edge TTS")
             return None
 
-        # model_voice_spec format: "gemini-2.5-flash-preview-tts:Kore"
+        # model_voice_spec format: "gemini-3.8-flash-tts:Kore" or "gemini-3.8-flash-lite-tts:Puck"
         spec_parts = model_voice_spec.split(":", 1)
-        model = spec_parts[0].strip() if spec_parts[0].strip() else "gemini-2.5-flash-preview-tts"
-        voice = spec_parts[1].strip() if len(spec_parts) > 1 else "Kore"
+        model = spec_parts[0].strip() if spec_parts[0].strip() else "gemini-3.8-flash-tts"
+        voice = spec_parts[1].strip() if len(spec_parts) > 1 and spec_parts[1].strip() else "Kore"
+
+        if model.lower().startswith("models/"):
+            model = model[7:]
 
         for k in active_keys:
             api_key = k["api_key"].strip()
             cid = k.get("id")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model)}:generateContent?key={urllib.parse.quote(api_key)}"
             payload = json.dumps({
                 "contents": [{
                     "parts": [{"text": text}]

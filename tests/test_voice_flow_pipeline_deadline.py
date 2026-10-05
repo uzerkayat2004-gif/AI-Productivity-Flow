@@ -93,11 +93,17 @@ def test_cloud_and_local_cleanup_both_get_usable_time_after_transcription(monkey
         )
         app = _app(session)
         app._post_release_deadline = main_module.time.monotonic() + 0.5
-        seen: list[float] = []
+        seen: list[tuple[float, float]] = []
         app.injector = SimpleNamespace(paste_text=lambda *_args, **_kwargs: True)
-        monkeypatch.setattr(main_module.polisher, "polish", lambda text, **kwargs: seen.append(kwargs["deadline"]) or text)
+        monkeypatch.setattr(
+            main_module.polisher,
+            "polish",
+            lambda text, **kwargs: seen.append((kwargs["deadline"], main_module.time.monotonic())) or text,
+        )
         app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=False)
-        return seen[0], main_module.time.monotonic()
+        # The budget contract ends at the polisher boundary. History/overlay
+        # work follows delivery and can vary with the host filesystem.
+        return seen[0]
 
     monkeypatch.setattr(main_module, "detect_voice_command", lambda text: SimpleNamespace(command=None, content=text))
     monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
@@ -122,12 +128,52 @@ def test_command_only_persistent_change_saves_without_arming_or_pasting(monkeypa
     app.injector = SimpleNamespace(paste_text=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("command was pasted")))
     saved: list[object] = []
     monkeypatch.setattr(main_module, "apply_persistent_change", lambda command: saved.append(command) or "work setting saved")
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
     monkeypatch.setattr(main_module.storage, "update_dictation", lambda *_args, **_kwargs: True)
 
     app.transcriber = SimpleNamespace(transcribe=lambda _audio, **_kwargs: "Hey Voice Flow, always make my work messages short.")
     app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=False)
 
     assert saved
+    assert getattr(app, "_pending_command", None) is None
+    assert app.state == DictationState.IDLE
+
+
+@pytest.mark.parametrize("stored_value", [False, "false"])
+def test_polishing_off_preserves_voice_command_words_and_clears_pending_command(monkeypatch, stored_value) -> None:
+    """OFF is a hard boundary: no command parsing, arming, selection, or save."""
+    session = DictationSession(
+        target_hwnd=123, app_title="Editor", app_category="work", style_id="work_formal",
+        started_at=0.0,
+        resolved_style=SimpleNamespace(app_name="Editor", category="work", style_id="work_formal", instruction="work"),
+    )
+    app = _app(session)
+    app._pending_command = SimpleNamespace(label=lambda: "stale command")
+    delivered: list[str] = []
+    app.injector = SimpleNamespace(
+        paste_text=lambda text, *_args, **_kwargs: delivered.append(text) or True,
+        get_selected_text_strict=lambda *_args, **_kwargs: pytest.fail("OFF must not inspect selected text"),
+    )
+    raw = "Hey Voice Flow, make this formal. Keep every word."
+    app.transcriber = SimpleNamespace(transcribe=lambda _audio, **_kwargs: raw)
+    app._defer_history_insert = lambda *_args, **_kwargs: None
+
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: stored_value if key == "polishing_enabled" else default)
+    monkeypatch.setattr(main_module, "detect_voice_command", lambda *_args: pytest.fail("OFF must not parse voice commands"))
+    monkeypatch.setattr(main_module, "apply_persistent_change", lambda *_args: pytest.fail("OFF must not save a voice command"))
+    monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
+    monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
+    monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
+    monkeypatch.setattr(main_module.storage, "update_dictation", lambda *_args, **_kwargs: True)
+
+    def basic_cleanup(text, **kwargs):
+        kwargs["outcome_callback"]("disabled")
+        return text
+
+    monkeypatch.setattr(main_module.polisher, "polish", basic_cleanup)
+    app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=False)
+
+    assert delivered == [raw]
     assert getattr(app, "_pending_command", None) is None
     assert app.state == DictationState.IDLE
 
@@ -155,6 +201,39 @@ def test_final_dictionary_guard_restores_canonical_casing_after_style_format(mon
     result = app._finalize_text("HyperKube release is ready today", session)
     assert "HyperKube" in result
     assert "hyperkube" not in result
+
+
+@pytest.mark.parametrize("polishing_enabled", [True, False])
+def test_finalization_applies_joined_vocabulary_alias_once_with_polishing_on_or_off(monkeypatch, tmp_path, polishing_enabled: bool) -> None:
+    """Both modes deliver a spoken `Hyper Kube` as the user-saved spelling."""
+    from voice_flow.dictionary import DictionaryEngine
+    from voice_flow.polisher import TextPolisher
+    from voice_flow.storage import StorageEngine
+    import voice_flow.polisher as polish_module
+
+    store = StorageEngine(str(tmp_path / "words.db"))
+    assert store.add_dictionary_word("HyperKube")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(main_module, "dictionary_engine", engine)
+    monkeypatch.setattr(polish_module, "dictionary_engine", engine)
+    monkeypatch.setattr(
+        polish_module.storage,
+        "get_setting",
+        lambda key, default=None: (
+            polishing_enabled if key == "polishing_enabled"
+            else "local/deterministic" if key == "voice_flow_polish_model"
+            else default
+        ),
+    )
+    monkeypatch.setattr(main_module, "polisher", TextPolisher())
+    monkeypatch.setattr(main_module, "smart_format", lambda text, *_args: text.lower())
+    session = DictationSession(123, "Editor", "personal", "personal_very_casual", 0.0, cleanup_level="cleanup_light")
+
+    result = object.__new__(VoiceFlowApp)._finalize_text("Please send the Hyper Kube update.", session)
+
+    assert "HyperKube" in result
+    assert "Hyper Kube" not in result
+    assert result.count("HyperKube") == 1
 
 
 def test_polish_mode_normalization_uses_the_three_persisted_policy_values() -> None:
@@ -237,6 +316,7 @@ def test_stream_failure_probe_forces_complete_whole_buffer_fallback(monkeypatch)
     monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
     monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
     monkeypatch.setattr(main_module.polisher, "polish", lambda text, **_kwargs: text)
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
     monkeypatch.setattr(main_module.storage, "update_dictation", lambda *_args, **_kwargs: True)
 
     app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=True)
@@ -448,6 +528,7 @@ def test_history_failure_after_valid_text_does_not_brick_state(monkeypatch) -> N
     monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
     monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
     monkeypatch.setattr(main_module.polisher, "polish", lambda text, **_kwargs: text)
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
 
     def history_is_unavailable(*_args, **_kwargs):
         raise OSError("database or disk is full")

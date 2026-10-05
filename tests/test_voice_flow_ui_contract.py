@@ -68,6 +68,25 @@ def test_voice_flow_stt_and_polish_pickers_keep_separate_catalogues_and_routes()
     assert 'saveVoiceFlowPolishModel(modelRef);' in chooser
 
 
+def test_audio_summary_format_copy_describes_notebooklm_native_outputs() -> None:
+    html = (GUI / "index.html").read_text(encoding="utf-8")
+    dialog = (ROOT / "src" / "voice_flow" / "audio_flow_dialog.py").read_text(encoding="utf-8")
+    summary_format = html[html.index('class="af-summary-style"'):html.index('</section>', html.index('class="af-summary-style"'))]
+
+    assert "Single narrator" in summary_format
+    assert "One voice, sharing the main ideas." in summary_format
+    assert "Podcast conversation" in summary_format
+    assert "Two voices, exploring the ideas together." in summary_format
+    assert "Native NotebookLM Brief" not in summary_format
+    assert "Native NotebookLM Deep Dive" not in summary_format
+    assert 'data-summary-style="single"' in summary_format
+    assert 'data-summary-style="podcast"' in summary_format
+    assert "Reading voice" not in summary_format
+    assert "NotebookLM Brief" in dialog
+    assert "NotebookLM Deep Dive" in dialog
+    assert "Both formats consider source size and depth" in dialog
+
+
 def test_voice_flow_model_save_failures_reload_the_persisted_selection() -> None:
     """A failed picker save must restore the server's previously saved model."""
     app = (GUI / "app.js").read_text(encoding="utf-8")

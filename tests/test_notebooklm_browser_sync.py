@@ -301,7 +301,11 @@ class TestSaveAndRecovery:
 
 class TestSelfHealAndProviderRecovery:
     def test_self_heal_falls_back_to_browser_sync(self, tmp_path, monkeypatch):
-        # When CLI path is missing, self_heal should attempt browser_sync
+        # Browser extraction cannot make NotebookLM usable without its CLI.
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.config.is_profile_disconnected",
+            lambda profile=None: False,
+        )
         monkeypatch.setattr(
             "voice_flow.video_flow_engine.notebooklm.login_flow.resolve_notebooklm_cli",
             lambda explicit=None: None,
@@ -312,11 +316,15 @@ class TestSelfHealAndProviderRecovery:
         )
 
         res = login_flow.self_heal(profile="test-profile")
-        assert res["ok"] is True
-        assert res["healed_via"] == "browser_sync"
+        assert res["ok"] is False
+        assert res["error"] == "cli_missing"
 
     def test_self_heal_falls_back_to_playwright(self, tmp_path, monkeypatch):
         monkeypatch.setenv("VOICE_FLOW_TEST_PLAYWRIGHT_HEAL", "1")
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.config.is_profile_disconnected",
+            lambda profile=None: False,
+        )
         monkeypatch.setattr(
             "voice_flow.video_flow_engine.notebooklm.login_flow.resolve_notebooklm_cli",
             lambda explicit=None: None,
@@ -331,8 +339,8 @@ class TestSelfHealAndProviderRecovery:
         )
 
         res = login_flow.self_heal(profile="test-profile")
-        assert res["ok"] is True
-        assert res.get("healed_via") == "playwright_sync"
+        assert res["ok"] is False
+        assert res["error"] == "cli_missing"
 
     def test_provider_check_auth_auto_recovers(self, tmp_path, monkeypatch):
         st_file = tmp_path / "storage_state.json"
@@ -349,14 +357,90 @@ class TestSelfHealAndProviderRecovery:
             lambda p=None: st_file,
         )
         monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.provider.get_storage_state_path",
+            lambda p=None: st_file,
+        )
+        monkeypatch.setattr(
             "voice_flow.video_flow_engine.notebooklm.config.get_storage_backup_path",
             lambda p=None: tmp_path / "storage_state.backup.json",
         )
 
-        provider = NotebookLMVideoProvider(profile="test_profile")
+        provider = NotebookLMVideoProvider(profile="test_profile", workdir=tmp_path)
         status = provider.check_auth(raise_on_error=False)
         assert status.authenticated is True
         assert status.status == "ok"
+
+    @pytest.mark.parametrize("cli_stdout", ["not-json", '{"status":"error","message":"Authentication expired"}'])
+    def test_provider_invoke_does_not_bypass_failed_shared_heal_with_broad_playwright(self, tmp_path, monkeypatch, cli_stdout):
+        st_file = tmp_path / "storage_state.json"
+        st_file.write_text(json.dumps({"cookies": _sample_valid_cookies()}), encoding="utf-8")
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.provider.get_storage_state_path",
+            lambda p=None: st_file,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.login_flow.self_heal",
+            lambda profile=None: {"ok": False, "classification": "transient_error", "reason": "transient_browser_failure"},
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.sync_cookies_with_playwright",
+            lambda **kwargs: pytest.fail("provider must not bypass shared self-heal"),
+        )
+        # Exercise the production branch while keeping every external boundary mocked.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+        class FailedResult:
+            returncode = 1
+            stdout = cli_stdout
+            stderr = "authentication expired"
+
+        cli_path = tmp_path / "notebooklm.exe"
+        cli_path.touch()
+        provider = NotebookLMVideoProvider(
+            cli_path=cli_path,
+            profile="test_profile",
+            workdir=tmp_path,
+            runner=lambda command, timeout: FailedResult(),
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            provider._invoke(["list"], timeout=2)
+        assert getattr(exc_info.value, "code", None) == "auth_unavailable"
+
+    def test_provider_check_auth_uses_only_shared_heal_for_automatic_browser_recovery(self, tmp_path, monkeypatch):
+        st_file = tmp_path / "storage_state.json"
+        st_file.write_text(json.dumps({"cookies": []}), encoding="utf-8")
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.provider.get_storage_state_path",
+            lambda p=None: st_file,
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.config.is_session_near_expiry",
+            lambda profile=None, threshold_seconds=0: False,
+        )
+        heals = []
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.login_flow.self_heal",
+            lambda profile=None: heals.append(profile) or {"ok": False, "classification": "transient_error"},
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.auto_sync_from_browser",
+            lambda **kwargs: pytest.fail("check_auth must not scan browser profiles automatically"),
+        )
+        monkeypatch.setattr(
+            "voice_flow.video_flow_engine.notebooklm.browser_sync.sync_cookies_with_playwright",
+            lambda **kwargs: pytest.fail("check_auth must not bypass shared self-heal"),
+        )
+
+        provider = NotebookLMVideoProvider(
+            cli_path=tmp_path / "notebooklm.exe", profile="test_profile", workdir=tmp_path
+        )
+        status = provider.check_auth(raise_on_error=False)
+
+        assert status.authenticated is False
+        assert status.status == "error"
+        assert status.details["retryable"] is True
+        assert heals == ["test_profile"]
 
 
 class TestApiServerSyncEndpoints:
@@ -770,12 +854,10 @@ class TestChromeV20InteractiveFallback:
 
         monkeypatch.setattr(
             "voice_flow.video_flow_engine.notebooklm.login_flow.get_online_verification_cache",
-            lambda p: {"authenticated": False, "status": "error", "message": "Google session expired", "checked_at": time.time()},
+            lambda p: {"authenticated": False, "status": "unauthenticated", "message": "Google session expired", "checked_at": time.time()},
         )
 
         auth, email, path, details = api_server._read_notebooklm_storage_state("test-prof")
         assert auth is False
         assert email == "exp@gmail.com"
         assert details.get("expired") is True
-
-

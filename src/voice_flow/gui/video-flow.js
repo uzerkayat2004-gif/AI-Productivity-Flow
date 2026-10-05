@@ -17,25 +17,25 @@ let vfxConnTestStatus = {};
 // NotebookLM Integration State
 let vfSelectedEngine = "notebooklm";
 let vfSelectedFormat = "auto";
-let vfNlmAuthStatus = (() => {
-  try {
-    const cached = localStorage.getItem("vf_nlm_auth_cache");
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed && typeof parsed === "object") return parsed;
-    }
-  } catch (_) {}
-  return { authenticated: false, status: "unauthenticated", email: null, profile: "video-flow-experiment" };
-})();
+// The browser must never paint a saved cookie as Connected.  A connection is
+// only confirmed after the backend has completed an online NotebookLM probe.
+let vfNlmAuthStatus = {
+  authenticated: false,
+  account_saved: false,
+  online_verified: null,
+  checking: true,
+  email: null,
+  profile: "video-flow-experiment",
+};
+let vfNlmAuthInProgress = false;
+let vfNlmAuthRequestSequence = 0;
+let vfNlmRecoveryPollTimer = null;
+let vfNlmRecoveryPollCount = 0;
 
 // Auto-hydrate NotebookLM auth state on load
 if (typeof window !== "undefined") {
   const hydrateImmediate = () => {
-    try {
-      if (typeof renderNotebookLMAuthStatus === "function" && vfNlmAuthStatus && vfNlmAuthStatus.authenticated) {
-        renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
-      }
-    } catch (_) {}
+    try { renderNotebookLMAuthStatus(vfNlmAuthStatus, false); } catch (_) {}
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", hydrateImmediate);
@@ -74,12 +74,20 @@ if (typeof window !== "undefined") {
 }
 
 let vfNlmAuthPollTimer = null;
+let vfNlmAuthFocusDelayTimer = null;
 function clearNlmAuthPollTimer() {
   if (vfNlmAuthPollTimer) {
     try { clearTimeout(vfNlmAuthPollTimer); } catch (_) {}
     try { clearInterval(vfNlmAuthPollTimer); } catch (_) {}
     vfNlmAuthPollTimer = null;
   }
+}
+function clearNlmRecoveryPollTimer() {
+  if (vfNlmRecoveryPollTimer) {
+    try { clearTimeout(vfNlmRecoveryPollTimer); } catch (_) {}
+    vfNlmRecoveryPollTimer = null;
+  }
+  vfNlmRecoveryPollCount = 0;
 }
 let vfLiveTimerInterval = null;
 let vfLiveTimerStartTime = null;
@@ -220,6 +228,67 @@ function isAuthError(videoOrErr) {
   );
 }
 
+function vfNotebookLMConnectionState(authStatus) {
+  const accountSaved = Boolean(authStatus && authStatus.account_saved);
+  if (authStatus && authStatus.checking) return "checking";
+  if (authStatus && authStatus.online_verified === true) return "connected";
+  if (authStatus && (authStatus.available === false || authStatus.status === "dependency_missing")) return "cli_missing";
+  if (authStatus && authStatus.recovery_state === "restoring") return "restoring";
+  if (authStatus && authStatus.recovery_state === "transient_error") return "unavailable";
+  if (authStatus && authStatus.recovery_state === "sign_in_required" && accountSaved) return "expired";
+  if (authStatus && authStatus.online_verified === false && accountSaved) return "expired";
+  if (authStatus && authStatus.verification_unavailable) return "unavailable";
+  if (accountSaved) return "saved";
+  return "disconnected";
+}
+
+function setNotebookLMAuthProgress(stage) {
+  const statusText = document.getElementById("vf-nlm-status-text");
+  const desc = document.getElementById("vf-nlm-account-desc");
+  const showButton = document.getElementById("vf-nlm-show-signin-btn");
+  const messages = {
+    opening: ["Opening sign-in…", "Opening the Google sign-in window…"],
+    account: ["Choose your Google account in Chrome", "Choose your Google account in Chrome. If Windows asks for a passkey, approve its prompt."],
+    verifying: ["Verifying connection…", "Checking that NotebookLM is ready to use…"],
+  };
+  const message = messages[stage];
+  if (!message) return;
+  if (statusText) statusText.textContent = message[0];
+  if (desc) desc.textContent = message[1];
+  if (showButton) showButton.classList.toggle("hidden", !vfNlmAuthInProgress || stage === "opening" || stage === "verifying");
+}
+
+function stopNotebookLMAuthProgress() {
+  vfNlmAuthInProgress = false;
+  if (vfNlmAuthFocusDelayTimer) {
+    clearTimeout(vfNlmAuthFocusDelayTimer);
+    vfNlmAuthFocusDelayTimer = null;
+  }
+  const showButton = document.getElementById("vf-nlm-show-signin-btn");
+  if (showButton) showButton.classList.add("hidden");
+}
+
+async function focusNotebookLMAuthWindow() {
+  const showButton = document.getElementById("vf-nlm-show-signin-btn");
+  if (showButton) showButton.disabled = true;
+  try {
+    const data = await safeFetchJson("/api/video-flow/notebooklm/auth/focus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: vfNlmAuthStatus.profile || "video-flow-experiment" }),
+    });
+    if (!data?.focused) {
+      const desc = document.getElementById("vf-nlm-account-desc");
+      if (desc) desc.textContent = "The sign-in window may still be opening. Check Chrome or select it from the taskbar to continue.";
+    }
+  } catch (_) {
+    const desc = document.getElementById("vf-nlm-account-desc");
+    if (desc) desc.textContent = "The sign-in window may still be opening. Check Chrome or select it from the taskbar to continue.";
+  } finally {
+    if (showButton) showButton.disabled = false;
+  }
+}
+
 function renderNotebookLMAuthStatus(authStatus, showToast = false) {
   const badge = document.getElementById("vf-nlm-status-badge");
   const dot = document.getElementById("vf-nlm-status-dot");
@@ -233,27 +302,33 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
 
   badge.className = "vf-nlm-status-badge";
   dot.className = "status-dot-indicator";
+  if (loginBtn) loginBtn.disabled = false;
 
   const email = (authStatus && authStatus.email) || "";
-  const isAuth = Boolean(authStatus && authStatus.authenticated && email && authStatus.status !== "unauthenticated");
-  const cookieHealth = authStatus && authStatus.cookie_health;
+  const accountSaved = Boolean(authStatus && authStatus.account_saved);
+  const connectionState = vfNotebookLMConnectionState(authStatus);
 
-  const isDurable = Boolean(authStatus && (authStatus.master_token_present || authStatus.durable));
-
-  if (isAuth) {
-    if (cookieHealth && cookieHealth.status === "expiring_soon") {
-      badge.classList.add("expiring");
-      dot.classList.add("expiring");
-      text.textContent = `Expiring Soon: ${email}`;
-      if (desc) desc.textContent = `${cookieHealth.message || "Session expiring soon"} — Auto-refresh is renewing your session with Google.`;
-    } else {
-      badge.classList.add("connected");
-      dot.classList.add("connected");
-      text.textContent = isDurable ? `Connected (Permanent): ${email}` : `Connected: ${email}`;
-      if (desc) desc.textContent = isDurable
-        ? `Google Account permanently connected (${email}) · Session auto-renews automatically.`
-        : `Google Account connected (${email}) · Ready for 1-click cloud AI video generation.`;
-    }
+  if (connectionState === "checking") {
+    badge.classList.add("verifying");
+    dot.classList.add("verifying");
+    text.textContent = vfNlmAuthInProgress ? "Verifying connection…" : "Checking connection…";
+    if (desc) desc.textContent = vfNlmAuthInProgress
+      ? "Checking that NotebookLM is ready to use…"
+      : "Checking your saved NotebookLM connection…";
+    if (loginBtn) loginBtn.disabled = true;
+    if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
+  } else if (connectionState === "restoring") {
+    badge.classList.add("verifying");
+    dot.classList.add("verifying");
+    text.textContent = "Restoring connection…";
+    if (desc) desc.textContent = "Refreshing your saved NotebookLM session in the background.";
+    if (loginBtn) loginBtn.disabled = true;
+    if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
+  } else if (connectionState === "connected") {
+    badge.classList.add("connected");
+    dot.classList.add("connected");
+    text.textContent = email ? `Connected: ${email}` : "Connected";
+    if (desc) desc.textContent = "NotebookLM is online and ready for cloud video generation.";
     if (loginBtn) {
       loginBtn.className = "btn-secondary vf-nlm-switch-btn";
       loginBtn.title = "Switch or change your Google account";
@@ -265,41 +340,75 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
       disconnectBtn.disabled = false;
     }
     if (showToast) vfToast(`Google NotebookLM is connected (${email})`);
-  } else if (authStatus && (!authStatus.available || authStatus.status === "dependency_missing")) {
+  } else if (connectionState === "cli_missing") {
     badge.classList.add("disconnected");
     dot.classList.add("disconnected");
-    text.textContent = "CLI Not Configured";
-    if (desc) desc.textContent = "NotebookLM CLI is not installed or configured on this machine.";
+    text.textContent = "Sign-in unavailable";
+    if (desc) desc.textContent = "NotebookLM sign-in support is missing from this installation. Update or reinstall the app.";
     if (loginBtn) {
       loginBtn.className = "btn-secondary vf-nlm-switch-btn";
-      loginBtn.title = "Configure NotebookLM CLI";
+      loginBtn.title = "Check whether NotebookLM support is available";
+      loginBtn.onclick = function () { checkNotebookLMAuth(true); };
+    }
+    if (loginLabel) loginLabel.textContent = "Retry check";
+    if (disconnectBtn) disconnectBtn.classList.add("hidden");
+    if (showToast) vfToast("NotebookLM sign-in support is missing.", true);
+  } else if (connectionState === "expired") {
+    badge.classList.add("disconnected");
+    dot.classList.add("disconnected");
+    text.textContent = email ? `Expired: ${email}` : "Reconnect required";
+    if (desc) desc.textContent = "NotebookLM could not verify this Google sign-in. Reconnect to continue.";
+    if (loginBtn) {
+      loginBtn.className = "btn-primary vf-nlm-login-btn";
+      loginBtn.title = "Reconnect your NotebookLM account";
       loginBtn.onclick = function () { startNotebookLMAuth(false); };
     }
-    if (loginLabel) loginLabel.textContent = "Configure CLI";
-    if (disconnectBtn) disconnectBtn.classList.add("hidden");
-    if (showToast) vfToast("NotebookLM CLI was not found.", true);
+    if (loginLabel) loginLabel.textContent = "Reconnect";
+    if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
+    if (showToast) vfToast("NotebookLM needs reconnection.", true);
+  } else if (connectionState === "unavailable") {
+    badge.classList.add("verifying");
+    dot.classList.add("verifying");
+    text.textContent = "Temporarily offline";
+    if (desc) desc.textContent = "Your saved account was not changed. Check your connection and verify again.";
+    if (loginBtn) {
+      loginBtn.className = "btn-primary vf-nlm-login-btn";
+      loginBtn.title = "Retry the NotebookLM connection check";
+      loginBtn.onclick = function () { checkNotebookLMAuth(true); };
+      loginBtn.disabled = false;
+    }
+    if (loginLabel) loginLabel.textContent = "Retry";
+    if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
+    if (showToast) vfToast("Unable to verify NotebookLM. Your saved account remains unchanged.", true);
+  } else if (connectionState === "saved") {
+    badge.classList.add("disconnected");
+    dot.classList.add("disconnected");
+    text.textContent = email ? `Saved account: ${email}` : "Saved account";
+    if (desc) desc.textContent = "Your sign-in is saved. We still need to check that the connection is ready.";
+    if (loginBtn) {
+      loginBtn.className = "btn-primary vf-nlm-login-btn";
+      loginBtn.title = "Connect your saved NotebookLM account";
+      loginBtn.onclick = function () { startNotebookLMAuth(false); };
+    }
+    if (loginLabel) loginLabel.textContent = "Connect NotebookLM";
+    if (disconnectBtn) disconnectBtn.classList.remove("hidden");
   } else {
     badge.classList.add("disconnected");
     dot.classList.add("disconnected");
-    if (cookieHealth && cookieHealth.status === "expired") {
-      text.textContent = email ? `Session Expired (${email})` : "Session Expired";
-      if (desc) desc.textContent = "Your Google session has expired. Click 'Log in to NotebookLM' to establish a permanent session that never expires.";
-    } else {
-      text.textContent = "Disconnected";
-      if (desc) desc.textContent = "Connect your Google account to enable permanent 1-click cloud video rendering.";
-    }
+    text.textContent = "Not connected";
+    if (desc) desc.textContent = "Connect your Google account to use NotebookLM for cloud video generation.";
     if (loginBtn) {
       loginBtn.className = "btn-primary vf-nlm-login-btn";
-      loginBtn.title = "Log in to your NotebookLM account";
+      loginBtn.title = "Connect your NotebookLM account";
       loginBtn.onclick = function () { startNotebookLMAuth(false); };
     }
-    if (loginLabel) loginLabel.textContent = "Log in to NotebookLM";
+    if (loginLabel) loginLabel.textContent = "Connect NotebookLM";
     if (disconnectBtn) disconnectBtn.classList.add("hidden");
-    if (showToast) vfToast("NotebookLM is disconnected.", true);
   }
 }
 
 async function checkNotebookLMAuth(showToast = false) {
+  const requestId = ++vfNlmAuthRequestSequence;
   const checkBtn = document.getElementById("vf-nlm-check-btn");
   const checkLabel = document.getElementById("vf-nlm-check-label");
   const checkIcon = document.getElementById("vf-nlm-check-icon");
@@ -308,15 +417,7 @@ async function checkNotebookLMAuth(showToast = false) {
   const statusText = document.getElementById("vf-nlm-status-text");
   const desc = document.getElementById("vf-nlm-account-desc");
 
-  // If user is currently not logged in / disconnected, do not run online verification
-  if (showToast && (!vfNlmAuthStatus.authenticated || !vfNlmAuthStatus.email)) {
-    vfToast("No Google account connected. Please click 'Log in to NotebookLM' to get started.", true);
-    renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
-    return vfNlmAuthStatus;
-  }
-
   let progressTimer = null;
-
   if (showToast) {
     if (checkBtn) checkBtn.disabled = true;
     if (checkLabel) checkLabel.textContent = "Verifying…";
@@ -338,23 +439,15 @@ async function checkNotebookLMAuth(showToast = false) {
   }
 
   try {
-    const query = showToast ? "?verify=1&force=1" : "";
+    vfNlmAuthStatus = { ...vfNlmAuthStatus, checking: true, verification_unavailable: false };
+    if (!showToast) renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
+    const query = showToast ? "?verify=1&force=1" : "?verify=1";
     const data = await safeFetchJson(`/api/video-flow/notebooklm/status${query}`);
+    if (requestId !== vfNlmAuthRequestSequence) return vfNlmAuthStatus;
     if (progressTimer) clearInterval(progressTimer);
-    if (!data || data.error) throw new Error(data?.error || "Failed to check status");
+    if (!data || data.error || data.success === false) throw new Error(data?.error || "Failed to check status");
 
     const isExplicitDisc = Boolean(data.details?.disconnected);
-    // A successful status response that omits `authenticated` must not be read
-    // as "signed out": treating an absent field as false would overwrite a
-    // known-good session and render the UI as Disconnected. Only an explicit
-    // value changes the stored auth state; when the field is missing, keep
-    // what we already know.
-    const authenticatedKnown = data.authenticated !== undefined ? Boolean(data.authenticated) : null;
-    const backendAuth = Boolean(
-      (authenticatedKnown === null ? vfNlmAuthStatus.authenticated : authenticatedKnown)
-      && !isExplicitDisc
-      && data.status !== "unauthenticated"
-    );
     let email = data.email || data.account_email || (data.details?.account?.email) || "";
     if (!email && vfNlmAuthStatus.email && !isExplicitDisc) {
       email = vfNlmAuthStatus.email;
@@ -362,29 +455,56 @@ async function checkNotebookLMAuth(showToast = false) {
     if (isExplicitDisc) {
       email = null;
     }
-    const isAuth = Boolean(backendAuth && email);
+    const accountSaved = !isExplicitDisc && (data.account_saved !== undefined
+      ? Boolean(data.account_saved)
+      : Boolean(data.authenticated));
+    const onlineVerified = data.online_verified === true
+      ? true
+      : (data.online_verified === false ? false : null);
+    const verificationUnavailable = Boolean(
+      data.verification_unavailable ||
+      data.status === "verification_unavailable" ||
+      data.status === "network_error"
+    );
 
     vfNlmAuthStatus = {
-      authenticated: isAuth,
-      status: isAuth ? "ok" : "unauthenticated",
-      email: isExplicitDisc ? null : (email || vfNlmAuthStatus.email || null),
+      authenticated: onlineVerified === true,
+      account_saved: accountSaved,
+      status: onlineVerified === true ? "ok" : (accountSaved ? "saved" : "unauthenticated"),
+      email: isExplicitDisc ? null : (email || null),
       profile: data.profile || vfNlmAuthStatus.profile || "video-flow-experiment",
       available: data.available !== false,
       cookie_health: data.cookie_health || null,
-      online_verified: isAuth ? data.online_verified : false,
+      online_verified: isExplicitDisc ? false : onlineVerified,
+      checking: false,
+      verification_unavailable: verificationUnavailable,
+      recovery_state: data.recovery_state || null,
+      recovery_in_progress: Boolean(data.recovery_in_progress),
     };
 
-    if (vfNlmAuthStatus.authenticated && vfNlmAuthStatus.email) {
-      try {
-        localStorage.setItem("vf_nlm_auth_cache", JSON.stringify(vfNlmAuthStatus));
-      } catch (_) {}
-    } else if (isExplicitDisc) {
-      try {
-        localStorage.removeItem("vf_nlm_auth_cache");
-      } catch (_) {}
+    if (vfNlmAuthStatus.recovery_state === "restoring" && typeof document !== "undefined" && document.visibilityState !== "hidden") {
+      // Renewal may include CLI verification plus passive and browser-profile
+      // recovery. Keep the view polling for the full 120-second service SLA.
+      if (vfNlmRecoveryPollCount < 80 && !vfNlmRecoveryPollTimer) {
+        vfNlmRecoveryPollCount += 1;
+        vfNlmRecoveryPollTimer = setTimeout(() => {
+          vfNlmRecoveryPollTimer = null;
+          checkNotebookLMAuth(false);
+        }, 1500);
+      } else if (vfNlmRecoveryPollCount >= 80 && !vfNlmRecoveryPollTimer) {
+        vfNlmAuthStatus = {
+          ...vfNlmAuthStatus,
+          recovery_state: "transient_error",
+          recovery_in_progress: false,
+          verification_unavailable: true,
+          online_verified: null,
+        };
+      }
+    } else {
+      clearNlmRecoveryPollTimer();
     }
 
-    if (vfNlmAuthStatus.authenticated && vfNlmAuthPollTimer) {
+    if (vfNlmAuthStatus.online_verified === true && vfNlmAuthPollTimer) {
       clearNlmAuthPollTimer();
       const loginBtn = document.getElementById("vf-nlm-login-btn");
       if (loginBtn) loginBtn.disabled = false;
@@ -395,10 +515,15 @@ async function checkNotebookLMAuth(showToast = false) {
     renderNotebookLMAuthStatus(vfNlmAuthStatus, showToast);
     return vfNlmAuthStatus;
   } catch (err) {
+    if (requestId !== vfNlmAuthRequestSequence) return vfNlmAuthStatus;
     if (progressTimer) clearInterval(progressTimer);
-    if (showToast) {
-      vfToast("Verification probe completed — keeping current session state.", false);
-    }
+    vfNlmAuthStatus = {
+      ...vfNlmAuthStatus,
+      checking: false,
+      online_verified: null,
+      verification_unavailable: true,
+    };
+    if (showToast) vfToast(`Unable to verify NotebookLM: ${cleanErrorMessage(err.message || err)}`, true);
     renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
     return vfNlmAuthStatus;
   } finally {
@@ -410,6 +535,11 @@ async function checkNotebookLMAuth(showToast = false) {
 }
 
 async function syncNotebookLMBrowser() {
+  // Invalidate an older passive status request before an explicit renewal can
+  // produce a newer result.
+  vfNlmAuthRequestSequence += 1;
+  clearNlmRecoveryPollTimer();
+  if (typeof cancelAudioSummaryNotebookLMRecoveryPoll === "function") cancelAudioSummaryNotebookLMRecoveryPoll();
   const syncBtn = document.getElementById("vf-nlm-sync-btn");
   const syncLabel = document.getElementById("vf-nlm-sync-label");
   const syncIcon = document.getElementById("vf-nlm-sync-icon");
@@ -451,26 +581,17 @@ async function syncNotebookLMBrowser() {
     if (progressTimer) clearInterval(progressTimer);
     if (data && data.success) {
       const emailSynced = data.email || currentEmail || "";
-      if (emailSynced) {
-        vfNlmAuthStatus.email = emailSynced;
-        vfNlmAuthStatus.authenticated = true;
-        vfNlmAuthStatus.status = "ok";
-        try {
-          localStorage.setItem("vf_nlm_auth_cache", JSON.stringify(vfNlmAuthStatus));
-        } catch (_) {}
-      }
-      vfToast(emailSynced ? `Synced session for ${emailSynced} successfully!` : `Synced ${data.cookies_count || ""} NotebookLM session cookies successfully!`);
-      await checkNotebookLMAuth(false);
-    } else if (data && (data.needs_interactive || data.chrome_v20_detected)) {
-      vfToast("Chrome security requires browser sign-in to refresh your session. Opening sign-in window…", false);
-      await startNotebookLMAuth(false, true);
+      vfNlmAuthStatus = {
+        ...vfNlmAuthStatus,
+        email: emailSynced || vfNlmAuthStatus.email,
+        account_saved: Boolean(emailSynced || vfNlmAuthStatus.account_saved),
+        authenticated: false,
+        online_verified: null,
+      };
+      vfToast("Browser session copied. Verifying NotebookLM…");
+      await checkNotebookLMAuth(true);
     } else {
-      vfToast(data?.error || "Could not sync cookies directly. Click 'Log in to NotebookLM'.", true);
-      vfNlmAuthStatus.authenticated = false;
-      vfNlmAuthStatus.status = "unauthenticated";
-      if (!vfNlmAuthStatus.cookie_health) vfNlmAuthStatus.cookie_health = {};
-      vfNlmAuthStatus.cookie_health.status = "expired";
-      vfNlmAuthStatus.cookie_health.message = "Session expired — click Log in to NotebookLM to reconnect";
+      vfToast(data?.error || "Could not sync the browser session. Use Connect NotebookLM to sign in.", true);
       renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
     }
   } catch (err) {
@@ -488,36 +609,17 @@ async function syncNotebookLMBrowser() {
   }
 }
 
-async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = false) {
+async function startNotebookLMAuth(switchAccount = false) {
+  vfNlmAuthRequestSequence += 1;
+  clearNlmRecoveryPollTimer();
+  if (typeof cancelAudioSummaryNotebookLMRecoveryPoll === "function") cancelAudioSummaryNotebookLMRecoveryPoll();
   clearNlmAuthPollTimer();
+  stopNotebookLMAuthProgress();
 
   const previousEmail = (vfNlmAuthStatus && vfNlmAuthStatus.email) || "";
-
-  if (switchAccount) {
-    vfNlmAuthStatus.email = null;
-    vfNlmAuthStatus.authenticated = false;
-    vfNlmAuthStatus.status = "unauthenticated";
-    try {
-      localStorage.removeItem("vf_nlm_auth_cache");
-    } catch (_) {}
-    renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
-  }
-
-  // If not switching accounts and not skipping browser sync, first check if browser sync can seamlessly authenticate
-  if (!switchAccount && !skipBrowserSync) {
-    try {
-      const syncCheck = await safeFetchJson("/api/video-flow/notebooklm/auth/sync-browser", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: vfNlmAuthStatus.profile || "video-flow-experiment", email: previousEmail || "" }),
-      });
-      if (syncCheck && syncCheck.success) {
-        await checkNotebookLMAuth(false);
-        vfToast(`Connected to ${syncCheck.email || "Google account"} from browser!`);
-        return;
-      }
-    } catch (_) {}
-  }
+  // Routine reconnection reuses the durable browser profile. Only an explicit
+  // account switch asks the CLI to clear that profile first.
+  const freshLogin = Boolean(switchAccount);
 
   const loginBtn = document.getElementById("vf-nlm-login-btn");
   const loginLabel = document.getElementById("vf-nlm-login-label");
@@ -526,14 +628,13 @@ async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = fals
   const dot = document.getElementById("vf-nlm-status-dot");
   const text = document.getElementById("vf-nlm-status-text");
 
-  if (loginLabel) {
-    loginLabel.textContent = switchAccount ? "Opening Account Chooser…" : "Opening Sign-in Window…";
-  }
+  if (loginLabel) loginLabel.textContent = "Opening sign-in…";
   if (loginBtn) loginBtn.disabled = true;
   if (disconnectBtn) disconnectBtn.disabled = true;
   if (badge) badge.className = "vf-nlm-status-badge polling";
   if (dot) dot.className = "status-dot-indicator polling";
-  if (text) text.textContent = switchAccount ? "Choose account in browser…" : "Waiting for permanent sign-in…";
+  vfNlmAuthInProgress = true;
+  setNotebookLMAuthProgress("opening");
 
   try {
     const activeProfile = vfNlmAuthStatus.profile || "video-flow-experiment";
@@ -543,35 +644,41 @@ async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = fals
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         profile: activeProfile,
-        mode: "master-token",
+        // Login always goes through the interactive CLI browser flow. Browser
+        // cookie sync remains an explicit advanced action and is never tried here.
+        mode: "cli",
         account_email: resolvedEmail || undefined,
-        browser: "chrome",
         switch_account: Boolean(switchAccount),
+        fresh_login: freshLogin,
         direct: true,
       }),
     });
     if (!data || !data.success) {
-      throw new Error(data?.error || "Could not launch Google authentication.");
+      throw new Error("Could not open the Chrome sign-in window.");
     }
 
-    vfToast(
-      data.message ||
-        (switchAccount
-          ? "Google account chooser opened in your default browser. Select an account to switch."
-          : "Google sign-in opened in your default browser. Select your account to sign in.")
-    );
+    setNotebookLMAuthProgress("account");
+    const showButton = document.getElementById("vf-nlm-show-signin-btn");
+    if (showButton) {
+      showButton.classList.add("hidden");
+      vfNlmAuthFocusDelayTimer = setTimeout(() => {
+        if (vfNlmAuthInProgress) showButton.classList.remove("hidden");
+      }, 1200);
+    }
 
     const startTime = Date.now();
     let attempts = 0;
+    let usedStatusFallback = false;
     const maxAttempts = 250; // 50 x 600ms (30s) + 50 x 1200ms (60s) + 150 x 2000ms (300s) = ~6.5 minutes of adaptive patience
     const pollTick = async () => {
       attempts++;
       if (attempts > maxAttempts) {
         clearNlmAuthPollTimer();
+        stopNotebookLMAuthProgress();
         if (loginBtn) loginBtn.disabled = false;
         if (disconnectBtn) disconnectBtn.disabled = false;
         await checkNotebookLMAuth(false);
-        vfToast("Sign-in timed out. Please try again.", true);
+        vfToast("Sign-in did not finish. In the Chrome sign-in window, choose your Google account, then click Reconnect to try again.", true);
         return;
       }
 
@@ -582,93 +689,77 @@ async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = fals
         } catch (_) {}
 
         const login = stateData && stateData.login ? stateData.login : null;
-        if (login && login.note && text) {
-          text.textContent = login.note;
-        }
-
         // When switchAccount is true, report error immediately if running === false and success === false
         if (switchAccount && login && login.running === false && login.success === false) {
           clearNlmAuthPollTimer();
+          stopNotebookLMAuthProgress();
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
           await checkNotebookLMAuth(false);
-          vfToast(login.error || "Account switch did not complete. Please try again.", true);
+          vfToast("We couldn’t finish switching accounts. Choose an account in the Chrome sign-in window, then try again.", true);
           return;
         }
 
         // Check if login failed
-        if (login && login.running === false && login.started_at && !login.success && login.error) {
+        if (login && login.running === false && login.started_at && !login.success) {
           clearNlmAuthPollTimer();
+          stopNotebookLMAuthProgress();
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
           await checkNotebookLMAuth(false);
-          vfToast(login.error || "Sign-in did not complete. Please try again.", true);
+          vfToast("Sign-in did not finish. Choose your Google account in the Chrome sign-in window, then click Reconnect to try again.", true);
           return;
         }
 
-        // Check if login watcher reported success
+        // The login watcher may observe saved credentials before NotebookLM is
+        // reachable. Announce success only after the status probe is online.
         if (login && login.running === false && login.success === true) {
           clearNlmAuthPollTimer();
+          setNotebookLMAuthProgress("verifying");
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
-
-          let newEmail = login.email || "";
-          if (!newEmail && login.note && login.note.startsWith("Signed in as ")) {
-            newEmail = login.note.replace("Signed in as ", "").trim();
-          }
-          if (newEmail && newEmail !== "your Google account") {
-            vfNlmAuthStatus.email = newEmail;
-            vfNlmAuthStatus.authenticated = true;
-            vfNlmAuthStatus.status = "ok";
-            try {
-              localStorage.setItem("vf_nlm_auth_cache", JSON.stringify(vfNlmAuthStatus));
-            } catch (_) {}
-            renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
-          }
-
           const finalStatus = await checkNotebookLMAuth(false);
-          const userStr = finalStatus?.email || newEmail || (login.note ? login.note.replace("Signed in as ", "") : "") || "Google account";
-          renderNotebookLMAuthStatus(finalStatus, false);
-          vfToast(
-            switchAccount
-              ? `Switched to ${userStr} successfully!`
-              : `Connected to ${userStr} successfully!`
-          );
+          stopNotebookLMAuthProgress();
+          if (finalStatus?.online_verified === true) {
+            const userStr = finalStatus.email || "Google account";
+            vfToast(switchAccount ? `Switched to ${userStr} successfully!` : `Connected to ${userStr} successfully!`);
+          } else {
+            vfToast("Sign-in finished, but the connection is not ready yet. Click Reconnect to try again.", true);
+          }
           return;
         }
 
-        // Secondary check via status endpoint
-        const statusData = await safeFetchJson("/api/video-flow/notebooklm/status");
-        if (statusData && statusData.authenticated && statusData.email) {
+        // While the CLI is actively waiting for the browser, poll only its
+        // lightweight state endpoint. If state is unavailable, use one online
+        // fallback probe; never repeat it on the short polling interval.
+        const shouldUseStatusFallback = !login && !usedStatusFallback;
+        if (shouldUseStatusFallback) usedStatusFallback = true;
+        const statusData = shouldUseStatusFallback
+          ? await safeFetchJson("/api/video-flow/notebooklm/status?verify=1")
+          : null;
+        if (statusData && statusData.online_verified === true && statusData.email) {
           if (switchAccount && previousEmail && statusData.email.toLowerCase() === previousEmail.toLowerCase()) {
             // Still reporting the old account while transitioning, check if 25s elapsed
             if (Date.now() - startTime >= 25000) {
               clearNlmAuthPollTimer();
+              stopNotebookLMAuthProgress();
               if (loginBtn) loginBtn.disabled = false;
               if (disconnectBtn) disconnectBtn.disabled = false;
               await checkNotebookLMAuth(false);
-              vfToast(`Account switch timed out: account was not changed from ${previousEmail}.`, true);
+              vfToast(`Account switch timed out: account was not changed from ${previousEmail}. Choose a different account in the Chrome sign-in window, then try again.`, true);
               return;
             }
           } else {
             clearNlmAuthPollTimer();
+            setNotebookLMAuthProgress("verifying");
             if (loginBtn) loginBtn.disabled = false;
             if (disconnectBtn) disconnectBtn.disabled = false;
-            vfNlmAuthStatus.email = statusData.email;
-            vfNlmAuthStatus.authenticated = true;
-            vfNlmAuthStatus.status = "ok";
-            try {
-              localStorage.setItem("vf_nlm_auth_cache", JSON.stringify(vfNlmAuthStatus));
-            } catch (_) {}
-            renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
             const finalStatus = await checkNotebookLMAuth(false);
+            stopNotebookLMAuthProgress();
             const userStr = finalStatus?.email || statusData.email || "Google account";
-            renderNotebookLMAuthStatus(finalStatus, false);
-            vfToast(
-              switchAccount
-                ? `Switched to ${userStr} successfully!`
-                : `Connected to ${userStr} successfully!`
-            );
+            if (finalStatus?.online_verified === true) {
+              vfToast(switchAccount ? `Switched to ${userStr} successfully!` : `Connected to ${userStr} successfully!`);
+            }
             return;
           }
         }
@@ -685,14 +776,18 @@ async function startNotebookLMAuth(switchAccount = false, skipBrowserSync = fals
     vfNlmAuthPollTimer = setTimeout(pollTick, 600);
   } catch (err) {
     clearNlmAuthPollTimer();
+    stopNotebookLMAuthProgress();
     if (loginBtn) loginBtn.disabled = false;
     if (disconnectBtn) disconnectBtn.disabled = false;
-    vfToast(err.message || "Failed to start Google sign-in.", true);
+    vfToast("Could not open the Chrome sign-in window. Try Reconnect again; if Chrome opens, choose your Google account there.", true);
     checkNotebookLMAuth(false);
   }
 }
 
 async function disconnectNotebookLM() {
+  vfNlmAuthRequestSequence += 1;
+  clearNlmRecoveryPollTimer();
+  if (typeof cancelAudioSummaryNotebookLMRecoveryPoll === "function") cancelAudioSummaryNotebookLMRecoveryPoll();
   clearNlmAuthPollTimer();
 
   const disconnectBtn = document.getElementById("vf-nlm-disconnect-btn");
@@ -708,12 +803,10 @@ async function disconnectNotebookLM() {
       body: JSON.stringify({ profile: activeProfile }),
     });
 
-    try {
-      localStorage.removeItem("vf_nlm_auth_cache");
-    } catch (_) {}
-
     vfNlmAuthStatus = {
       authenticated: false,
+      account_saved: false,
+      online_verified: false,
       status: "unauthenticated",
       email: null,
       profile: activeProfile,
@@ -778,7 +871,7 @@ async function loadVideoFlow() {
     }
     vfCatalog = catalogData;
     vfCatalogLoaded = true;
-    vfVideos = historyData.videos || [];
+    vfVideos = (historyData.videos || []).slice(0, 50);
     renderVideoHistory();
     renderVideoCatalog();
     if (typeof loadCustomProviders === "function") loadCustomProviders();
@@ -4110,7 +4203,7 @@ function scheduleVideoFlowPolling(immediate = false) {
     try {
       const data = await safeFetchJson("/api/video-flow/history");
       if (data && Array.isArray(data.videos)) {
-        vfVideos = data.videos;
+        vfVideos = data.videos.slice(0, 50);
         renderVideoHistory();
 
         const activeVideo = vfVideos.find(video => !["completed", "complete", "ready", "failed", "cancelled"].includes(video.status));
@@ -6291,18 +6384,12 @@ function beginVideoDelete(videoId) {
 }
 
 function continueVideoDelete() {
-  document.getElementById("vf-delete-first-modal")?.classList.add("hidden");
-  const input = document.getElementById("vf-delete-confirm-input");
-  if (input) input.value = "";
-  updateFinalDeleteButton();
-  document.getElementById("vf-delete-final-modal")?.classList.remove("hidden");
-  window.setTimeout(() => input?.focus(), 60);
+  permanentlyDeleteVideo();
 }
 
 function updateFinalDeleteButton() {
-  const input = document.getElementById("vf-delete-confirm-input");
   const button = document.getElementById("vf-delete-final-button");
-  if (button) button.disabled = input?.value !== "DELETE";
+  if (button) button.disabled = false;
 }
 
 function cancelVideoDelete() {
@@ -6312,7 +6399,7 @@ function cancelVideoDelete() {
 }
 
 async function permanentlyDeleteVideo() {
-  if (!vfDeleteTarget || document.getElementById("vf-delete-confirm-input")?.value !== "DELETE") return;
+  if (!vfDeleteTarget) return;
   const videoId = vfDeleteTarget;
   try {
     const data = await safeFetchJson("/api/video-flow/videos/delete", {
@@ -6324,7 +6411,7 @@ async function permanentlyDeleteVideo() {
     vfVideos = vfVideos.filter(video => video.id !== videoId);
     cancelVideoDelete();
     renderVideoHistory();
-    vfToast("Video and all project files were permanently deleted from this PC.");
+    vfToast("Video was deleted.");
   } catch (error) {
     vfToast(error.message || "Could not delete video.", true);
   }

@@ -34,12 +34,44 @@ from typing import Any
 import numpy as np
 
 from voice_flow import paths
+from voice_flow.local_model_resources import (
+    LOCAL_MODEL_IDLE_SECONDS,
+    acquire_model_use,
+    cleanup_is_forced,
+    cleanup_requested,
+    notify_models_available,
+    register_idle_cleanup,
+)
 
 log = logging.getLogger(__name__)
 
 # Singleton cache for loaded Nemotron engines: model_path_str -> NemotronGGUFEngine
 _NEMOTRON_CACHE: dict[str, NemotronGGUFEngine] = {}
 _CACHE_LOCK = threading.Lock()
+# Native construction can reserve several GiB before an engine is published.
+# Serialize that cold path separately from the short cache registry lock.
+_CONSTRUCTION_LOCK = threading.Lock()
+
+
+def _evict_idle_engines(now: float) -> bool:
+    if not _CACHE_LOCK.acquire(blocking=False):
+        return False
+    try:
+        candidates = tuple(_NEMOTRON_CACHE.items())
+    finally:
+        _CACHE_LOCK.release()
+    busy = False
+    force = cleanup_is_forced("speech")
+    for key, engine in candidates:
+        release = getattr(engine, "release_if_idle", None)
+        if callable(release) and release(now, force=force):
+            with _CACHE_LOCK:
+                if _NEMOTRON_CACHE.get(key) is engine:
+                    _NEMOTRON_CACHE.pop(key, None)
+            log.info("[NEMOTRON] Released inactive speech model memory")
+        elif cleanup_requested("speech"):
+            busy = True
+    return not busy
 
 # Global C ABI dynamic library and loader state
 _NEMO_DLL: ctypes.CDLL | None = None
@@ -302,7 +334,7 @@ class NemotronGGUFEngine:
         self.spec = spec or {}
         self.model_id = self.spec.get("id") or self.model_path.stem
         self.model_name = self.spec.get("name") or self.model_path.name
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
         # Native C ABI Recognizer Handle
         self.rec_handle: ctypes.c_void_p = ctypes.c_void_p()
@@ -321,6 +353,9 @@ class NemotronGGUFEngine:
         self.preemph: float = 0.97
         self.data_start_offset: int = 0
         self._is_warm: bool = False
+        self._active_streams = 0
+        self._evict_when_idle = False
+        self._last_used = time.monotonic()
 
         # Profiling stats
         self.last_latency_ms: float = 0.0
@@ -516,6 +551,9 @@ class NemotronGGUFEngine:
     def close(self) -> None:
         """Destroy native recognizer handle and release RAM."""
         with self.lock:
+            if self._active_streams:
+                self._evict_when_idle = True
+                return
             if getattr(self, "rec_handle", None) and self.rec_handle.value:
                 dll = get_nemo_dll()
                 if dll is not None:
@@ -525,6 +563,39 @@ class NemotronGGUFEngine:
                         pass
                 self.rec_handle = ctypes.c_void_p()
             self._is_warm = False
+
+    def acquire_stream(self) -> None:
+        with self.lock:
+            self._active_streams += 1
+            self._last_used = time.monotonic()
+
+    def release_stream(self) -> None:
+        should_close = False
+        with self.lock:
+            self._active_streams = max(0, self._active_streams - 1)
+            self._last_used = time.monotonic()
+            should_close = self._active_streams == 0 and self._evict_when_idle
+        if should_close:
+            self.close()
+        notify_models_available("speech")
+
+    def touch(self) -> None:
+        with self.lock:
+            self._last_used = time.monotonic()
+
+    def release_if_idle(self, now: float, *, force: bool = False) -> bool:
+        """Release unused native arenas without interrupting active speech."""
+        if not self.lock.acquire(blocking=False):
+            return False
+        try:
+            if self._active_streams:
+                return False
+            if not force and now - getattr(self, "_last_used", now) < LOCAL_MODEL_IDLE_SECONDS:
+                return False
+            self.close()
+            return True
+        finally:
+            self.lock.release()
 
     def __del__(self) -> None:
         try:
@@ -736,6 +807,7 @@ class NemotronGGUFEngine:
 
         if c_abi_available:
             with self.lock:
+                self._last_used = time.monotonic()
                 # If audio is short or is a stream chunk, transcribe directly in-process
                 if is_chunk or duration <= 12.0:
                     result = self._transcribe_segment(wav, language=resolved_lang)
@@ -826,15 +898,39 @@ def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> Nemotron
     with _CACHE_LOCK:
         cached = _NEMOTRON_CACHE.get(path_key)
         if cached is not None and cached.is_warm:
+            touch = getattr(cached, "touch", None)
+            if callable(touch):
+                touch()
             return cached
 
+    replaced: list[NemotronGGUFEngine] = []
+    with _CONSTRUCTION_LOCK:
+        # Another capture/stream worker may have completed the same cold load
+        # while this caller waited. Recheck before reserving native memory.
+        with _CACHE_LOCK:
+            cached = _NEMOTRON_CACHE.get(path_key)
+            if cached is not None and cached.is_warm:
+                touch = getattr(cached, "touch", None)
+                if callable(touch):
+                    touch()
+                return cached
         try:
             engine = NemotronGGUFEngine(model_file, spec=spec)
-            _NEMOTRON_CACHE[path_key] = engine
-            return engine
         except Exception as exc:
             log.error("[NEMOTRON ERROR] Failed to load Nemotron engine from %s: %s", model_file, exc, exc_info=True)
             return None
+        with _CACHE_LOCK:
+            _NEMOTRON_CACHE[path_key] = engine
+            for old_key, old_engine in list(_NEMOTRON_CACHE.items()):
+                if old_key != path_key:
+                    _NEMOTRON_CACHE.pop(old_key, None)
+                    replaced.append(old_engine)
+    # Closing a replaced recognizer can call native code; never do it while a
+    # cache or construction lock is held.
+    for old_engine in replaced:
+        old_engine.close()
+    register_idle_cleanup("nemotron", _evict_idle_engines, kind="speech")
+    return engine
 
 
 class NemotronStreamTranscriber:
@@ -862,41 +958,23 @@ class NemotronStreamTranscriber:
         self._deadline: float | None = None
         self._model_ref: str = ""
         self._worker_thread: threading.Thread | None = None
+        self._model_lease = None
         # Native streaming context, opened by start_session.
         self._stream: Any = ctypes.c_void_p()
 
     def start_session(self, model_ref: str | None = None, deadline: float | None = None) -> None:
         self._model_ref = str(model_ref or "")
         self._deadline = deadline
-        if self._engine is None:
-            self._engine = get_nemotron_engine(self._model_ref)
-        if self._engine is None or not getattr(self._engine, "rec_handle", None) or not self._engine.rec_handle.value:
-            log.warning("[NEMOTRON STREAM] Native C ABI engine handle not available; failing stream")
-            self._failed = True
-            self._done.set()
-            return
-
-        dll = get_nemo_dll()
-        if dll is None:
-            log.warning("[NEMOTRON STREAM] Native C ABI DLL not available; failing stream")
-            self._failed = True
-            self._done.set()
-            return
-
-        # Open the streaming recognition context here, before any microphone
-        # frame arrives. Creating it lazily inside the worker meant the first
-        # frames queued up during setup, and every dictation then paid for that
-        # backlog when the user released (measured up to ~1s of drain on a
-        # release budget of 0.85s). Opening it up front moves that cost off the
-        # release path.
-        self._stream = ctypes.c_void_p()
-        if not self._open_stream(dll):
-            self._failed = True
-            self._done.set()
-            return
-
+        self._model_lease = acquire_model_use("speech")
         self._worker_thread = threading.Thread(target=self._run, name="vf-nemotron-stream", daemon=True)
-        self._worker_thread.start()
+        try:
+            self._worker_thread.start()
+        except Exception:
+            if self._model_lease:
+                self._model_lease.release()
+                self._model_lease = None
+            self._failed = True
+            self._done.set()
 
     def _open_stream(self, dll: Any) -> bool:
         """Create the native streaming recognizer for this session."""
@@ -962,6 +1040,8 @@ class NemotronStreamTranscriber:
         return int(not self._done.is_set())
 
     def had_failures(self) -> bool:
+        if not self._failed and not self._cancel.is_set() and not self._done.is_set() and self._worker_thread:
+            self._done.wait(0.05)
         return self._failed or self._cancel.is_set()
 
     def completed_successfully(self) -> bool:
@@ -987,28 +1067,33 @@ class NemotronStreamTranscriber:
         return self._deadline is not None and time.monotonic() >= self._deadline
 
     def _run(self) -> None:
-        dll = get_nemo_dll()
         eng = self._engine
-        if dll is None or eng is None or not getattr(eng, "rec_handle", None) or not eng.rec_handle.value:
-            self._failed = True
-            self._done.set()
-            return
-
-        # The stream is opened by start_session so frames never queue behind
-        # context setup. Fall back to opening it here only if that did not
-        # happen (defensive: keeps direct _run callers working).
-        stream = getattr(self, "_stream", None) or ctypes.c_void_p()
+        stream = ctypes.c_void_p()
+        stream_acquired = False
+        committed_transcripts: list[str] = []
+        interim_latest = ""
         t0 = time.perf_counter()
         try:
-            if not stream.value:
+            if self._cancel.is_set() or self._expired():
+                raise RuntimeError("Stream was cancelled before model loading")
+            if eng is None:
+                eng = get_nemotron_engine(self._model_ref)
+                self._engine = eng
+            dll = get_nemo_dll()
+            if self._cancel.is_set() or self._expired():
+                raise RuntimeError("Stream was cancelled during model loading")
+            if dll is None or eng is None or not getattr(eng, "rec_handle", None) or not eng.rec_handle.value:
+                raise RuntimeError("Native C ABI engine handle not available")
+            with eng.lock:
+                if not eng.rec_handle.value:
+                    raise RuntimeError("Native recognizer was evicted before stream setup")
+                eng.acquire_stream()
+                stream_acquired = True
+                self._stream = ctypes.c_void_p()
                 if not self._open_stream(dll):
-                    self._failed = True
-                    self._done.set()
-                    return
-                stream = self._stream
-
-            committed_transcripts: list[str] = []
-            interim_latest = ""
+                    stream = self._stream
+                    raise RuntimeError("Native C ABI stream could not be opened")
+            stream = self._stream
 
             while not self._cancel.is_set() and not self._expired():
                 try:
@@ -1053,6 +1138,13 @@ class NemotronStreamTranscriber:
             if self._cancel.is_set():
                 raise RuntimeError("Stream was cancelled")
             if self._expired():
+                if committed_transcripts or interim_latest:
+                    log.warning("[NEMOTRON STREAM] Stream deadline elapsed, but harvesting %d transcripts", len(committed_transcripts))
+                    if interim_latest and not committed_transcripts:
+                        committed_transcripts.append(interim_latest)
+                    self._text = " ".join(committed_transcripts).strip()
+                    self._failed = True
+                    return
                 raise TimeoutError("Stream deadline elapsed before all audio was consumed")
 
             # Finalize audio stream and drain tail
@@ -1062,6 +1154,14 @@ class NemotronStreamTranscriber:
                 raise RuntimeError(f"Audio finalization failed (status {fin_st})")
 
             while True:
+                if self._cancel.is_set():
+                    self._failed = True
+                    log.warning("[NEMOTRON STREAM] Stream cancelled during drain")
+                    break
+                if self._expired():
+                    self._failed = True
+                    log.warning("[NEMOTRON STREAM] Stream deadline elapsed during drain")
+                    break
                 res = ctypes.c_void_p()
                 next_st = dll.nemo_speech_asr_stream_next(stream, ctypes.byref(res))
                 if next_st != 0 or not res.value:
@@ -1088,12 +1188,33 @@ class NemotronStreamTranscriber:
                 self._text[:60] if self._text else "<empty>",
             )
         except Exception as exc:
-            self._failed = True
-            log.warning("[NEMOTRON STREAM] Streaming session exception: %s; falling back to whole-buffer", exc)
+            if committed_transcripts or interim_latest:
+                if interim_latest and not committed_transcripts:
+                    committed_transcripts.append(interim_latest)
+                self._text = " ".join(committed_transcripts).strip()
+                # Keep partial text for diagnostics, but force the caller to
+                # use whole-buffer fallback when any queued audio was lost.
+                self._failed = True
+                log.info(
+                    "[NEMOTRON STREAM] Salvaged %d committed transcripts despite exception (%s): '%s'",
+                    len(committed_transcripts),
+                    exc,
+                    self._text[:60],
+                )
+            else:
+                self._failed = True
+                log.warning("[NEMOTRON STREAM] Streaming session exception: %s; falling back to whole-buffer", exc)
         finally:
-            if stream.value:
+            if stream.value and 'dll' in locals() and dll is not None:
                 try:
                     dll.nemo_speech_asr_stream_close(stream)
                 except Exception:
                     pass
+            if stream_acquired and eng is not None:
+                eng.release_stream()
+            lease = self._model_lease
+            self._model_lease = None
+            if lease is not None:
+                lease.release()
+            notify_models_available("speech")
             self._done.set()

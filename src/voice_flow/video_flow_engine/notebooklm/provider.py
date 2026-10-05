@@ -46,6 +46,10 @@ Runner = Callable[[Sequence[str], float | None], Any]
 ProgressCallback = Callable[[Mapping[str, Any]], None]
 
 AUTH_EXPIRED_MESSAGE = "Google account login expired. Please sign in to NotebookLM in Video Flow settings."
+CLI_OUTPUT_TOO_LARGE_MESSAGE = "NotebookLM CLI produced too much output. Please try again."
+MAX_CLI_STDOUT_BYTES = 8 * 1024 * 1024
+MAX_CLI_STDERR_BYTES = 1 * 1024 * 1024
+CLI_PIPE_SHUTDOWN_SECONDS = 0.5
 
 RATE_LIMITED_MESSAGE = (
     "NotebookLM's usage limit is reached for this Google account. "
@@ -84,7 +88,7 @@ def _may_local_fallback(err: BaseException) -> bool:
     """
     code = getattr(err, "code", None)
     message = str(getattr(err, "message", None) or err or "")
-    if _is_auth_expired_error(code, message):
+    if _normalize_error_code(code) == "auth_unavailable" or _is_auth_expired_error(code, message):
         return False
     if _is_rate_limited_error(code, message):
         return False
@@ -306,6 +310,85 @@ def _run_command(command: Sequence[str], timeout: float | None) -> Any:
 
 
 _ORIGINAL_RUN_COMMAND = _run_command
+
+
+class _BoundedPipeCollector:
+    """Drain one child pipe while retaining no more than its configured limit."""
+
+    def __init__(self, stream: Any, limit: int, overflowed: threading.Event) -> None:
+        self.stream = stream
+        self.limit = limit
+        self.overflowed = overflowed
+        self.data = bytearray()
+        self.error: BaseException | None = None
+        self.thread = threading.Thread(target=self._drain, name="notebooklm-cli-pipe", daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def join(self, timeout: float) -> bool:
+        self.thread.join(timeout)
+        return not self.thread.is_alive()
+
+    def text(self) -> str:
+        return bytes(self.data).decode("utf-8", errors="replace")
+
+    def _drain(self) -> None:
+        try:
+            while True:
+                chunk = self.stream.read(64 * 1024)
+                if not chunk:
+                    return
+                room = self.limit - len(self.data)
+                if room > 0:
+                    self.data.extend(chunk[:room])
+                if len(chunk) > room:
+                    self.overflowed.set()
+        except (OSError, ValueError) as exc:
+            self.error = exc
+        finally:
+            # Only the reader closes its own buffered stream. Closing it from
+            # another thread while read() owns its buffer lock can block.
+            try:
+                self.stream.close()
+            except (OSError, ValueError):
+                pass
+
+
+def _terminate_owned_process_tree(proc: Any) -> None:
+    """Stop only the CLI child started by this provider and its descendants."""
+    # A completed Popen no longer proves ownership of its numeric PID; Windows
+    # can reuse it for an unrelated process before cleanup reaches this path.
+    if getattr(proc, "poll", lambda: 0)() is not None:
+        return
+    try:
+        if os.name == "nt" or sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
+        else:
+            try:
+                import psutil
+
+                parent = psutil.Process(proc.pid)
+                for child in parent.children(recursive=True):
+                    try:
+                        child.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except Exception:
+                pass
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def _inspect_cookies(
@@ -728,18 +811,7 @@ class NotebookLMVideoProvider:
         with self._proc_lock:
             proc = getattr(self, "_active_proc", None)
             if proc is not None and getattr(proc, "poll", None) is not None and proc.poll() is None:
-                try:
-                    if os.name == "nt" or sys.platform == "win32":
-                        subprocess.run(
-                            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                            capture_output=True,
-                            text=True,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                        )
-                    else:
-                        proc.terminate()
-                except Exception:
-                    pass
+                _terminate_owned_process_tree(proc)
 
     def _now_monotonic(self) -> float:
         try:
@@ -949,9 +1021,6 @@ class NotebookLMVideoProvider:
                 kwargs: dict[str, Any] = {
                     "stdout": subprocess.PIPE,
                     "stderr": subprocess.PIPE,
-                    "text": True,
-                    "encoding": "utf-8",
-                    "errors": "replace",
                     "shell": False,
                 }
                 if os.name == "nt" or sys.platform == "win32":
@@ -961,6 +1030,9 @@ class NotebookLMVideoProvider:
                     startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
                     kwargs["startupinfo"] = startupinfo
                 proc = subprocess.Popen(list(command), **kwargs)
+                overflowed = threading.Event()
+                stdout_collector = _BoundedPipeCollector(proc.stdout, MAX_CLI_STDOUT_BYTES, overflowed)
+                stderr_collector = _BoundedPipeCollector(proc.stderr, MAX_CLI_STDERR_BYTES, overflowed)
                 with self._proc_lock:
                     self._active_proc = proc
                 if self._active_job_id and self.process_manager and hasattr(self.process_manager, "register"):
@@ -969,20 +1041,61 @@ class NotebookLMVideoProvider:
                     except Exception:
                         pass
                 try:
-                    stdout, stderr = proc.communicate(timeout=timeout)
-                    result = subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+                    stdout_collector.start()
+                    stderr_collector.start()
+                    started_at = time.monotonic()
+                    timed_out = False
+                    output_too_large = False
+                    pipe_read_failed = False
+                    while True:
+                        if overflowed.is_set():
+                            output_too_large = True
+                            break
+                        if timeout is None:
+                            wait_seconds = 0.05
+                        else:
+                            remaining = timeout - (time.monotonic() - started_at)
+                            if remaining <= 0:
+                                timed_out = True
+                                break
+                            wait_seconds = min(0.05, remaining)
+                        try:
+                            proc.wait(timeout=wait_seconds)
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
+                    if output_too_large or timed_out:
+                        _terminate_owned_process_tree(proc)
+                    try:
+                        proc.wait(timeout=CLI_PIPE_SHUTDOWN_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        # The owned child has already received kill().  Keep
+                        # the error typed and finish pipe cleanup below.
+                        pass
+                    for collector in (stdout_collector, stderr_collector):
+                        if not collector.join(CLI_PIPE_SHUTDOWN_SECONDS):
+                            pipe_read_failed = True
+                    if pipe_read_failed:
+                        _terminate_owned_process_tree(proc)
+                    output_too_large = output_too_large or overflowed.is_set()
+                    if output_too_large:
+                        raise NotebookLMVideoError("CLI_OUTPUT_TOO_LARGE", CLI_OUTPUT_TOO_LARGE_MESSAGE)
+                    if timed_out:
+                        raise NotebookLMVideoError("TIMEOUT", "NotebookLM CLI command timed out")
+                    if pipe_read_failed or stdout_collector.error or stderr_collector.error:
+                        raise NotebookLMVideoError("CLI_OUTPUT_READ_FAILED", "NotebookLM CLI output could not be read safely.")
+                    result = subprocess.CompletedProcess(
+                        command, proc.returncode, stdout_collector.text(), stderr_collector.text()
+                    )
                 except subprocess.TimeoutExpired as exc:
+                    _terminate_owned_process_tree(proc)
                     try:
-                        proc.kill()
+                        proc.wait(timeout=CLI_PIPE_SHUTDOWN_SECONDS)
                     except Exception:
                         pass
-                    try:
-                        proc.wait(timeout=5)
-                    except Exception:
-                        pass
-                    with self._proc_lock:
-                        if self._active_proc is proc:
-                            self._active_proc = None
+                    for collector in (stdout_collector, stderr_collector):
+                        if not collector.join(CLI_PIPE_SHUTDOWN_SECONDS):
+                            _terminate_owned_process_tree(proc)
                     raise NotebookLMVideoError("TIMEOUT", "NotebookLM CLI command timed out") from exc
                 finally:
                     if self._active_job_id and self.process_manager and hasattr(self.process_manager, "unregister"):
@@ -1012,20 +1125,21 @@ class NotebookLMVideoProvider:
             if code:
                 raw_err = stderr.strip() or stdout.strip() or "CLI failed"
                 if _is_auth_expired_error("CLI_ERROR", raw_err):
+                    heal: dict[str, Any] = {}
                     if retry_on_auth_expired:
                         try:
                             from .login_flow import self_heal
                             heal = self_heal(profile=self.profile)
-                            if not heal.get("ok") and not os.environ.get("PYTEST_CURRENT_TEST"):
-                                from .browser_sync import sync_cookies_with_playwright
-                                pw_sync = sync_cookies_with_playwright(profile=self.profile, headless=True, timeout_seconds=35)
-                                if pw_sync.get("success"):
-                                    heal = {"ok": True}
                             if heal.get("ok"):
                                 self.sync_storage_state(force=True)
                                 return self._invoke(args, timeout=timeout, retry_on_auth_expired=False)
                         except Exception:
                             pass
+                    if heal.get("classification") == "transient_error":
+                        raise NotebookLMVideoError(
+                            "auth_unavailable", "NotebookLM connection temporarily unavailable; try again.",
+                            payload={"classification": "transient_error", "retryable": True},
+                        )
                     raise NotebookLMVideoError("auth_expired", AUTH_EXPIRED_MESSAGE, payload={"stderr": stderr, "stdout": stdout})
                 raise NotebookLMVideoError("CLI_ERROR", raw_err)
             raise
@@ -1046,20 +1160,21 @@ class NotebookLMVideoProvider:
                 "CLI_ERROR",
             )
             if _is_auth_expired_error(error_code, message):
+                heal = {}
                 if retry_on_auth_expired:
                     try:
                         from .login_flow import self_heal
                         heal = self_heal(profile=self.profile)
-                        if not heal.get("ok") and not os.environ.get("PYTEST_CURRENT_TEST"):
-                            from .browser_sync import sync_cookies_with_playwright
-                            pw_sync = sync_cookies_with_playwright(profile=self.profile, headless=True, timeout_seconds=35)
-                            if pw_sync.get("success"):
-                                heal = {"ok": True}
                         if heal.get("ok"):
                             self.sync_storage_state(force=True)
                             return self._invoke(args, timeout=timeout, retry_on_auth_expired=False)
                     except Exception:
                         pass
+                if heal.get("classification") == "transient_error":
+                    raise NotebookLMVideoError(
+                        "auth_unavailable", "NotebookLM connection temporarily unavailable; try again.",
+                        payload={"classification": "transient_error", "retryable": True},
+                    )
                 raise NotebookLMVideoError(
                     "auth_expired",
                     AUTH_EXPIRED_MESSAGE,
@@ -1189,6 +1304,7 @@ class NotebookLMVideoProvider:
         raise_on_error: bool = True,
         online: bool = False,
         test_network: bool = False,
+        fast_valid_session: bool = False,
     ) -> AuthStatus:
         """Verify local Google authentication profile status.
         
@@ -1197,6 +1313,25 @@ class NotebookLMVideoProvider:
         If online=True or test_network=True is explicitly set, invokes CLI 'auth check'.
         """
         self._emit("auth_check", phase="auth", elapsed=0.0, elapsed_seconds=0.0)
+
+        # Audio Flow calls this latency-sensitive path before any cloud work.
+        # It may skip only the *proactive* near-expiry refresh when the on-disk
+        # session validates and no credential has actually expired.  Any invalid
+        # or expired session still takes the established recovery path below.
+        if fast_valid_session and not online and not test_network:
+            storage_path = self.get_storage_path()
+            backup_path = self.get_backup_path()
+            valid, msg, details = _validate_storage_file(storage_path, backup_path, auto_restore=False)
+            if valid and not details.get("psidts_expired"):
+                return AuthStatus(
+                    status="ok",
+                    profile=self.profile,
+                    storage_path=str(storage_path),
+                    authenticated=True,
+                    message=msg,
+                    details=details,
+                )
+
         self.sync_storage_state()
 
         if online or test_network:
@@ -1258,40 +1393,39 @@ class NotebookLMVideoProvider:
         valid, msg, details = _validate_storage_file(storage_path, backup_path, auto_restore=True)
         from .config import is_session_near_expiry
         near_expiry = is_session_near_expiry(self.profile, threshold_seconds=86400.0)
+        heal_classification: str | None = None
         if not valid or details.get("psidts_expired") or near_expiry:
-            # Auto-recovery layer 1: attempt zero-interaction browser sync / backup restore
-            try:
-                from .browser_sync import auto_sync_from_browser
-
-                sync_res = auto_sync_from_browser(profile=self.profile)
-                if sync_res.get("success"):
-                    valid, msg, details = _validate_storage_file(storage_path, backup_path, auto_restore=True)
-            except Exception:
-                pass
-
-            # Auto-recovery layer 2: headless self-heal (master token refresh / live session rotation)
+            # All automatic browser recovery is account-bound and coordinated by
+            # self_heal. Broad browser/profile scans remain explicit user actions.
             if not valid or details.get("psidts_expired") or is_session_near_expiry(self.profile, threshold_seconds=86400.0):
                 try:
                     from .login_flow import self_heal
 
                     heal_res = self_heal(profile=self.profile)
+                    heal_classification = str(heal_res.get("classification") or "") or None
                     if heal_res.get("ok"):
                         valid, msg, details = _validate_storage_file(storage_path, backup_path, auto_restore=True)
                 except Exception:
                     pass
 
-            # Auto-recovery layer 3: headless Playwright live session rotation
-            if (not valid or details.get("psidts_expired") or is_session_near_expiry(self.profile, threshold_seconds=86400.0)) and not os.environ.get("PYTEST_CURRENT_TEST"):
-                try:
-                    from .browser_sync import sync_cookies_with_playwright
-
-                    pw_res = sync_cookies_with_playwright(profile=self.profile, headless=True, timeout_seconds=35)
-                    if pw_res.get("success"):
-                        valid, msg, details = _validate_storage_file(storage_path, backup_path, auto_restore=True)
-                except Exception:
-                    pass
-
         if not valid:
+            if heal_classification == "transient_error":
+                transient_message = "NotebookLM connection temporarily unavailable; try again."
+                transient_details = {**details, "classification": "transient_error", "retryable": True}
+                if raise_on_error:
+                    raise NotebookLMVideoError(
+                        "auth_unavailable",
+                        transient_message,
+                        payload={"storage_path": str(storage_path), "message": msg, **transient_details},
+                    )
+                return AuthStatus(
+                    status="error",
+                    profile=self.profile,
+                    storage_path=str(storage_path),
+                    authenticated=False,
+                    message=transient_message,
+                    details=transient_details,
+                )
             if _is_auth_expired_error("AUTH", msg) or details.get("psidts_expired"):
                 if raise_on_error:
                     raise NotebookLMVideoError(

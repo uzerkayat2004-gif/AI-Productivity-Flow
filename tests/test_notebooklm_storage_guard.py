@@ -252,8 +252,13 @@ def test_placeholder_email_not_written_when_state_has_no_account(profile_env):
     assert profile_env["db"].get_setting("video_flow_notebooklm_email") != "your Google account"
 
 
-def test_real_email_still_persisted_by_record_successful_login(profile_env):
+def test_real_email_still_persisted_by_record_successful_login(profile_env, monkeypatch):
     _write_state(profile_env["st"], _valid_cookies("live"), email="old@gmail.com")
+    monkeypatch.setattr(
+        login_flow,
+        "verify_online",
+        lambda **kwargs: {"authenticated": True, "status": "ok", "email": "new@gmail.com"},
+    )
 
     login_flow.record_successful_login("new@gmail.com", profile="prof-guard")
 

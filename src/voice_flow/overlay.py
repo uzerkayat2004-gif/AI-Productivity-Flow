@@ -16,6 +16,7 @@ from __future__ import annotations
 import ctypes
 import math
 import sys
+import threading
 import time
 import tkinter as tk
 from typing import Callable
@@ -238,6 +239,8 @@ class FloatingOverlayBar:
         self._user_pos: tuple[int, int] | None = None
         self._heartbeat_at: float | None = None
         self._proximity_after_id = None
+        self._main_thread_id: int | None = None
+        self._mainloop_running: bool = False
 
     def set_visible(self, visible: bool) -> bool:
         """Runtime hook for the Hub; hiding the bar deliberately leaves hotkeys live."""
@@ -263,40 +266,109 @@ class FloatingOverlayBar:
             return False
         self.dock = value
         self._user_pos = None
+        self._persist_position()
         self._run_on_ui(self._position_window)
         return True
 
+    # -- Persistent position -------------------------------------------------
+
+    _POS_SETTING_KEY = "overlay_user_pos"
+
+    def load_saved_position(self) -> None:
+        """Restore the position the user last dragged the bar to (survives restarts)."""
+        self._persist_enabled = True
+        try:
+            saved = storage.get_setting(self._POS_SETTING_KEY, None)
+            if isinstance(saved, (list, tuple)) and len(saved) == 2:
+                self._user_pos = (int(saved[0]), int(saved[1]))
+        except Exception:
+            pass
+
+    def _persist_position(self) -> None:
+        if not getattr(self, "_persist_enabled", False):
+            return
+        try:
+            pos = list(self._user_pos) if self._user_pos is not None else None
+            storage.save_setting(self._POS_SETTING_KEY, pos)
+        except Exception:
+            pass
+
     def show(self) -> None:
-        """Bring the floating bar to the front immediately."""
+        """Bring the floating bar to the front immediately, keeping the user's position."""
         self.visible = True
 
         def _do():
             if not self.win:
-                return
+                self._create_window()
+                if not self.win:
+                    return
             if self.state == "HIDDEN":
                 self.state = "READY"
-            if self._user_pos is not None:
-                anchor_cx, anchor_by = self._user_pos
-                target_x = int(anchor_cx - self.width / 2)
-                target_y = int(anchor_by - self.height)
-                if self._is_offscreen(target_x, target_y):
-                    self._user_pos = None
-                    self._position_window()
+            self._position_window()  # clamps a stale/off-screen anchor back on-screen
             self._bring_to_top()
             self._draw()
 
         self._run_on_ui(_do)
 
     def reset_position(self) -> None:
-        """Reset floating bar to default dock position and bring to front."""
+        """Explicitly reset floating bar to the default dock position and bring to front."""
         self._user_pos = None
+        self._persist_position()
 
         def _do():
             if not self.win:
-                return
+                self._create_window()
+                if not self.win:
+                    return
             self._position_window()
             self._bring_to_top()
             self._draw()
+
+        self._run_on_ui(_do)
+
+    def restart_and_refresh(self) -> None:
+        """Completely reset, recreate/revalidate, reposition, and bring the floating bar to front.
+
+        Resets all active/stuck states (errors, progress, audio/video jobs, selections),
+        clears user drag position to default dock, recreates window if destroyed or dead,
+        restores Win32 topmost styles, and forces an immediate fresh redraw.
+        """
+        self.visible = True
+        self.state = "READY"
+        self.error_message = ""
+        self.done_label = "Done"
+        self.selected_text = ""
+        self._selection_expanded = False
+        self.video_job_id = ""
+        self.video_status = ""
+        self.video_progress = 0
+        self.video_stage = ""
+        self.audio_summary_status = ""
+        self.audio_summary_progress = 0
+        self.audio_summary_stage = ""
+        self._hover_zone = None
+        self._is_mouse_over = False
+        self._anim_phase = 0.0
+        self._animation_generation += 1
+
+        def _do():
+            need_create = False
+            if not self.win:
+                need_create = True
+            else:
+                try:
+                    if hasattr(self.win, "winfo_exists") and not self.win.winfo_exists():
+                        need_create = True
+                except Exception:
+                    need_create = True
+            if need_create:
+                self._create_window()
+            if self.win:
+                self.width, self.height = self._target_size()
+                self._set_bar_size(self.width, self.height)
+                self._position_window()
+                self._bring_to_top()
+                self._draw()
 
         self._run_on_ui(_do)
 
@@ -321,9 +393,19 @@ class FloatingOverlayBar:
 
     def _create_window(self) -> None:
         """Create and initialize the Tkinter toplevel overlay and canvas."""
+        cur_tid = threading.get_ident()
+        if getattr(self, "_main_thread_id", None) is not None and cur_tid != self._main_thread_id:
+            if self.root is not None and getattr(self, "_mainloop_running", False):
+                try:
+                    self.root.after(0, self._create_window)
+                except Exception:
+                    pass
+            return
+
         _enable_dpi_awareness()
         if self.root is None:
             self.root = tk.Tk()
+            self._main_thread_id = cur_tid
             self.root.withdraw()
             try:
                 from voice_flow.installer import get_icon_path
@@ -386,14 +468,15 @@ class FloatingOverlayBar:
 
         self.drag_x = 0
         self.drag_y = 0
-        # Session-only dragged position anchor (center_x, bottom_y). Never
-        # persisted: every app start begins at the default dock position; a
-        # system sleep/resume also resets it.
-        self._user_pos: tuple[int, int] | None = None
+        # Dragged position anchor (center_x, bottom_y). Persisted across
+        # restarts and sleep/resume; only an explicit reset clears it.
+        if not hasattr(self, "_user_pos"):
+            self._user_pos = None
         self._heartbeat_at: float | None = None
         if hasattr(self.canvas, "bind"):
             self.canvas.bind("<ButtonPress-1>", self._on_press)
             self.canvas.bind("<B1-Motion>", self._on_drag)
+            self.canvas.bind("<ButtonRelease-1>", self._on_release)
             self.canvas.bind("<Motion>", self._on_motion)
             self.canvas.bind("<Leave>", self._on_leave)
 
@@ -409,6 +492,7 @@ class FloatingOverlayBar:
 
     def run_loop(self) -> None:
         """Start the Tkinter event loop for floating overlay bar."""
+        self._main_thread_id = threading.get_ident()
         self._create_window()
         if self.root:
             from voice_flow.audio_flow_widget import audio_flow_widget
@@ -423,7 +507,11 @@ class FloatingOverlayBar:
             self._schedule_heartbeat()
             self._draw()
         if self.root:
-            self.root.mainloop()
+            self._mainloop_running = True
+            try:
+                self.root.mainloop()
+            finally:
+                self._mainloop_running = False
 
     def _on_map(self, _event: tk.Event) -> None:
         self._apply_win32_styles()
@@ -542,11 +630,11 @@ class FloatingOverlayBar:
         self._apply_win32_styles()
 
     def _schedule_heartbeat(self) -> None:
-        """Reset to the default position after the machine sleeps.
+        """Periodic self-heal: keep the bar topmost and on-screen.
 
-        Tk timers pause while the system sleeps, so a heartbeat that fires
-        far later than its 20s interval means a suspend/resume happened —
-        the bar then returns to the default dock position."""
+        A heartbeat firing far later than its 20s interval means the machine
+        slept/resumed (or the display layout changed) — the bar keeps the
+        user's saved position but is re-clamped onto a visible monitor."""
         import time as _time
 
         if not (self.win and getattr(self.win, "winfo_exists", lambda: True)()):
@@ -558,15 +646,18 @@ class FloatingOverlayBar:
         else:
             self._heartbeat_at = now
         if self.visible and self.state != "HIDDEN":
+            if not getattr(self, "_is_dragging", False):
+                try:
+                    self._position_window()
+                except Exception:
+                    pass
             self._bring_to_top()
         if hasattr(self.win, "after"):
             self.win.after(20000, self._schedule_heartbeat)
 
     def _handle_resume(self) -> None:
-        """System woke from sleep: return the bar to the default position."""
-        if self._user_pos is not None:
-            self._user_pos = None
-            self._position_window()
+        """System woke from sleep: keep the saved position, just make sure it is visible."""
+        self._position_window()
         if self.visible and self.state != "HIDDEN":
             self._bring_to_top()
             self._draw()
@@ -599,13 +690,18 @@ class FloatingOverlayBar:
     # -- Public State API --
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
-        if self.root and self.win:
+        cur_tid = threading.get_ident()
+        if self.root is not None and getattr(self, "_mainloop_running", False):
             try:
                 self.root.after(0, func)
+                return
             except Exception:
                 pass
-        else:
-            func()
+        elif getattr(self, "_main_thread_id", None) == cur_tid or getattr(self, "_main_thread_id", None) is None:
+            try:
+                func()
+            except Exception:
+                pass
 
     def refresh(self) -> None:
         """Thread-safe redraw request: routes _draw through the UI loop."""
@@ -1004,6 +1100,11 @@ class FloatingOverlayBar:
             self.win.geometry(f"+{clamped_x}+{clamped_y}")
         # Store bottom-center anchor point so all states remain concentric
         self._user_pos = (clamped_x + self.width // 2, clamped_y + self.height)
+
+    def _on_release(self, _event: tk.Event) -> None:
+        if getattr(self, "_is_dragging", False):
+            self._is_dragging = False
+            self._persist_position()
 
     def _on_motion(self, event: tk.Event) -> None:
         was_over = self._is_mouse_over

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,56 @@ BUILD = Path(os.environ.get("APF_BUILD_DIR", Path.home() / "apf-release-build"))
 STAGING = BUILD / "staging"
 DIST = REPO / "dist"
 ISCC = Path(r"C:/Program Files (x86)/Inno Setup 6/ISCC.exe")
+NOTEBOOKLM_PACKAGE = "notebooklm-py[browser,mcp]==0.8.2"
+
+
+def notebooklm_runtime_executables(runtime: Path) -> list[Path]:
+    """NotebookLM console scripts required by the packaged private Python."""
+    scripts = runtime / "python" / "Scripts"
+    return [scripts / "notebooklm.exe", scripts / "notebooklm-mcp.exe"]
+
+
+def ensure_notebooklm_runtime(staging: Path) -> bool:
+    """Provision NotebookLM into the staging private Python when needed.
+
+    This is deliberately a build-time operation. It never touches the build
+    machine's global Python or a user's environment, and it never runs from the
+    application sign-in path. Returns True when a provision step was run.
+    """
+    runtime = staging / "runtime"
+    required = notebooklm_runtime_executables(runtime)
+    if all(path.is_file() for path in required):
+        return False
+
+    python = runtime / "python" / "python.exe"
+    if not python.is_file():
+        sys.exit(
+            "NOTEBOOKLM RUNTIME PROVISION FAILED — staging private Python is missing: "
+            f"{python}"
+        )
+
+    uv = shutil.which("uv")
+    if uv:
+        command = [uv, "pip", "install", "--python", str(python), NOTEBOOKLM_PACKAGE]
+    else:
+        command = [str(python), "-m", "pip", "install", NOTEBOOKLM_PACKAGE]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout or "")[-2000:]
+        sys.exit(
+            "NOTEBOOKLM RUNTIME PROVISION FAILED — could not install "
+            f"{NOTEBOOKLM_PACKAGE} into {python}.\n{output}"
+        )
+
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        sys.exit(
+            "NOTEBOOKLM RUNTIME PROVISION FAILED — package installation completed "
+            "but required console scripts are missing:\n  " + "\n  ".join(missing)
+        )
+    print("NotebookLM runtime provisioned in staging private Python")
+    return True
 
 
 def refresh_app_package(staging: Path) -> None:
@@ -50,6 +101,7 @@ def preflight(staging: Path) -> None:
     runtime = staging / "runtime"
     required = [
         runtime / "python" / "pythonw.exe",
+        *notebooklm_runtime_executables(runtime),
         runtime / "python" / "Lib" / "site-packages" / "voice_flow" / "main.py",
         runtime / "python" / "Lib" / "site-packages" / "narova_tts" / "pipeline.py",
         runtime / "node" / "node.exe",
@@ -101,6 +153,7 @@ def sha256_file(path: Path) -> str:
 
 def main() -> None:
     refresh_app_package(STAGING)
+    ensure_notebooklm_runtime(STAGING)
     preflight(STAGING)
     installer = build_installer()
     size_mb = installer.stat().st_size / (1024 * 1024)

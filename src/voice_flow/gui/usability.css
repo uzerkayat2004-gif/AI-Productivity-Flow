@@ -3446,11 +3446,16 @@ html[data-theme="dark"] #settings-modal {
   border-radius: 999px;
 }
 
-/* Word row: identity on the left, two quiet tools on the right */
-#page-dictionary.flow-ux .dict-word-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* Dictionary flowing capsule container & tags */
+#page-dictionary.flow-ux .dict-capsules-container,
+#page-dictionary.flow-ux .dict-word-rows,
+#page-dictionary.flow-ux #dictionary-chips {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 10px 12px !important;
+  padding: 16px 4px 20px 4px !important;
 }
 
 #page-dictionary.flow-ux .dict-word-row {
