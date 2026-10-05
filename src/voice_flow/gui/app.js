@@ -6220,10 +6220,57 @@ function loadAudioFlowPage() {
   loadAudioProvidersOverview();
   loadExecAudioFlowPolicy();
   loadAudioSummarySettings();
+  loadAudioFlowSummaryStyle();
   initAudioSpeedSelect();
   updateAudioSummaryConnectionUI();
   loadAudioSummaryHistory();
 }
+
+function applyAudioFlowSummaryStyleUI(style) {
+  const safeStyle = style === "podcast" ? "podcast" : "single";
+  document.querySelectorAll(".af-summary-style-option, [data-summary-style]").forEach(btn => {
+    const btnStyle = btn.getAttribute("data-summary-style");
+    const isActive = btnStyle === safeStyle;
+    btn.setAttribute("aria-pressed", String(isActive));
+    btn.classList.toggle("active", isActive);
+  });
+}
+
+async function loadAudioFlowSummaryStyle() {
+  try {
+    const res = await fetch("/api/settings/get?key=audio_flow_summary_style");
+    const data = await res.json();
+    if (data.success && (data.value === "single" || data.value === "podcast")) {
+      applyAudioFlowSummaryStyleUI(data.value);
+      return data.value;
+    }
+  } catch (err) {
+    console.warn("Could not load audio_flow_summary_style:", err);
+  }
+  applyAudioFlowSummaryStyleUI("single");
+  return "single";
+}
+
+async function setAudioFlowSummaryStyle(style) {
+  const safeStyle = style === "podcast" ? "podcast" : "single";
+  applyAudioFlowSummaryStyleUI(safeStyle);
+  try {
+    const res = await fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "audio_flow_summary_style", value: safeStyle }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      console.warn("Failed to persist audio_flow_summary_style:", data.error);
+    }
+  } catch (err) {
+    console.error("Error setting audio_flow_summary_style:", err);
+  }
+}
+window.setAudioFlowSummaryStyle = setAudioFlowSummaryStyle;
+window.loadAudioFlowSummaryStyle = loadAudioFlowSummaryStyle;
+window.applyAudioFlowSummaryStyleUI = applyAudioFlowSummaryStyleUI;
 
 let afSummaryModelRef = "";
 
@@ -6669,26 +6716,145 @@ async function toggleVideoFlowFeature(checked) {
 // Onboarding: welcome screen + pre-recorded explanatory tour
 // =========================================================
 const ONBOARDING_NARRATION = [
-  "Welcome to AI Productivity Flow. Here is a clear introduction to your complete voice-driven productivity suite for Windows.",
-  "Welcome to the Audio Flow feature, our first feature. Imagine scrolling through Twitter and coming across a lengthy article that you don't want to read. Simply select the text, and a small audio button will appear. Click it to select the summary option, converting the article into an audio summary.",
-  "Next is Video Flow, our second feature. If you want to convert that article into a visual summary, Video Flow transforms your text into an animated visual explainer right on your screen.",
+  "Welcome to AI Productivity Flow! We're thrilled to have you here. AI Productivity Flow is your completely free, 100% open-source personal productivity companion. Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy. Whether you want to generate visual explainer videos, listen to instant audio summaries of long articles, or dictate and polish text into any app effortlessly... it's all built right here for you. In this quick tour, we'll walk you through how everything works, starting with our first feature: Video Flow. Let's dive right in!",
+  "Welcome to Video Flow, our first core feature. If you have a lengthy article, research paper, or complex notes that you want to understand visually, Video Flow is built for you. Simply paste your text or select an article, and Video Flow transforms it into an animated visual explainer with dynamic motion graphics, slide layouts, and natural audio narration. You can watch the full explainer right here on your screen, switch visual styles, or export your video in seconds. Next up, let's explore our second feature: Audio Flow!",
+  "Next is Audio Flow, our second feature. Imagine scrolling through Twitter and coming across a lengthy article that you don't want to read. Simply select the text, and a small audio button will appear. Click it to select the summary option, converting the article into an audio summary.",
   "Now that you have all the context about the article, you can use the Voice Flow feature to post about the article by speaking, and it will write it down for you. Zoom in on your context and let your voice write down your thoughts.",
-  "Here is an overview of all five features built into AI Productivity Flow: Audio Summaries, Visual Summaries, Voice Flow Dictation, Article Conversion, and Feedback Insights.",
+  "Here is an overview of all five features built into AI Productivity Flow: Visual Summaries, Audio Summaries, Voice Flow Dictation, Article Conversion, and Feedback Insights.",
   "We hope you enjoy using AI Productivity Flow! If you like the app, please visit our GitHub repository to check reports, provide feedback, and give us a star on GitHub. Your feedback is appreciated!",
 ];
 
 // Dedicated pre-recorded narrator voice & explanatory pacing configuration
-const ONBOARDING_NARRATOR_VOICE = "edge/en-US-AvaNeural";
-const ONBOARDING_VOICE_SPEED = "-15%";
+const ONBOARDING_NARRATOR_VOICE = "deepgram/flux-rufus-en";
+const ONBOARDING_VOICE_SPEED = "0%";
 
 const ONBOARDING_PAGE_MAP = {
-  0: "audioflow",
-  1: "audioflow",
-  2: "videoflow",
+  0: "home",
+  1: "videoflow",
+  2: "audioflow",
   3: "home",
   4: "insights",
   5: "home"
 };
+
+const scene1Timeline = [
+  { start: 0.0, end: 4.2, text: "Welcome to AI Productivity Flow! We're thrilled to have you here." },
+  { start: 4.2, end: 11.0, text: "AI Productivity Flow is your completely free, 100% open-source personal productivity companion." },
+  { start: 11.0, end: 19.9, text: "Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy." },
+  { start: 19.9, end: 22.8, text: "Whether you want to generate visual explainer videos," },
+  { start: 22.8, end: 25.8, text: "listen to instant audio summaries of long articles," },
+  { start: 25.8, end: 29.5, text: "or dictate and polish text into any app effortlessly..." },
+  { start: 29.5, end: 34.8, text: "it's all built right here for you. In this quick tour, we'll walk you through how everything works," },
+  { start: 34.8, end: 40.5, text: "starting with our first feature: Video Flow. Let's dive right in!" }
+];
+
+function updateOnboardingScene1Subtitles(time) {
+  const subEl = document.getElementById("subtitle-text-0");
+  if (!subEl) return;
+
+  const currentMatch = scene1Timeline.find(item => time >= item.start && time <= item.end);
+  if (currentMatch && subEl.textContent !== currentMatch.text) {
+    subEl.style.opacity = "0.2";
+    setTimeout(() => {
+      subEl.textContent = currentMatch.text;
+      subEl.style.opacity = "1";
+    }, 100);
+  }
+
+  // Dynamic visual card highlighting based on voiceover in Scene 1
+  const c1 = document.getElementById("card-feature-1");
+  const c2 = document.getElementById("card-feature-2");
+  const c3 = document.getElementById("card-feature-3");
+
+  if (c1 && c2 && c3) {
+    c1.classList.remove("highlight-orange");
+    c2.classList.remove("highlight-blue");
+    c3.classList.remove("highlight-purple");
+
+    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+      c1.classList.add("highlight-orange");
+    } else if (time >= 22.8 && time < 25.8) {
+      c2.classList.add("highlight-blue");
+    } else if (time >= 25.8 && time < 29.5) {
+      c3.classList.add("highlight-purple");
+    }
+  }
+}
+
+let _confettiAnimId = null;
+function initOnboardingConfetti() {
+  const canvas = document.getElementById("onboarding-confetti-canvas");
+  if (!canvas) return;
+  const parent = canvas.parentElement;
+  if (!parent) return;
+
+  const rect = parent.getBoundingClientRect();
+  canvas.width = rect.width || 920;
+  canvas.height = rect.height || 640;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  if (_confettiAnimId) {
+    cancelAnimationFrame(_confettiAnimId);
+    _confettiAnimId = null;
+  }
+
+  const colors = ["#ff6b00", "#0284c7", "#9333ea", "#10b981", "#f59e0b", "#ec4899"];
+  const particles = [];
+  const particleCount = 45;
+
+  for (let i = 0; i < particleCount; i++) {
+    particles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * -canvas.height * 0.5,
+      w: Math.random() * 8 + 4,
+      h: Math.random() * 5 + 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      vx: (Math.random() - 0.5) * 2,
+      vy: Math.random() * 2.5 + 1.2,
+      rotation: Math.random() * 360,
+      rotSpeed: (Math.random() - 0.5) * 6,
+      opacity: Math.random() * 0.7 + 0.3
+    });
+  }
+
+  const startTime = performance.now();
+  const maxDuration = 4500;
+
+  function render(now) {
+    const elapsed = now - startTime;
+    if (elapsed > maxDuration || onboardingSlide !== 0) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      _confettiAnimId = null;
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.rotSpeed;
+      if (p.y > canvas.height) {
+        p.y = -10;
+        p.x = Math.random() * canvas.width;
+      }
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate((p.rotation * Math.PI) / 180);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.opacity * Math.max(0, 1 - (elapsed / maxDuration));
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+
+    _confettiAnimId = requestAnimationFrame(render);
+  }
+
+  _confettiAnimId = requestAnimationFrame(render);
+}
 
 let onboardingSlide = 0;
 let onboardingNarrationPaused = false;
@@ -6740,6 +6906,10 @@ function renderOnboardingDots() {
 }
 
 function renderOnboardingSlide() {
+  const card = document.querySelector(".onboarding-card");
+  if (card) {
+    card.classList.toggle("scene-wide", onboardingSlide === 0);
+  }
   document.querySelectorAll(".onboarding-slide").forEach(s => {
     const slideIdx = Number(s.getAttribute("data-slide") || (s.dataset && s.dataset.slide) || 0);
     s.classList.toggle("active", slideIdx === onboardingSlide);
@@ -6747,6 +6917,10 @@ function renderOnboardingSlide() {
   renderOnboardingDots();
   const player = document.getElementById("onboarding-player");
   if (player) player.style.display = onboardingSlide === 0 ? "none" : "flex";
+
+  if (onboardingSlide === 0) {
+    setTimeout(initOnboardingConfetti, 100);
+  }
 
   // Auto-navigate app background to match current tour topic
   const targetPage = ONBOARDING_PAGE_MAP[onboardingSlide];
@@ -6777,6 +6951,12 @@ function speakOnboardingNarration() {
   const audioPath = getOnboardingAudioPath(onboardingSlide);
   onboardingAudioPlayer = new Audio(audioPath);
   
+  onboardingAudioPlayer.addEventListener("timeupdate", () => {
+    if (onboardingSlide === 0) {
+      updateOnboardingScene1Subtitles(onboardingAudioPlayer.currentTime);
+    }
+  });
+
   onboardingAudioPlayer.addEventListener("ended", () => {
     updateOnboardingNarrationUI(true);
   });
@@ -6860,6 +7040,7 @@ function finishOnboarding() {
 
 function replayOnboarding() {
   setOnboardingFlag("vf_onboarding.done", "");
+  setOnboardingFlag("hasViewedOnboarding", "");
   if (typeof closeSettings === "function") closeSettings();
   onboardingSlide = 0;
   renderOnboardingSlide();
