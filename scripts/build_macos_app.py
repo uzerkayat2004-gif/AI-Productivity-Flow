@@ -42,7 +42,7 @@ def create_info_plist() -> None:
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": "com.uzerkayat.aiproductivityflow",
-        "CFBundleVersion": VERSION,
+        "CFBundleVersion": "1",
         "CFBundleShortVersionString": VERSION,
         "CFBundlePackageType": "APPL",
         "CFBundleSignature": "????",

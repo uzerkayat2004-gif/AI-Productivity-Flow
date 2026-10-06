@@ -9,11 +9,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def test_canonical_version_match():
     # 1. Canonical _version.py
     from voice_flow._version import VERSION
-    assert VERSION == "1.0.2", f"Canonical VERSION in _version.py is {VERSION}, expected 1.0.2"
+    assert VERSION == "1.0.0", f"Canonical VERSION in _version.py is {VERSION}, expected 1.0.0"
 
     # 2. Package __version__
     import voice_flow
-    assert voice_flow.__version__ == "1.0.2", f"__version__ in __init__.py is {voice_flow.__version__}, expected 1.0.2"
+    assert voice_flow.__version__ == "1.0.0", f"__version__ in __init__.py is {voice_flow.__version__}, expected 1.0.0"
 
     # 3. pyproject.toml
     pyproject_path = REPO_ROOT / "pyproject.toml"
