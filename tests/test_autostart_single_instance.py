@@ -6,8 +6,8 @@ Covers the "two app instances at Windows startup" bug:
 2. A second launcher must POLL for the first launcher's window (boot race:
    the engine spawns a second launcher before the first window exists) and
    exit with 'focused' instead of spawning its own suite.
-3. installer must register exactly ONE boot mechanism (HKCU Run key) and
-   remove legacy Startup-folder .lnk duplicates on install/upgrade.
+3. installer must register exactly ONE boot mechanism (a current-user logon
+   task, with one Run fallback only when Scheduler is unavailable).
 """
 
 from __future__ import annotations
@@ -218,24 +218,23 @@ def test_install_all_registers_exactly_one_boot_mechanism(monkeypatch: pytest.Mo
     vbs.write_text("placeholder", encoding="utf-8")
     monkeypatch.setattr(installer, "get_vbs_launcher_path", lambda: vbs)
 
-    calls = {"reg": 0, "register_startup": 0, "unregister_startup": 0, "shortcuts": 0}
-    monkeypatch.setattr(installer, "register_registry_autorun", lambda: calls.__setitem__("reg", calls["reg"] + 1) or True)
+    calls = {"ensure": 0, "register_startup": 0, "shortcuts": 0}
+    monkeypatch.setattr(
+        installer,
+        "ensure_single_autostart_mechanism",
+        lambda: calls.__setitem__("ensure", calls["ensure"] + 1) or True,
+    )
+    monkeypatch.setattr(installer, "is_autostart_enabled", lambda: True)
     monkeypatch.setattr(
         installer,
         "register_startup_folder",
         lambda: calls.__setitem__("register_startup", calls["register_startup"] + 1) or True,
     )
-    monkeypatch.setattr(
-        installer,
-        "unregister_startup_folder",
-        lambda: calls.__setitem__("unregister_startup", calls["unregister_startup"] + 1) or True,
-    )
     monkeypatch.setattr(installer, "register_desktop_shortcuts", lambda: calls.__setitem__("shortcuts", 1) or True)
 
     assert installer.install_all() is True
 
-    assert calls["reg"] == 1
-    assert calls["unregister_startup"] == 1
+    assert calls["ensure"] == 1
     # Regression: the legacy 'dual-layer' install created a second boot
     # mechanism (Startup .lnk) which opened two instances at logon.
     assert calls["register_startup"] == 0
@@ -245,6 +244,15 @@ def test_ensure_single_autostart_mechanism_registers_run_key_and_removes_lnk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+    action = installer.windows_startup.StartupAction("C:\\wscript.exe", '"C:\\app.vbs"', "C:\\")
+    statuses = iter((installer.windows_startup.TaskStatus(True), installer.windows_startup.TaskStatus(True)))
+    monkeypatch.setattr(installer, "get_startup_action", lambda: action)
+    monkeypatch.setattr(installer.windows_startup, "inspect_task", lambda _action: next(statuses))
+    monkeypatch.setattr(
+        installer.windows_startup,
+        "register_task",
+        lambda _action: installer.windows_startup.TaskResult(False, available=True),
+    )
     monkeypatch.setattr(installer, "register_registry_autorun", lambda: calls.append("reg") or True)
     monkeypatch.setattr(installer, "unregister_startup_folder", lambda: calls.append("unreg_lnk") or True)
 
@@ -253,12 +261,30 @@ def test_ensure_single_autostart_mechanism_registers_run_key_and_removes_lnk(
 
 
 def test_ensure_single_autostart_mechanism_propagates_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    action = installer.windows_startup.StartupAction("C:\\wscript.exe", '"C:\\app.vbs"', "C:\\")
+    statuses = iter((installer.windows_startup.TaskStatus(True), installer.windows_startup.TaskStatus(True)))
+    monkeypatch.setattr(installer, "get_startup_action", lambda: action)
+    monkeypatch.setattr(installer.windows_startup, "inspect_task", lambda _action: next(statuses))
+    monkeypatch.setattr(
+        installer.windows_startup,
+        "register_task",
+        lambda _action: installer.windows_startup.TaskResult(False, available=True),
+    )
     monkeypatch.setattr(installer, "register_registry_autorun", lambda: False)
     monkeypatch.setattr(installer, "unregister_startup_folder", lambda: True)
     assert installer.ensure_single_autostart_mechanism() is False
 
 
 def test_set_autostart_true_never_registers_startup_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    action = installer.windows_startup.StartupAction("C:\\wscript.exe", '"C:\\app.vbs"', "C:\\")
+    statuses = iter((installer.windows_startup.TaskStatus(True), installer.windows_startup.TaskStatus(True)))
+    monkeypatch.setattr(installer, "get_startup_action", lambda: action)
+    monkeypatch.setattr(installer.windows_startup, "inspect_task", lambda _action: next(statuses))
+    monkeypatch.setattr(
+        installer.windows_startup,
+        "register_task",
+        lambda _action: installer.windows_startup.TaskResult(False, available=True),
+    )
     monkeypatch.setattr(installer, "register_registry_autorun", lambda: True)
     monkeypatch.setattr(installer, "unregister_startup_folder", lambda: True)
 
@@ -293,7 +319,7 @@ def test_first_launch_normalizes_autostart_to_single_mechanism(monkeypatch: pyte
     monkeypatch.setattr("voice_flow.storage.storage", fake_storage)
 
     autostart_calls: list[bool] = []
-    monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda enable=True: autostart_calls.append(enable))
+    monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda enable=True: autostart_calls.append(enable) or True)
     monkeypatch.setattr(desktop_launcher, "ensure_backend_running", lambda: None)
     monkeypatch.setattr(desktop_launcher, "is_api_server_ready", lambda timeout=0.2: True)
     monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
@@ -336,6 +362,11 @@ def test_release_cleanup_removes_all_legacy_autostart_entries(monkeypatch: pytes
         DeleteValue=fake_delete_value,
     )
     monkeypatch.setattr(release_cleanup_autorun, "winreg", fake_winreg)
+    monkeypatch.setattr(
+        release_cleanup_autorun.windows_startup,
+        "unregister_task",
+        lambda: installer.windows_startup.TaskResult(True),
+    )
     monkeypatch.setenv("APPDATA", str(tmp_path))
 
     startup_dir = tmp_path / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
@@ -344,7 +375,7 @@ def test_release_cleanup_removes_all_legacy_autostart_entries(monkeypatch: pytes
     (startup_dir / "VoiceFlow.lnk").write_bytes(b"lnk")
     (startup_dir / "unrelated.lnk").write_bytes(b"lnk")
 
-    release_cleanup_autorun.main()
+    assert release_cleanup_autorun.main() is True
 
     assert sorted(deleted) == ["AI Productivity Flow", "VoiceFlow"]
     assert not (startup_dir / "AI Productivity Flow.lnk").exists()
@@ -360,6 +391,34 @@ def test_release_cleanup_tolerates_missing_registry_and_startup_dir(monkeypatch:
         HKEY_CURRENT_USER=object(), KEY_SET_VALUE=0x20000, OpenKey=fake_open_key, DeleteValue=lambda *a: None
     )
     monkeypatch.setattr(release_cleanup_autorun, "winreg", fake_winreg)
+    monkeypatch.setattr(
+        release_cleanup_autorun.windows_startup,
+        "unregister_task",
+        lambda: installer.windows_startup.TaskResult(True),
+    )
     monkeypatch.setenv("APPDATA", str(tmp_path))  # Startup dir does not exist
 
-    release_cleanup_autorun.main()  # must not raise
+    assert release_cleanup_autorun.main() is True
+
+
+def test_release_cleanup_reports_task_removal_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class MissingRegistry:
+        HKEY_CURRENT_USER = object()
+        KEY_SET_VALUE = 0x20000
+
+        @staticmethod
+        def OpenKey(*_args, **_kwargs):
+            raise FileNotFoundError()
+
+    monkeypatch.setattr(release_cleanup_autorun, "winreg", MissingRegistry())
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(
+        release_cleanup_autorun.windows_startup,
+        "unregister_task",
+        lambda: installer.windows_startup.TaskResult(False, error="access denied"),
+    )
+
+    assert release_cleanup_autorun.main() is False
+    assert "[ERROR]" in capsys.readouterr().out

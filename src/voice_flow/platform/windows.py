@@ -31,8 +31,7 @@ from voice_flow.platform.wincompat import IS_WINDOWS, windll
 
 log = logging.getLogger(__name__)
 
-# HKCU\Software\Microsoft\Windows\CurrentVersion\Run — the single autostart
-# mechanism the installer standardised on (see installer.py).
+# Legacy HKCU Run constants used only when a caller supplies a custom command.
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_VALUE = "VoiceFlow"
 
@@ -234,8 +233,8 @@ class WindowsBackend:
         if not IS_WINDOWS:
             return False
         try:
-            from voice_flow import installer
-            return installer.is_autostart_enabled()
+            from voice_flow.native_settings import get_launch_at_login
+            return get_launch_at_login().applied
         except Exception:
             pass
         try:
@@ -255,8 +254,8 @@ class WindowsBackend:
             return False
         if command is None:
             try:
-                from voice_flow import installer
-                return installer.set_autostart(enabled)
+                from voice_flow.native_settings import set_launch_at_login
+                return set_launch_at_login(enabled).applied
             except Exception:
                 pass
         try:

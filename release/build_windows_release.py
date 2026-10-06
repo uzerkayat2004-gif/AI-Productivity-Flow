@@ -144,7 +144,7 @@ def build_installer() -> Path:
     DIST.mkdir(exist_ok=True)
     iss = REPO / "release" / "installer" / "apf-setup.iss"
     result = subprocess.run(
-        [str(ISCC), f"/DSTAGING_ROOT={STAGING}", f"/DDIST_ROOT={DIST}", str(iss)],
+        [str(ISCC), f"/DREPO_ROOT={REPO}", f"/DSTAGING_ROOT={STAGING}", f"/DDIST_ROOT={DIST}", str(iss)],
         capture_output=True, text=True,
     )
     print(result.stdout[-2000:])

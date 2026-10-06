@@ -1,15 +1,15 @@
 """Voice Flow Auto-Startup & Desktop Integration Installer.
 
 Configures seamless, zero-console auto-starting for Voice Flow on Windows:
-1. Windows Registry: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\VoiceFlow
-   (the ONLY boot autostart mechanism - registering more than one launches
-   two app instances at logon)
+1. A current-user Task Scheduler logon task (preferred), or one HKCU Run
+   value when Task Scheduler is unavailable.
 2. User Desktop: %USERPROFILE%\\Desktop\\Voice Flow.lnk (manual launch only)
 3. Start Menu Programs: %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Voice Flow.lnk
    (manual launch only)
 
-Legacy Startup-folder .lnk autostart shortcuts are detected and removed so
-upgrades can never leave a second boot mechanism behind.
+Legacy Run values and Startup-folder .lnk autostart shortcuts are removed only
+after the preferred task has been registered and verified.  Failed migration
+rolls the new task back so an upgrade cannot leave two boot mechanisms behind.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+
+from voice_flow import windows_startup
 
 try:
     import winreg
@@ -49,6 +51,38 @@ def _installed_watchdog_command() -> tuple[str, str, str] | None:
 def get_vbs_launcher_path() -> Path:
     """Return the VoiceFlowLauncher.vbs path for the active project/installation root."""
     return get_project_root() / "VoiceFlowLauncher.vbs"
+
+
+def _windows_system_executable(name: str) -> Path:
+    return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / name
+
+
+def get_startup_action() -> windows_startup.StartupAction | None:
+    """Return the verified, absolute action used by Task Scheduler."""
+    installed = _installed_watchdog_command()
+    if installed is not None:
+        pyw, args, working_dir = installed
+        executable = Path(pyw)
+        if not executable.is_absolute() or not executable.is_file():
+            return None
+        return windows_startup.StartupAction(str(executable), args, str(Path(working_dir).resolve()))
+
+    vbs_path = get_vbs_launcher_path().resolve()
+    wscript = _windows_system_executable("wscript.exe").resolve()
+    if not vbs_path.is_file() or not wscript.is_file():
+        return None
+    return windows_startup.StartupAction(
+        executable=str(wscript),
+        arguments=f'"{vbs_path}"',
+        working_directory=str(get_project_root().resolve()),
+    )
+
+
+def _expected_registry_command() -> str | None:
+    action = get_startup_action()
+    if action is None:
+        return None
+    return f'"{action.executable}" {action.arguments}'.strip()
 
 
 
@@ -147,17 +181,11 @@ Shortcut.Save
 
 
 def register_registry_autorun() -> bool:
-    """Register Voice Flow in HKCU Run key for silent boot start."""
-    installed = _installed_watchdog_command()
-    if installed is not None:
-        pyw, args, _ = installed
-        cmd = f'"{pyw}" {args}'
-    else:
-        vbs_path = get_vbs_launcher_path()
-        if not vbs_path.exists():
-            print(f"[ERROR] Launcher not found at {vbs_path}")
-            return False
-        cmd = f'wscript.exe "{vbs_path}"'
+    """Register the one HKCU Run fallback when Task Scheduler is unavailable."""
+    cmd = _expected_registry_command()
+    if cmd is None:
+        print("[ERROR] A verified startup command could not be built")
+        return False
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE) as key:
@@ -183,26 +211,47 @@ def unregister_registry_autorun() -> bool:
                 except FileNotFoundError:
                     pass
             return True
+    except FileNotFoundError:
+        return True
     except Exception as e:
         print(f"[ERROR] Failed to remove Registry Auto-Run: {e}")
         return False
 
 
 def is_registry_autorun_enabled() -> bool:
-    """Check if Voice Flow is registered in HKCU Run key."""
+    """Check whether the current HKCU Run value exactly matches this install."""
+    expected = _expected_registry_command()
+    if expected is None:
+        return False
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
             for val_name in ("VoiceFlow", "Voice Flow", "AI Productivity Flow"):
                 try:
                     val, _ = winreg.QueryValueEx(key, val_name)
-                    if val and str(val).strip():
+                    if val_name == "VoiceFlow" and str(val).strip() == expected:
                         return True
                 except (FileNotFoundError, OSError):
                     pass
         return False
     except Exception:
         return False
+
+
+def has_own_registry_autorun() -> bool:
+    """Return whether any current or legacy app-owned Run value exists."""
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+            for val_name in ("VoiceFlow", "Voice Flow", "AI Productivity Flow"):
+                try:
+                    winreg.QueryValueEx(key, val_name)
+                    return True
+                except (FileNotFoundError, OSError):
+                    pass
+    except Exception:
+        pass
+    return False
 
 
 def is_startup_folder_enabled() -> bool:
@@ -218,33 +267,131 @@ def is_startup_folder_enabled() -> bool:
 
 
 def is_autostart_enabled() -> bool:
-    """Check if Voice Flow auto-start is active in Registry or Startup folder."""
-    return is_registry_autorun_enabled() or is_startup_folder_enabled()
+    """Return the actual, valid registration state for the current user."""
+    return get_autostart_status()[0]
+
+
+def get_autostart_status() -> tuple[bool, str | None]:
+    """Return actual state plus an error when no mechanism can be verified."""
+    action = get_startup_action()
+    if action is None:
+        return False, "A verified Windows startup action could not be built"
+    task = windows_startup.inspect_task(action)
+    if task.available and task.exists:
+        # A disabled or externally changed task is deliberately reported off.
+        return task.enabled and task.matches, None
+    fallback = is_registry_autorun_enabled() or is_startup_folder_enabled()
+    if fallback:
+        return True, None
+    if not task.available:
+        return False, task.error or "Windows Task Scheduler is unavailable"
+    return False, None
+
+
+def _remove_legacy_autostart() -> bool:
+    registry_ok = unregister_registry_autorun()
+    startup_ok = unregister_startup_folder()
+    return registry_ok and startup_ok
+
+
+def _enable_registry_fallback() -> bool:
+    """Create one safe fallback without leaving a Startup shortcut duplicate."""
+    if not register_registry_autorun():
+        return False
+    if unregister_startup_folder():
+        return True
+    # The old shortcut is still a launch path. Roll back the new Run value.
+    unregister_registry_autorun()
+    return False
+
+
+def _finish_task_migration() -> bool:
+    """Remove legacy paths, rolling the task back only if one still remains."""
+    if _remove_legacy_autostart():
+        return True
+    if has_own_registry_autorun() or is_startup_folder_enabled():
+        # A legacy launch path is still active. Removing the new task avoids a
+        # duplicate while retaining the older path as the last mechanism.
+        windows_startup.unregister_task()
+    # If cleanup reported an error but no legacy path remains, keep the verified
+    # task so startup is not accidentally removed altogether.
+    return False
 
 
 def set_autostart(enabled: bool) -> bool:
-    """Enable or disable Windows auto-start cleanly across Registry and Startup folder."""
+    """Explicitly enable or disable current-user startup registration."""
     if enabled:
-        reg_ok = register_registry_autorun()
-        unregister_startup_folder()  # Prevent duplicate startup
-        return reg_ok
-    else:
-        reg_ok = unregister_registry_autorun()
-        su_ok = unregister_startup_folder()
-        return reg_ok and su_ok
+        action = get_startup_action()
+        if action is None:
+            return False
+        current = windows_startup.inspect_task(action)
+        if not current.available:
+            # A query timeout cannot prove an older task is absent. Preserve an
+            # already-verified fallback, but never create a possible duplicate.
+            return is_registry_autorun_enabled()
+        if current.exists and current.enabled and current.matches:
+            # Idempotent: do not rewrite an already-correct task on every GUI open.
+            return _finish_task_migration()
+        task_result = windows_startup.register_task(action)
+        if task_result.success:
+            return _finish_task_migration()
+
+        # Registration may have failed after Windows accepted the definition
+        # (for example, verification timed out). Never add a fallback until a
+        # follow-up inspection proves there is no task.
+        after = windows_startup.inspect_task(action)
+        if not after.available:
+            return False
+        if after.exists:
+            removed = windows_startup.unregister_task()
+            if not removed.success:
+                return False
+            verified_removed = windows_startup.inspect_task(action)
+            if not verified_removed.available or verified_removed.exists:
+                return False
+        return _enable_registry_fallback()
+
+    task_ok = windows_startup.unregister_task().success
+    reg_ok = unregister_registry_autorun()
+    su_ok = unregister_startup_folder()
+    return task_ok and reg_ok and su_ok
+
+
+def reconcile_autostart(enabled: bool) -> bool:
+    """Reconcile a saved preference without overriding Task Scheduler UI edits.
+
+    An existing disabled task is treated as an explicit external choice. An
+    enabled stale task is repaired for this installation. A missing task may
+    be created for a saved-on preference; an unavailable scheduler keeps a
+    valid Run fallback.
+    """
+    if not enabled:
+        if set_autostart(False):
+            return False
+        return is_autostart_enabled()
+    action = get_startup_action()
+    if action is None:
+        return False
+    current = windows_startup.inspect_task(action)
+    if current.available and current.exists:
+        if not current.enabled:
+            # Remove old secondary paths so the disabled task is the
+            # authoritative off state. Do not rewrite the task itself.
+            _remove_legacy_autostart()
+            return False
+        if not current.matches:
+            # An enabled stale definition is an upgrade/move failure, so repair
+            # it. A disabled definition above remains an explicit user choice.
+            return set_autostart(True)
+        return _finish_task_migration()
+    if not current.available and is_registry_autorun_enabled():
+        return not is_startup_folder_enabled() or unregister_startup_folder()
+    return set_autostart(True)
 
 
 def ensure_single_autostart_mechanism() -> bool:
-    """Guarantee exactly ONE boot mechanism: the HKCU Run key.
-
-    Older installs registered a "dual-layer" autostart (Run key AND a
-    Startup-folder .lnk), so Windows launched the app twice at logon and two
-    app windows opened. This (re)registers the Run key and removes every
-    Startup-folder shortcut so an install/upgrade can never leave a second
-    boot mechanism behind."""
-    reg_ok = register_registry_autorun()
-    lnk_ok = unregister_startup_folder()
-    return reg_ok and lnk_ok
+    """Guarantee one verified task, or one Run fallback if unavailable."""
+    return set_autostart(True)
 
 
 def register_startup_folder() -> bool:
@@ -409,41 +556,50 @@ WshShell.Run \"\"\"\" & strPythonw & \"\"\" -m voice_flow.gui.desktop_launcher\"
     else:
         print(f"[1/4] Found Launcher VBS at {vbs_path}")
 
-    # Step 2: Register Windows Registry Auto-Run (the ONLY boot mechanism)
-    print("\n[2/4] Configuring Windows Registry Auto-Run (HKCU)...")
-    reg_ok = register_registry_autorun()
+    # Steps 2-3 are transactional: verify the preferred logon task first,
+    # then remove legacy launch paths. set_autostart rolls back on cleanup
+    # failure and uses one Run fallback when Task Scheduler is unavailable.
+    print("\n[2/4] Configuring current-user Windows logon startup...")
+    startup_ok = ensure_single_autostart_mechanism()
 
-    # Step 3: Ensure a single boot mechanism - remove any legacy Startup
-    # Folder shortcut so Windows cannot launch the app twice at logon.
-    print("\n[3/4] Removing legacy Startup Folder shortcut (single boot mechanism)...")
-    su_ok = unregister_startup_folder()
+    print("\n[3/4] Verifying a single startup mechanism...")
+    single_ok = startup_ok and is_autostart_enabled()
 
     # Step 4: Register Desktop & Start Menu Shortcuts
     print("\n[4/4] Creating Desktop & Start Menu Program Shortcuts...")
     dt_ok = register_desktop_shortcuts()
 
     print("\n========================================================")
-    if reg_ok and su_ok and dt_ok:
+    if startup_ok and single_ok and dt_ok:
         print("  INSTALLATION SUCCESSFUL!")
         print("  Voice Flow is now configured for single-mechanism auto-startup:")
-        print("  1. Windows Registry (HKCU Run) - the only boot autostart entry")
-        print("  2. Legacy Startup Folder .lnk removed (no duplicate instances at logon)")
+        print("  1. Current-user logon task (or one HKCU Run fallback)")
+        print("  2. Legacy startup entries removed (no duplicate instances at logon)")
         print("  3. Background Watchdog Supervisor (Auto-Recovery)")
         print("  4. Zero Console Popup (Silent pythonw execution)")
         print("========================================================")
         return True
     else:
         print("  INSTALLATION COMPLETED WITH WARNINGS.")
-        print(f"  Registry: {reg_ok}, Startup Folder: {su_ok}, Shortcuts: {dt_ok}")
+        print(f"  Startup: {startup_ok}, Verified: {single_ok}, Shortcuts: {dt_ok}")
         print("========================================================")
         return False
 
 
-def uninstall_all() -> None:
+def uninstall_all() -> bool:
     print("Uninstalling Voice Flow auto-start configurations...")
-    unregister_registry_autorun()
-    unregister_startup_folder()
-    print("[OK] Uninstalled auto-startup entries.")
+    task_ok = windows_startup.unregister_task().success
+    registry_ok = unregister_registry_autorun()
+    startup_ok = unregister_startup_folder()
+    success = task_ok and registry_ok and startup_ok
+    if success:
+        print("[OK] Uninstalled auto-startup entries.")
+    else:
+        print(
+            "[ERROR] Could not remove every auto-startup entry "
+            f"(task={task_ok}, registry={registry_ok}, startup={startup_ok})."
+        )
+    return success
 
 
 def status_report() -> None:
@@ -452,7 +608,20 @@ def status_report() -> None:
     print("  VOICE FLOW AUTO-STARTUP STATUS DIAGNOSTICS")
     print("========================================================")
 
-    # 1. Registry
+    # 1. Preferred current-user logon task
+    action = get_startup_action()
+    task = windows_startup.inspect_task(action) if action is not None else None
+    if task is None:
+        task_text = "INVALID ACTION"
+    elif not task.available:
+        task_text = f"UNAVAILABLE ({task.error or 'unknown error'})"
+    elif not task.exists:
+        task_text = "NOT CONFIGURED"
+    else:
+        task_text = f"{'ENABLED' if task.enabled else 'DISABLED'}, {'CURRENT' if task.matches else 'CHANGED'} ({task.task_name})"
+    print(f"1. Logon task:         {task_text}")
+
+    # 2. Registry fallback
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     reg_val = "NOT CONFIGURED"
     try:
@@ -460,25 +629,25 @@ def status_report() -> None:
             reg_val, _ = winreg.QueryValueEx(key, "VoiceFlow")
     except Exception:
         pass
-    print(f"1. Registry Auto-Run:  {reg_val}")
+    print(f"2. Registry fallback:  {reg_val}")
 
-    # 2. Startup Folder
+    # 3. Startup Folder
     startup_sc = get_startup_dir() / "AI Productivity Flow.lnk"
     if not startup_sc.exists():
         startup_sc = get_startup_dir() / "Voice Flow.lnk"
-    print(f"2. Startup Shortcut:   {'EXISTS (' + str(startup_sc) + ')' if startup_sc.exists() else 'MISSING'}")
+    print(f"3. Startup Shortcut:   {'EXISTS (' + str(startup_sc) + ')' if startup_sc.exists() else 'MISSING'}")
 
-    # 3. Launcher VBS
+    # 4. Launcher VBS
     vbs = get_vbs_launcher_path()
-    print(f"3. Launcher VBS:       {'EXISTS (' + str(vbs) + ')' if vbs.exists() else 'MISSING'}")
+    print(f"4. Launcher VBS:       {'EXISTS (' + str(vbs) + ')' if vbs.exists() else 'MISSING'}")
 
-    # 4. Desktop Shortcut
+    # 5. Desktop Shortcut
     dts = [p / "AI Productivity Flow.lnk" for p in get_desktop_dirs()]
     found_dts = [str(p) for p in dts if p.exists()]
     if not found_dts:
         legacy_dts = [p / "Voice Flow.lnk" for p in get_desktop_dirs()]
         found_dts = [str(p) for p in legacy_dts if p.exists()]
-    print(f"4. Desktop Shortcuts:  {', '.join(found_dts) if found_dts else 'MISSING'}")
+    print(f"5. Desktop Shortcuts:  {', '.join(found_dts) if found_dts else 'MISSING'}")
 
     print("========================================================")
 

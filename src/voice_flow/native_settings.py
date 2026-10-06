@@ -41,6 +41,13 @@ def default_launch_command() -> str:
 
 
 def get_launch_at_login(registry: Any | None = None) -> NativeResult:
+    if registry is None and sys.platform == "win32":
+        try:
+            from voice_flow import installer
+            enabled, error = installer.get_autostart_status()
+            return NativeResult(enabled, error)
+        except Exception as exc:
+            return NativeResult(False, f"Windows launch-at-login error: {exc}")
     if registry is None and sys.platform == "darwin":
         try:
             from voice_flow.platform import get_backend
@@ -61,9 +68,20 @@ def get_launch_at_login(registry: Any | None = None) -> NativeResult:
 
 
 def set_launch_at_login(enabled: bool, command: str | None = None, registry: Any | None = None) -> NativeResult:
-    """Set only Voice Flow's HKCU startup value; never mutate it on import."""
+    """Set the native login registration; never mutate it on import.
+
+    Passing ``registry`` retains the pure HKCU seam used by platform-neutral
+    tests and callers that intentionally supply a custom command.
+    """
     if not isinstance(enabled, bool):
         return NativeResult(False, "launch_at_login must be a boolean")
+    if registry is None and sys.platform == "win32" and command is None:
+        try:
+            from voice_flow import installer
+            ok = installer.set_autostart(enabled)
+            return NativeResult(ok, None if ok else "Could not update Windows launch-at-login")
+        except Exception as exc:
+            return NativeResult(False, f"Windows launch-at-login error: {exc}")
     if registry is None and sys.platform == "darwin":
         try:
             from voice_flow.platform import get_backend

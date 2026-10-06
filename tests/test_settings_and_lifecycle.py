@@ -19,6 +19,7 @@ from voice_flow.gui import api_server
 from voice_flow.storage import StorageEngine
 from voice_flow import installer
 from voice_flow import lifecycle
+from voice_flow.native_settings import NativeResult
 
 
 @pytest.fixture
@@ -92,10 +93,12 @@ def test_installer_is_registry_autorun_enabled(monkeypatch: pytest.MonkeyPatch) 
     mock_key = MagicMock()
     mock_open_key = MagicMock(return_value=mock_key)
     mock_key.__enter__.return_value = mock_key
-    mock_query_val = MagicMock(return_value=('wscript.exe "C:\\fake\\VoiceFlowLauncher.vbs"', 1))
+    expected = '"C:\\Windows\\System32\\wscript.exe" "C:\\fake\\VoiceFlowLauncher.vbs"'
+    mock_query_val = MagicMock(return_value=(expected, 1))
 
     monkeypatch.setattr(installer.winreg, "OpenKey", mock_open_key)
     monkeypatch.setattr(installer.winreg, "QueryValueEx", mock_query_val)
+    monkeypatch.setattr(installer, "_expected_registry_command", lambda: expected)
 
     assert installer.is_registry_autorun_enabled() is True
 
@@ -111,6 +114,19 @@ def test_installer_set_autostart_enable_and_disable(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(installer, "register_registry_autorun", lambda: (reg_calls.append("reg_on"), True)[1])
     monkeypatch.setattr(installer, "unregister_registry_autorun", lambda: (reg_calls.append("reg_off"), True)[1])
     monkeypatch.setattr(installer, "unregister_startup_folder", lambda: (su_calls.append("su_off"), True)[1])
+    monkeypatch.setattr(installer, "get_startup_action", lambda: installer.windows_startup.StartupAction("C:\\wscript.exe", '"C:\\app.vbs"', "C:\\"))
+    statuses = iter((installer.windows_startup.TaskStatus(True), installer.windows_startup.TaskStatus(True)))
+    monkeypatch.setattr(installer.windows_startup, "inspect_task", lambda _action: next(statuses))
+    monkeypatch.setattr(
+        installer.windows_startup,
+        "register_task",
+        lambda _action: installer.windows_startup.TaskResult(False, available=True),
+    )
+    monkeypatch.setattr(
+        installer.windows_startup,
+        "unregister_task",
+        lambda: installer.windows_startup.TaskResult(True),
+    )
 
     # Enable autostart: registers registry autorun and unregisters startup folder
     res_enable = installer.set_autostart(True)
@@ -132,7 +148,7 @@ def test_desktop_launcher_respects_stored_autostart_setting(tmp_path: Path, monk
     from voice_flow.gui import desktop_launcher
 
     set_calls = []
-    monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda en: set_calls.append(en))
+    monkeypatch.setattr(desktop_launcher, "reconcile_windows_auto_startup", lambda en: set_calls.append(en) or False)
     monkeypatch.setattr(desktop_launcher, "ensure_backend_running", lambda: None)
     monkeypatch.setattr(desktop_launcher, "is_api_server_ready", lambda timeout=0.2: True)
     monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
@@ -290,9 +306,10 @@ def test_api_app_restart_endpoint(test_server, monkeypatch: pytest.MonkeyPatch) 
 
 def test_api_autostart_status_and_toggle(test_server, monkeypatch: pytest.MonkeyPatch) -> None:
     base_url = test_server["base_url"]
+    actual = {"enabled": False}
 
     # 1. GET autostart status
-    monkeypatch.setattr(installer, "is_autostart_enabled", lambda: False)
+    monkeypatch.setattr(installer, "get_autostart_status", lambda: (actual["enabled"], None))
     status, headers, body = _get(f"{base_url}/api/settings/autostart/status")
     assert status == 200
     assert body["success"] is True
@@ -300,7 +317,11 @@ def test_api_autostart_status_and_toggle(test_server, monkeypatch: pytest.Monkey
 
     # 2. POST autostart toggle -> ON
     autostart_calls = []
-    monkeypatch.setattr(installer, "set_autostart", lambda en: (autostart_calls.append(en), True)[1])
+    monkeypatch.setattr(
+        installer,
+        "set_autostart",
+        lambda en: (autostart_calls.append(en), actual.__setitem__("enabled", en), True)[2],
+    )
     status, headers, body = _post(f"{base_url}/api/settings/autostart/toggle", {"enabled": True})
     assert status == 200
     assert body["success"] is True
@@ -320,6 +341,42 @@ def test_api_autostart_status_and_toggle(test_server, monkeypatch: pytest.Monkey
     assert body["enabled"] is False
     assert autostart_calls == [True, False]
     assert test_server["storage"].get_setting("autostart_enabled") is False
+
+
+def test_api_autostart_status_reports_actual_without_overwriting_intent(
+    test_server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = test_server["storage"]
+    storage.save_setting("autostart_enabled", True)
+    monkeypatch.setattr(api_server, "get_launch_at_login", lambda: NativeResult(False))
+
+    status, _, body = _get(f'{test_server["base_url"]}/api/settings/autostart/status')
+
+    assert status == 200
+    assert body["enabled"] is False
+    assert storage.get_setting("autostart_enabled") is True
+
+
+@pytest.mark.parametrize("path", ["/api/settings/autostart/toggle", "/api/settings/update"])
+def test_failed_os_autostart_change_is_not_persisted(
+    test_server, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    storage = test_server["storage"]
+    storage.save_setting("autostart_enabled", False)
+    monkeypatch.setattr(
+        api_server,
+        "set_launch_at_login",
+        lambda _enabled: NativeResult(False, "scheduler denied the change"),
+    )
+    monkeypatch.setattr(api_server, "get_launch_at_login", lambda: NativeResult(False))
+    payload = {"enabled": True} if path.endswith("toggle") else {"key": "autostart_enabled", "value": True}
+
+    status, _, body = _post(f'{test_server["base_url"]}{path}', payload)
+
+    assert status == 500
+    assert body["success"] is False
+    assert "denied" in body["error"]
+    assert storage.get_setting("autostart_enabled") is False
 
 
 def test_api_settings_get_all_types_and_defaults(test_server) -> None:
@@ -570,7 +627,7 @@ def test_lifecycle_terminate_suite_processes_kills_children_and_listeners(monkey
 def test_desktop_launcher_initializes_autostart_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from voice_flow.gui import desktop_launcher
     set_calls = []
-    monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda enable: set_calls.append(enable))
+    monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda enable: set_calls.append(enable) or True)
     monkeypatch.setattr(desktop_launcher, "ensure_backend_running", lambda: None)
     monkeypatch.setattr(desktop_launcher, "is_api_server_ready", lambda timeout=0.2: True)
     monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
@@ -589,4 +646,3 @@ def test_desktop_launcher_initializes_autostart_when_missing(monkeypatch: pytest
     desktop_launcher.launch_desktop_gui()
     assert set_calls == [True]
     assert test_storage.get_setting("autostart_enabled") is True
-

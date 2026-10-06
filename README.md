@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.0-orange.svg" alt="Release: v1.0.0"></a>
+  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.2-orange.svg" alt="Release: v1.0.2"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20macOS%2012%2B-0078D4.svg" alt="Platforms">
   <img src="https://img.shields.io/badge/Architecture-Local--first%20%2F%20BYOK-success.svg" alt="Local-first / BYOK">
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0">
@@ -44,8 +44,9 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
 
 ### macOS 12+ (Apple Silicon & Intel)
 
-* **Application Bundle**: Download **[`AI-Productivity-Flow-macOS.zip`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.zip)**.
-* **Checksum**: [`AI-Productivity-Flow-macOS.zip.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.zip.sha256)
+* **DMG Installer**: Download the drag-to-Applications installer **[`AI-Productivity-Flow-macOS.dmg`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg)**.
+* **Checksum**: [`AI-Productivity-Flow-macOS.dmg.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg.sha256)
+* **Secondary Archive**: [`AI-Productivity-Flow-macOS.zip`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.zip) ([SHA-256](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.zip.sha256))
 * **Terminal Install** (Bash / Zsh):
   ```bash
   curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash

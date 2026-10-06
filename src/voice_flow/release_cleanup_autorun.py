@@ -1,16 +1,16 @@
 """Uninstaller helper: remove every Voice Flow autostart registration.
 
 Run by the installer's uninstall step (``python -m voice_flow.release_cleanup_autorun``).
-Removes all legacy Run-value names and any Startup-folder shortcut so an
-uninstall/upgrade cannot leave a second boot mechanism behind (a second boot
-mechanism launches two app instances at logon). User data under ~/.voice_flow
-is preserved by design.
+Removes the current user's app-owned logon task, legacy Run-value names, and
+Startup-folder shortcuts. User data under ~/.voice_flow is preserved by design.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from voice_flow import windows_startup
 try:
     import winreg
 except ImportError:
@@ -21,11 +21,12 @@ RUN_VALUE_NAMES = ("VoiceFlow", "Voice Flow", "AI Productivity Flow")
 STARTUP_LNK_NAMES = ("Voice Flow.lnk", "VoiceFlow.lnk", "voiceFlow.lnk", "AI Productivity Flow.lnk")
 
 
-def remove_registry_autorun() -> int:
+def remove_registry_autorun() -> tuple[int, bool]:
     """Delete all known Voice Flow value names from the HKCU Run key."""
     if winreg is None:
-        return 0
+        return 0, False
     removed = 0
+    success = True
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
             for name in RUN_VALUE_NAMES:
@@ -35,18 +36,21 @@ def remove_registry_autorun() -> int:
                 except FileNotFoundError:
                     pass
                 except OSError:
-                    pass
-    except (FileNotFoundError, OSError):
+                    success = False
+    except FileNotFoundError:
         pass
-    return removed
+    except OSError:
+        success = False
+    return removed, success
 
 
-def remove_startup_folder_shortcuts() -> int:
+def remove_startup_folder_shortcuts() -> tuple[int, bool]:
     """Delete all known Voice Flow shortcut names from the Startup folder."""
     removed = 0
+    success = True
     appdata = os.environ.get("APPDATA")
     if not appdata:
-        return 0
+        return 0, False
     startup_dir = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
     for name in STARTUP_LNK_NAMES:
         shortcut = startup_dir / name
@@ -56,14 +60,22 @@ def remove_startup_folder_shortcuts() -> int:
             shortcut.unlink()
             removed += 1
         except OSError:
-            pass
-    return removed
+            success = False
+    return removed, success
 
 
-def main() -> None:
-    remove_registry_autorun()
-    remove_startup_folder_shortcuts()
+def main() -> bool:
+    task = windows_startup.unregister_task()
+    registry_removed, registry_ok = remove_registry_autorun()
+    shortcut_removed, shortcut_ok = remove_startup_folder_shortcuts()
+    success = task.success and registry_ok and shortcut_ok
+    message = (
+        f"task={'removed' if task.success else 'failed'}, "
+        f"Run values removed={registry_removed}, shortcuts removed={shortcut_removed}"
+    )
+    print(f"[{'OK' if success else 'ERROR'}] Auto-start cleanup: {message}")
+    return success
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(0 if main() else 1)

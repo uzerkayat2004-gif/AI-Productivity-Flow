@@ -20,15 +20,15 @@ echo [2/3] Generating Silent Background Launcher and Watchdog Supervisor...
 python scratch/generate_launcher.py
 
 echo.
-echo [3/3] Registering Dual-Layer Windows Auto-Startup ^& Shortcuts...
+echo [3/3] Registering Current-User Windows Logon Startup ^& Shortcuts...
 python -m voice_flow.installer --install
 
 echo.
 echo ========================================================
 echo   INSTALLATION COMPLETE!
 echo   Voice Flow is now configured with resilient auto-startup:
-echo   - Registry: HKCU\Software\Microsoft\Windows\CurrentVersion\Run\VoiceFlow
-echo   - Startup Folder: %%APPDATA%%\Microsoft\Windows\Start Menu\Programs\Startup\AI Productivity Flow.lnk
+echo   - Startup: One current-user logon task ^(HKCU Run fallback if unavailable^)
+echo   - Legacy Run and Startup Folder entries: removed after verification
 echo   - Auto-Recovery: Background Watchdog Supervisor
 echo   - Zero Console Popup: Enabled (Silent pythonw execution)
 echo ========================================================

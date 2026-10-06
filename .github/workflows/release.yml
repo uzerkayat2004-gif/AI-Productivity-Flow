@@ -147,6 +147,34 @@ jobs:
           }
           Write-Host "Windows installer smoke validation passed with hash $calculatedHash."
 
+      - name: Sign Windows Installer (Optional Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_CERT: ${{ secrets.WINDOWS_CERT }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $exe = "dist/AI-Productivity-Flow-Setup-x64.exe"
+          if ($env:WINDOWS_CERT -and $env:WINDOWS_CERT_PASSWORD) {
+            Write-Host "Signing Windows installer with provided certificate..."
+            $certPath = Join-Path $env:RUNNER_TEMP "windows_cert.pfx"
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT))
+            try {
+              $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse | Select-Object -First 1).FullName
+              if ($signtool) {
+                & $signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 /d "AI Productivity Flow" "$exe"
+                Write-Host "Windows installer signed successfully."
+                $newHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+                "$newHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath "dist/AI-Productivity-Flow-Setup-x64.exe.sha256" -Encoding ascii
+              } else {
+                Write-Warning "signtool.exe not found in Windows SDK; skipping signing."
+              }
+            } finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+            }
+          } else {
+            Write-Host "Windows code signing skipped (WINDOWS_CERT / WINDOWS_CERT_PASSWORD not configured)."
+          }
+
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -169,21 +197,90 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dependencies & DMG tools
         run: |
           pip install --upgrade pip
           pip install -e .
-          pip install pillow
+          pip install pillow dmgbuild
+          brew install create-dmg || true
 
-      - name: Build macOS Application Bundle (.app & .zip)
+      - name: Build macOS Application Bundle (.app, .dmg & .zip)
         run: |
-          python scripts/build_macos_app.py --bundle-runtime
+          python scripts/build_macos_app.py --bundle-runtime --dmg
+
+      - name: Sign & Notarize macOS App and DMG (Optional)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MACOS_CERT: ${{ secrets.MACOS_CERT }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_CERT" ] && [ -n "$MACOS_CERT_PASSWORD" ]; then
+            echo "Setting up temporary keychain for Apple Developer ID signing..."
+            KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+            KEYCHAIN_PASS="$(uuidgen)"
+            security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+            security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            
+            CERT_PATH="$RUNNER_TEMP/cert.p12"
+            echo "$MACOS_CERT" | base64 --decode > "$CERT_PATH"
+            security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            
+            IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -n 1 | awk -F'"' '{print $2}')
+            if [ -n "$IDENTITY" ]; then
+              echo "Signing AI Productivity Flow.app with identity: $IDENTITY..."
+              codesign --force --deep --options runtime --sign "$IDENTITY" --timestamp "dist/AI Productivity Flow.app"
+              
+              # Re-package DMG and ZIP with signed app
+              python scripts/build_macos_app.py --dmg-only
+              python scripts/build_macos_app.py --bundle-runtime --no-dmg
+              
+              if [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+                echo "Signing AI-Productivity-Flow-macOS.dmg with identity: $IDENTITY..."
+                codesign --force --sign "$IDENTITY" --timestamp "dist/AI-Productivity-Flow-macOS.dmg"
+              fi
+              
+              if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] && [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+                echo "Submitting DMG to Apple Notarization service..."
+                xcrun notarytool submit "dist/AI-Productivity-Flow-macOS.dmg" \
+                  --apple-id "$APPLE_ID" \
+                  --team-id "$APPLE_TEAM_ID" \
+                  --password "$APPLE_APP_PASSWORD" \
+                  --wait
+                echo "Stapling notarization ticket to DMG..."
+                xcrun stapler staple "dist/AI-Productivity-Flow-macOS.dmg"
+                echo "Stapling notarization ticket to APP..."
+                xcrun stapler staple "dist/AI Productivity Flow.app" || true
+                echo "macOS code signing and notarization completed successfully."
+              else
+                echo "Apple notarization credentials not configured; skipping notarization."
+              fi
+            else
+              echo "No Developer ID Application certificate found in keychain; skipping signing."
+            fi
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          else
+            echo "macOS signing and notarization skipped (MACOS_CERT / MACOS_CERT_PASSWORD not configured)."
+          fi
+
+          # Ensure hashes are fresh
+          if [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+            shasum -a 256 "dist/AI-Productivity-Flow-macOS.dmg" | awk '{print $1 "  AI-Productivity-Flow-macOS.dmg"}' > "dist/AI-Productivity-Flow-macOS.dmg.sha256"
+          fi
+          shasum -a 256 "dist/AI-Productivity-Flow-macOS.zip" | awk '{print $1 "  AI-Productivity-Flow-macOS.zip"}' > "dist/AI-Productivity-Flow-macOS.zip.sha256"
 
       - name: Verify macOS Artifacts & Smoke Test
         run: |
+          test -f dist/AI-Productivity-Flow-macOS.dmg
+          test -f dist/AI-Productivity-Flow-macOS.dmg.sha256
           test -f dist/AI-Productivity-Flow-macOS.zip
           test -f dist/AI-Productivity-Flow-macOS.zip.sha256
-          echo "macOS archive size: $(wc -c < dist/AI-Productivity-Flow-macOS.zip) bytes"
+          echo "macOS DMG size: $(wc -c < dist/AI-Productivity-Flow-macOS.dmg) bytes"
+          echo "macOS ZIP size: $(wc -c < dist/AI-Productivity-Flow-macOS.zip) bytes"
+          cat dist/AI-Productivity-Flow-macOS.dmg.sha256
           cat dist/AI-Productivity-Flow-macOS.zip.sha256
           python -c "
           import zipfile, sys
@@ -208,6 +305,8 @@ jobs:
         with:
           name: macos-release-artifacts
           path: |
+            dist/AI-Productivity-Flow-macOS.dmg
+            dist/AI-Productivity-Flow-macOS.dmg.sha256
             dist/AI-Productivity-Flow-macOS.zip
             dist/AI-Productivity-Flow-macOS.zip.sha256
 
@@ -232,6 +331,8 @@ jobs:
           required=(
             "AI-Productivity-Flow-Setup-x64.exe"
             "AI-Productivity-Flow-Setup-x64.exe.sha256"
+            "AI-Productivity-Flow-macOS.dmg"
+            "AI-Productivity-Flow-macOS.dmg.sha256"
             "AI-Productivity-Flow-macOS.zip"
             "AI-Productivity-Flow-macOS.zip.sha256"
           )
@@ -248,6 +349,8 @@ jobs:
           cd release-assets
           # Validate macOS zip sha256
           sha256sum -c AI-Productivity-Flow-macOS.zip.sha256
+          # Validate macOS dmg sha256
+          sha256sum -c AI-Productivity-Flow-macOS.dmg.sha256
           # Validate Windows exe sha256
           expected_win_hash=$(awk '{print $1}' AI-Productivity-Flow-Setup-x64.exe.sha256 | tr '[:upper:]' '[:lower:]')
           actual_win_hash=$(sha256sum AI-Productivity-Flow-Setup-x64.exe | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
@@ -280,3 +383,4 @@ jobs:
               --notes-file CHANGELOG.md \
               --repo "${{ github.repository }}"
           fi
+

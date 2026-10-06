@@ -887,7 +887,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "hotkey_default": "Cmd + Option" if is_mac else "Ctrl + Win",
                 "taskbar_label": "Show in Dock" if is_mac else "Show in Taskbar",
                 "taskbar_tip": "Shows Voice Flow in the macOS Dock while running." if is_mac else "Shows Voice Flow in the Windows taskbar while the window is open. Turn off to keep it tray-only.",
-                "autostart_tip": "Launches Voice Flow silently on macOS login via LaunchAgent." if is_mac else "Launches Voice Flow silently on Windows boot via the Registry Run key.",
+                "autostart_tip": "Starts AI Productivity Flow automatically when you sign in.",
                 "runtime_tip": f"Local API server with local speech-to-text on {'macOS' if is_mac else 'Windows 10/11 x64'}.",
                 "runtime_badge": f"macOS ({arch})" if is_mac else "Win x64",
             })
@@ -1108,13 +1108,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             })
         elif path == "/api/settings/autostart/status":
             try:
-                stored = storage.get_setting("autostart_enabled", None)
-                if stored is not None:
-                    enabled = bool(stored)
-                else:
-                    from voice_flow.platform import get_backend
-                    enabled = get_backend().get_launch_at_login()
-                    storage.save_setting("autostart_enabled", enabled)
+                result = get_launch_at_login()
+                if result.error:
+                    self.send_json_response({"success": False, "error": result.error, "enabled": False}, 500)
+                    return
+                enabled = result.applied
                 self.send_json_response({"success": True, "enabled": enabled})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc), "enabled": False}, 500)
@@ -3922,14 +3920,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         elif path == "/api/settings/autostart/toggle":
             try:
-                enabled = bool(data.get("enabled", False))
+                enabled = data.get("enabled", False)
+                if not isinstance(enabled, bool):
+                    self.send_json_response({"success": False, "error": "enabled must be a boolean"}, 400)
+                    return
+                result = set_launch_at_login(enabled)
+                if not result.applied:
+                    self.send_json_response({
+                        "success": False,
+                        "enabled": get_launch_at_login().applied,
+                        "error": result.error or "Could not update auto-startup.",
+                    }, 500)
+                    return
+                storage.save_setting("autostart_enabled", enabled)
                 from voice_flow.platform import get_backend
                 backend = get_backend()
-                ok = backend.set_launch_at_login(enabled)
-                storage.save_setting("autostart_enabled", enabled)
-                os_label = "macOS login" if backend.name == "macos" else "Windows boot"
+                os_label = "macOS login" if backend.name == "macos" else "Windows sign-in"
                 msg = f"Auto-startup {'enabled' if enabled else 'disabled'} ({os_label})."
-                self.send_json_response({"success": ok, "enabled": enabled, "message": msg})
+                self.send_json_response({"success": True, "enabled": enabled, "message": msg})
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
 
@@ -4461,6 +4469,17 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 if key == "audio_flow_summary_style" and val not in ("single", "podcast"):
                     self.send_json_response({"success": False, "error": "audio_flow_summary_style must be 'single' or 'podcast'"}, 400)
                     return
+                if key == "autostart_enabled":
+                    if not isinstance(val, bool):
+                        self.send_json_response({"success": False, "error": "autostart_enabled must be a boolean"}, 400)
+                        return
+                    result = set_launch_at_login(val)
+                    if not result.applied:
+                        self.send_json_response({
+                            "success": False,
+                            "error": result.error or "Could not update auto-startup.",
+                        }, 500)
+                        return
                 if not storage.save_setting(key, val):
                     self.send_json_response({"success": False, "error": "Could not save setting"}, 500)
                     return
@@ -4470,12 +4489,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         request_model_cleanup("polish")
                     except Exception:
                         log.debug("Could not request local polish cleanup", exc_info=True)
-                if key == "autostart_enabled":
-                    try:
-                        from voice_flow.installer import set_autostart
-                        set_autostart(bool(val))
-                    except Exception:
-                        pass
                 if key == "show_in_taskbar":
                     # The desktop launcher only reads this preference while it is
                     # building the window, so toggling it used to persist the value

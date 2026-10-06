@@ -26,12 +26,16 @@ for arg in "$@"; do
         --launch)
             SHOULD_LAUNCH=1
             ;;
+        --dmg)
+            USE_DMG=1
+            ;;
         --help|-h)
             echo "AI Productivity Flow — macOS Terminal Installer"
             echo ""
             echo "Options:"
             echo "  --dir=<path>    Destination directory (default: ~/AI-Productivity-Flow)"
             echo "  --branch=<name> Git branch (default: main)"
+            echo "  --dmg           Install and mount via .dmg installer image"
             echo "  --launch        Launch app immediately after installation"
             echo "  --help, -h      Show this message"
             exit 0
@@ -194,21 +198,32 @@ if [ -d "video_flow_renderer" ] && [ -f "video_flow_renderer/package.json" ]; th
 fi
 
 # ------------------------------------------------------------------------------
-# 6. Build macOS Application Bundle (.app)
+# 6. Build macOS Application Bundle (.app) & DMG Installer
 # ------------------------------------------------------------------------------
-echo -e "${GREEN}==>${NC} Building native macOS Application Bundle..."
+echo -e "${GREEN}==>${NC} Building native macOS Application Bundle & Installers..."
 if [ -f "scripts/build_macos_app.py" ]; then
-    "${VENV_PYTHON}" scripts/build_macos_app.py --bundle-runtime || true
+    "${VENV_PYTHON}" scripts/build_macos_app.py --bundle-runtime --dmg || true
 fi
 
-# If AI Productivity Flow.app was created, offer to link or copy to /Applications
 APP_NAME="AI Productivity Flow.app"
 APP_SOURCE=""
-if [ -d "dist/AI Productivity Flow.app" ]; then
-    APP_SOURCE="dist/AI Productivity Flow.app"
-elif [ -d "dist/Voice Flow.app" ]; then
-    APP_SOURCE="dist/Voice Flow.app"
-    APP_NAME="Voice Flow.app"
+
+if [ "${USE_DMG:-0}" -eq 1 ] && [ -f "dist/AI-Productivity-Flow-macOS.dmg" ] && command -v hdiutil >/dev/null 2>&1; then
+    echo -e "${GREEN}==>${NC} Mounting AI-Productivity-Flow-macOS.dmg..."
+    MOUNT_POINT=$(mktemp -d /tmp/apf_dmg_mount_XXXXXX)
+    hdiutil attach "dist/AI-Productivity-Flow-macOS.dmg" -mountpoint "${MOUNT_POINT}" -nobrowse -quiet
+    if [ -d "${MOUNT_POINT}/${APP_NAME}" ]; then
+        APP_SOURCE="${MOUNT_POINT}/${APP_NAME}"
+    fi
+fi
+
+if [ -z "$APP_SOURCE" ]; then
+    if [ -d "dist/AI Productivity Flow.app" ]; then
+        APP_SOURCE="dist/AI Productivity Flow.app"
+    elif [ -d "dist/Voice Flow.app" ]; then
+        APP_SOURCE="dist/Voice Flow.app"
+        APP_NAME="Voice Flow.app"
+    fi
 fi
 
 if [ -n "$APP_SOURCE" ]; then
@@ -227,6 +242,11 @@ if [ -n "$APP_SOURCE" ]; then
         APP_PATH="${HOME}/Applications/${APP_NAME}"
     fi
     echo -e "  ${GREEN}[OK]${NC} Installed: ${APP_PATH}"
+fi
+
+if [ -n "${MOUNT_POINT:-}" ] && [ -d "${MOUNT_POINT}" ]; then
+    hdiutil detach "${MOUNT_POINT}" -quiet 2>/dev/null || true
+    rm -rf "${MOUNT_POINT}" 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------------------------

@@ -3,6 +3,24 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## 1.0.2 - 2026-10-06
+
+New professional installers for Windows and macOS.
+
+### Windows (.exe Installer)
+- **Professional Setup Wizard**: Modern Inno Setup wizard featuring a welcome screen, Apache-2.0 license agreement, custom installation directory picker, and finish screen with "Launch AI Productivity Flow" post-install checkbox.
+- **Branding & File Properties**: Installer and application icon match the official logo (`icon.ico`). File properties display app name "AI Productivity Flow", version "1.0.2", and publisher "Uzer Kayat".
+- **Shortcuts & Uninstaller**: Creates a Start Menu program shortcut and an optional Desktop shortcut. Registers a clean uninstaller in Windows "Apps & features" with display icon and version metadata.
+- **Per-User Installation**: Standard per-user install requiring no administrator privileges (`%LOCALAPPDATA%\Programs\AI Productivity Flow`).
+- **Automated Workflow Code Signing**: GitHub release workflow includes optional Windows Authenticode signing using `WINDOWS_CERT` and `WINDOWS_CERT_PASSWORD`.
+
+### macOS (.dmg Installer)
+- **Branded Drag-to-Applications DMG**: Generates `AI-Productivity-Flow-macOS.dmg` with branded background artwork matching the website color palette, custom window positioning, app icon, arrow indicator, and direct drag link to `/Applications`.
+- **Application Bundle Metadata**: Info.plist configured with `CFBundleIconFile` (`AppIcon.icns`), bundle name "AI Productivity Flow", bundle identifier `com.uzerkayat.aiproductivityflow`, and version `1.0.2`.
+- **Universal Architecture Compatibility**: Supports Apple Silicon and Intel Macs with native fallback logic.
+- **Automated Workflow Signing & Notarization**: GitHub release workflow includes optional Apple Developer ID code signing, `xcrun notarytool` notarization, and `stapler` ticket attachment when credentials are provided.
+- **Secondary Formats**: Retains `.zip` format as a secondary download (`AI-Productivity-Flow-macOS.zip`) alongside the primary `.dmg`.
+
 ## 1.0.1 - 2026-10-06
 
 ### Patch Release: Release Integrity, Installer Rebuild & Packaging Audit

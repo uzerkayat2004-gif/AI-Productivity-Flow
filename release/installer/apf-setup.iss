@@ -3,15 +3,25 @@
 ; release/build_windows_release.py (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.1"
-#define MyAppPublisher "AI Productivity Flow"
+#define MyAppVersion "1.0.2"
+#define MyAppPublisher "Uzer Kayat"
+#define MyAppURL "https://ai-productivity-flow.vercel.app/"
 #define MyAppExeName "pythonw.exe"
+
+#ifndef REPO_ROOT
+  #define REPO_ROOT "..\.."
+#endif
+#define SetupIconPath REPO_ROOT + "\src\voice_flow\gui\assets\icon.ico"
+#define LicenseFilePath REPO_ROOT + "\LICENSE"
 
 [Setup]
 AppId={{8E7B6C4A-52D1-4F3B-9A2E-6C4A52D12026}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL=https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues
+AppUpdatesURL=https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -23,8 +33,26 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
+
+; --- Setup Wizard Screens ---
+DisableWelcomePage=no
+LicenseFile={#LicenseFilePath}
+DisableDirPage=no
+DisableFinishedPage=no
+
+; --- Branding & Icons ---
+SetupIconFile={#SetupIconPath}
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\runtime\python\Lib\site-packages\voice_flow\gui\assets\icon.ico
 Uninstallable=not IsPortableMode
+
+; --- Windows File Properties ---
+VersionInfoVersion=1.0.2.0
+VersionInfoCompany=Uzer Kayat
+VersionInfoDescription=AI Productivity Flow Setup
+VersionInfoProductName=AI Productivity Flow
+VersionInfoProductVersion=1.0.2
+VersionInfoCopyright=Copyright (C) 2026 Uzer Kayat
 
 [Files]
 Source: "{#STAGING_ROOT}\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion

@@ -230,13 +230,15 @@ def test_installer_registry_autorun_logic(monkeypatch: pytest.MonkeyPatch) -> No
     mock_open_key = MagicMock(return_value=mock_key)
     mock_key.__enter__.return_value = mock_key
     mock_set_val = MagicMock()
-    mock_query_val = MagicMock(return_value=('wscript.exe "C:\\fake\\VoiceFlowLauncher.vbs"', 1))
+    expected = '"C:\\Windows\\System32\\wscript.exe" "C:\\fake\\VoiceFlowLauncher.vbs"'
+    mock_query_val = MagicMock(return_value=(expected, 1))
 
     monkeypatch.setattr(installer.winreg, "OpenKey", mock_open_key)
     monkeypatch.setattr(installer.winreg, "SetValueEx", mock_set_val)
     monkeypatch.setattr(installer.winreg, "QueryValueEx", mock_query_val)
     monkeypatch.setattr(installer, "_installed_watchdog_command", lambda: None)
     monkeypatch.setattr(installer, "get_vbs_launcher_path", lambda: Path("C:/fake/VoiceFlowLauncher.vbs"))
+    monkeypatch.setattr(installer, "_expected_registry_command", lambda: expected)
 
     with patch.object(Path, "exists", return_value=True):
         ok = installer.register_registry_autorun()

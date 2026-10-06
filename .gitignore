@@ -27,7 +27,10 @@ test_gemini_output.wav
 
 # Screenshots and temp media
 *.png
+!docs/assets/*.png
+!scripts/assets/*.png
 *.jpg
+!docs/assets/*.jpg
 *.jpeg
 *.mp4
 *.wav

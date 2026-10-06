@@ -297,13 +297,24 @@ def ensure_backend_running() -> bool:
             return False
 
 
-def set_windows_auto_startup(enable: bool = True) -> None:
-    """Configure single-point Windows Registry auto-launch at login via silent VBS launcher."""
+def set_windows_auto_startup(enable: bool = True) -> bool:
+    """Explicitly configure the current user's native auto-start registration."""
     try:
         from voice_flow.installer import set_autostart
-        set_autostart(enable)
-    except Exception:
-        pass
+        return set_autostart(enable)
+    except Exception as exc:
+        _launcher_log(f"Could not update auto-startup: {exc}")
+        return False
+
+
+def reconcile_windows_auto_startup(enable: bool) -> bool:
+    """Apply a saved preference while respecting a task disabled in Windows."""
+    try:
+        from voice_flow.installer import reconcile_autostart
+        return reconcile_autostart(enable)
+    except Exception as exc:
+        _launcher_log(f"Could not reconcile auto-startup: {exc}")
+        return False
 
 
 def is_api_server_ready(timeout: float = 0.2) -> bool:
@@ -410,13 +421,14 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         from voice_flow.storage import storage
         autostart_pref = storage.get_setting("autostart_enabled", None)
         if autostart_pref is None:
-            # First launch: normalise to exactly ONE boot mechanism (HKCU Run
-            # key). set_autostart(True) also removes any legacy Startup-folder
-            # .lnk so logon can never register the app twice (two windows).
-            set_windows_auto_startup(True)
-            storage.save_setting("autostart_enabled", True)
+            # First launch is an explicit default-on registration. Persist it
+            # only when the operating-system change actually succeeded.
+            if set_windows_auto_startup(True):
+                storage.save_setting("autostart_enabled", True)
         else:
-            set_windows_auto_startup(bool(autostart_pref))
+            # Reconcile the registration but leave stored intent to explicit UI
+            # toggles. The status API reads the actual OS state independently.
+            reconcile_windows_auto_startup(bool(autostart_pref))
     except Exception as exc:
         _launcher_log(f"Auto-startup initialization warning: {exc}")
 
