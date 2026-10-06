@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/ai-productivity-flow-hero.png" alt="AI Productivity Flow Interface Banner" width="920">
+  <img src="docs/assets/ai-productivity-flow-hero-banner.png" alt="AI Productivity Flow Interface Banner" width="920">
 </p>
 
 ---
