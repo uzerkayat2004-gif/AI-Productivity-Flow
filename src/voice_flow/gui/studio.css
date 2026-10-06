@@ -82,6 +82,8 @@
   background: var(--studio-paper); border-color: var(--studio-copper);
   box-shadow: 0 0 0 2px var(--studio-tint); outline: none;
 }
+#page-dictionary.dict-studio .dict-add-heard-as { flex: 1 1 200px; min-width: 140px; min-height: 36px; padding: 7px 12px; border-radius: 10px; background: var(--studio-well); border: 1px solid var(--studio-line); color: var(--studio-ink); font-size: 13.5px; box-sizing: border-box; }
+#page-dictionary.dict-studio .dict-add-heard-as:focus { background: var(--studio-paper); border-color: var(--studio-copper); box-shadow: 0 0 0 2px var(--studio-tint); outline: none; }
 #page-dictionary.dict-studio .dict-add-select {
   flex: 0 0 auto; min-height: 36px; padding: 7px 30px 7px 10px; border-radius: 10px;
   background: var(--studio-well); border: 1px solid var(--studio-line);
@@ -125,6 +127,14 @@
   font-size: 15px !important; font-weight: 700 !important;
   letter-spacing: -0.015em; color: var(--studio-ink) !important; margin: 0 !important;
 }
+#page-dictionary.dict-studio .dict-section-count { display: inline-flex; min-width: 22px; height: 22px; margin-left: 5px; padding: 0 7px; align-items: center; justify-content: center; border-radius: 999px; background: var(--studio-well); color: var(--studio-muted); font-size: 11px; font-weight: 650; vertical-align: 2px; }
+#page-dictionary.dict-studio .dict-capsule { flex-wrap: wrap; position: relative; padding-right: 32px; border-radius: 12px; }
+#page-dictionary.dict-studio .dict-capsule-delete { position: absolute; top: 10px; right: 10px; }
+#page-dictionary.dict-studio .dict-heard-as-line { flex-basis: 100%; color: var(--studio-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+#page-dictionary.dict-studio .dict-heard-as-line .dict-inline-link { margin-left: 8px; border: 0; padding: 0; background: transparent; color: var(--studio-copper); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; }
+#page-dictionary.dict-studio .dict-heard-as-editor { flex-basis: 100%; display: flex; align-items: center; gap: 7px; padding: 3px 0 1px; }
+#page-dictionary.dict-studio .dict-heard-as-editor .flow-input { min-width: 0; flex: 1 1 180px; min-height: 32px; background: var(--studio-paper); border: 1px solid var(--studio-line); color: var(--studio-ink); }
+#page-dictionary.dict-studio .dict-heard-as-editor .flow-btn { min-height: 32px; padding: 5px 10px; font-size: 12px; }
 #page-dictionary.dict-studio .dict-search-wrap { position: relative; flex: 0 1 220px; min-width: 160px; }
 #page-dictionary.dict-studio .dict-search-icon {
   position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
@@ -235,23 +245,6 @@
   color: var(--studio-copper);
   border: 1px solid rgba(240, 140, 74, 0.25);
   white-space: nowrap;
-}
-
-.dict-capsule-approve {
-  font-size: 11px;
-  font-weight: 650;
-  padding: 3px 9px;
-  border-radius: 9999px;
-  background: var(--studio-copper);
-  color: #ffffff;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.dict-capsule-approve:hover {
-  opacity: 0.9;
-  transform: scale(1.05);
 }
 
 .dict-capsule-delete {

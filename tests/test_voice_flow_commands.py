@@ -518,36 +518,56 @@ class TestLearnedVocabularyStorage(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "lex.db")
         return StorageEngine(db_path=path)
 
-    def test_candidate_promotes_and_appears_in_suggestions(self):
+    def test_candidate_autoactivates_on_third_observation(self):
         st = self._db()
         self.assertFalse(st.record_lexicon_candidate("LangGraph", "land graph"))
         self.assertFalse(st.record_lexicon_candidate("LangGraph", "land graph"))
-        self.assertTrue(st.record_lexicon_candidate("LangGraph", "land graph"))  # 3rd promotes
-        items = st.get_lexicon_suggestions()
-        self.assertEqual([i["term"] for i in items], ["LangGraph"])
-        self.assertEqual(items[0]["evidence"], 3)
+        self.assertTrue(st.record_lexicon_candidate("LangGraph", "land graph"))
+        self.assertIn("LangGraph", st.get_dictionary_words())
+        self.assertEqual(st.get_lexicon_suggestions(), [])
+        self.assertEqual(st.get_dictionary_corrections()[0]["wrong_text"], "land graph")
 
     def test_raw_candidates_do_not_surface(self):
         st = self._db()
         st.record_lexicon_candidate("Kubernetes", "coobernetees")
         self.assertEqual(st.get_lexicon_suggestions(), [])
 
-    def test_approval_activates_dictionary_word(self):
+    def test_repeated_use_activates_dictionary_word_without_approval(self):
         st = self._db()
         st.record_lexicon_candidate("LangGraph", "land graph")
         st.record_lexicon_candidate("LangGraph", "land graph")
-        st.record_lexicon_candidate("LangGraph", "land graph")
-        cid = st.get_lexicon_suggestions()[0]["id"]
-        self.assertTrue(st.set_lexicon_candidate_state(cid, "active"))
+        self.assertTrue(st.record_lexicon_candidate("LangGraph", "land graph"))
         self.assertIn("LangGraph", st.get_dictionary_words())
 
-    def test_migration_promotes_autocaptured_once(self):
+    def test_migration_autoactivates_only_repeated_raw_terms_and_preserves_unqualified_autocaptured(self):
         st = self._db()
         st.add_dictionary_word("GitHub", category="Auto-Captured")
         promoted = st.migrate_learned_vocabulary()
-        self.assertGreaterEqual(promoted, 1)
-        terms = [i["term"] for i in st.get_lexicon_suggestions()]
-        self.assertIn("GitHub", terms)
+        self.assertEqual(promoted, 0)
+        self.assertEqual(st.get_lexicon_suggestions(), [])
+        self.assertNotIn("GitHub", st.get_dictionary_words())
+        legacy = [row for row in st.get_dictionary_entries(include_auto=True) if row["word"] == "GitHub"]
+        self.assertEqual(len(legacy), 1)
+        self.assertEqual(legacy[0]["category"], "Auto-Captured")
+
+        # Migration evaluates successful raw records; polished-only names do
+        # not count as evidence. Three separate records auto-activate GitHub.
+        with st._get_conn_ctx() as conn:
+            for _ in range(3):
+                conn.execute(
+                    "INSERT INTO history (timestamp, raw_text, polished_text, status) "
+                    "VALUES (datetime('now'), ?, ?, 'success')",
+                    ("Use GitHub every day", "Use InventedCloud every day"),
+                )
+        st.save_setting("history_vocab_seeded_v5", False)
+        st.save_setting("lexicon_migration_v2", False)
+        promoted = st.migrate_learned_vocabulary()
+        self.assertEqual(promoted, 1)
+        self.assertEqual(st.get_lexicon_suggestions(), [])
+        self.assertIn("GitHub", st.get_dictionary_words())
+        self.assertNotIn("InventedCloud", st.get_dictionary_words())
+        upgraded = [row for row in st.get_dictionary_entries(include_auto=True) if row["word"] == "GitHub"]
+        self.assertEqual(upgraded[0]["category"], "Learned")
         # idempotent
         self.assertEqual(st.migrate_learned_vocabulary(), 0)
 

@@ -212,13 +212,13 @@ def test_static_ui_has_no_snippets_page_after_feature_removal():
     assert "loadSnippets" not in javascript and "renderSnippets" not in javascript
 
 
-def test_static_dictionary_page_uses_auto_learn():
-    """Suggestions section was removed; words auto-learn in JS background."""
+def test_static_dictionary_page_explains_automatic_repeated_use_learning():
+    """The dictionary describes automatic learning without an approval step."""
     root = Path(__file__).parents[1] / "src" / "voice_flow" / "gui"
     html = (root / "index.html").read_text(encoding="utf8")
     dictionary_page = html.split('<section id="page-dictionary"', 1)[1].split("</section>", 1)[0]
-    # Old manual-approval UI was removed; auto-learn comment marks intent
-    assert "auto-learn" in dictionary_page.lower() or "Auto-learned" in dictionary_page
+    assert "added automatically after repeated use" in dictionary_page
+    assert "approval" not in dictionary_page.lower()
 
 
 @contextmanager
@@ -253,20 +253,19 @@ def get(url, path):
             return error.code, json.load(error)
 
 
-def test_api_returns_evidence_backed_dictionary_suggestions(store, monkeypatch):
+def test_api_does_not_suggest_terms_already_activated_by_repeated_use(store, monkeypatch):
     for _ in range(3):
         store.record_lexicon_candidate("Kubernetes", "cuber netties", source="usage-history")
     with api_server(store, monkeypatch) as url:
         status, suggestions = get(url, "/api/dictionary/suggestions")
     assert status == 200
-    assert [(item["term"], item["variant"], item["state"]) for item in suggestions] == [
-        ("Kubernetes", "cuber netties", "suggested")
-    ]
+    assert "Kubernetes" in store.get_dictionary_words()
+    assert suggestions == []
 
 
-def test_repeated_name_mishearing_promotes_to_suggestion_with_evidence(store):
+def test_repeated_name_mishearing_automatically_activates_with_correction(store):
     """Genuinely repeated user vocabulary (used 3+ times with a heard-as
-    variant) must surface as an evidence-backed suggestion, never silently."""
+    variant) automatically activates its canonical spelling and heard-as rule."""
     from voice_flow.correction_learning import extract_correction_pairs
 
     pairs = extract_correction_pairs("please ask joe ee to review", "Please ask Joey to review")
@@ -275,37 +274,38 @@ def test_repeated_name_mishearing_promotes_to_suggestion_with_evidence(store):
         store.record_lexicon_candidate(term, variant, source="correction")
         store.record_lexicon_candidate(term, variant, source="correction")
         store.record_lexicon_candidate(term, variant, source="correction")
-    suggestions = store.get_lexicon_suggestions()
-    joey = [item for item in suggestions if item["term"] == "Joey"]
-    assert joey and joey[0]["variant"] == "joe ee" and joey[0]["evidence"] >= 3
+    assert "Joey" in store.get_dictionary_words()
+    assert any(row["wrong_text"] == "joe ee" and row["correct_text"] == "Joey" for row in store.get_dictionary_corrections())
+    assert store.get_lexicon_suggestions() == []
 
 
-def test_ignored_suggestion_never_resurfaces(store):
-    """Ignore persistence: an ignored suggestion stays ignored and does not
-    resurface in the suggestion list, even with further observations."""
-    for _ in range(3):
+def test_ignored_internal_candidate_never_activates(store):
+    """A user can ignore a candidate before it reaches the activation threshold."""
+    for _ in range(2):
         store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    candidate = store.get_lexicon_suggestions()[0]
+    with store._get_conn_ctx() as conn:
+        candidate = conn.execute("SELECT id FROM lexicon_candidates WHERE term='Kubernetes'").fetchone()
     assert store.set_lexicon_candidate_state(candidate["id"], "ignored")
     assert store.get_lexicon_suggestions() == []
-    # Further observations of the same pair must not flip it back to suggested.
+    # Further observations must not activate the ignored word or its rule.
     store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
     store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
     assert store.get_lexicon_suggestions() == []
+    assert "Kubernetes" not in store.get_dictionary_words()
+    assert store.get_dictionary_corrections() == []
 
 
-def test_suggestions_require_heard_as_variant_evidence(store):
-    """A suggestion is a candidate correction with evidence: term plus the
-    heard-as variant and counts — never a bare single filler word."""
+def test_heard_as_correction_activates_only_after_repeated_evidence(store):
+    """Canonical term and heard-as correction activate together at threshold."""
     store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
     store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
     assert store.get_lexicon_suggestions() == []
+    assert "Kubernetes" not in store.get_dictionary_words()
+    assert store.get_dictionary_corrections() == []
     store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    suggestions = store.get_lexicon_suggestions()
-    assert len(suggestions) == 1
-    item = suggestions[0]
-    assert item["term"] == "Kubernetes" and item["variant"] == "cuber netties"
-    assert item["evidence"] >= 3 and item["state"] == "suggested"
+    assert "Kubernetes" in store.get_dictionary_words()
+    assert any(row["wrong_text"] == "cuber netties" and row["correct_text"] == "Kubernetes" for row in store.get_dictionary_corrections())
+    assert store.get_lexicon_suggestions() == []
 
 
 def test_api_correction_crud(store, monkeypatch):

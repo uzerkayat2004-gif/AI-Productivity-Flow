@@ -111,7 +111,7 @@ def master_token_present(profile: str | None = None) -> bool:
 
 
 def _self_heal_once(*, profile: str | None = None, timeout: int = 240) -> dict[str, Any]:
-    """Run one bounded CLI refresh verification without opening a browser."""
+    """Run one bounded CLI refresh without interactive sign-in."""
     profile = resolve_notebooklm_profile(profile)
     operation_generation = get_session_generation(profile)
     deadline = time.monotonic() + min(110.0, max(8.0, float(timeout) + 65.0))
@@ -151,10 +151,29 @@ def _self_heal_once(*, profile: str | None = None, timeout: int = 240) -> dict[s
         if remaining < 8.0:
             return {"ok": False, "error": "refresh_timeout", "profile": profile,
                     "classification": "transient_error", "definitive": False}
+        with _STATE_LOCK:
+            if _SESSION_GENERATION.get(profile, 0) != operation_generation:
+                return {"ok": False, "error": "stale_operation", "profile": profile,
+                        "classification": "transient_error", "definitive": False, "stale": True}
         verification = verify_online(profile=profile, force=True, timeout=min(15.0, remaining))
         if verification.get("authenticated") is True:
             code, err = 0, ""
-        elif verification.get("definitive") and verification.get("failure_kind") == "auth":
+        else:
+            verification_error = str(
+                verification.get("details_message") or verification.get("message") or ""
+            ).strip()
+            if verification_error:
+                # Preserve the specific URL-redacted diagnosis instead of the
+                # CLI's often-unhelpful exit code.
+                err = verification_error[:300]
+        if verification.get("authenticated") is not True and (
+            (verification.get("definitive") and verification.get("failure_kind") == "auth")
+            or verification.get("failure_kind") == "token_extraction"
+        ):
+            with _STATE_LOCK:
+                if _SESSION_GENERATION.get(profile, 0) != operation_generation:
+                    return {"ok": False, "error": "stale_operation", "profile": profile,
+                            "classification": "transient_error", "definitive": False, "stale": True}
             expected_email = _storage_email(profile)
             if expected_email:
                 try:
@@ -184,13 +203,19 @@ def _self_heal_once(*, profile: str | None = None, timeout: int = 240) -> dict[s
                     )
                     if verification.get("authenticated") is True:
                         code, err = 0, ""
-        try:
-            from .config import is_profile_disconnected
-            if is_profile_disconnected(profile):
-                return {"ok": False, "error": "explicit_disconnected", "profile": profile,
-                        "classification": "disconnected", "definitive": True}
-        except Exception:
-            pass
+                    else:
+                        verification_error = str(
+                            verification.get("details_message") or verification.get("message") or ""
+                        ).strip()
+                        if verification_error:
+                            err = verification_error[:300]
+    try:
+        from .config import is_profile_disconnected
+        if is_profile_disconnected(profile):
+            return {"ok": False, "error": "explicit_disconnected", "profile": profile,
+                    "classification": "disconnected", "definitive": True}
+    except Exception:
+        pass
     if code == 0:
         # A refresh may have changed server-side session state.  Do not retain
         # a stale negative verdict until the normal cache interval elapses.
@@ -240,11 +265,12 @@ def _self_heal_once(*, profile: str | None = None, timeout: int = 240) -> dict[s
                         )
                         if email and not is_placeholder_email(email):
                             _save_email(email)
-                            from voice_flow.storage import StorageEngine
-                            StorageEngine().save_setting("video_flow_notebooklm_email", email)
-                            StorageEngine().save_setting("video_flow_notebooklm_authenticated", True)
-                            StorageEngine().save_setting("video_flow_notebooklm_auth_error", "")
-                            StorageEngine().save_setting("video_flow_notebooklm_disconnected", False)
+                            from .config import _app_settings_storage
+                            app_storage = _app_settings_storage()
+                            app_storage.save_setting("video_flow_notebooklm_email", email)
+                            app_storage.save_setting("video_flow_notebooklm_authenticated", True)
+                            app_storage.save_setting("video_flow_notebooklm_auth_error", "")
+                            app_storage.save_setting("video_flow_notebooklm_disconnected", False)
                     except Exception:
                         pass
             else:
@@ -259,8 +285,12 @@ def _self_heal_once(*, profile: str | None = None, timeout: int = 240) -> dict[s
     recovery_retryable = bool(recovery and not recovery.get("success") and (
         recovery.get("transient") is True or recovery.get("reason") not in terminal_recovery_reasons
     ))
+    token_extraction_unresolved = bool(
+        verification and verification.get("failure_kind") == "token_extraction"
+    )
     classification = "authenticated" if code == 0 else (
-        "sign_in_required" if verification and verification.get("definitive") and not recovery_retryable
+        "sign_in_required"
+        if verification and verification.get("definitive") and not recovery_retryable and not token_extraction_unresolved
         else "transient_error"
     )
     return {"ok": code == 0, "error": None if code == 0 else (err or f"exit {code}"),
@@ -365,9 +395,9 @@ def _storage_email(*args, **kwargs) -> str | None:
         pass
 
     try:
-        from voice_flow.storage import StorageEngine
+        from .config import _app_settings_storage
 
-        email = str(StorageEngine().get_setting("video_flow_notebooklm_email") or "").strip()
+        email = str(_app_settings_storage().get_setting("video_flow_notebooklm_email") or "").strip()
         if email and not _is_placeholder(email):
             return email
     except Exception:
@@ -378,9 +408,9 @@ def _storage_email(*args, **kwargs) -> str | None:
 
 def _save_email(email: str) -> None:
     try:
-        from voice_flow.storage import StorageEngine
+        from .config import _app_settings_storage
 
-        StorageEngine().save_setting("video_flow_notebooklm_email", email)
+        _app_settings_storage().save_setting("video_flow_notebooklm_email", email)
     except Exception:
         pass
 
@@ -393,6 +423,39 @@ def _is_placeholder(email: str | None) -> bool:
         return is_placeholder_email(email)
     except Exception:
         return str(email or "").strip().lower() in {"your google account"}
+
+
+def is_token_extraction_error(message: object) -> bool:
+    """Recognize known page-token extraction failures, not auth/network gates."""
+    details_lower = str(message or "").casefold()
+    if not details_lower:
+        return False
+    if any(word in details_lower for word in (
+        "timeout", "timed out", "connection", "network", "socket", "unreachable",
+        "getaddrinfo", "dns", "temporarily unavailable", "service unavailable",
+    )):
+        return False
+    if any(phrase in details_lower for phrase in (
+        "access denied", "access restricted", "not authorized", "permission denied",
+        "not available for this account", "notebooklm is unavailable", "notebooklm is not available",
+        "captcha", "forbidden", "http 403", "status code 403", "region blocked", "region restricted",
+        "not available in this region", "not supported in this region", "not available in your country",
+        "not supported in your country", "region is not supported",
+        "automated requests", "automated traffic", "unusual traffic", "unusual activity",
+        "verify you are human", "too many requests", "rate limit",
+    )):
+        return False
+    return any(marker in details_lower for marker in (
+        "csrf token not found", "session token not found", "session id not found",
+        "session id is missing", "could not find session id", "wiz token not found", "wiz field not found",
+        "missing wiz", "wiz not found", "snlm0e token not found", "snlm0e field not found",
+        "missing snlm0e", "snlm0e not found", "token extraction failed", "failed to extract token",
+        "failed to extract csrf", "failed to extract snlm0e", "failed to extract wiz",
+        "token not found in html", "could not extract token from html",
+    )) or bool(re.search(
+        r"failed to extract\s+['\"]?(?:snlm0e|wiz|csrf|session(?:\s+(?:id|token))?)\b",
+        details_lower,
+    ))
 
 
 def _profile_browser_dir(profile: str) -> Path:
@@ -1743,6 +1806,10 @@ def verify_online(
         "authentication expired", "not authenticated", "unauthenticated", "sign in again",
         "login required", "session expired", "invalid credentials",
     ))
+    token_extraction_failure = bool(
+        not authenticated and not is_network_error and not is_definite_auth_error
+        and is_token_extraction_error(details_message)
+    )
     transient_failure = not authenticated and (is_network_error or not is_definite_auth_error)
     # Hold the generation fence through every settings/file/cache publication.
     # Explicit disconnect/login completion increments the generation under the
@@ -1831,12 +1898,19 @@ def verify_online(
     verified = {
         "status": "ok" if authenticated else ("network_error" if is_network_error else ("transient_error" if transient_failure else "unauthenticated")),
         "classification": "authenticated" if authenticated else ("transient_error" if transient_failure else "sign_in_required"),
-        "authenticated": authenticated if not transient_failure else None,
-        "definitive": bool(authenticated or not transient_failure),
-        "failure_kind": None if authenticated else ("network" if is_network_error else ("auth" if is_definite_auth_error else "cli")),
+        "authenticated": True if authenticated else (False if is_definite_auth_error else None),
+        "definitive": bool(authenticated or is_definite_auth_error),
+        "failure_kind": None if authenticated else (
+            "network" if is_network_error else
+            ("auth" if is_definite_auth_error else
+             ("token_extraction" if token_extraction_failure else "cli"))
+        ),
         "message": "Google session verified online" if authenticated else (
-            "Could not reach Google to verify this saved session" if transient_failure
-            else "Google session is no longer valid — sign in again"
+            "Could not reach Google to verify this saved session" if is_network_error
+            else ("NotebookLM could not read the session token; restoring the saved connection."
+                  if token_extraction_failure else
+                  ("Could not verify this saved session" if transient_failure
+                   else "Google session is no longer valid — sign in again"))
         ),
         "email": email,
         "profile": profile,

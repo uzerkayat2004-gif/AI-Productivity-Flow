@@ -83,34 +83,58 @@ jobs:
 
       - name: Verify Windows Release Artifacts & Smoke Test
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $tag = "${{ github.ref_name }}"
           $exe = "dist/AI-Productivity-Flow-Setup-x64.exe"
           $sha = "dist/AI-Productivity-Flow-Setup-x64.exe.sha256"
-          if (Test-Path $exe) {
-            $size = (Get-Item $exe).Length
-            Write-Host "Found Windows Installer ($size bytes)"
-            if ($size -lt 10000000) {
-              Write-Error "Windows installer is too small ($size bytes) to contain required runtime!"
+
+          # 1. If not present in repo checkout, check if pre-staged in release assets
+          if (-not (Test-Path $exe)) {
+            Write-Host "Windows installer not found in checkout; probing pre-staged release assets for $tag..."
+            try {
+              gh release download "$tag" --pattern "AI-Productivity-Flow-Setup-x64.exe*" --dir dist --repo "${{ github.repository }}"
+            } catch {
+              Write-Host "No pre-existing release asset download available."
+            }
+          }
+
+          # 2. Hard fail if still missing
+          if (-not (Test-Path $exe)) {
+            Write-Error "CRITICAL: Windows installer ($exe) is missing! The release workflow requires a valid, pre-built Windows installer artifact."
+            exit 1
+          }
+
+          $size = (Get-Item $exe).Length
+          Write-Host "Found Windows Installer ($size bytes)"
+          if ($size -lt 50000000) {
+            Write-Error "Windows installer is too small ($size bytes) to contain required runtime closure!"
+            exit 1
+          }
+
+          # 3. Guard against obsolete beta binary (v0.9.0-beta installer hash)
+          $calculatedHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+          $knownOldBetaHash = "aad99333f71c76e9ec3d9b9a1cfbf59d5f713dba5531c8e18c34052d562f6057"
+          if ($calculatedHash -eq $knownOldBetaHash) {
+            Write-Error "CRITICAL INTEGRITY FAILURE: The Windows installer is byte-identical to the old v0.9.0-beta installer ($knownOldBetaHash)! Releases cannot publish outdated or recycled binaries."
+            exit 1
+          }
+
+          # 4. Checksum verification
+          if (Test-Path $sha) {
+            $expectedHash = (Get-Content $sha).Trim().Split()[0].ToLower()
+            if ($calculatedHash -ne $expectedHash) {
+              Write-Error "Checksum mismatch! Calculated: $calculatedHash, Expected: $expectedHash"
               exit 1
             }
-            $calculatedHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
-            if (Test-Path $sha) {
-              $expectedHash = (Get-Content $sha).Trim().Split()[0].ToLower()
-              if ($calculatedHash -ne $expectedHash) {
-                Write-Error "Checksum mismatch! Calculated: $calculatedHash, Expected: $expectedHash"
-                exit 1
-              }
-            } else {
-              "$calculatedHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath $sha -Encoding ascii
-            }
-            Write-Host "Windows installer smoke validation passed."
           } else {
-            Write-Host "Windows installer not in repo tree; skipping Windows local artifact upload."
+            "$calculatedHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath $sha -Encoding ascii
           }
+          Write-Host "Windows installer smoke validation passed with hash $calculatedHash."
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
-        if: hashFiles('dist/AI-Productivity-Flow-Setup-x64.exe') != ''
         with:
           name: windows-release-artifacts
           path: |
@@ -139,7 +163,7 @@ jobs:
 
       - name: Build macOS Application Bundle (.app & .zip)
         run: |
-          python scripts/build_macos_app.py
+          python scripts/build_macos_app.py --bundle-runtime
 
       - name: Verify macOS Artifacts & Smoke Test
         run: |
@@ -156,12 +180,13 @@ jobs:
                   'AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher',
                   'AI Productivity Flow.app/Contents/Resources/AppIcon.icns',
                   'AI Productivity Flow.app/Contents/Resources/src/voice_flow/__init__.py',
-                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/_version.py'
+                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/_version.py',
+                  'AI Productivity Flow.app/Contents/Resources/runtime/site-packages'
               ]
-              missing = [r for r in required if r not in names]
+              missing = [r for r in required if not any(n.startswith(r) for n in names)]
               if missing:
                   sys.exit(f'macOS zip smoke test failed! Missing entries: {missing}')
-          print('macOS zip smoke test passed!')
+          print('macOS zip smoke test passed (runtime dependencies verified)!')
           "
 
       - name: Upload macOS Artifacts
@@ -186,12 +211,42 @@ jobs:
           path: release-assets/
           merge-multiple: true
 
-      - name: Prepare Release Notes & Verify Artifacts
-        id: prep
+      - name: Verify All Required Artifacts Present & Validate Hashes
         run: |
-          tag="${{ github.ref_name }}"
-          echo "tag=$tag" >> $GITHUB_OUTPUT
-          ls -la release-assets/
+          set -e
+          echo "Checking required release artifacts in release-assets/..."
+          required=(
+            "AI-Productivity-Flow-Setup-x64.exe"
+            "AI-Productivity-Flow-Setup-x64.exe.sha256"
+            "AI-Productivity-Flow-macOS.zip"
+            "AI-Productivity-Flow-macOS.zip.sha256"
+          )
+          for f in "${required[@]}"; do
+            target="release-assets/$f"
+            if [ ! -f "$target" ]; then
+              echo "::error::Required release artifact $target is MISSING! Release workflow aborted to prevent partial/broken release."
+              exit 1
+            fi
+            size=$(wc -c < "$target")
+            echo "Artifact verified: $target ($size bytes)"
+          done
+
+          cd release-assets
+          # Validate macOS zip sha256
+          sha256sum -c AI-Productivity-Flow-macOS.zip.sha256
+          # Validate Windows exe sha256
+          expected_win_hash=$(awk '{print $1}' AI-Productivity-Flow-Setup-x64.exe.sha256 | tr '[:upper:]' '[:lower:]')
+          actual_win_hash=$(sha256sum AI-Productivity-Flow-Setup-x64.exe | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+          if [ "$expected_win_hash" != "$actual_win_hash" ]; then
+            echo "::error::Windows installer checksum mismatch! Expected $expected_win_hash, got $actual_win_hash"
+            exit 1
+          fi
+          # Ensure Windows installer is not the obsolete beta hash
+          if [ "$actual_win_hash" = "aad99333f71c76e9ec3d9b9a1cfbf59d5f713dba5531c8e18c34052d562f6057" ]; then
+            echo "::error::Obsolete v0.9.0-beta installer hash detected! Refusing to publish outdated binary."
+            exit 1
+          fi
+          echo "All release artifacts and checksums strictly validated."
 
       - name: Create or Update GitHub Release
         env:

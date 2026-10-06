@@ -1488,12 +1488,34 @@ class VoiceFlowApp:
                     audio_path = None
                 app_title = getattr(session, "app_title", "General App") or (session.get("app_title") if isinstance(session, dict) else "General App")
                 category = getattr(session, "app_category", "smart_clean") or (session.get("category") if isinstance(session, dict) else "smart_clean")
-                storage.add_dictation(
+                record = storage.add_dictation(
                     raw_text, polished_text, app_title, duration, category,
                     status=status, audio_path=audio_path,
                     error_message=error_message, insertion_status=insertion_status,
                     processing_metadata=processing_metadata,
                 )
+                # Count corrections against the saved, successfully delivered
+                # dictation. Rewrites and commands are not spelling evidence.
+                metadata = processing_metadata if isinstance(processing_metadata, dict) else {}
+                polish = metadata.get("polish") or {}
+                command = metadata.get("command") or {}
+                record_id = getattr(record, "id", None)
+                if (
+                    status == "success"
+                    and insertion_status == "pasted"
+                    and isinstance(record_id, int)
+                    and record_id > 0
+                    and isinstance(polish, dict)
+                    and polish.get("outcome") in {"ai_accepted", "local_model"}
+                    and isinstance(command, dict)
+                    and command.get("status") == "not_detected"
+                    and not command.get("label")
+                ):
+                    try:
+                        for term, variant in extract_correction_pairs(raw_text, polished_text):
+                            storage.record_lexicon_candidate(term, variant, history_id=record_id)
+                    except Exception:
+                        log.exception("[LEARNING] correction capture failed")
             except Exception as exc:
                 log.warning("Could not persist dictation history: %s", exc)
 
@@ -2086,22 +2108,6 @@ class VoiceFlowApp:
                 # Accepted transcript state is updated only after a successful paste.
                 # An action-only Enter must not erase the prior copy-last transcript.
                 if success and polished_text.strip():
-                    # Correction learning (spec §35/§41): cheap diff of raw vs
-                    # final text, recorded asynchronously so insertion never
-                    # waits on it.
-                    try:
-                        import threading as _th
-
-                        def _learn_corrections(raw_txt=raw_transcript, final_txt=polished_text):
-                            try:
-                                for term, variant in extract_correction_pairs(raw_txt, final_txt):
-                                    storage.record_lexicon_candidate(term, variant)
-                            except Exception:
-                                log.exception("[LEARNING] correction capture failed")
-
-                        _th.Thread(target=_learn_corrections, daemon=True).start()
-                    except Exception:
-                        pass
                     self.last_successful_transcript = polished_text
                     recent = getattr(self, "recent_dictations", None)
                     if recent is not None:

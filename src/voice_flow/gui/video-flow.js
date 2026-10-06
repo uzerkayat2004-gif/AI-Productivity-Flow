@@ -379,15 +379,15 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
   } else if (connectionState === "unavailable") {
     badge.classList.add("verifying");
     dot.classList.add("verifying");
-    text.textContent = "Temporarily offline";
-    if (desc) desc.textContent = "Your saved account was not changed. Check your connection and verify again.";
+    text.textContent = "Connection delayed";
+    if (desc) desc.textContent = "Your saved account is safe. Flow will retry automatically when the connection returns; you can also retry now.";
     if (loginBtn) {
       loginBtn.className = "btn-primary vf-nlm-login-btn";
       loginBtn.title = "Retry the NotebookLM connection check";
       loginBtn.onclick = function () { checkNotebookLMAuth(true); };
       loginBtn.disabled = false;
     }
-    if (loginLabel) loginLabel.textContent = "Retry";
+    if (loginLabel) loginLabel.textContent = "Retry now";
     if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
     if (showToast) vfToast("Unable to verify NotebookLM. Your saved account remains unchanged.", true);
   } else if (connectionState === "saved") {
@@ -523,6 +523,9 @@ async function checkNotebookLMAuth(showToast = false) {
     }
 
     renderNotebookLMAuthStatus(vfNlmAuthStatus, showToast);
+    if (typeof updateAudioSummaryConnectionUI === "function" && typeof _afMapNlmState === "function") {
+      updateAudioSummaryConnectionUI(_afMapNlmState(vfNlmAuthStatus));
+    }
     return vfNlmAuthStatus;
   } catch (err) {
     if (requestId !== vfNlmAuthRequestSequence) return vfNlmAuthStatus;
@@ -535,6 +538,9 @@ async function checkNotebookLMAuth(showToast = false) {
     };
     if (showToast) vfToast(`Unable to verify NotebookLM: ${cleanErrorMessage(err.message || err)}`, true);
     renderNotebookLMAuthStatus(vfNlmAuthStatus, false);
+    if (typeof updateAudioSummaryConnectionUI === "function" && typeof _afMapNlmState === "function") {
+      updateAudioSummaryConnectionUI(_afMapNlmState(vfNlmAuthStatus));
+    }
     return vfNlmAuthStatus;
   } finally {
     if (progressTimer) clearInterval(progressTimer);

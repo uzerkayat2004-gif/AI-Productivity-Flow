@@ -146,8 +146,8 @@ class NotebookLMKeepaliveService:
             # Explicit Disconnect is authoritative even when old cookies remain.
             try:
                 if not self._refresh_func:
-                    from voice_flow.storage import StorageEngine
-                    storage = StorageEngine()
+                    from .config import _app_settings_storage
+                    storage = _app_settings_storage()
                     explicit_disc = storage.get_setting("video_flow_notebooklm_disconnected")
                     saved_email = str(storage.get_setting("video_flow_notebooklm_email") or "").strip()
                     from .config import get_storage_state_path
@@ -246,28 +246,46 @@ class NotebookLMKeepaliveService:
 
     def _run_loop(self) -> None:
         """Internal daemon loop."""
-        # Immediate startup refresh check upon boot without waiting 30 seconds
-        short_retry_due = False
+        # Start immediately, then keep retrying transient network failures with
+        # a capped exponential delay instead of parking until the full cadence.
+        transient_failures = 0
+
+        def update_retry_streak(result: dict[str, Any], *, reset_first: bool = False) -> None:
+            nonlocal transient_failures
+            if reset_first:
+                transient_failures = 0
+            with self._refresh_lock:
+                state = self._refresh_state
+                refresh_in_progress = self._refresh_in_progress
+            if not result.get("ran"):
+                if state != "transient_error" and not refresh_in_progress:
+                    transient_failures = 0
+                return
+            if result.get("success") or state != "transient_error":
+                transient_failures = 0
+            else:
+                transient_failures += 1
+
         if not self._stop_event.is_set():
             try:
                 initial_result = self.run_once(force=True)
-                short_retry_due = bool(
-                    initial_result.get("ran") and not initial_result.get("success")
-                    and self._refresh_state == "transient_error"
-                )
+                update_retry_streak(initial_result)
             except Exception as exc:
                 logger.error("Error in initial NotebookLM startup keepalive check: %s", exc)
-                short_retry_due = True
+                transient_failures = 1
 
         while not self._stop_event.is_set():
-            # Retry each normal wake/startup transient once after connectivity
-            # may have settled; a failed retry returns to the normal cadence.
-            delay = min(60.0, self.interval_seconds) if short_retry_due else self.interval_seconds
+            retry_delays = (60.0, 120.0, 300.0)
+            retry_delay = min(retry_delays[min(transient_failures - 1, len(retry_delays) - 1)], self.interval_seconds)
+            delay = retry_delay if transient_failures else self.interval_seconds
             deadline = time.time() + delay
             last_tick = time.time()
             wake_detected = False
+            retry_cancelled = False
             while time.time() < deadline and not self._stop_event.is_set():
                 time.sleep(1.0)
+                if self._stop_event.is_set():
+                    break
                 now_tick = time.time()
                 # System sleep / wake detection (e.g. laptop lid closed for days and opened)
                 if (now_tick - last_tick > 5.0) or (now_tick - last_tick < -5.0):
@@ -279,19 +297,32 @@ class NotebookLMKeepaliveService:
                     break
                 last_tick = now_tick
 
+                # A manual refresh can recover the session while a short retry
+                # is pending. Drop that retry and return to the healthy cadence.
+                if transient_failures:
+                    with self._refresh_lock:
+                        state = self._refresh_state
+                        refresh_in_progress = self._refresh_in_progress
+                    if state != "transient_error" and not refresh_in_progress:
+                        transient_failures = 0
+                        retry_cancelled = True
+                        break
+
             if self._stop_event.is_set():
                 break
+            if retry_cancelled:
+                continue
 
             try:
-                was_short_retry = short_retry_due
+                if wake_detected:
+                    # Wake is an immediate fresh attempt and starts any next
+                    # retry sequence from its first delay.
+                    transient_failures = 0
                 run_res = self.run_once(force=wake_detected)
-                short_retry_due = bool(
-                    not was_short_retry and run_res.get("ran") and not run_res.get("success")
-                    and self._refresh_state == "transient_error"
-                )
+                update_retry_streak(run_res)
             except Exception as exc:
                 logger.error("Error in NotebookLM keepalive loop: %s", exc)
-                short_retry_due = not short_retry_due
+                transient_failures += 1
 
     def status(self) -> dict[str, Any]:
         """Return current status of the keepalive service."""

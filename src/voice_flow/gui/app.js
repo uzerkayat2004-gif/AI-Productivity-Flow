@@ -2375,7 +2375,7 @@ function getAppIcon(appName) {
   return "⚡";
 }
 
-// Dictionary page (explicit vocabulary; learned suggestions need approval)
+// Dictionary page (learned vocabulary plus optional manual entries)
 let allDictionaryWords = [];
 let dictionaryHeardAs = {};
 let dictionaryLoadRevision = 0;
@@ -2393,25 +2393,23 @@ function dictionaryWord(entry) {
   return String(entry && entry.word || "");
 }
 
+function dictionaryHandlerArg(value) {
+  // Escape JS first, then HTML, so literal entity-like names stay literal.
+  return escapeHtml(JSON.stringify(String(value)));
+}
+
 async function loadDictionary() {
   const chipContainer = document.getElementById("dictionary-chips");
   if (!chipContainer) return;
   const revision = ++dictionaryLoadRevision;
-
-  // Complete background learning first.  Previously this ran concurrently
-  // with the list fetch, so a slower stale response could overwrite words
-  // that had just been accepted and make them appear to disappear.
-  await loadDictionarySuggestions(revision);
-  if (revision !== dictionaryLoadRevision) return;
-
   try {
     const [wordsRes, correctionsRes] = await Promise.all([
-      fetch("/api/dictionary?details=1&include_auto=1"),
+      fetch("/api/dictionary?details=1"),
       fetch("/api/dictionary/corrections").catch(() => null),
     ]);
     const words = await wordsRes.json();
     if (revision !== dictionaryLoadRevision) return;
-    allDictionaryWords = normalizeDictionaryEntries(words);
+    allDictionaryWords = normalizeDictionaryEntries(words).filter(entry => String(entry.category || "").toLowerCase() !== "auto-captured");
 
     dictionaryHeardAs = {};
     try {
@@ -2424,8 +2422,8 @@ async function loadDictionary() {
           if (!correct || !wrong) continue;
           const key = correct.toLowerCase();
           if (!dictionaryHeardAs[key]) dictionaryHeardAs[key] = [];
-          if (!dictionaryHeardAs[key].some(v => v.toLowerCase() === wrong.toLowerCase())) {
-            dictionaryHeardAs[key].push(wrong);
+          if (!dictionaryHeardAs[key].some(v => v.wrong.toLowerCase() === wrong.toLowerCase())) {
+            dictionaryHeardAs[key].push({ id: Number(c.id) || 0, wrong });
           }
         }
       }
@@ -2435,43 +2433,12 @@ async function loadDictionary() {
 
     const counterBadge = document.getElementById("dict-counter-badge");
     if (counterBadge) counterBadge.textContent = `${allDictionaryWords.length} term${allDictionaryWords.length === 1 ? '' : 's'}`;
+    const activeCount = document.getElementById("dict-active-count");
+    if (activeCount) activeCount.textContent = String(allDictionaryWords.length);
 
     renderDictionaryFilteredChips();
   } catch (err) {
     console.error("Error loading dictionary:", err);
-  }
-}
-
-
-// ===== Auto-learn: silently accept all suggestions =====
-
-async function loadDictionarySuggestions(revision = dictionaryLoadRevision) {
-  try {
-    const res = await fetch("/api/dictionary/suggestions");
-    const items = await res.json();
-    if (!Array.isArray(items) || items.length === 0) return;
-    // Auto-accept every suggestion silently
-    await Promise.allSettled(
-      items.map(it => {
-        const id = Number(it.id) || 0;
-        if (!id) return Promise.resolve();
-        return fetch("/api/dictionary/suggestions/decide", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, state: "active" })
-        });
-      })
-    );
-    // Refresh word list to show newly accepted words
-    const wordsRes = await fetch("/api/dictionary?details=1&include_auto=1");
-    const words = await wordsRes.json();
-    if (revision !== dictionaryLoadRevision) return;
-    allDictionaryWords = normalizeDictionaryEntries(words);
-    const counterBadge = document.getElementById("dict-counter-badge");
-    if (counterBadge) counterBadge.textContent = `${allDictionaryWords.length} term${allDictionaryWords.length === 1 ? '' : 's'}`;
-    renderDictionaryFilteredChips();
-  } catch (err) {
-    // Silently ignore — auto-learn is best-effort
   }
 }
 
@@ -2511,7 +2478,10 @@ function renderDictionaryFilteredChips() {
   let filtered = allDictionaryWords;
 
   if (query) {
-    filtered = filtered.filter(entry => dictionaryWord(entry).toLowerCase().includes(query));
+    filtered = filtered.filter(entry => {
+      const word = dictionaryWord(entry).toLowerCase();
+      return word.includes(query) || (dictionaryHeardAs[word] || []).some(item => item.wrong.toLowerCase().includes(query));
+    });
   }
 
   updateDictionaryResultMeta(filtered);
@@ -2536,7 +2506,7 @@ function renderDictionaryFilteredChips() {
         <span class="dict-empty-icon" aria-hidden="true">${DICT_EMPTY_SVG}</span>
         <div>
           <div class="dict-empty-title">Your dictionary is empty</div>
-          <p class="dict-empty-sub">Teach Flow your first word above — your name is a great start. It takes effect on your very next dictation.</p>
+          <p class="dict-empty-sub">Flow learns useful words as you dictate. You can also add a word above.</p>
         </div>
       </div>
       `;
@@ -2556,7 +2526,8 @@ function renderDictionaryFilteredChips() {
       expansion = (parts[1] || "").trim();
     }
     const hasCamelOrUpper = /[A-Z]/.test(w);
-    const isAutoCaptured = String(entry.category || "").toLowerCase() === "auto-captured";
+    const heardAs = dictionaryHeardAs[w.toLowerCase()] || [];
+    const heardAsLabel = heardAs.length ? `Heard as: ${heardAs.map(item => item.wrong).join(", ")}` : "";
 
     let contentHtml = "";
     if (isExpansion) {
@@ -2571,16 +2542,14 @@ function renderDictionaryFilteredChips() {
       `;
     }
 
-    if (isAutoCaptured) {
-      contentHtml += `
-        <button type="button" class="dict-capsule-approve" onclick="event.stopPropagation(); approveDictionaryWord('${escapeJs(w)}')" title="Approve exact spelling">Approve</button>
-      `;
+    if (!isExpansion) {
+      contentHtml += `<div class="dict-heard-as-line">${heardAsLabel ? escapeHtml(heardAsLabel) : ""}<button type="button" class="dict-inline-link" onclick="event.stopPropagation(); startDictionaryHeardAsEdit(${dictionaryHandlerArg(w)},this)">${heardAs.length ? "Edit heard-as" : "Add heard-as"}</button></div>`;
     }
 
     return `
       <div class="dict-capsule" data-word="${escapeHtml(w)}" title="${isExpansion ? 'Shortcut: ' + escapeHtml(w) : 'Dictionary term: ' + escapeHtml(w)}">
         ${contentHtml}
-        <button type="button" class="dict-capsule-delete" onclick="event.stopPropagation(); removeDictionaryWord('${escapeJs(w)}', this)" title="Remove “${escapeHtml(w)}” from dictionary" aria-label="Remove ${escapeHtml(w)}">
+        <button type="button" class="dict-capsule-delete" onclick="event.stopPropagation(); removeDictionaryWord(${dictionaryHandlerArg(w)}, this)" title="Remove “${escapeHtml(w)}” from dictionary" aria-label="Remove ${escapeHtml(w)}">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>`;
@@ -2635,6 +2604,8 @@ async function addDictionaryWordFromInput() {
   const addBtn = document.querySelector("#page-dictionary .dict-add-btn");
   if (!inputEl || dictionaryAddBusy) return;
   const raw = inputEl.value.trim();
+  const heardAsEl = document.getElementById("dictionary-heard-as-input");
+  const heardAs = heardAsEl ? heardAsEl.value.trim() : "";
   if (!raw) {
     setDictionaryAddError("Type a word first.");
     inputEl.focus();
@@ -2645,12 +2616,20 @@ async function addDictionaryWordFromInput() {
     inputEl.focus();
     return;
   }
+  if (heardAs.length > 120) {
+    setDictionaryAddError("Keep the heard-as spelling under 120 characters.");
+    heardAsEl.focus();
+    return;
+  }
   if (raw.includes("->") || raw.includes("=>")) {
     setDictionaryAddError("Use plain words here. Expansions with \u201c->\u201d are not supported.");
     return;
   }
   const word = applyDictionaryCasing(raw);
-  const duplicate = allDictionaryWords.some(entry => String(entry.category).toLowerCase() !== "auto-captured" && dictionaryWord(entry).toLowerCase() === String(word).toLowerCase());
+  const duplicate = allDictionaryWords.some(entry => {
+    const category = String(entry.category || "").toLowerCase();
+    return category !== "learned" && category !== "auto-captured" && dictionaryWord(entry).toLowerCase() === String(word).toLowerCase();
+  });
   if (duplicate) {
     setDictionaryAddError(`“${word}” is already in your dictionary.`);
     inputEl.focus();
@@ -2663,7 +2642,7 @@ async function addDictionaryWordFromInput() {
     const res = await fetch("/api/dictionary/add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word }),
+      body: JSON.stringify({ word, heard_as: heardAs }),
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
@@ -2671,6 +2650,7 @@ async function addDictionaryWordFromInput() {
       return;
     }
     inputEl.value = "";
+    if (heardAsEl) heardAsEl.value = "";
     setDictionaryAddError(null);
     showToast(`“${word}” saved — Flow will hear it next time.`, "✅");
     loadDictionary();
@@ -2687,18 +2667,34 @@ async function addDictionaryWord() {
   addDictionaryWordFromInput();
 }
 
-async function approveDictionaryWord(word) {
+function startDictionaryHeardAsEdit(word, button) {
+  const capsule = button ? button.closest(".dict-capsule") : null;
+  if (!capsule || capsule.querySelector(".dict-heard-as-editor")) return;
+  const existing = dictionaryHeardAs[String(word).toLowerCase()] || [];
+  const first = existing[0] || { id: 0, wrong: "" };
+  const editor = document.createElement("div");
+  editor.className = "dict-heard-as-editor";
+  editor.innerHTML = `<input class="flow-input" type="text" maxlength="120" aria-label="Heard as spelling" placeholder="What Flow hears" value="${escapeHtml(first.wrong)}"><button type="button" class="flow-btn flow-btn--primary" onclick="saveDictionaryHeardAs(${dictionaryHandlerArg(word)},${Number(first.id) || 0},this)">Save</button><button type="button" class="flow-btn flow-btn--secondary" onclick="this.closest('.dict-heard-as-editor').remove()">Cancel</button>`;
+  capsule.appendChild(editor);
+  editor.querySelector("input").focus();
+}
+
+async function saveDictionaryHeardAs(word, correctionId, button) {
+  const editor = button ? button.closest(".dict-heard-as-editor") : null;
+  const input = editor ? editor.querySelector("input") : null;
+  if (!input) return;
+  const wrong = input.value.trim();
+  const endpoint = correctionId ? (wrong ? "/api/dictionary/corrections/update" : "/api/dictionary/corrections/remove") : "/api/dictionary/corrections/add";
+  const payload = correctionId ? (wrong ? { id: correctionId, wrong_text: wrong, correct_text: word } : { id: correctionId }) : { wrong_text: wrong, correct_text: word };
+  if (!wrong && !correctionId) { editor.remove(); return; }
   try {
-    const res = await fetch("/api/dictionary/add", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word }),
-    });
+    const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = await res.json();
-    if (!res.ok || !data.success) throw new Error(data.error || "Could not save this spelling.");
-    showToast(`“${word}” is now an active spelling.`, "✅");
+    if (!res.ok || !data.success) throw new Error(data.error || "Could not save heard-as spelling.");
+    showToast(wrong ? "Heard-as spelling saved." : "Heard-as spelling removed.", "✅");
     await loadDictionary();
   } catch (err) {
-    showToast(err.message || "Could not save this spelling.", "⚠️");
+    showToast(err.message || "Could not save heard-as spelling.", "⚠️");
   }
 }
 
@@ -6444,10 +6440,8 @@ function updateAudioSummaryModelUI(modelRef) {
 }
 
 // --- NotebookLM connection state for the Summary card ----------------------
-// Existing read-only state source: /api/video-flow/notebooklm/status (no
-// verify=1, so no external verification call is triggered here). If the real
-// state cannot be determined we show "Connection status unavailable" — never
-// "Ready", "Local", or "offline".
+// Shared NotebookLM status source. If the real state cannot be determined we
+// show "Connection status unavailable" — never "Ready", "Local", or "offline".
 let _afNlmStatusPromise = null;
 
 function _afMapNlmState(data) {
@@ -6461,7 +6455,7 @@ function _afMapNlmState(data) {
     return { key: "checking", label: "Checking connection…" };
   }
   if (data.recovery_state === "transient_error") {
-    return { key: "attention", label: "Temporarily offline" };
+    return { key: "attention", label: "Connection delayed" };
   }
   if (data.recovery_state === "sign_in_required" || data.online_verified === false) {
     return { key: "attention", label: "Sign-in required" };
@@ -10556,4 +10550,3 @@ try {
     }
   }, 10000);
 } catch (_) {}
-

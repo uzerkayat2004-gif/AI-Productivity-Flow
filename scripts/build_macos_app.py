@@ -75,7 +75,11 @@ fi
 # 2. Fallback to system / homebrew / user python 3.10+
 if [ -z "$PYTHON" ]; then
     for candidate in \\
+        /opt/homebrew/bin/python3.12 \\
+        /opt/homebrew/bin/python3.11 \\
         /opt/homebrew/bin/python3 \\
+        /usr/local/bin/python3.12 \\
+        /usr/local/bin/python3.11 \\
         /usr/local/bin/python3 \\
         python3 \\
         /usr/bin/python3; do
@@ -89,8 +93,16 @@ if [ -z "$PYTHON" ]; then
 fi
 
 if [ -z "$PYTHON" ]; then
-    osascript -e 'display dialog "Python 3.10+ is required to run AI Productivity Flow. Please install Python 3.10 or newer from python.org or Homebrew." buttons {"OK"} default button 1 with icon stop'
+    osascript -e 'display dialog "Python 3.10+ is required to run AI Productivity Flow. Please install Python 3.10 or newer from python.org or Homebrew (brew install python@3.12)." buttons {"OK"} default button 1 with icon stop'
     exit 1
+fi
+
+# 3. Verify runtime imports and check architecture compatibility
+if ! "$PYTHON" -c 'import voice_flow' 2>/dev/null; then
+    HOST_ARCH="$(uname -m)"
+    if [ "$HOST_ARCH" = "x86_64" ] && [ -d "$DIR/Resources/runtime/site-packages" ]; then
+        osascript -e 'display dialog "Notice: The bundled dependencies were packaged on Apple Silicon (arm64), but this system is Intel (x86_64).\\n\\nPlease run the terminal installer to set up native Intel dependencies:\\ncurl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash" buttons {"OK"} default button 1 with icon caution'
+    fi
 fi
 
 exec "$PYTHON" -m voice_flow.main "$@"
@@ -128,27 +140,55 @@ def copy_resources() -> None:
 
 def bundle_runtime_dependencies() -> None:
     """Bundle dependencies into Contents/Resources/runtime/site-packages if present."""
+    import json
+    import platform
+
     runtime_dir = RESOURCES_DIR / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     target_sp = runtime_dir / "site-packages"
-    if target_sp.exists():
+
+    # Write build manifest for architecture audit
+    manifest = {
+        "build_platform": platform.platform(),
+        "build_machine": platform.machine(),
+        "python_version": platform.python_version(),
+        "bundled_runtime": True,
+        "supported_architectures": [platform.machine()],
+    }
+    (runtime_dir / "build-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    if target_sp.exists() and any(target_sp.iterdir()):
+        print(f"Target site-packages already populated at {target_sp}")
         return
 
-    # 1. If a private venv exists in repo root, copy dependencies
-    venv_site = REPO_ROOT / ".venv" / "lib"
-    if venv_site.is_dir():
-        for py_dir in venv_site.glob("python3*"):
+    # 1. If a private venv exists in repo root (.venv/lib or .venv/Lib)
+    venv_dir = REPO_ROOT / ".venv"
+    if venv_dir.is_dir():
+        # Unix layout
+        for py_dir in (venv_dir / "lib").glob("python3*"):
             sp = py_dir / "site-packages"
             if sp.is_dir():
-                print(f"Bundling dependencies from {sp}...")
+                print(f"Bundling dependencies from repo .venv (Unix) {sp}...")
                 shutil.copytree(
                     sp,
                     target_sp,
+                    dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
                 )
                 return
+        # Windows layout
+        sp_win = venv_dir / "Lib" / "site-packages"
+        if sp_win.is_dir():
+            print(f"Bundling dependencies from repo .venv (Windows) {sp_win}...")
+            shutil.copytree(
+                sp_win,
+                target_sp,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
+            )
+            return
 
-    # 2. If running inside a virtualenv, bundle from active environment
+    # 2. If running inside a virtualenv, bundle from active virtual environment
     if sys.prefix != sys.base_prefix:
         import site
         try:
@@ -162,9 +202,29 @@ def bundle_runtime_dependencies() -> None:
                 shutil.copytree(
                     sp,
                     target_sp,
+                    dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
                 )
                 return
+
+    # 3. Active Python environment site-packages (hosted toolcache or system Python)
+    import site
+    try:
+        candidate_dirs = [Path(p) for p in site.getsitepackages() if "site-packages" in p]
+    except Exception:
+        candidate_dirs = []
+    for sp in candidate_dirs:
+        if sp.is_dir():
+            print(f"Bundling dependencies from active Python environment {sp}...")
+            shutil.copytree(
+                sp,
+                target_sp,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
+            )
+            return
+
+    print("Warning: No site-packages found to bundle into macOS app package.")
 
 
 

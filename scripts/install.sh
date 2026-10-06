@@ -198,24 +198,33 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${GREEN}==>${NC} Building native macOS Application Bundle..."
 if [ -f "scripts/build_macos_app.py" ]; then
-    "${VENV_PYTHON}" scripts/build_macos_app.py || true
+    "${VENV_PYTHON}" scripts/build_macos_app.py --bundle-runtime || true
 fi
 
-# If Voice Flow.app was created, offer to link or copy to /Applications
-if [ -d "dist/Voice Flow.app" ]; then
+# If AI Productivity Flow.app was created, offer to link or copy to /Applications
+APP_NAME="AI Productivity Flow.app"
+APP_SOURCE=""
+if [ -d "dist/AI Productivity Flow.app" ]; then
+    APP_SOURCE="dist/AI Productivity Flow.app"
+elif [ -d "dist/Voice Flow.app" ]; then
+    APP_SOURCE="dist/Voice Flow.app"
+    APP_NAME="Voice Flow.app"
+fi
+
+if [ -n "$APP_SOURCE" ]; then
     if [ -w "/Applications" ]; then
-        echo -e "${GREEN}==>${NC} Installing Voice Flow.app into /Applications..."
-        rm -rf "/Applications/Voice Flow.app" 2>/dev/null || true
-        cp -R "dist/Voice Flow.app" "/Applications/"
-        xattr -cr "/Applications/Voice Flow.app" 2>/dev/null || true
-        APP_PATH="/Applications/Voice Flow.app"
+        echo -e "${GREEN}==>${NC} Installing ${APP_NAME} into /Applications..."
+        rm -rf "/Applications/${APP_NAME}" 2>/dev/null || true
+        cp -R "${APP_SOURCE}" "/Applications/"
+        xattr -cr "/Applications/${APP_NAME}" 2>/dev/null || true
+        APP_PATH="/Applications/${APP_NAME}"
     else
         mkdir -p "${HOME}/Applications"
-        echo -e "${GREEN}==>${NC} Installing Voice Flow.app into ~/Applications..."
-        rm -rf "${HOME}/Applications/Voice Flow.app" 2>/dev/null || true
-        cp -R "dist/Voice Flow.app" "${HOME}/Applications/"
-        xattr -cr "${HOME}/Applications/Voice Flow.app" 2>/dev/null || true
-        APP_PATH="${HOME}/Applications/Voice Flow.app"
+        echo -e "${GREEN}==>${NC} Installing ${APP_NAME} into ~/Applications..."
+        rm -rf "${HOME}/Applications/${APP_NAME}" 2>/dev/null || true
+        cp -R "${APP_SOURCE}" "${HOME}/Applications/"
+        xattr -cr "${HOME}/Applications/${APP_NAME}" 2>/dev/null || true
+        APP_PATH="${HOME}/Applications/${APP_NAME}"
     fi
     echo -e "  ${GREEN}[OK]${NC} Installed: ${APP_PATH}"
 fi
@@ -236,7 +245,7 @@ echo -e "  2. ${BOLD}Accessibility${NC}     — to paste polished text into your
 echo -e "  3. ${BOLD}Input Monitoring${NC}  — to detect the global push-to-talk triggers"
 echo ""
 echo -e "${BOLD}Running AI Productivity Flow:${NC}"
-echo -e "  • ${BOLD}From Finder / Spotlight:${NC} Open ${CYAN}Voice Flow.app${NC}"
+echo -e "  • ${BOLD}From Finder / Spotlight:${NC} Open ${CYAN}AI Productivity Flow.app${NC}"
 echo -e "  • ${BOLD}From Terminal:${NC}          ${CYAN}${VENV_PYTHON} -m voice_flow.main${NC}"
 echo -e "  • ${BOLD}Web Dashboard:${NC}          ${CYAN}http://127.0.0.1:8991${NC}"
 echo ""
@@ -246,7 +255,7 @@ echo ""
 
 if [ "$SHOULD_LAUNCH" -eq 1 ]; then
     if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
-        echo -e "${GREEN}==>${NC} Launching Voice Flow.app..."
+        echo -e "${GREEN}==>${NC} Launching AI Productivity Flow.app..."
         open "$APP_PATH"
     else
         echo -e "${GREEN}==>${NC} Launching from terminal..."

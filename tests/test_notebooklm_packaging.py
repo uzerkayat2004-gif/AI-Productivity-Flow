@@ -32,7 +32,7 @@ def test_private_runtime_scripts_precede_personal_experiment(monkeypatch, tmp_pa
     monkeypatch.delenv("NOTEBOOKLM_MCP", raising=False)
     monkeypatch.setattr(config.sys, "executable", str(active_python))
     monkeypatch.setattr("voice_flow.runtime_env.runtime_root", lambda: tmp_path / "runtime")
-    monkeypatch.setattr("voice_flow.storage.StorageEngine", lambda: _EmptySettings())
+    monkeypatch.setattr("voice_flow.storage.storage", _EmptySettings(), raising=False)
     monkeypatch.setattr(config, "ISOLATED_CLI_PATH", tmp_path / "personal" / "notebooklm.exe")
     monkeypatch.setattr(config, "ISOLATED_MCP_PATH", tmp_path / "personal" / "notebooklm-mcp.exe")
 
@@ -64,7 +64,7 @@ def test_active_python_environment_is_used_when_no_private_runtime(monkeypatch, 
     monkeypatch.delenv("NOTEBOOKLM_MCP", raising=False)
     monkeypatch.setattr(config.sys, "executable", str(python))
     monkeypatch.setattr("voice_flow.runtime_env.runtime_root", lambda: None)
-    monkeypatch.setattr("voice_flow.storage.StorageEngine", lambda: _EmptySettings())
+    monkeypatch.setattr("voice_flow.storage.storage", _EmptySettings(), raising=False)
     monkeypatch.setattr(config, "ISOLATED_CLI_PATH", tmp_path / "personal" / "notebooklm.exe")
     monkeypatch.setattr(config, "ISOLATED_MCP_PATH", tmp_path / "personal" / "notebooklm-mcp.exe")
 

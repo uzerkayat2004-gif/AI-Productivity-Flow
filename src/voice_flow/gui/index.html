@@ -38,7 +38,7 @@
   <!-- Usability redesign scoped styles - must load AFTER all other sheets so
        .flow-ux / .flow-picker scoped rules win cascade ties intentionally. -->
   <link rel="stylesheet" href="usability.css?v=20260912-dialog-10">
-  <link rel="stylesheet" href="studio.css?v=20261005-audiopolish">
+  <link rel="stylesheet" href="studio.css?v=20261006-dictionary-auto">
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
   <link rel="stylesheet" href="workspace-ui.css?v=20261005-audiopolish">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
@@ -562,9 +562,10 @@
           <span class="dict-studio-countpill" role="status" aria-live="polite"><span class="dict-count-dot" aria-hidden="true"></span> <span id="dict-counter-badge">0 terms</span></span>
         </div>
 
-        <p class="dict-page-intro">Give names, phrases, and shortcuts the spelling you want.</p>
+        <p class="dict-page-intro">Useful names and technical terms are added automatically after repeated use. This works with polishing on or off. Manual add is optional.</p>
         <div class="dict-add-card dict-studio-teach">
           <input type="text" id="dictionary-add-input" class="flow-input dict-add-input" aria-label="Word, phrase, or shortcut" placeholder="Add a word or phrase…" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();addDictionaryWordFromInput();}">
+          <input type="text" id="dictionary-heard-as-input" class="flow-input dict-add-heard-as" aria-label="Heard as (optional)" placeholder="Heard as (optional)" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();addDictionaryWordFromInput();}">
           <select id="dictionary-casing" class="flow-input dict-add-select" aria-label="Preferred capitalization">
             <option value="keep">As typed</option>
             <option value="upper">ALL CAPS</option>
@@ -576,7 +577,7 @@
 
         <div class="dict-list-card dict-studio-library">
           <div class="dict-list-head">
-            <h2 class="flow-section-title" style="margin: 0;">Your words</h2>
+            <h2 class="flow-section-title" style="margin: 0;">Your words <span id="dict-active-count" class="dict-section-count">0</span></h2>
             <div class="dict-search-wrap">
               <span aria-hidden="true" class="dict-search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
               <input type="search" id="dictionary-search-input" class="flow-input dict-search" placeholder="Search…" aria-label="Search your words" oninput="filterDictionaryChips()">
@@ -585,7 +586,6 @@
           <div class="dict-word-rows dict-capsules-container" id="dictionary-chips" aria-live="polite"></div>
         </div>
 
-        <!-- Auto-learned words are accepted silently in the background -->
       </section>
 
 
@@ -3601,8 +3601,8 @@
   <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
 
   <script src="provider-logos.js?v=20260913-icons-all"></script>
-  <script src="app.js?v=20261005-audiopolish"></script>
-  <script src="video-flow.js?v=20261005_restore"></script>
+  <script src="app.js?v=20261006-dictionary-auto-final-nlm-recovery"></script>
+  <script src="video-flow.js?v=20261006-nlm-recovery"></script>
   <script src="splash.js?v=20260913-cinematic-studio"></script>
 </body>
 </html>

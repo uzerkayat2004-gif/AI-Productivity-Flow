@@ -28,6 +28,16 @@ REQUIRED_SESSION_COOKIES: tuple[str, ...] = (
 )
 
 
+def _app_settings_storage():
+    """Return the current app storage singleton after following account switches."""
+    from voice_flow.storage import storage
+
+    repoint = getattr(storage, "repoint_if_needed", None)
+    if getattr(storage, "is_global_singleton", False) and callable(repoint):
+        repoint()
+    return storage
+
+
 def get_profiles_dir() -> Path:
     """Return the root directory for NotebookLM profiles.
 
@@ -446,8 +456,7 @@ def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | No
             return path
 
     try:
-        from voice_flow.storage import StorageEngine
-        storage = StorageEngine()
+        storage = _app_settings_storage()
         stored = storage.get_setting("video_flow_notebooklm_cli")
         if stored:
             path = Path(stored).expanduser().resolve()
@@ -492,8 +501,7 @@ def resolve_notebooklm_profile(explicit_profile: str | None = None) -> str:
         candidate = str(explicit_profile).strip()
     else:
         try:
-            from voice_flow.storage import StorageEngine
-            storage = StorageEngine()
+            storage = _app_settings_storage()
             stored = storage.get_setting("video_flow_notebooklm_profile")
             if stored and str(stored).strip():
                 candidate = str(stored).strip()
@@ -529,8 +537,7 @@ def resolve_notebooklm_mcp(explicit_path: Path | str | None = None) -> Path | No
             return path
 
     try:
-        from voice_flow.storage import StorageEngine
-        storage = StorageEngine()
+        storage = _app_settings_storage()
         stored = storage.get_setting("video_flow_notebooklm_mcp")
         if stored:
             path = Path(stored).expanduser().resolve()

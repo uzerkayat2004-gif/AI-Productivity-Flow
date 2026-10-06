@@ -13,6 +13,7 @@ import re
 import threading
 
 from voice_flow.storage import storage
+from voice_flow.vocabulary_learning import is_noise_variant
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,12 @@ _STOPWORDS = {
     "ok", "okay", "yes", "yeah", "no",
     "is", "are", "was", "were", "be", "been",
 }
+
+# Keep vocabulary prompts short enough to be useful to both Whisper and cloud
+# providers. A single malformed/very long correction target must not crowd out
+# otherwise useful saved terms.
+_STT_HINT_MAX_CHARS = 500
+_STT_HINT_MAX_TERM_CHARS = 96
 
 # A saved product or proper name such as ``HyperKube`` has an unambiguous
 # spoken form ("Hyper Kube").  Speech engines commonly insert that space,
@@ -140,7 +147,7 @@ def _combined_pattern(rules: tuple[_Rule, ...]) -> tuple[re.Pattern[str], tuple[
 
 
 class DictionaryEngine:
-    """Apply explicit dictionary terms and corrections exactly once."""
+    """Apply active saved and automatically learned vocabulary exactly once."""
 
     def __init__(self, store=storage) -> None:
         self.store = store
@@ -175,8 +182,8 @@ class DictionaryEngine:
 
     def _load_source_words(self) -> list[str]:
         # Auto-captured entries are intentionally excluded from the active
-        # vocabulary. They were learned from polished text and are not user
-        # authorization to rewrite future dictation.
+        # vocabulary. They lack the repeated raw evidence required for
+        # automatic activation; qualifying rows are promoted by storage.
         words: list[str] = []
         loaded = False
         last_error: Exception | None = None
@@ -190,8 +197,8 @@ class DictionaryEngine:
                 log.exception("Could not load dictionary entries")
         # An empty explicit dictionary is a valid, authoritative result.  Do
         # not fall through to the legacy snapshot in that case: snapshots can
-        # contain Auto-Captured metadata, which must remain visible to the UI
-        # but must never become an active rewrite rule.
+        # contain unqualified Auto-Captured metadata, which must never become
+        # an active rewrite rule merely because it was stored.
         if not loaded:
             snapshot = getattr(self.store, "get_dictionary_snapshot", None)
             if snapshot is not None:
@@ -336,35 +343,7 @@ class DictionaryEngine:
         the prompt (contextual vocabulary pack, spec §33); global terms fill
         the remaining bounded slots.
         """
-        self._ensure_loaded()
-        terms: list[str] = []
-        seen: set[str] = set()
-
-        def _add(term: str) -> None:
-            key = term.casefold()
-            if key and key not in seen and term not in terms:
-                seen.add(key)
-                terms.append(term)
-
-        if category:
-            try:
-                for term in storage.get_contextual_vocabulary(category, limit=12):
-                    _add(term)
-            except Exception:
-                log.exception("Could not load contextual vocabulary for %s", category)
-
-        for rule in self._rules:
-            if rule.trigger.casefold() in _STOPWORDS or len(rule.trigger) < 2:
-                continue
-            _add(rule.trigger)
-        for rule in self._correction_rules:
-            _add(rule.replacement)
-        # Prefer longer technical phrases over arbitrary alphabetical rows.
-        # Contextual (category-tagged) terms keep their head-of-list priority.
-        contextual = terms[:12] if category else []
-        global_terms = terms[len(contextual):] if category else terms
-        global_terms = sorted(global_terms, key=lambda term: (-len(term), term.casefold()))
-        terms = (contextual + global_terms)[:40]
+        terms = self._build_stt_hint_terms(category, limit=40)
         if not terms:
             return "Clear dictation, accurate spelling, proper names."
         prompt = "Dictionary terms: " + ", ".join(terms) + "."
@@ -555,46 +534,84 @@ class DictionaryEngine:
         """Bounded terms for cloud STT biasing: contextual pack, explicit
         terms, and correction targets — the exact spellings the provider
         should hear (spec §33)."""
+        return self._build_stt_hint_terms(category, limit=limit)
+
+    def _build_stt_hint_terms(self, category: str | None, limit: int) -> list[str]:
+        """Return bounded canonical vocabulary and correction targets.
+
+        Build explicit terms from the stored rows instead of ``_rules``:
+        that rule set also contains snippet triggers and generated spoken-space
+        aliases, neither of which should bias recognition. Category lookup is
+        scoped to this engine's store and constrained to the same explicit
+        canonical terms.
+        """
         self._ensure_loaded()
+        if limit <= 0:
+            return []
+
+        canonical_by_key: dict[str, str] = {}
+        for raw in self.words:
+            trigger, expansion = _split_entry(str(raw).strip())
+            if expansion is not None or not trigger:
+                continue
+            key = trigger.casefold()
+            if len(trigger) < 2 or key in _STOPWORDS or len(trigger) > _STT_HINT_MAX_TERM_CHARS:
+                continue
+            canonical_by_key.setdefault(key, trigger)
+
+        contextual: list[str] = []
+        if category:
+            getter = getattr(self.store, "get_contextual_vocabulary", None)
+            if getter is not None:
+                try:
+                    try:
+                        category_words = getter(category, limit=max(limit, 12))
+                    except TypeError:
+                        category_words = getter(category)
+                    for raw in category_words:
+                        key = str(raw).strip().casefold()
+                        term = canonical_by_key.get(key)
+                        if term and term not in contextual:
+                            contextual.append(term)
+                except Exception:
+                    log.exception("Could not load contextual vocabulary for %s", category)
+
+        global_terms = sorted(canonical_by_key.values(), key=lambda term: (-len(term), term.casefold()))
+        corrections = sorted(
+            (rule.replacement for rule in self._correction_rules),
+            key=lambda term: (-len(term), term.casefold()),
+        )
+
         terms: list[str] = []
         seen: set[str] = set()
-
-        def _add(term: str) -> None:
-            key = term.casefold()
-            if len(term) >= 3 and key not in _STOPWORDS and key not in seen:
-                seen.add(key)
-                terms.append(term)
-
-        if category:
-            try:
-                for term in storage.get_contextual_vocabulary(category, limit=8):
-                    _add(term)
-            except Exception:
-                pass
-        for rule in self._rules:
-            _add(rule.trigger)
-        for rule in self._correction_rules:
-            _add(rule.replacement)
-        return terms[:limit]
+        used_chars = 0
+        # Contextual terms lead, then correction targets, then the remaining
+        # explicit vocabulary. This keeps corrections in the bounded prefix.
+        for term in contextual + corrections + global_terms:
+            cleaned = str(term).strip()
+            key = cleaned.casefold()
+            if (
+                not cleaned
+                or len(cleaned) > _STT_HINT_MAX_TERM_CHARS
+                or len(cleaned) < 2
+                or key in _STOPWORDS
+                or key in seen
+                or is_noise_variant(cleaned)
+            ):
+                continue
+            separator_chars = 2 if terms else 0  # comma and space, plus prompt period budget
+            if used_chars + separator_chars + len(cleaned) > _STT_HINT_MAX_CHARS - 1:
+                continue
+            terms.append(cleaned)
+            seen.add(key)
+            used_chars += separator_chars + len(cleaned)
+            if len(terms) >= limit:
+                break
+        return terms
 
     def get_contextual_vocabulary(self, category: str | None = None, limit: int = 30) -> list[str]:
-        """Bounded vocabulary pack for STT hinting: global terms plus the
-        category pack when the engine supports contextual hints (spec §33)."""
-        self._ensure_loaded()
-        global_terms: list[str] = []
-        for rule in self._rules:
-            if rule.trigger.casefold() not in _STOPWORDS and len(rule.trigger) >= 3:
-                global_terms.append(rule.trigger)
-        terms = sorted(global_terms, key=lambda t: (-len(t), t.casefold()))[:limit]
-        if category:
-            try:
-                extras = storage.get_contextual_vocabulary(category, limit=limit // 2)
-                for term in extras:
-                    if term not in terms:
-                        terms.append(term)
-            except Exception:
-                pass
-        return terms[: limit + (limit // 2)]
+        """Compatibility alias for bounded canonical contextual STT hints."""
+        return self._build_stt_hint_terms(category, limit=limit)
 
 
 # Singleton instance

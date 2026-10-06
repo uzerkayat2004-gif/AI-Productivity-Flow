@@ -5,6 +5,7 @@ import logging
 import os
 import socket
 import ssl
+import tempfile
 import threading
 import time
 import urllib.error
@@ -360,6 +361,55 @@ def _handle_download_error(
         }
 
 
+def _maybe_repair_nemotron_tokenizer(part_file: Path, model_id: str) -> bool:
+    """Add the pinned English Nemotron tokenizer metadata without risking the download.
+
+    The small tokenizer range is fetched only after the complete GGUF has been
+    downloaded. Repair is optional: every failure leaves ``part_file`` intact so
+    the original model can still be installed and used with post-decode fixes.
+    """
+    if model_id != "nvidia/nemotron-speech-streaming-en-0.6b":
+        return False
+
+    try:
+        from voice_flow.nemotron_tokenizer import (
+            fetch_official_nemotron_tokenizer_model,
+            prepare_tokenizer_metadata_copy,
+            read_gguf_metadata,
+        )
+
+        metadata = read_gguf_metadata(part_file).metadata
+        if metadata.get("asr.tokenizer.type") != "sentencepiece_bpe":
+            log.info("[DOWNLOAD] Skipping Nemotron tokenizer repair: GGUF tokenizer type is unsupported")
+            return False
+        if metadata.get("asr.tokenizer.spm_model"):
+            log.info("[DOWNLOAD] Nemotron GGUF already embeds its SentencePiece model")
+            return False
+
+        tokenizer_model = fetch_official_nemotron_tokenizer_model()
+        if tokenizer_model is None:
+            log.warning("[DOWNLOAD] Could not fetch the pinned Nemotron tokenizer; keeping original GGUF")
+            return False
+
+        # Keep temporary files alongside the .part file so publishing the
+        # repaired copy is an atomic same-volume replace. The tokenizer is tiny;
+        # only the verified repair copy adds temporary model-sized disk use.
+        with tempfile.TemporaryDirectory(prefix="nemotron-tokenizer-", dir=part_file.parent) as tmp:
+            temp_dir = Path(tmp)
+            tokenizer_path = temp_dir / "tokenizer.model"
+            repaired_path = temp_dir / "repaired.gguf"
+            tokenizer_path.write_bytes(tokenizer_model)
+            result = prepare_tokenizer_metadata_copy(part_file, tokenizer_path, repaired_path)
+            if not result.added_metadata or result.output_path != repaired_path:
+                raise ValueError("Tokenizer repair did not produce a validated metadata copy")
+            repaired_path.replace(part_file)
+        log.info("[DOWNLOAD] Added verified SentencePiece metadata for Nemotron word boosting")
+        return True
+    except Exception as exc:
+        log.warning("[DOWNLOAD] Optional Nemotron tokenizer repair failed; keeping original GGUF: %s", exc)
+        return False
+
+
 def _download_worker(
     spec: dict[str, Any],
     target_file: Path,
@@ -488,6 +538,11 @@ def _download_worker(
                 f"Incomplete download: received {downloaded_bytes} of {total_bytes} bytes "
                 f"({format_mb(downloaded_bytes)} MB of {format_mb(total_bytes)} MB)"
             )
+
+        # Nemotron's native word boosting requires SentencePiece metadata that
+        # is missing from older converted GGUFs. Do this only for a complete
+        # English Nemotron download, never during model loading or dictation.
+        _maybe_repair_nemotron_tokenizer(part_file, model_id)
 
         # Atomic replacement: replace temporary .part with final destination file
         if target_file.exists():

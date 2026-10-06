@@ -68,6 +68,8 @@ def test_verify_online_generic_cli_failure_is_transient_and_not_cached_as_expire
 @pytest.mark.parametrize("error,kind", [
     ("Token fetch failed: Authentication expired or invalid.", "auth"),
     ("Token fetch failed: getaddrinfo failed", "network"),
+    ("Token fetch failed: CSRF token not found in HTML. Final URL: https://notebook.google.com/ This may indicate the page structure has changed.", "token_extraction"),
+    ("Access denied: NotebookLM is not available for this account; CSRF token not found.", "cli"),
 ])
 def test_pinned_cli_nested_diagnostic_error_is_classified(monkeypatch, tmp_path, error, kind):
     import json
@@ -84,6 +86,35 @@ def test_pinned_cli_nested_diagnostic_error_is_classified(monkeypatch, tmp_path,
     assert result["failure_kind"] == kind
     assert result["definitive"] is (kind == "auth")
     assert result["authenticated"] is (False if kind == "auth" else None)
+    if kind == "token_extraction":
+        assert "CSRF token not found" in result["details_message"]
+        assert "https://" not in result["details_message"]
+        assert result["status"] == "transient_error"
+        assert "restoring the saved connection" in result["message"]
+
+
+@pytest.mark.parametrize("message", [
+    "Session ID not found in HTML",
+    "Failed to extract 'SNlM0e' from NotebookLM HTML response",
+    "Failed to extract WIZ token from session page",
+])
+def test_shared_token_extraction_classifier_recognizes_precise_missing_fields(message):
+    from voice_flow.video_flow_engine.notebooklm.login_flow import is_token_extraction_error
+
+    assert is_token_extraction_error(message)
+
+
+@pytest.mark.parametrize("message", [
+    "CSRF token not found; getaddrinfo failed",
+    "Access denied; CSRF token not found",
+    "NotebookLM not available in this region; session token not found",
+    "Unusual traffic CAPTCHA; WIZ token not found",
+    "Token fetch failed with an unknown runtime error",
+])
+def test_shared_token_extraction_classifier_rejects_other_failures(message):
+    from voice_flow.video_flow_engine.notebooklm.login_flow import is_token_extraction_error
+
+    assert not is_token_extraction_error(message)
 
 
 def test_verify_online_success_message_containing_connection_stays_authenticated(
@@ -205,6 +236,167 @@ def test_definite_refresh_failure_recovers_only_from_matching_persistent_browser
     }]
 
 
+def test_token_extraction_failure_recovers_once_and_requires_online_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: "person@example.com")
+    checks = iter([
+        {"authenticated": None, "definitive": True, "failure_kind": "token_extraction",
+         "status": "transient_error", "details_message": "CSRF token not found in HTML. Final URL: <redacted URL>"},
+        {"authenticated": True, "definitive": True, "status": "ok"},
+    ])
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: next(checks))
+    recoveries: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        browser_sync, "refresh_from_persistent_browser",
+        lambda **kwargs: recoveries.append(kwargs) or {"success": True, "email": "person@example.com"},
+    )
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["ok"] is True
+    assert result["classification"] == "authenticated"
+    assert recoveries == [{
+        "profile": "renewal-test", "expected_email": "person@example.com", "timeout_seconds": 35
+    }]
+
+
+def test_token_extraction_failure_without_trusted_identity_stays_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: None)
+    verification = {"authenticated": None, "definitive": True, "failure_kind": "token_extraction",
+                    "status": "transient_error", "details_message": "CSRF token not found in HTML. Final URL: <redacted URL>"}
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: verification)
+    monkeypatch.setattr(browser_sync, "refresh_from_persistent_browser", lambda **kwargs: pytest.fail("unknown identity must not open a browser"))
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["ok"] is False
+    assert result["classification"] == "transient_error"
+    assert "CSRF token not found" in result["error"]
+    assert result["verification"] == verification
+
+
+def test_token_extraction_recovery_failure_preserves_specific_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: "person@example.com")
+    verification = {"authenticated": None, "definitive": True, "failure_kind": "token_extraction",
+                    "status": "transient_error", "details_message": "CSRF token not found in HTML. Final URL: <redacted URL>"}
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: verification)
+    monkeypatch.setattr(
+        browser_sync, "refresh_from_persistent_browser",
+        lambda **kwargs: {"success": False, "reason": "capture_failed"},
+    )
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["ok"] is False
+    assert "CSRF token not found" in result["error"]
+    assert result["browser_recovery"]["reason"] == "capture_failed"
+
+
+@pytest.mark.parametrize("verification", [
+    {"authenticated": None, "definitive": False, "failure_kind": "network", "status": "network_error"},
+    {"authenticated": None, "definitive": False, "failure_kind": "cli", "status": "transient_error"},
+])
+def test_transient_network_or_cli_failure_never_opens_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verification
+):
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: "person@example.com")
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: verification)
+    monkeypatch.setattr(browser_sync, "refresh_from_persistent_browser", lambda **kwargs: pytest.fail("transient failures must not open a browser"))
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["ok"] is False
+    assert result["classification"] == "transient_error"
+    assert result["browser_recovery"] is None
+
+
+def test_access_gate_diagnostic_with_missing_token_marker_never_opens_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import json
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    payload = {"status": "error", "details": {"error": (
+        "Access denied: NotebookLM is not available in this region; CSRF token not found."
+    )}}
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: "person@example.com")
+    monkeypatch.setattr(
+        login_flow.subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout=json.dumps(payload), stderr=""),
+    )
+    monkeypatch.setattr(browser_sync, "refresh_from_persistent_browser", lambda **kwargs: pytest.fail("access gates must not open a browser"))
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["ok"] is False
+    assert result["verification"]["failure_kind"] == "cli"
+    assert result["browser_recovery"] is None
+
+
+def test_stale_token_extraction_verdict_does_not_start_browser_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from voice_flow.video_flow_engine.notebooklm import browser_sync, login_flow
+
+    fake_cli = tmp_path / "notebooklm.exe"
+    fake_cli.touch()
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: fake_cli)
+    monkeypatch.setattr(login_flow, "_login_log_path", lambda: tmp_path / "login.log")
+    monkeypatch.setattr(login_flow, "_run_login_once", lambda *args, **kwargs: (2, "exit 2"))
+    monkeypatch.setattr(login_flow, "_storage_email", lambda profile=None: "person@example.com")
+
+    def stale_verification(**kwargs):
+        login_flow.note_session_refreshed("renewal-test")
+        return {"authenticated": None, "definitive": True, "failure_kind": "token_extraction",
+                "status": "transient_error", "details_message": "CSRF token not found in HTML"}
+
+    monkeypatch.setattr(login_flow, "verify_online", stale_verification)
+    monkeypatch.setattr(browser_sync, "refresh_from_persistent_browser", lambda **kwargs: pytest.fail("stale generation must not recover"))
+
+    result = login_flow.self_heal(profile="renewal-test", timeout=12)
+
+    assert result["stale"] is True
+    assert result["error"] == "stale_operation"
+
+
 def test_reset_epoch_keeps_new_login_state_when_old_refresh_finishes(monkeypatch: pytest.MonkeyPatch):
     from voice_flow.video_flow_engine.notebooklm import keepalive
 
@@ -274,7 +466,7 @@ def test_storage_email_prefers_exact_profile_identity_over_stale_global_setting(
             assert key == "video_flow_notebooklm_email"
             return "stale-test@gmail.com"
 
-    monkeypatch.setattr("voice_flow.storage.StorageEngine", Settings)
+    monkeypatch.setattr("voice_flow.storage.storage", Settings(), raising=False)
 
     assert login_flow._storage_email("profile-a") == "actual@example.com"
 
@@ -300,7 +492,7 @@ def test_storage_email_falls_back_when_profile_identity_is_missing_or_placeholde
             assert key == "video_flow_notebooklm_email"
             return "fallback@example.com"
 
-    monkeypatch.setattr("voice_flow.storage.StorageEngine", Settings)
+    monkeypatch.setattr("voice_flow.storage.storage", Settings(), raising=False)
 
     assert login_flow._storage_email("profile-a") == "fallback@example.com"
 
@@ -323,7 +515,7 @@ def test_storage_email_keeps_profile_identities_isolated(
         def get_setting(self, key):
             return "stale-global@example.com"
 
-    monkeypatch.setattr("voice_flow.storage.StorageEngine", Settings)
+    monkeypatch.setattr("voice_flow.storage.storage", Settings(), raising=False)
 
     assert login_flow._storage_email("profile-a") == "a@example.com"
     assert login_flow._storage_email("profile-b") == "b@example.com"

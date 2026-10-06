@@ -30,6 +30,17 @@ logger = logging.getLogger(__name__)
 _HIDE_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
+def _safe_token_error_detail(value: Any) -> str:
+    """Keep useful extraction diagnostics while dropping URL queries/fragments."""
+    import re
+
+    return re.sub(
+        r"https?://[^\s]+",
+        lambda match: match.group(0).split("?", 1)[0].split("#", 1)[0],
+        str(value or ""),
+    )
+
+
 def _default_runner(command: Sequence[str], timeout: float | None = 60.0) -> subprocess.CompletedProcess[str]:
     kwargs: dict[str, Any] = {
         "capture_output": True,
@@ -116,6 +127,33 @@ class NotebookLMMcpClient:
 
         if code != 0:
             err_msg = stderr.strip() or stdout.strip() or f"CLI returned exit code {code}"
+            details = data.get("details") if isinstance(data, dict) else None
+            details_error = details.get("error") if isinstance(details, dict) else None
+            if isinstance(details_error, dict):
+                details_error = details_error.get("message") or details_error.get("details")
+            diagnostic = "\n".join(str(value) for value in (err_msg, details_error) if value)
+            from .login_flow import is_token_extraction_error
+            if is_token_extraction_error(diagnostic):
+                logger.info("Encountered NotebookLM token-extraction failure, attempting account-bound recovery...")
+                heal_res: dict[str, Any] = {}
+                if retry_on_auth_error:
+                    try:
+                        from .login_flow import self_heal
+                        heal_res = self_heal(profile=self.profile)
+                        if heal_res.get("ok"):
+                            return self._invoke_cli(args, timeout=timeout, retry_on_auth_error=False)
+                    except Exception as exc:
+                        logger.debug("Failed to recover NotebookLM token extraction: %s", exc)
+                raise NotebookLMVideoError(
+                    "auth_unavailable",
+                    "NotebookLM could not retrieve its session token; try again.",
+                    payload={
+                        "classification": "token_extraction",
+                        "retryable": True,
+                        "details_message": _safe_token_error_detail(details_error or err_msg),
+                        "recovery_classification": heal_res.get("classification"),
+                    },
+                )
             # Check for auth expired error and auto-heal once
             is_auth_error = any(tok in err_msg.lower() for tok in ("auth_expired", "session expired", "psidts", "re-authenticate", "login"))
             if is_auth_error and retry_on_auth_error:

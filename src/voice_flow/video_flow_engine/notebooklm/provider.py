@@ -713,6 +713,14 @@ def _text(*values: Any) -> str:
     return ""
 
 
+def _safe_token_error_detail(value: Any) -> str:
+    """Keep useful token-extraction diagnostics while dropping URL queries/fragments."""
+    def strip_sensitive_url(match: re.Match[str]) -> str:
+        return match.group(0).split("?", 1)[0].split("#", 1)[0]
+
+    return re.sub(r"https?://[^\s]+", strip_sensitive_url, str(value or ""))
+
+
 def _decode_json(raw: str) -> Any:
     text = str(raw or "").strip()
     if not text:
@@ -1124,6 +1132,31 @@ class NotebookLMVideoProvider:
         except NotebookLMVideoError:
             if code:
                 raw_err = stderr.strip() or stdout.strip() or "CLI failed"
+                from .login_flow import is_token_extraction_error
+                if is_token_extraction_error(raw_err):
+                    heal: dict[str, Any] = {}
+                    if retry_on_auth_expired:
+                        try:
+                            from .login_flow import self_heal
+                            heal = self_heal(profile=self.profile)
+                            if heal.get("ok"):
+                                self.sync_storage_state(force=True)
+                                self._check_cancelled(self._active_job_id)
+                                return self._invoke(
+                                    args, timeout=timeout, retry_on_auth_expired=False,
+                                )
+                        except NotebookLMVideoError:
+                            raise
+                        except Exception:
+                            pass
+                    raise NotebookLMVideoError(
+                        "auth_unavailable",
+                        "NotebookLM could not retrieve its session token; try again.",
+                        payload={
+                            "classification": "token_extraction", "retryable": True,
+                            "details_message": _safe_token_error_detail(raw_err),
+                        },
+                    )
                 if _is_auth_expired_error("CLI_ERROR", raw_err):
                     heal: dict[str, Any] = {}
                     if retry_on_auth_expired:
@@ -1132,7 +1165,10 @@ class NotebookLMVideoProvider:
                             heal = self_heal(profile=self.profile)
                             if heal.get("ok"):
                                 self.sync_storage_state(force=True)
+                                self._check_cancelled(self._active_job_id)
                                 return self._invoke(args, timeout=timeout, retry_on_auth_expired=False)
+                        except NotebookLMVideoError:
+                            raise
                         except Exception:
                             pass
                     if heal.get("classification") == "transient_error":
@@ -1146,10 +1182,18 @@ class NotebookLMVideoProvider:
         if code:
             data = _mapping(payload)
             nested_error = _nested(data, "error")
+            details = _nested(data, "details")
+            details_error = details.get("error")
+            details_error_message = (
+                _text(details_error.get("message"), details_error.get("details"))
+                if isinstance(details_error, Mapping)
+                else str(details_error or "")
+            )
             message = _text(
                 data.get("message"),
                 nested_error.get("message"),
                 data.get("error"),
+                details_error_message,
                 stderr,
                 "NotebookLM CLI failed",
             )
@@ -1159,6 +1203,37 @@ class NotebookLMVideoProvider:
                 data.get("error_code"),
                 "CLI_ERROR",
             )
+            from .login_flow import is_token_extraction_error
+            token_diagnostic = "\n".join(
+                str(value) for value in (
+                    data.get("message"), nested_error.get("message"), data.get("error"),
+                    details_error_message, stderr,
+                ) if value
+            )
+            if is_token_extraction_error(token_diagnostic):
+                heal = {}
+                if retry_on_auth_expired:
+                    try:
+                        from .login_flow import self_heal
+                        heal = self_heal(profile=self.profile)
+                        if heal.get("ok"):
+                            self.sync_storage_state(force=True)
+                            self._check_cancelled(self._active_job_id)
+                            return self._invoke(
+                                args, timeout=timeout, retry_on_auth_expired=False,
+                            )
+                    except NotebookLMVideoError:
+                        raise
+                    except Exception:
+                        pass
+                raise NotebookLMVideoError(
+                    "auth_unavailable",
+                    "NotebookLM could not retrieve its session token; try again.",
+                    payload={
+                        "classification": "token_extraction", "retryable": True,
+                        "details_message": _safe_token_error_detail(details_error_message or stderr or message),
+                    },
+                )
             if _is_auth_expired_error(error_code, message):
                 heal = {}
                 if retry_on_auth_expired:
@@ -1167,7 +1242,10 @@ class NotebookLMVideoProvider:
                         heal = self_heal(profile=self.profile)
                         if heal.get("ok"):
                             self.sync_storage_state(force=True)
+                            self._check_cancelled(self._active_job_id)
                             return self._invoke(args, timeout=timeout, retry_on_auth_expired=False)
+                    except NotebookLMVideoError:
+                        raise
                     except Exception:
                         pass
                 if heal.get("classification") == "transient_error":
@@ -1335,14 +1413,107 @@ class NotebookLMVideoProvider:
         self.sync_storage_state()
 
         if online or test_network:
+            token_recovery_attempted = False
             try:
                 cmd = ["auth", "check"]
                 if test_network:
                     cmd.append("--test")
-                data = _mapping(self._invoke(cmd, timeout=60))
+                try:
+                    data = _mapping(self._invoke(cmd, timeout=60, retry_on_auth_expired=False))
+                except NotebookLMVideoError as exc:
+                    token_failure = (
+                        exc.code == "auth_unavailable"
+                        and isinstance(exc.payload, Mapping)
+                        and exc.payload.get("classification") == "token_extraction"
+                    )
+                    if exc.code not in {"auth_expired", "AUTH"} and not token_failure:
+                        raise
+                    token_recovery_attempted = True
+                    try:
+                        from .login_flow import self_heal
+                        heal = self_heal(profile=self.profile)
+                    except Exception:
+                        heal = {}
+                    if not heal.get("ok"):
+                        if heal.get("classification") == "transient_error":
+                            raise NotebookLMVideoError(
+                                "auth_unavailable",
+                                "NotebookLM connection temporarily unavailable; try again.",
+                                payload={
+                                    "classification": "transient_error",
+                                    "retryable": True,
+                                },
+                            ) from exc
+                        raise
+                    self.sync_storage_state(force=True)
+                    self._check_cancelled(self._active_job_id)
+                    data = _mapping(self._invoke(cmd, timeout=60, retry_on_auth_expired=False))
                 is_ok = _text(data.get("status")).casefold() == "ok"
                 if not is_ok:
+                    details = _nested(data, "details")
+                    details_error = details.get("error")
+                    if isinstance(details_error, Mapping):
+                        details_error = _text(details_error.get("message"), details_error.get("details"))
                     raw_msg = _text(data.get("message"), "NotebookLM profile is not authenticated")
+                    token_diagnostic = "\n".join((raw_msg, str(details_error or "")))
+                    from .login_flow import is_token_extraction_error
+                    if is_token_extraction_error(token_diagnostic):
+                        heal: dict[str, Any] = {}
+                        if not token_recovery_attempted:
+                            token_recovery_attempted = True
+                            try:
+                                from .login_flow import self_heal
+                                heal = self_heal(profile=self.profile)
+                            except Exception:
+                                pass
+                        if heal.get("ok"):
+                            self.sync_storage_state(force=True)
+                            self._check_cancelled(self._active_job_id)
+                            data = _mapping(self._invoke(cmd, timeout=60, retry_on_auth_expired=False))
+                            is_ok = _text(data.get("status")).casefold() == "ok"
+                            if is_ok:
+                                self.backup_storage_state()
+                                return AuthStatus(
+                                    status="ok",
+                                    profile=self.profile,
+                                    storage_path=data.get("storage_path"),
+                                    authenticated=True,
+                                    message="Authenticated successfully",
+                                    details=data,
+                                )
+                            details = _nested(data, "details")
+                            details_error = details.get("error")
+                            if isinstance(details_error, Mapping):
+                                details_error = _text(details_error.get("message"), details_error.get("details"))
+                            raw_msg = _text(data.get("message"), "NotebookLM profile is not authenticated")
+                            token_diagnostic = "\n".join((raw_msg, str(details_error or "")))
+                        if is_token_extraction_error(token_diagnostic):
+                            safe_details_error = _safe_token_error_detail(details_error or raw_msg)
+                            token_details = {
+                                **dict(details),
+                                "error": safe_details_error,
+                                "classification": "token_extraction",
+                                "retryable": True,
+                                "details_message": safe_details_error,
+                            }
+                            if raise_on_error:
+                                raise NotebookLMVideoError(
+                                    "auth_unavailable",
+                                    "NotebookLM could not retrieve its session token; try again.",
+                                    payload={
+                                        "classification": "token_extraction",
+                                        "retryable": True,
+                                        "details": token_details,
+                                    },
+                                )
+                            return AuthStatus(
+                                status="error",
+                                profile=self.profile,
+                                storage_path=data.get("storage_path"),
+                                authenticated=False,
+                                message="NotebookLM could not retrieve its session token; try again.",
+                                details=token_details,
+                            )
                     if _is_auth_expired_error("AUTH", raw_msg):
                         if raise_on_error:
                             raise NotebookLMVideoError("auth_expired", AUTH_EXPIRED_MESSAGE, payload=data)
@@ -1378,12 +1549,19 @@ class NotebookLMVideoProvider:
                     details=data,
                 )
             except NotebookLMVideoError as exc:
-                if exc.code in {"AUTH", "auth_expired"} and not raise_on_error:
+                if exc.code in {"AUTH", "auth_expired", "auth_unavailable"} and not raise_on_error:
+                    token_payload = exc.payload if isinstance(exc.payload, Mapping) else {}
+                    is_token_failure = token_payload.get("classification") == "token_extraction"
                     return AuthStatus(
-                        status="unauthenticated",
+                        status="error" if exc.code == "auth_unavailable" else "unauthenticated",
                         profile=self.profile,
                         authenticated=False,
-                        message=AUTH_EXPIRED_MESSAGE if exc.code == "auth_expired" else str(exc),
+                        message=(
+                            "NotebookLM could not retrieve its session token; try again."
+                            if is_token_failure else
+                            AUTH_EXPIRED_MESSAGE if exc.code == "auth_expired" else str(exc)
+                        ),
+                        details=dict(token_payload),
                     )
                 raise
 

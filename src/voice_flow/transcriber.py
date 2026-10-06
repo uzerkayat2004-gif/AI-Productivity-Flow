@@ -744,15 +744,11 @@ class Transcriber:
         else:
             clean_audio = _apply_noise_gate_and_normalize(audio)
 
-        # Route to Nemotron GGUF engine if active. Nemotron's C ABI options
-        # struct carries speech-context fields and its transcribe() already
-        # accepts a ``vocabulary`` keyword (currently unused inside the
-        # engine, which is outside this change's scope), so dictionary hint
-        # terms are passed here: engines that predate the keyword keep
-        # working via the TypeError retry, and a future engine that wires
-        # speech contexts picks the terms up with no dictation-side change.
-        # Deterministic trigger->replacement post-processing below still
-        # applies on this path, so explicit terms take effect regardless.
+        # Route to Nemotron GGUF engine if active. It applies per-request
+        # speech-context boosts only when the GGUF embeds its SentencePiece
+        # model; older vocab-only GGUFs still receive exact deterministic
+        # dictionary post-processing below. Engines predating the vocabulary
+        # keyword keep working through the TypeError retry.
         if nemotron_engine.is_nemotron_model(requested_model):
             eng = getattr(self, "nemotron_engine", None) or nemotron_engine.get_nemotron_engine(requested_model)
             if eng and eng.is_warm:

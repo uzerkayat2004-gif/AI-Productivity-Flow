@@ -588,8 +588,20 @@ def test_complete_notebooklm_flow_no_switch_no_change_cookies_unbound_regression
 
 def test_start_login_cli_mode_launches_watcher(monkeypatch):
     """Verify start_login with mode='cli' launches the CLI login watcher thread."""
+    import threading
+
     monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
     monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: Path("C:/fake/notebooklm.exe"))
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: {
+        "authenticated": True, "status": "ok", "email": "watcher@example.com",
+    })
+    monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda p, l: 0)
+    monkeypatch.setattr(login_flow, "_prepare_browser_profile", lambda *a, **k: None)
+    with login_flow._STATE_LOCK:
+        login_flow._STATE.update(
+            running=False, mode=None, started_at=None, finished_at=None,
+            success=None, error=None, note=None, durable=None, log_path=None,
+        )
 
     commands = []
     def fake_run_login_once(command, log_path, timeout):
@@ -597,18 +609,24 @@ def test_start_login_cli_mode_launches_watcher(monkeypatch):
         return 0, ""
 
     monkeypatch.setattr(login_flow, "_run_login_once", fake_run_login_once)
-    monkeypatch.setattr(login_flow, "_terminate_stale_login_processes", lambda p, l: 0)
+    real_thread = threading.Thread
+    started_threads = []
+
+    def tracked_thread(*args, **kwargs):
+        worker = real_thread(*args, **kwargs)
+        started_threads.append(worker)
+        return worker
+
+    monkeypatch.setattr(login_flow.threading, "Thread", tracked_thread)
 
     res = login_flow.start_login(profile="video-flow-experiment", mode="cli", browser="chrome")
     assert res["launched"] is True
     assert res["mode"] == "browser"
 
-    import time
-    for _ in range(50):
-        state = login_flow.get_login_state()
-        if not state["running"]:
-            break
-        time.sleep(0.05)
+    assert len(started_threads) == 1
+    started_threads[0].join(timeout=2)
+    assert not started_threads[0].is_alive()
+    assert login_flow.get_login_state()["running"] is False
 
     assert len(commands) >= 1
     assert "login" in commands[0]

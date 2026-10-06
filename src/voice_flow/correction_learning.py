@@ -3,12 +3,14 @@
 The strongest learning signal is a correction: the STT produced one string,
 the user's final output said another. This module extracts cheap, bounded
 (term, variant) observations from a dictation result — pure functions, no
-I/O — so storage can accumulate evidence and later suggest high-confidence
-vocabulary additions to the user (never auto-activate them, spec §34/§36).
+I/O — so storage can automatically activate useful vocabulary and correction
+rules after repeated evidence from separate successful dictations.
 """
 from __future__ import annotations
 
 import re
+
+from voice_flow.vocabulary_learning import is_noise_variant, is_useful_term, strip_protected_spans
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "so", "to", "for", "of",
@@ -38,16 +40,14 @@ _MIN_DISTINCT_CONTENT_TOKENS = 2
 
 
 def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+    return re.findall(r"[^\W_]+", strip_protected_spans(text), flags=re.UNICODE)
 
 
 def _is_candidate_word(word: str) -> bool:
     w = word.lower()
     if len(w) < _MIN_LEN or w in _STOPWORDS or w in _COMMON_WORDS:
         return False
-    # Proper-noun-ish: capitalised, contains an internal capital, or has a
-    # digit/symbol (technical tokens like v2, C++, Node.js).
-    return word[0].isupper() or any(c.isupper() for c in word[1:]) or any(c.isdigit() for c in w)
+    return is_useful_term(word, allow_sentence_initial=True)
 
 
 def _content_tokens(tokens: list[str]) -> set[str]:
@@ -119,6 +119,7 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
                 variant = " ".join(raw_seg).lower()
                 term = final_seg[0]
                 if variant.casefold() != term.casefold() and _is_candidate_word(term) \
+                        and not is_noise_variant(variant) \
                         and len(variant) >= _MIN_LEN and not any(w.lower() in _STOPWORDS for w in raw_seg) \
                         and _has_distinct_context(raw_seg):
                     key = (term.casefold(), variant)
@@ -133,7 +134,7 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
                         continue
                     if not _is_candidate_word(term):
                         continue
-                    if variant.lower() in _STOPWORDS or len(variant) < _MIN_LEN:
+                    if variant.lower() in _STOPWORDS or len(variant) < _MIN_LEN or is_noise_variant(variant):
                         continue
                     key = (term.casefold(), variant)
                     if key not in seen_pairs:

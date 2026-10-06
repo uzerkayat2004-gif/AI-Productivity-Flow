@@ -3,7 +3,7 @@
 ; release/build_windows_release.py (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "AI Productivity Flow"
 #define MyAppExeName "pythonw.exe"
 

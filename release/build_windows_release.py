@@ -129,6 +129,16 @@ def preflight(staging: Path) -> None:
         sys.exit("hf.js syntax check failed under bundled node:\n" + check.stderr[-800:])
     print("hf.js syntax OK under bundled node")
 
+    # Preflight runtime Python dependencies are present and importable.
+    python = str(runtime / "python" / "python.exe")
+    check_deps = subprocess.run(
+        [python, "-c", "import requests, webview, sounddevice, faster_whisper, edge_tts, cryptography, websockets, notebooklm; print('runtime dependencies OK')"],
+        capture_output=True, text=True,
+    )
+    if check_deps.returncode != 0:
+        sys.exit("runtime python dependencies verification failed in staging:\n" + check_deps.stderr[-800:])
+    print("runtime python dependencies verified in staging")
+
 
 def build_installer() -> Path:
     DIST.mkdir(exist_ok=True)

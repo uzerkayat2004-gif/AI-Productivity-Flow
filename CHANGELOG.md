@@ -3,6 +3,24 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## 1.0.1 - 2026-10-06
+
+### Patch Release: Release Integrity, Installer Rebuild & Packaging Audit
+
+This release resolves critical packaging and workflow issues identified in the release-artifact integrity audit:
+
+#### Packaging & Artifact Fixes
+- **Windows Installer Rebuild**: Fixed an issue where the initial Windows installer asset on GitHub retained an obsolete v0.9.0-beta payload due to build staging caching. The Windows installer (`AI-Productivity-Flow-Setup-x64.exe`) has been rebuilt from scratch from verified source with Python 3.12, bundled Faster-Whisper models, and fresh SHA-256 verification.
+- **macOS Bundle Dependency Packaging**: Updated the macOS packaging pipeline to build with `--bundle-runtime`, bundling all required Python packages into `Contents/Resources/runtime/site-packages` and adding architecture validation to support clean macOS machines.
+- **macOS Terminal Installer**: Harmonized target bundle directory in `scripts/install.sh` to correctly match `AI Productivity Flow.app`.
+
+#### Release Workflow & Gate Hardening
+- **Strict Release Gate**: Hardened `.github/workflows/release.yml` to prevent publishing incomplete or outdated releases. The workflow now verifies that all 4 required release artifacts (`Setup-x64.exe`, `Setup-x64.exe.sha256`, `macOS.zip`, `macOS.zip.sha256`) exist, pass SHA-256 integrity validation, and specifically blocks recycling the old v0.9.0-beta binary hash (`aad99333...`).
+- **macOS Smoke Validation**: Added automated archive validation ensuring `Contents/Resources/runtime/site-packages` is non-empty before uploading release artifacts.
+
+#### Core Feature Refinements
+- **Voice Flow Commands & Dictionary**: Integrated automatic dictionary pipeline learning, Nemotron speech tokenizer repair, and enhanced command parsing.
+
 ## 1.0.0 - 2026-10-05
 
 ### First Stable Public Release

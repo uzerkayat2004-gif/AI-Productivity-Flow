@@ -111,6 +111,17 @@ class _RecognizerConfig(ctypes.Structure):
     ]
 
 
+class _SpeechContext(ctypes.Structure):
+    """Per-request phrase boost, matching nemo_speech/asr.h v0.1.0."""
+
+    _fields_ = [
+        ("size", ctypes.c_size_t),
+        ("phrases", ctypes.POINTER(ctypes.c_char_p)),
+        ("phrase_count", ctypes.c_size_t),
+        ("boost", ctypes.c_float),
+    ]
+
+
 class _RecognitionOptions(ctypes.Structure):
     _fields_ = [
         ("size", ctypes.c_size_t),
@@ -122,12 +133,68 @@ class _RecognitionOptions(ctypes.Structure):
         ("verbatim_transcripts", ctypes.c_bool),
         ("profanity_filter", ctypes.c_bool),
         ("stop_history_eou_ms", ctypes.c_int32),
-        ("speech_contexts", ctypes.c_void_p),
+        ("speech_contexts", ctypes.POINTER(_SpeechContext)),
         ("speech_context_count", ctypes.c_size_t),
         ("max_alternatives", ctypes.c_int32),
         ("enable_speaker_diarization", ctypes.c_bool),
         ("max_speaker_count", ctypes.c_int32),
     ]
+
+
+def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
+    """Build a per-request native phrase boost and retain all backing memory.
+
+    The returned references must stay alive through the C ABI call. Streaming
+    callers retain them for the whole stream because native stream setup may
+    keep request context while decoding continues.
+    """
+    terms: list[str] = []
+    seen: set[str] = set()
+    used_chars = 0
+    for raw in vocabulary or ():
+        term = str(raw).strip()
+        key = term.casefold()
+        if not term or len(term) > 96 or key in seen:
+            continue
+        extra = len(term) + (2 if terms else 0)
+        if used_chars + extra > 499:
+            continue
+        terms.append(term)
+        seen.add(key)
+        used_chars += extra
+        if len(terms) >= 15:
+            break
+    if not terms:
+        return None, ()
+
+    encoded_phrases = tuple(term.encode("utf-8") for term in terms)
+    phrase_array = (ctypes.c_char_p * len(encoded_phrases))(*encoded_phrases)
+    contexts = (_SpeechContext * 1)()
+    contexts[0].size = ctypes.sizeof(_SpeechContext)
+    contexts[0].phrases = phrase_array
+    contexts[0].phrase_count = len(encoded_phrases)
+    contexts[0].boost = 3.0
+    return contexts, (contexts, phrase_array, encoded_phrases)
+
+
+def _options_support_speech_context(opts: _RecognitionOptions) -> bool:
+    """Whether this native library's append-only options struct has both fields."""
+    struct_size = int(getattr(opts, "size", 0) or 0)
+    ptr_end = _RecognitionOptions.speech_contexts.offset + ctypes.sizeof(ctypes.c_void_p)
+    count_end = _RecognitionOptions.speech_context_count.offset + ctypes.sizeof(ctypes.c_size_t)
+    return struct_size >= max(ptr_end, count_end)
+
+
+def _attach_speech_context(opts: _RecognitionOptions, vocabulary):
+    """Attach supported phrase boosts and return the references to retain."""
+    if not vocabulary or not _options_support_speech_context(opts):
+        return ()
+    contexts, references = _make_speech_context(vocabulary)
+    if contexts is None:
+        return ()
+    opts.speech_contexts = ctypes.cast(contexts, ctypes.POINTER(_SpeechContext))
+    opts.speech_context_count = 1
+    return references
 
 
 def _find_nemo_speech_dll() -> Path | None:
@@ -439,6 +506,14 @@ class NemotronGGUFEngine:
                     self.metadata["architecture"] = _read_str()
                 elif key == "general.name":
                     self.metadata["name"] = _read_str()
+                elif key == "asr.tokenizer.type":
+                    self.metadata["tokenizer_type"] = _read_str()
+                elif key == "asr.tokenizer.spm_model":
+                    # Current NeMo-Speech GGUFs embed the serialized
+                    # SentencePiece proto separately from the readable vocab.
+                    # The native RNNT word booster needs this proto to tokenize
+                    # arbitrary user terms; a token list alone is insufficient.
+                    self.metadata["tokenizer_spm_model_embedded"] = bool(_read_str())
                 else:
                     _skip_val(vtype)
 
@@ -456,12 +531,22 @@ class NemotronGGUFEngine:
             pad = (32 - (cur % 32)) % 32
             self.data_start_offset = cur + pad
 
-            # Load filterbank if available
+            # Load filterbank if available.
             if "preprocessor.fb" in self.tensors:
                 fb_dims, fb_type, fb_offset = self.tensors["preprocessor.fb"]
                 f.seek(self.data_start_offset + fb_offset)
                 fb_bytes = f.read(fb_dims[0] * fb_dims[1] * 4)
                 self.preprocessor_fb = np.frombuffer(fb_bytes, dtype=np.float32).reshape(fb_dims[1], fb_dims[0])
+
+        self.metadata["speech_context_supported"] = (
+            self.metadata.get("tokenizer_type") == "sentencepiece_bpe"
+            and self.metadata.get("tokenizer_spm_model_embedded", False)
+        )
+        if self.vocab and not self.metadata["speech_context_supported"]:
+            log.info(
+                "[NEMOTRON] This GGUF has token strings but no embedded SentencePiece model; "
+                "native dictionary boosting is unavailable for this model."
+            )
 
         # Initialize in-memory native C ABI recognizer
         dll = get_nemo_dll()
@@ -722,6 +807,7 @@ class NemotronGGUFEngine:
         self,
         wav_segment: np.ndarray,
         language: str | None = None,
+        vocabulary: list[str] | None = None,
     ) -> str:
         """Transcribe a single <= 12s audio segment via in-process C ABI."""
         dll = get_nemo_dll()
@@ -739,6 +825,15 @@ class NemotronGGUFEngine:
                     lang = "en"
             if lang and lang != "multilingual":
                 opts.language_code = lang.encode("utf-8")
+            # Phrases are copied by the native C ABI while recognize_f32 is
+            # running. Keep every ctypes buffer alive until that synchronous
+            # call returns; old libraries with a shorter options struct safely
+            # ignore the appended speech-context fields.
+            speech_context_refs = (
+                _attach_speech_context(opts, vocabulary)
+                if getattr(self, "metadata", {}).get("speech_context_supported", False)
+                else ()
+            )
 
             audio_ptr = wav_segment.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
             res_handle = ctypes.c_void_p()
@@ -751,6 +846,7 @@ class NemotronGGUFEngine:
                 self.sample_rate,
                 ctypes.byref(res_handle),
             )
+            _ = speech_context_refs
             if st == 0 and res_handle.value:
                 txt_p = dll.nemo_speech_asr_result_transcript(res_handle, 0)
                 seg_text = txt_p.decode("utf-8", errors="replace").strip() if txt_p else ""
@@ -810,7 +906,7 @@ class NemotronGGUFEngine:
                 self._last_used = time.monotonic()
                 # If audio is short or is a stream chunk, transcribe directly in-process
                 if is_chunk or duration <= 12.0:
-                    result = self._transcribe_segment(wav, language=resolved_lang)
+                    result = self._transcribe_segment(wav, language=resolved_lang, vocabulary=vocabulary)
                 else:
                     # Long whole-buffer audio (> 12.0s): chunk into ~4s segments at silence points
                     # to avoid FastConformer O(T^2) quadratic self-attention blowup on CPU.
@@ -851,7 +947,7 @@ class NemotronGGUFEngine:
                             offset = split_point
 
                         if seg.size >= int(0.2 * self.sample_rate):
-                            part_txt = self._transcribe_segment(seg, language=resolved_lang)
+                            part_txt = self._transcribe_segment(seg, language=resolved_lang, vocabulary=vocabulary)
                             if part_txt:
                                 transcripts.append(part_txt)
 
@@ -987,6 +1083,7 @@ class NemotronStreamTranscriber:
     def __init__(self, vocabulary: tuple[str, ...] | list[str] = (), engine: NemotronGGUFEngine | None = None) -> None:
         self._vocabulary = tuple(vocabulary)
         self._engine = engine
+        self._speech_context_refs: tuple[Any, ...] = ()
         self._queue: queue.Queue[tuple[np.ndarray, int] | None] = queue.Queue(maxsize=512)
         self._finish = threading.Event()
         self._cancel = threading.Event()
@@ -1022,6 +1119,14 @@ class NemotronStreamTranscriber:
             opts = dll.nemo_speech_asr_recognition_options_default()
             opts.enable_automatic_punctuation = True
             opts.interim_results = False
+            # Streaming decode outlives this setup call; retain the ctypes
+            # arrays and UTF-8 phrase storage on this session until the native
+            # stream closes in _run's finally block.
+            self._speech_context_refs = (
+                _attach_speech_context(opts, self._vocabulary)
+                if eng is not None and getattr(eng, "metadata", {}).get("speech_context_supported", False)
+                else ()
+            )
 
             lang = None
             if eng is not None and eng.spec:
@@ -1268,6 +1373,7 @@ class NemotronStreamTranscriber:
                     dll.nemo_speech_asr_stream_close(stream)
                 except Exception:
                     pass
+            self._speech_context_refs = ()
             if stream_acquired and eng is not None:
                 eng.release_stream()
             lease = self._model_lease

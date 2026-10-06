@@ -1238,12 +1238,21 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             _sync_active_storage()
             details = urllib.parse.parse_qs(parsed.query).get("details", [""])[0] in ("1", "true")
             include_auto = urllib.parse.parse_qs(parsed.query).get("include_auto", [""])[0] in ("1", "true")
+            review = urllib.parse.parse_qs(parsed.query).get("review", [""])[0] in ("1", "true")
             recognition = urllib.parse.parse_qs(parsed.query).get("recognition", [""])[0] in ("1", "true")
             if details:
                 entries = storage.get_dictionary_entries(
                     include_auto=include_auto,
                     include_snippets=True,
                 )
+                if review and include_auto:
+                    ignored = storage.get_setting("dictionary_ignored_terms", []) or []
+                    if isinstance(ignored, str):
+                        ignored = [ignored]
+                    ignored_terms = {str(term).casefold() for term in ignored}
+                    entries = [entry for entry in entries if
+                               str(entry.get("category") or "").casefold() != "auto-captured" or
+                               str(entry.get("word") or "").casefold() not in ignored_terms]
                 # Preserve the established details payload unless the
                 # Dictionary UI explicitly requests recognition hints.
                 # Generated aliases are derived from the saved canonical word;
@@ -5730,16 +5739,30 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "state must be active or ignored"}, 400)
                 return
             ok = storage.set_lexicon_candidate_state(cid, state)
-            self.send_json_response({"success": bool(ok)})
+            self.send_json_response({"success": bool(ok)}, 200 if ok else 409)
+
+        elif path == "/api/dictionary/ignore":
+            word = data.get("word")
+            if not isinstance(word, str) or not word.strip():
+                self.send_json_response({"success": False, "error": "Dictionary word must be a non-empty string."}, 400)
+            else:
+                legacy_capture = next((entry for entry in storage.get_dictionary_entries(include_auto=True, include_snippets=False)
+                                       if str(entry.get("category") or "").casefold() == "auto-captured"
+                                       and str(entry.get("word") or "").casefold() == word.strip().casefold()), None)
+                ok = storage.ignore_dictionary_word(word) if legacy_capture else True
+                self.send_json_response({"success": bool(ok)}, 200 if ok else 409)
 
         elif path == "/api/dictionary/add":
             word_value = data.get("word") or data.get("text") or ""
+            heard_as = data.get("heard_as", "")
             if not isinstance(word_value, str) or not word_value.strip():
                 self.send_json_response({"success": False, "error": "Dictionary word must be a non-empty string."}, 400)
+            elif not isinstance(heard_as, str) or len(word_value.strip()) > 120 or len(heard_as.strip()) > 120:
+                self.send_json_response({"success": False, "error": "Word and heard-as spelling must be text under 120 characters."}, 400)
             else:
-                success = storage.add_dictionary_word(word_value)
+                success = storage.add_dictionary_entry(word_value, heard_as.strip())
                 if not success:
-                    self.send_json_response({"success": False, "error": "Word already exists or invalid."}, 400)
+                    self.send_json_response({"success": False, "error": "Word or heard-as spelling could not be saved. Check for a duplicate or conflicting correction."}, 409)
                 else:
                     dictionary_engine.mark_dirty()
                     self.send_json_response({"success": True, "words": storage.get_dictionary_words(include_auto=True, include_snippets=True)})

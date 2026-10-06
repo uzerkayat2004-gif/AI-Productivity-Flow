@@ -215,13 +215,24 @@ def test_startup_auth_check_never_triggers_wipe_or_disconnect(profile_env, monke
     assert not (profile_env["prof_dir"] / "rejected").exists()
 
 
-def test_wipe_only_reachable_via_explicit_switch(tmp_path, monkeypatch):
-    """_clean_account_state_for_switch must stay gated behind an explicit
-    switch_account=True request, never a startup/auth-check code path."""
-    import inspect
+def test_wipe_only_reachable_via_explicit_switch(profile_env, monkeypatch):
+    """Only an explicit account-switch request invokes the state cleanup path."""
+    monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
+    _write_state(profile_env["st"], _valid_cookies("keep"), email="saved@gmail.com")
+    before = profile_env["st"].read_text(encoding="utf-8")
+    wipes = []
+    monkeypatch.setattr(login_flow, "_clean_account_state_for_switch", lambda profile: wipes.append(profile))
+    monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda explicit=None: None)
 
-    source = inspect.getsource(login_flow.start_login)
-    assert "if switch_account:\n        _clean_account_state_for_switch(profile)" in source
+    normal_login = login_flow.start_login(profile="prof-guard", mode="cli")
+    assert normal_login["launched"] is False
+    assert wipes == []
+    assert profile_env["st"].read_text(encoding="utf-8") == before
+
+    switch_login = login_flow.start_login(profile="prof-guard", mode="cli", switch_account=True)
+    assert switch_login["launched"] is False
+    assert wipes == ["prof-guard"]
+    assert profile_env["st"].read_text(encoding="utf-8") == before
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +240,11 @@ def test_wipe_only_reachable_via_explicit_switch(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_placeholder_email_not_persisted_by_record_successful_login(profile_env):
+def test_placeholder_email_not_persisted_by_record_successful_login(profile_env, monkeypatch):
     _write_state(profile_env["st"], _valid_cookies("live"), email="real@gmail.com")
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: {
+        "authenticated": True, "status": "ok", "email": None,
+    })
 
     login_flow.record_successful_login("your Google account", profile="prof-guard")
 
@@ -241,8 +255,11 @@ def test_placeholder_email_not_persisted_by_record_successful_login(profile_env)
     assert profile_env["db"].get_setting("video_flow_notebooklm_email") != "your Google account"
 
 
-def test_placeholder_email_not_written_when_state_has_no_account(profile_env):
+def test_placeholder_email_not_written_when_state_has_no_account(profile_env, monkeypatch):
     _write_state(profile_env["st"], _valid_cookies("live"))
+    monkeypatch.setattr(login_flow, "verify_online", lambda **kwargs: {
+        "authenticated": True, "status": "ok", "email": None,
+    })
 
     login_flow.record_successful_login("your Google account", profile="prof-guard")
 
