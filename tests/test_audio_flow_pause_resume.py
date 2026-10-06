@@ -10,11 +10,12 @@ Verifies:
 from __future__ import annotations
 
 import ctypes
+import threading
 from types import SimpleNamespace
 
 from voice_flow import main as main_module
 from voice_flow.audio_flow_widget import AudioFlowFloatingWidget
-from voice_flow.main import VoiceFlowApp
+from voice_flow.main import DictationState, VoiceFlowApp
 from voice_flow.tts_engine import TTSEngine
 
 
@@ -200,6 +201,12 @@ def test_widget_set_paused_syncs_only_while_playing() -> None:
 
 def _pause_app(monkeypatch, speaking: bool, paused: bool) -> VoiceFlowApp:
     app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.state = DictationState.IDLE
+    app._read_generation = 0
+    app._read_generation_lock = threading.RLock()
+    app._read_active = False
+    app._read_pending = False
+    app._active_summary_player_token = None
     calls: SimpleNamespace = SimpleNamespace(paused=0, resumed=0, widget_states=[])
     app.overlay = SimpleNamespace(show_ready=lambda: None, state="READING", refresh=lambda: None)
 

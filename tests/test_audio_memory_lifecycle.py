@@ -14,13 +14,18 @@ def test_capture_reuses_owned_frames_and_preserves_reused_driver_data(monkeypatc
     recorder = AudioRecorder()
     recorder._recording = True
     recorder._native_sr = 16_000
+    recorder._vad = None
+    # Close a chunk before the bounded five-second startup-frame queue fills.
+    recorder.max_chunk_seconds = 4.0
     recorder.begin_stream_input_buffering()
     clock = [1_000.0]
     monkeypatch.setattr("voice_flow.audio.time.monotonic", lambda: clock[0])
     chunks = []
     recorder.on_chunk_closed = lambda chunk, _sr, **_kwargs: chunks.append(chunk)
     driver = np.full((1_024, 1), 0.05, dtype=np.float32)
-    for _ in range(170):
+    # Stay within the five-second startup handoff buffer while crossing one
+    # forced chunk boundary.
+    for _ in range(78):
         recorder._audio_callback(driver, len(driver), None, None)
         clock[0] += len(driver) / recorder._native_sr
     assert len(recorder._pending_closed_chunks) >= 1
@@ -35,10 +40,10 @@ def test_capture_reuses_owned_frames_and_preserves_reused_driver_data(monkeypatc
     frames = []
     recorder.on_audio_frame = lambda frame, _sr: frames.append(frame)
     recorder.flush_stream_input_buffer()
-    assert len(frames) == 170
+    assert len(frames) == 78
     assert chunks
     complete = recorder.stop()
-    assert len(complete) == 170 * 1_024
+    assert len(complete) == 78 * 1_024
     assert np.allclose(complete, 0.05)
 
 
@@ -55,7 +60,7 @@ def test_shutdown_releases_retained_audio_without_starting_a_device():
 
 
 def test_cancelled_queued_summary_never_creates_another_bridge(tmp_path):
-    entered = threading.Event()
+    entered = threading.Condition()
     release = threading.Event()
     cancelled = threading.Event()
     constructions = []
@@ -66,7 +71,8 @@ def test_cancelled_queued_summary_never_creates_another_bridge(tmp_path):
             constructions.append(self)
 
         def check_auth(self, **_kwargs):
-            entered.set()
+            with entered:
+                entered.notify_all()
             assert release.wait(2.0)
             raise NotebookLMAudioSummaryError("TEST", "end offline setup")
 
@@ -79,21 +85,25 @@ def test_cancelled_queued_summary_never_creates_another_bridge(tmp_path):
             errors.append(error.code)
 
     first = threading.Thread(target=run)
-    second = threading.Thread(target=run, args=(cancelled,))
+    second_active = threading.Thread(target=run)
     first.start()
-    assert entered.wait(1.0)
-    second.start()
+    second_active.start()
+    with entered:
+        assert entered.wait_for(lambda: len(constructions) == 2, timeout=1.0)
+
+    second = threading.Thread(target=run, args=(cancelled,))
     cancelled.set()
+    second.start()
     second.join(timeout=1.0)
     try:
         assert not second.is_alive()
-        assert len(constructions) == 1
+        assert len(constructions) == 2
         assert "cancelled" in errors
     finally:
         release.set()
         first.join(timeout=1.0)
+        second_active.join(timeout=1.0)
         second.join(timeout=1.0)
     # Failure must release the gate for the next request too.
     run()
-    assert len(constructions) == 2
-    assert not service._generation_lock.locked()
+    assert len(constructions) == 3

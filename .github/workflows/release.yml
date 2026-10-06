@@ -121,7 +121,21 @@ jobs:
             exit 1
           }
 
-          # 4. Checksum verification
+          # 4. Guard against version and product metadata mismatch
+          $expectedVersion = $tag.TrimStart("v")
+          $installerVersion = (Get-Item $exe).VersionInfo.ProductVersion.Trim()
+          Write-Host "Installer ProductVersion: $installerVersion, Expected Version: $expectedVersion"
+          if ($installerVersion -ne $expectedVersion) {
+            Write-Error "CRITICAL VERSION MISMATCH: Windows installer version '$installerVersion' does not match release tag version '$expectedVersion'!"
+            exit 1
+          }
+          $productName = (Get-Item $exe).VersionInfo.ProductName.Trim()
+          if ($productName -ne "AI Productivity Flow") {
+            Write-Error "CRITICAL PRODUCT NAME MISMATCH: Windows installer ProductName is '$productName', expected 'AI Productivity Flow'!"
+            exit 1
+          }
+
+          # 5. Checksum verification
           if (Test-Path $sha) {
             $expectedHash = (Get-Content $sha).Trim().Split()[0].ToLower()
             if ($calculatedHash -ne $expectedHash) {

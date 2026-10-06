@@ -163,9 +163,17 @@ def test_api_history_endpoints_and_cancel_route(tmp_path: Path):
     ]
     mock_vf_service = MagicMock()
     mock_vf_service.list.side_effect = lambda limit=None: mock_jobs[:limit] if limit else mock_jobs
+    mock_runtime_controller = MagicMock()
+    def cancel_audio_summary_job(summary_id):
+        if summary_id != "ash_to_cancel":
+            return False
+        storage.update_audio_summary_history(summary_id, status="cancelled", progress=0, error="Cancelled by user")
+        return True
+    mock_runtime_controller.cancel_audio_summary_job.side_effect = cancel_audio_summary_job
 
     with patch("voice_flow.storage.storage", storage), \
          patch("voice_flow.gui.api_server.storage", storage), \
+         patch("voice_flow.gui.api_server.runtime_controller", mock_runtime_controller), \
          patch("voice_flow.gui.api_server.get_video_flow_service", return_value=mock_vf_service):
 
         server = HTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
@@ -277,4 +285,3 @@ def test_unpruned_database_auto_prunes_on_startup_and_list(tmp_path: Path):
     storage = StorageEngine(str(db_file))
     audios = storage.get_audio_summary_history()
     assert len(audios) == 50
-

@@ -26,49 +26,8 @@ def test_overlay_audio_summary_progress_bar():
     """Verify FloatingOverlayBar displays and manages the Audio Flow progressive bar."""
     from voice_flow.overlay import FloatingOverlayBar
 
-    overlay = FloatingOverlayBar.__new__(FloatingOverlayBar)
-    overlay.root = None
-    overlay.win = None
-    overlay.canvas = None
-    overlay.width = 48
-    overlay.height = 10
-    overlay.idle_width = 48
-    overlay.idle_height = 10
-    overlay.ready_actions_width = 248
-    overlay.video_action_width = 66
-    overlay.settings_action_width = 26
-    overlay.hover_height = 28
-    overlay.video_progress_width = 280
-    overlay.video_progress_height = 26
-    overlay.video_progress_hover_height = 26
-    overlay.audio_summary_progress_width = 280
-    overlay.audio_summary_progress_height = 26
-    overlay.audio_summary_progress_hover_height = 26
-    overlay.recording_width = 192
-    overlay.working_width = 250
-    overlay.working_height = 28
-    overlay.audio_playback_width = 272
-    overlay.expanded_width = 144
-    overlay.done_label = "Done"
+    overlay = FloatingOverlayBar()
     overlay.state = "READY"
-    overlay.video_status = ""
-    overlay.video_progress = 0
-    overlay.video_stage = ""
-    overlay.video_job_id = ""
-    overlay.selected_text = ""
-    overlay._selection_generation = 0
-    overlay.error_message = ""
-    overlay._anim_phase = 0.0
-    overlay._hover_zone = None
-    overlay._is_mouse_over = False
-    overlay._selection_expanded = False
-    overlay._last_drawn_width = 280
-    overlay.GRIP_W = 14
-    overlay.audio_summary_status = ""
-    overlay.audio_summary_progress = 0
-    overlay.audio_summary_stage = ""
-    overlay._audio_summary_animation_generation = 0
-    overlay.on_audio_summary_cancel = None
 
     # Helper to mock _run_on_ui
     def _run_on_ui(fn):
@@ -84,17 +43,20 @@ def test_overlay_audio_summary_progress_bar():
     assert overlay.audio_summary_status == "processing"
     assert overlay.audio_summary_progress == 45
     assert overlay.audio_summary_stage == "Synthesizing audio"
-    assert overlay._target_size() == (280, 26)
+    assert overlay._target_size() == (280, 10 + 4 + 26)
 
     # 3. Expanded / hovered size stacks actions below progress strip
     overlay._is_mouse_over = True
     assert overlay._target_size() == (280, 28 + 26 + 4)
     overlay._is_mouse_over = False
+    overlay.width = 280
+    overlay._last_drawn_width = 280
 
     # 4. Cancel button zone detection
-    # Bar width = 280, grip_left = 280 - 14 = 266, cancel button is 248..266
-    zone = overlay._get_zone(255, 13)
-    assert zone == "audio_summary_cancel"
+    # One legacy no-ID row remains compatible and is hit-tested below the voice controls.
+    row_top, row_bottom, _row = overlay._summary_row_geometry()[0]
+    zone = overlay._get_zone(255, (row_top + row_bottom) // 2)
+    assert zone == "summary_cancel:0"
 
     # 5. Cancel callback triggers and clears status
     cancelled = []
@@ -102,11 +64,13 @@ def test_overlay_audio_summary_progress_bar():
     class FakeEvent:
         x = 255
         y = 13
-    overlay.show_ready = lambda: setattr(overlay, "state", "READY")
+    FakeEvent.x = 255
+    FakeEvent.y = (row_top + row_bottom) // 2
     overlay._on_press(FakeEvent())
     assert cancelled == [True]
     assert overlay.audio_summary_status == ""
     assert overlay.audio_summary_progress == 0
+    assert overlay.state == "READY"
 
 
 def test_audio_flow_widget_short_text_notice():
@@ -221,6 +185,8 @@ def test_audio_summary_history_persistence_and_api(tmp_path):
     assert looked_up["duration_sec"] == 42.5
 
     # 4. REST API: GET /api/audio-flow/history and POST /api/audio-flow/history/delete
+    audio_file = str(tmp_path / "dummy_audio.mp3")
+    Path(audio_file).write_bytes(b"dummy mp3 data")
     from unittest.mock import patch
     with patch("voice_flow.storage.storage", storage_engine), \
          patch("voice_flow.gui.api_server.storage", storage_engine):
@@ -391,6 +357,7 @@ def test_audio_flow_history_play_endpoint_and_media_download(tmp_path):
     from unittest.mock import patch
     from voice_flow.storage import StorageEngine
     from voice_flow.gui.api_server import VoiceFlowApiHandler
+    from voice_flow import audio_summary_player
 
     # Create dummy audio file inside audio_summaries
     from voice_flow.paths import data_dir
@@ -409,8 +376,13 @@ def test_audio_flow_history_play_endpoint_and_media_download(tmp_path):
         item_id="ash_play_test_1",
     )
 
+    def fake_launch(audio_path, *, depth="balanced", token=None, **_kwargs):
+        return audio_summary_player.register_summary_audio(audio_path, depth=depth, token=token)
+
     with patch("voice_flow.storage.storage", storage_engine), \
-         patch("voice_flow.gui.api_server.storage", storage_engine):
+         patch("voice_flow.gui.api_server.storage", storage_engine), \
+         patch("voice_flow.audio_summary_player.launch_summary_audio_player", side_effect=fake_launch) as mock_launch, \
+         patch("voice_flow.audio_summary_player.ensure_mp3_audio", side_effect=lambda _path: audio_file):
 
         server = HTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
         server.daemon_threads = True
@@ -427,7 +399,12 @@ def test_audio_flow_history_play_endpoint_and_media_download(tmp_path):
                 data=post_body,
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(play_req, timeout=5) as resp:
+            try:
+                response = urllib.request.urlopen(play_req, timeout=5)
+            except urllib.error.HTTPError as err:
+                pytest.fail(f"play endpoint returned {err.code}: {err.read().decode('utf-8', 'replace')}")
+            assert mock_launch.called
+            with response as resp:
                 play_res = json.loads(resp.read().decode("utf-8"))
                 assert play_res["success"] is True
                 assert play_res["mode"] == "native_window"

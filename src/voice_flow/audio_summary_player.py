@@ -614,9 +614,11 @@ def launch_summary_audio_player(
     token: str | None = None,
     style: str = "",
     autoplay: bool = True,
+    close_existing: bool = True,
 ) -> str:
     """Open the dedicated summary player and return its opaque media ID."""
-    close_summary_audio_player()
+    if close_existing:
+        close_summary_audio_player()
     token = register_summary_audio(audio_path, depth=depth, token=token)
     url = player_url(token, base_url=base_url, depth=depth, title=title, style=style, autoplay=autoplay)
     env = os.environ.copy()

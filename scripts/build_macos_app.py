@@ -97,11 +97,21 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-# 3. Verify runtime imports and check architecture compatibility
-if ! "$PYTHON" -c 'import voice_flow' 2>/dev/null; then
-    HOST_ARCH="$(uname -m)"
+# 3. Check architecture compatibility and runtime dependencies
+HOST_ARCH="$(uname -m)"
+MANIFEST="$DIR/Resources/runtime/build-manifest.json"
+BUILD_ARCH=""
+if [ -f "$MANIFEST" ]; then
+    BUILD_ARCH=$(grep -o '"build_machine": *"[^"]*"' "$MANIFEST" | head -n 1 | cut -d'"' -f4)
+fi
+
+if [ "$HOST_ARCH" = "x86_64" ] && [ "$BUILD_ARCH" = "arm64" ]; then
+    osascript -e 'display dialog "Notice: The bundled dependencies were packaged for Apple Silicon (arm64), but this Mac uses an Intel processor (x86_64).\\n\\nPlease run the terminal installer to configure native Intel dependencies:\\ncurl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash" buttons {"OK"} default button 1 with icon caution'
+    exit 1
+elif ! "$PYTHON" -c "import sounddevice, requests, cryptography; from voice_flow.main import main" 2>/dev/null; then
     if [ "$HOST_ARCH" = "x86_64" ] && [ -d "$DIR/Resources/runtime/site-packages" ]; then
-        osascript -e 'display dialog "Notice: The bundled dependencies were packaged on Apple Silicon (arm64), but this system is Intel (x86_64).\\n\\nPlease run the terminal installer to set up native Intel dependencies:\\ncurl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash" buttons {"OK"} default button 1 with icon caution'
+        osascript -e 'display dialog "Notice: Native dependencies could not be loaded on this Intel (x86_64) Mac.\\n\\nPlease run the terminal installer to configure native Intel dependencies:\\ncurl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash" buttons {"OK"} default button 1 with icon caution'
+        exit 1
     fi
 fi
 
@@ -222,10 +232,23 @@ def bundle_runtime_dependencies() -> None:
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "pip*", "setuptools*", "wheel*"),
             )
-            return
+            break
 
-    print("Warning: No site-packages found to bundle into macOS app package.")
+    # Clean up runner-specific editable links or redundant dist-info
+    if target_sp.exists():
+        for dead_link in target_sp.glob("*_editable_impl_*"):
+            try:
+                dead_link.unlink()
+            except Exception:
+                pass
+        for dead_info in target_sp.glob("voice_flow-*.dist-info"):
+            try:
+                shutil.rmtree(dead_info, ignore_errors=True)
+            except Exception:
+                pass
 
+    if not target_sp.exists() or not any(target_sp.iterdir()):
+        print("Warning: No site-packages found to bundle into macOS app package.")
 
 
 def package_zip() -> Path:
@@ -238,7 +261,21 @@ def package_zip() -> Path:
             for file in files:
                 full_path = Path(root) / file
                 rel_path = full_path.relative_to(DIST_DIR)
-                zf.write(full_path, arcname=str(rel_path))
+                rel_posix = rel_path.as_posix()
+                is_executable = (
+                    rel_posix.startswith(f"{APP_NAME}.app/Contents/MacOS/")
+                    or file.endswith(".sh")
+                    or file.endswith(".command")
+                )
+                info = zipfile.ZipInfo(rel_posix)
+                info.date_time = (2026, 10, 6, 0, 0, 0)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3  # Unix
+                if is_executable:
+                    info.external_attr = 0o100755 << 16
+                else:
+                    info.external_attr = 0o100644 << 16
+                zf.writestr(info, full_path.read_bytes())
     size = zip_path.stat().st_size
     print(f"Created {zip_path} ({size} bytes)")
 

@@ -757,7 +757,7 @@ def test_podcast_with_unreadable_metadata_fails_without_a_second_submit(tmp_path
         return original_invoke(args, timeout=timeout)
 
     bridge._invoke = invalid_download
-    service._bridge = lambda: bridge  # type: ignore[method-assign]
+    service._bridge = lambda **_kwargs: bridge  # type: ignore[method-assign]
     with pytest.raises(NotebookLMAudioSummaryError) as error:
         service.generate("source " * 84, "short", style="podcast")
     assert error.value.code == "AUDIO_METADATA_INVALID"

@@ -5687,17 +5687,42 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Missing summary id"}, 400)
             else:
                 try:
-                    storage.update_audio_summary_history(summary_id, status="cancelled", progress=0, error="Cancelled by user")
                     hist = storage.get_audio_summary_history_by_id(summary_id)
-                    title = (hist.get("title") if hist else "Audio Summary") or "Audio Summary"
-                    snippet = (hist.get("text_snippet") if hist else "") or ""
-                    storage.record_audio_summary_to_history(
-                        audio_id=summary_id,
-                        title=title,
-                        text_snippet=snippet,
-                        status="cancelled",
-                        error_message="Cancelled by user",
-                    )
+                    if not hist:
+                        self.send_json_response({"success": False, "error": "Audio summary not found", "code": "not_found"}, 404)
+                        return
+                    status = str(hist.get("status") or "").strip().lower()
+                    active_statuses = {"queued", "pending", "in_progress", "running", "generating"}
+                    if status not in active_statuses:
+                        self.send_json_response({
+                            "success": False,
+                            "id": summary_id,
+                            "status": status,
+                            "error": "Audio summary is not active",
+                            "code": "not_active",
+                        }, 409)
+                        return
+                    cancel = getattr(runtime_controller, "cancel_audio_summary_job", None) if runtime_controller else None
+                    if not callable(cancel):
+                        self.send_json_response({
+                            "success": False,
+                            "id": summary_id,
+                            "status": status,
+                            "error": "Audio summary runtime is unavailable; cancellation was not confirmed",
+                            "code": "unable_to_cancel",
+                        }, 503)
+                        return
+                    if not cancel(summary_id):
+                        latest = storage.get_audio_summary_history_by_id(summary_id)
+                        latest_status = str((latest or {}).get("status") or status).strip().lower()
+                        self.send_json_response({
+                            "success": False,
+                            "id": summary_id,
+                            "status": latest_status,
+                            "error": "Audio summary cancellation was not accepted",
+                            "code": "unable_to_cancel" if latest_status in active_statuses else "not_active",
+                        }, 409)
+                        return
                     invalidate_history_cache()
                     self.send_json_response({"success": True, "id": summary_id, "status": "cancelled"})
                 except Exception as e:
@@ -5709,6 +5734,28 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Missing summary id"}, 400)
             else:
                 try:
+                    hist = storage.get_audio_summary_history_by_id(summary_id)
+                    if hist and str(hist.get("status") or "").strip().lower() in {"queued", "pending", "in_progress", "running", "generating"}:
+                        cancel = getattr(runtime_controller, "cancel_audio_summary_job", None) if runtime_controller else None
+                        if not callable(cancel):
+                            self.send_json_response({
+                                "success": False,
+                                "id": summary_id,
+                                "error": "Audio summary runtime is unavailable; cancellation was not confirmed",
+                                "code": "unable_to_cancel",
+                            }, 503)
+                            return
+                        if not cancel(summary_id):
+                            latest = storage.get_audio_summary_history_by_id(summary_id)
+                            latest_status = str((latest or {}).get("status") or "").strip().lower()
+                            self.send_json_response({
+                                "success": False,
+                                "id": summary_id,
+                                "status": latest_status,
+                                "error": "Audio summary cancellation was not accepted; history was not deleted",
+                                "code": "unable_to_cancel" if latest_status in {"queued", "pending", "in_progress", "running", "generating"} else "not_active",
+                            }, 409)
+                            return
                     res = storage.delete_audio_summary_history(summary_id)
                     invalidate_history_cache()
                     self.send_json_response({"success": bool(res), "id": summary_id})

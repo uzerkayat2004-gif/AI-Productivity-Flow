@@ -86,13 +86,13 @@ def test_video_processing_progress_strip_layout_and_geometry() -> None:
     bar.video_job_id = "job-123"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_progress_width, bar.video_progress_height)
+    assert (w, h) == (bar.video_progress_width, bar.idle_height + 4 + 26)
     assert w >= 260
     assert h >= 24
 
     bar._draw()
-    assert "Video Flow" in canvas.texts
-    assert "45%" in canvas.texts
+    assert any("Video Flow" in text for text in canvas.texts)
+    assert any("45%" in text for text in canvas.texts)
 
     # Test hit zones for progress rail
     grip_x = bar.width - 5
@@ -110,24 +110,23 @@ def test_video_failed_state_pill_dimensions_and_interactions() -> None:
     bar.video_job_id = "job-failed-1"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_failed_width, bar.video_status_height)
+    assert (w, h) == (bar.video_failed_width, bar.idle_height + 4 + 26)
     assert w >= 190
     assert h >= 24
 
     bar._draw()
     assert any("Video failed" in t for t in canvas.texts)
-    assert "!" in canvas.texts
 
     # Hit zones
     cancel_x = bar.width - bar.GRIP_W - 8
     status_x = 50
-    assert bar._get_zone(cancel_x) == "video_cancel"
-    assert bar._get_zone(status_x) == "video_status"
+    assert bar._get_zone(cancel_x, h // 2) == "summary_dismiss:0"
+    assert bar._get_zone(status_x, h // 2) == "summary_activate:0"
 
-    # Clicking status zone triggers show_error and clears video_status
-    bar.show_error = lambda msg: setattr(bar, "_error_shown", msg)
+    # Dismissing a background failure leaves the foreground voice state alone.
+    initial_state = bar.state
     bar._on_press(SimpleNamespace(x=status_x, y=h // 2))
-    assert getattr(bar, "_error_shown", None) == "Render timeout"
+    assert bar.state == initial_state
     assert bar.video_status == ""
 
 
@@ -139,8 +138,8 @@ def test_video_ready_state_pill_dimensions_and_interactions() -> None:
     bar.video_job_id = "job-ready-1"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_ready_width, bar.video_status_height)
-    assert (w, h) == (280, 26)
+    assert (w, h) == (bar.video_ready_width, bar.idle_height + 4 + 26)
+    assert (w, h) == (280, 40)
     assert w >= 180
     assert h >= 24
 
@@ -150,7 +149,7 @@ def test_video_ready_state_pill_dimensions_and_interactions() -> None:
 
     # Hit zones and clicking opens video player
     status_x = 50
-    assert bar._get_zone(status_x) == "video_status"
+    assert bar._get_zone(status_x, h // 2) == "summary_activate:0"
 
     ready_jobs: list[str] = []
     bar.on_video_ready = ready_jobs.append

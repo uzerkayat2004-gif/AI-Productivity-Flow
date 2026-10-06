@@ -26,6 +26,7 @@ class _Overlay:
         self.cleared = 0
         self.selected: list[str] = []
         self.states: list[tuple[str, str | None]] = []
+        self.summary_rows: dict[str, tuple[str, object]] = {}
 
     def clear_selected_text(self) -> None:
         self.cleared += 1
@@ -50,8 +51,16 @@ class _Overlay:
 
     def show_audio_summary_progress(self, progress: int = 0, stage: str = "") -> None:
         self.states.append(("audio_summary_progress", (progress, stage)))
+    def show_audio_summary_ready(self, job_id: str, *, stage: str = "Audio ready") -> None:
+        self.summary_rows[job_id] = ("ready", stage)
+    def show_audio_summary_failed(self, job_id: str, message: str) -> None:
+        self.summary_rows[job_id] = ("failed", message)
 
-    def clear_audio_summary_status(self) -> None:
+    def clear_audio_summary_status(self, job_id: str | None = None) -> None:
+        if job_id is not None:
+            self.summary_rows.pop(job_id, None)
+            return
+        self.summary_rows.clear()
         self.states.append(("audio_summary_cleared", None))
 
 
@@ -484,11 +493,12 @@ def test_summary_export_runs_after_ready_and_failed_copy_does_not_mark_downloade
             summary_depth="short",
         )
         assert export_started.wait(1.0), (events, app.overlay.states, history_updates)
-        assert events == ["player", "history", "ready"]
+        assert events == ["history", "player"]
         assert not any(update.get("downloaded") == 1 for update in history_updates)
     finally:
         release_export.set()
         assert export_finished.wait(1.0)
+        app._audio_flow_jobs.shutdown(timeout=1.0)
 
     assert not any(update.get("downloaded") == 1 for update in history_updates)
 
@@ -522,9 +532,10 @@ def test_audio_summary_pipeline_worker_handles_tts_error_safely(monkeypatch) -> 
         summary_depth="balanced",
     )
 
-    time.sleep(0.3)  # Allow worker thread to execute
-    assert widget_resets == [False]
-    assert any(s[0] == "error" and "NotebookLM" in str(s[1]) for s in app.overlay.states)
+    assert _wait_until(lambda: any(row[0] == "failed" for row in app.overlay.summary_rows.values()))
+    assert widget_resets == [], "a summary failure must not reset foreground playback state"
+    assert any("NotebookLM" in str(row[1]) for row in app.overlay.summary_rows.values())
+    app._audio_flow_jobs.shutdown(timeout=1.0)
 
 
 def test_mouse_release_never_invalidates_audio_summary_generation(monkeypatch) -> None:

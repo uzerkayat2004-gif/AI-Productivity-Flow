@@ -94,6 +94,7 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("voice_flow.main")
+_AUDIO_FLOW_JOBS_INIT_LOCK = threading.Lock()
 
 
 class DictationState(str, Enum):
@@ -494,6 +495,14 @@ class VoiceFlowApp:
         self.processing_lock = threading.Lock()
         self._audio_summary_generation = 0
         self._active_summary_player_token: str | None = None
+        self._read_generation = 0
+        self._read_generation_lock = threading.RLock()
+        self._audio_summary_launch_reservation: str | None = None
+        self._read_active = False
+        self._read_pending = False
+        self._audio_summary_payloads: dict[str, dict[str, str]] = {}
+        self._audio_flow_jobs = None
+        self._audio_flow_jobs_lock = threading.Lock()
         self.video_stage = ""
 
         # Ensure local REST API server is always active in background immediately for UI & signaling
@@ -604,6 +613,8 @@ class VoiceFlowApp:
         self.overlay.on_video_cancel = self._cancel_video_from_screen
         self.overlay.on_audio_pause_toggle = self._toggle_audio_flow_pause
         self.overlay.on_audio_stop = self._stop_audio_flow_pipeline
+        self.overlay.on_audio_summary_cancel = self.cancel_audio_summary_job
+        self.overlay.on_audio_summary_ready = self.open_audio_summary_job
         self.overlay.on_open_settings = self._open_audio_flow_settings
 
         # Connect Audio Flow Floating Widget
@@ -1014,39 +1025,40 @@ class VoiceFlowApp:
         # or inject Ctrl+C during dictation
         self._selection_generation = getattr(self, "_selection_generation", 0) + 1
 
-        # Suppress Audio Flow selection widget and pause any active audio playback
-        # so Voice Flow dictation is not disturbed and mic does not pick up audio
-        try:
-            audio_flow_widget.hide()
-            self._stop_audio_flow_pipeline()
-        except Exception as _af_err:
-            log.debug("Audio flow suppression on dictation start skipped: %s", _af_err)
+        # Serialize the read stop and Voice ownership transition against a
+        # background Read worker or summary autoplay launch.
+        with self._get_read_generation_lock():
+            try:
+                audio_flow_widget.hide()
+                self._stop_audio_flow_pipeline()
+            except Exception as _af_err:
+                log.debug("Audio flow suppression on dictation start skipped: %s", _af_err)
 
-        with self._state_lock:
-            if self.state == DictationState.PROCESSING:
-                proc_start = getattr(self, "_processing_start_time", 0.0)
-                elapsed = time.monotonic() - proc_start if proc_start > 0 else 999.0
-                if elapsed < 15.0:
-                    log.info("Refusing new dictation start: active session is currently PROCESSING (elapsed %.2fs < 15.0s)", elapsed)
+            with self._state_lock:
+                if self.state == DictationState.PROCESSING:
+                    proc_start = getattr(self, "_processing_start_time", 0.0)
+                    elapsed = time.monotonic() - proc_start if proc_start > 0 else 999.0
+                    if elapsed < 15.0:
+                        log.info("Refusing new dictation start: active session is currently PROCESSING (elapsed %.2fs < 15.0s)", elapsed)
+                        self._set_hotkeys_recording_state(False)
+                        return False
+                    log.warning("Cancelling genuinely stale PROCESSING session (elapsed %.2fs >= 15.0s) to service new dictation request.", elapsed)
+                    self._on_dictation_cancel()
+                elif self.state == DictationState.ERROR:
+                    self._reset_to_idle()
+
+                if self.state != DictationState.IDLE:
+                    log.info("Refusing start dictation while in state %s", self.state)
                     self._set_hotkeys_recording_state(False)
                     return False
-                log.warning("Cancelling genuinely stale PROCESSING session (elapsed %.2fs >= 15.0s) to service new dictation request.", elapsed)
-                self._on_dictation_cancel()
-            elif self.state == DictationState.ERROR:
-                self._reset_to_idle()
-
-            if self.state != DictationState.IDLE:
-                log.info("Refusing start dictation while in state %s", self.state)
-                self._set_hotkeys_recording_state(False)
-                return False
-            try:
-                session = self._capture_session()
-            except Exception as exc:
-                log.error("[START ERROR] Could not capture dictation context: %s", exc, exc_info=True)
-                self._set_hotkeys_recording_state(False)
-                return False
-            self.session = session
-            self.state = DictationState.RECORDING
+                try:
+                    session = self._capture_session()
+                except Exception as exc:
+                    log.error("[START ERROR] Could not capture dictation context: %s", exc, exc_info=True)
+                    self._set_hotkeys_recording_state(False)
+                    return False
+                self.session = session
+                self.state = DictationState.RECORDING
 
         hwnd = getattr(session, "target_hwnd", None) or (session.get("hwnd") if isinstance(session, dict) else None)
         app_title = getattr(session, "app_title", "General App") or (session.get("app_title") if isinstance(session, dict) else "General App")
@@ -2400,33 +2412,25 @@ class VoiceFlowApp:
         mode: str = "full",
         summary_depth: str | None = None,
     ) -> None:
-        """Capture selected text and read aloud via Audio Flow TTS Engine or Audio Summary."""
-        generation_lock = getattr(self, "_audio_flow_generation_lock", None)
-        if generation_lock is None:
-            generation_lock = self._audio_flow_generation_lock = threading.RLock()
-        with generation_lock:
-            self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
-            gen_token = self._audio_summary_generation
-        try:
-            from voice_flow.audio_summary_player import close_summary_audio_player
-            close_summary_audio_player(getattr(self, "_active_summary_player_token", None))
-            self._active_summary_player_token = None
-        except Exception:
-            pass
+        """Start an independent summary job or foreground Read request."""
+        effective_mode = (mode or "read").lower().strip()
+        if effective_mode == "default":
+            effective_mode = str(storage.get_setting("exec_audio_flow_default_mode", "read") or "read").lower().strip()
+        if effective_mode == "explain":
+            effective_mode = "read"
+        is_summary = effective_mode == "summary"
 
-        if tts_engine.is_speaking():
-            self._stop_audio_flow_pipeline()
-            # A bare hotkey remains a stop toggle. A selection action replaces
-            # the old read immediately, so Summary never requires a second click.
-            if not text_override:
-                return
-            with generation_lock:
-                self._audio_summary_generation += 1
-                gen_token = self._audio_summary_generation
+        if not is_summary and not text_override:
+            with self._get_read_generation_lock():
+                player_active = bool(getattr(self, "_active_summary_player_token", None))
+                if player_active or tts_engine.is_speaking():
+                    self._stop_audio_flow_pipeline()
+                    return
 
         if not storage.get_setting("audio_flow_enabled", True):
-            audio_flow_widget.set_playing(False)
-            self.overlay.show_error("Audio Flow is disabled")
+            if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
+                audio_flow_widget.set_playing(False)
+                self.overlay.show_error("Audio Flow is disabled")
             return
 
         explicit_selection = bool(text_override and str(text_override).strip())
@@ -2434,380 +2438,462 @@ class VoiceFlowApp:
         if not text_to_read:
             target_hwnd = getattr(self, "target_hwnd", None)
             text_to_read = self.injector.get_selected_text(target_hwnd=target_hwnd)
-
         if not text_to_read or not text_to_read.strip():
-            audio_flow_widget.set_playing(False)
-            self.overlay.show_error("Select text to listen")
+            if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
+                audio_flow_widget.set_playing(False)
+                self.overlay.show_error("Select text to listen")
             return
-
         if not explicit_selection and self._is_voice_flow_dictation(text_to_read):
             log.info("[AUDIO FLOW] Refusing to read text that matches Voice Flow dictation transcript.")
             audio_flow_widget.set_playing(False)
             self.overlay.show_error("Voice Flow dictation skipped")
             return
 
+        text_to_read = str(text_to_read).strip()
         snippet = text_to_read[:35] + "…" if len(text_to_read) > 35 else text_to_read
+        if is_summary:
+            audio_flow_widget.hide()
+            self._submit_audio_summary(text_to_read, summary_depth)
+            return
+
+        read_lock = self._get_read_generation_lock()
+        with read_lock:
+            player_active = bool(getattr(self, "_active_summary_player_token", None))
+            if player_active or tts_engine.is_speaking():
+                self._stop_audio_flow_pipeline()
+            if self.state != DictationState.IDLE:
+                return
+            generation = getattr(self, "_read_generation", 0) + 1
+            self._read_generation = generation
+            self._read_active = False
+            self._read_pending = True
+            self._active_read_text = text_to_read
         audio_flow_widget.hide()
 
-        def _on_start():
-            if self._audio_summary_generation == gen_token:
+        def _on_start() -> None:
+            with read_lock:
+                if getattr(self, "_read_generation", 0) != generation or self.state != DictationState.IDLE:
+                    return
+                self._read_pending = False
+                self._read_active = True
                 audio_flow_widget.set_playing(True)
                 audio_flow_widget.hide()
                 self.overlay.show_reading(snippet)
 
-        def _on_done():
-            if self._audio_summary_generation != gen_token:
-                return
-            audio_flow_widget.set_playing(False)
-            audio_flow_widget.hide()
-            self.overlay.clear_selected_text()
-            self.overlay.show_ready()
+        def _on_done() -> None:
+            with read_lock:
+                if getattr(self, "_read_generation", 0) != generation:
+                    return
+                self._read_active = False
+                self._read_pending = False
+                audio_flow_widget.set_playing(False)
+                audio_flow_widget.hide()
+                self.overlay.clear_selected_text()
+                if self.state == DictationState.IDLE:
+                    self.overlay.show_ready()
 
-        def _on_error(err_msg: str):
-            if self._audio_summary_generation != gen_token:
-                return
-            audio_flow_widget.set_playing(False)
-            audio_flow_widget.hide()
-            self.overlay.clear_selected_text()
-            self.overlay.show_error(f"Audio Flow: {err_msg}"[:90])
+        def _on_error(err_msg: str) -> None:
+            with read_lock:
+                if getattr(self, "_read_generation", 0) != generation:
+                    return
+                self._read_active = False
+                self._read_pending = False
+                audio_flow_widget.set_playing(False)
+                audio_flow_widget.hide()
+                self.overlay.clear_selected_text()
+                if self.state == DictationState.IDLE:
+                    self.overlay.show_error(f"Audio Flow: {err_msg}"[:90])
             log.warning("Audio Flow synthesis error: %s", err_msg)
 
-        speak_kwargs = {
-            "on_start": _on_start,
-            "on_done": _on_done,
-            "on_error": _on_error,
-        }
+        speak_kwargs = {"on_start": _on_start, "on_done": _on_done, "on_error": _on_error}
         if model_override is not None:
             speak_kwargs["model_override"] = model_override
 
-        effective_mode = (mode or "read").lower().strip()
-        if effective_mode == "default":
-            # Existing installations may retain the retired "explain" setting.
-            # Default behavior is now always verbatim Read, never an AI rewrite.
-            effective_mode = str(storage.get_setting("exec_audio_flow_default_mode", "read") or "read").lower().strip()
-        if effective_mode == "explain":
-            effective_mode = "read"
-        if effective_mode == "summary":
-            import uuid
-            depth = (summary_depth or "balanced").lower().strip()
-            depth = {"quick": "short", "standard": "balanced", "detailed": "deep_dive"}.get(depth, depth)
-            if depth not in {"short", "balanced", "deep_dive"}:
-                depth = "balanced"
-            # Snapshot this setting for the complete job: a user changing the
-            # preference while NotebookLM is working must not change its route.
-            summary_style = str(storage.get_setting("audio_flow_summary_style", "single") or "single").strip().lower()
-            if summary_style not in {"single", "podcast"}:
-                summary_style = "single"
-            history_id = f"ash_{uuid.uuid4().hex[:12]}"
-            summary_title = storage._derive_audio_title(text_to_read)
-            log.info("Audio Flow generating summary (%s depth) for text: '%s'", depth, snippet)
+        read_mode_setting = str(storage.get_setting("audio_flow_read_mode", "explanatory") or "explanatory").lower().strip()
+        if read_mode_setting == "verbatim" or mode == "read_verbatim":
+            log.info("Audio Flow reading selected text (Verbatim Read): '%s'", snippet)
+            with read_lock:
+                if self.state != DictationState.IDLE or self._read_generation != generation:
+                    return
+                self.overlay.show_generating_audio()
+                tts_engine.speak(text_to_read, **speak_kwargs)
+            return
+
+        log.info("Audio Flow reading selected text (Human Explanatory Narration): '%s'", snippet)
+        with read_lock:
+            if self.state != DictationState.IDLE or self._read_generation != generation:
+                return
+            self.overlay.show_generating_audio("Preparing explanation...")
+
+        def _explanatory_read_worker() -> None:
+            narrated = text_to_read
             try:
-                storage.add_audio_summary_history(
-                    text=text_to_read,
-                    depth=depth,
-                    audio_path="",
-                    duration_sec=0.0,
-                    item_id=history_id,
-                    title=summary_title,
-                    status="in_progress",
-                    progress=0,
-                )
-            except Exception as hexc:
-                log.debug("Failed to record audio summary history init: %s", hexc)
+                from voice_flow.audio_explainer import audio_explainer
+                candidate = audio_explainer.transform_for_human_reading(text_to_read)
+                if isinstance(candidate, str) and candidate.strip():
+                    narrated = candidate.strip()
+            except Exception as err:
+                log.warning("Audio explainer transform failed (%s); falling back to direct TTS", err)
+            with read_lock:
+                if getattr(self, "_read_generation", 0) != generation:
+                    return
+                if self.state != DictationState.IDLE:
+                    self._read_pending = False
+                    return
+                try:
+                    tts_engine.speak(narrated, **speak_kwargs)
+                except Exception as err:
+                    if getattr(self, "_read_generation", 0) == generation:
+                        _on_error(str(err))
 
-            if hasattr(self.overlay, "show_audio_summary_progress"):
-                self.overlay.show_audio_summary_progress(0, f"Preparing {depth} summary")
-            audio_flow_widget.hide()
+        threading.Thread(
+            target=_explanatory_read_worker,
+            name="AudioFlowExplanatoryRead",
+            daemon=True,
+        ).start()
 
-            def _on_cancel():
-                self._audio_summary_generation += 1
+    def _get_audio_flow_jobs(self):
+        jobs = getattr(self, "_audio_flow_jobs", None)
+        if jobs is None:
+            init_lock = getattr(self, "_audio_flow_jobs_lock", _AUDIO_FLOW_JOBS_INIT_LOCK)
+            with init_lock:
+                jobs = getattr(self, "_audio_flow_jobs", None)
+                if jobs is None:
+                    from voice_flow.audio_flow_jobs import AudioFlowJobs
+                    jobs = self._audio_flow_jobs = AudioFlowJobs(
+                        max_workers=2,
+                        on_change=self._on_audio_summary_job_changed,
+                        on_evict=self._clear_audio_summary_status,
+                        max_queued=6,
+                        retained_terminal=4,
+                    )
+        return jobs
+
+    def _submit_audio_summary(self, text: str, summary_depth: str | None) -> str:
+        import uuid
+
+        depth = (summary_depth or "balanced").lower().strip()
+        depth = {"quick": "short", "standard": "balanced", "detailed": "deep_dive"}.get(depth, depth)
+        if depth not in {"short", "balanced", "deep_dive"}:
+            depth = "balanced"
+        style = str(storage.get_setting("audio_flow_summary_style", "single") or "single").strip().lower()
+        if style not in {"single", "podcast"}:
+            style = "single"
+        job_id = f"ash_{uuid.uuid4().hex[:12]}"
+        title = storage._derive_audio_title(text)
+        payload = {"text": text, "title": title, "depth": depth, "style": style}
+        payloads = getattr(self, "_audio_summary_payloads", None)
+        if payloads is None:
+            payloads = self._audio_summary_payloads = {}
+        payloads[job_id] = payload
+        def persist_initial() -> None:
+            storage.add_audio_summary_history(
+                text=text,
+                depth=depth,
+                audio_path="",
+                duration_sec=0.0,
+                item_id=job_id,
+                title=title,
+                status="in_progress",
+                progress=0,
+            )
+
+        def run(job):
+            from voice_flow.audio_notebooklm import audio_notebooklm_service
+            retrying_podcast = False
+
+            def progress(event):
+                nonlocal retrying_podcast
+                percent, stage = self._audio_summary_progress(event, retrying_podcast=retrying_podcast)
+                if isinstance(event, dict) and event.get("state") == "audio_retry":
+                    retrying_podcast = True
+                self._get_audio_flow_jobs().update_progress(job, percent, stage)
+
+            result = audio_notebooklm_service.generate(
+                text,
+                depth=depth,
+                style=style,
+                cancelled=job.is_cancelled,
+                on_progress=progress,
+            )
+            if job.is_cancelled():
+                raise RuntimeError("Audio summary cancelled")
+            audio_path = str((result or {}).get("audio_path") or "")
+            if not audio_path:
+                raise RuntimeError("NotebookLM did not return summary audio.")
+            duration = float((result or {}).get("duration_sec") or 0.0)
+            if not duration:
+                try:
+                    import wave
+                    with wave.open(audio_path, "rb") as audio_file:
+                        duration = audio_file.getnframes() / float(audio_file.getframerate())
+                except Exception:
+                    try:
+                        duration = max(10.0, Path(audio_path).stat().st_size / 16000.0)
+                    except Exception:
+                        duration = 0.0
+            return {"audio_path": audio_path, "duration_sec": duration}
+
+        try:
+            if len(text.encode("utf-8")) > 100_000:
+                payloads.pop(job_id, None)
+                raise ValueError("Selected text is too long for an Audio Summary. Shorten the selection and try again.")
+            self._get_audio_flow_jobs().submit(
+                job_id=job_id,
+                text=text,
+                depth=depth,
+                style=style,
+                title=title,
+                run=run,
+                before_enqueue=persist_initial,
+            )
+        except Exception as exc:
+            payloads.pop(job_id, None)
+            if isinstance(exc, RuntimeError) and "queue is full" in str(exc).lower():
+                if self.state == DictationState.IDLE and not getattr(self, "_read_active", False):
+                    self.overlay.show_error(str(exc))
+            elif isinstance(exc, ValueError) and "too long" in str(exc).lower():
+                if self.state == DictationState.IDLE and not getattr(self, "_read_active", False):
+                    self.overlay.show_error(str(exc))
+            raise
+        return job_id
+
+    def _get_read_generation_lock(self):
+        lock = getattr(self, "_read_generation_lock", None)
+        if lock is None:
+            lock = self._read_generation_lock = threading.RLock()
+        return lock
+
+    @staticmethod
+    def _audio_summary_progress(event, *, retrying_podcast: bool = False) -> tuple[int, str]:
+        if isinstance(event, dict):
+            state = str(event.get("state") or "")
+            elapsed = float(event.get("elapsed") or 0.0)
+            if state == "notebook_create":
+                return 15, "Setting up notebook"
+            if state == "source_add":
+                return 30, "Adding source text"
+            if state == "source_ready":
+                return 40, "Source text ready"
+            if state == "audio_start":
+                if retrying_podcast:
+                    return 88, "Shortening podcast summary"
+                return 50, "Starting audio generation"
+            if state == "audio_retry":
+                return 88, "Shortening podcast summary"
+            if state == "audio_poll":
+                if retrying_podcast:
+                    return 88, f"Shortening podcast summary ({int(elapsed)}s)"
+                return min(88, 50 + int(elapsed * 0.8)), f"Synthesizing audio ({int(elapsed)}s)"
+            if state == "audio_download":
+                return 92, "Downloading summary audio"
+            msg = event.get("message") or event.get("stage") or event.get("status")
+            return int(event.get("progress") or 25), str(msg or "Preparing summary")[:44]
+        if isinstance(event, (int, float)):
+            return max(0, min(99, int(event))), "Preparing summary"
+        if isinstance(event, str):
+            return 25, event[:44]
+        return 5, "Preparing summary"
+
+    def _on_audio_summary_job_changed(self, job) -> None:
+        payloads = getattr(self, "_audio_summary_payloads", {})
+        payload = payloads.get(job.job_id, {})
+        try:
+            if job.status in {"queued", "running"}:
+                self._show_audio_summary_progress(job.progress, job.stage, job.job_id, job.title)
+                try:
+                    storage.update_audio_summary_history(job.job_id, status="in_progress", progress=job.progress)
+                except Exception:
+                    pass
+                return
+
+            if job.status == "ready":
+                result = job.result or {}
+                audio_path = str(result.get("audio_path") or "")
+                duration = float(result.get("duration_sec") or 0.0)
+                title = str(payload.get("title") or job.title or "Audio Summary")
+                text = str(payload.get("text") or "")
                 try:
                     storage.update_audio_summary_history(
-                        history_id,
-                        status="cancelled",
-                        progress=0,
-                        error="Cancelled by user",
+                        job.job_id, status="ready", progress=100, audio_path=audio_path,
+                        duration_sec=duration, title=title,
                     )
                     storage.record_audio_summary_to_history(
-                        audio_id=history_id,
-                        title=summary_title,
-                        text_snippet=text_to_read,
-                        status="cancelled",
-                        error_message="Cancelled by user",
+                        audio_id=job.job_id, title=title, text_snippet=text,
+                        audio_path=audio_path, duration_sec=duration, status="success",
                     )
                     from voice_flow.gui.api_server import invalidate_history_cache
                     invalidate_history_cache()
-                except Exception as cexc:
-                    log.debug("Failed to update cancelled status: %s", cexc)
-                if hasattr(self.overlay, "clear_audio_summary_status"):
-                    self.overlay.clear_audio_summary_status()
-                if hasattr(self.overlay, "show_ready"):
-                    self.overlay.show_ready()
-            if hasattr(self.overlay, "on_audio_summary_cancel"):
-                self.overlay.on_audio_summary_cancel = _on_cancel
-
-            def _summary_worker():
-                retrying_podcast = False
-
-                def _progress(event):
-                    nonlocal retrying_podcast
-                    if self._audio_summary_generation != gen_token:
-                        return
-                    progress_pct = 5
-                    stage_msg = "Preparing summary"
-                    if isinstance(event, dict):
-                        state = str(event.get("state") or "")
-                        elapsed = float(event.get("elapsed") or 0.0)
-                        if state == "notebook_create":
-                            progress_pct = 15
-                            stage_msg = "Setting up notebook"
-                        elif state == "source_add":
-                            progress_pct = 30
-                            stage_msg = "Adding source text"
-                        elif state == "source_ready":
-                            progress_pct = 40
-                            stage_msg = "Source text ready"
-                        elif state == "audio_start":
-                            if retrying_podcast:
-                                progress_pct = 88
-                                stage_msg = "Shortening podcast summary"
-                            else:
-                                progress_pct = 50
-                                stage_msg = "Starting audio generation"
-                        elif state == "audio_retry":
-                            # A verified overlong podcast is regenerated once;
-                            # preserve progress rather than making it appear to
-                            # restart from the initial cloud submission.
-                            retrying_podcast = True
-                            progress_pct = 88
-                            stage_msg = "Shortening podcast summary"
-                        elif state == "audio_poll":
-                            if retrying_podcast:
-                                progress_pct = 88
-                                stage_msg = f"Shortening podcast summary ({int(elapsed)}s)"
-                            else:
-                                progress_pct = min(88, 50 + int(elapsed * 0.8))
-                                stage_msg = f"Synthesizing audio ({int(elapsed)}s)"
-                        elif state == "audio_download":
-                            progress_pct = 92
-                            stage_msg = "Downloading summary audio"
-                        else:
-                            msg = event.get("message") or event.get("stage") or event.get("status")
-                            if msg:
-                                stage_msg = str(msg)[:44]
-                            progress_pct = int(event.get("progress") or 25)
-                    elif isinstance(event, (int, float)):
-                        progress_pct = int(event)
-                    elif isinstance(event, str):
-                        stage_msg = event[:44]
-                    if hasattr(self.overlay, "show_audio_summary_progress"):
-                        self.overlay.show_audio_summary_progress(progress_pct, stage_msg)
-                    try:
-                        storage.update_audio_summary_history(history_id, progress=progress_pct)
-                    except Exception:
-                        pass
-
-                try:
-                    from voice_flow.audio_notebooklm import audio_notebooklm_service
-                    result = audio_notebooklm_service.generate(
-                        text_to_read,
-                        depth=depth,
-                        style=summary_style,
-                        cancelled=lambda: self._audio_summary_generation != gen_token,
-                        on_progress=_progress,
-                    )
-                    if self._audio_summary_generation != gen_token:
-                        log.info("Audio summary generation token %d invalidated", gen_token)
-                        if hasattr(self.overlay, "clear_audio_summary_status"):
-                            self.overlay.clear_audio_summary_status()
-                        return
-                    audio_path = str((result or {}).get("audio_path") or "")
-                    if not audio_path:
-                        raise RuntimeError("NotebookLM did not return summary audio.")
-                    from voice_flow.audio_summary_player import launch_summary_audio_player
-                    if self._audio_summary_generation != gen_token:
-                        if hasattr(self.overlay, "clear_audio_summary_status"):
-                            self.overlay.clear_audio_summary_status()
-                        return
-
-                    # NotebookLM validates podcast M4A duration before it is
-                    # returned. Prefer that exact value for history.
-                    duration_sec = float((result or {}).get("duration_sec") or 0.0)
-                    if not duration_sec:
-                        try:
-                            import wave
-                            with wave.open(audio_path, "rb") as wf:
-                                duration_sec = wf.getnframes() / float(wf.getframerate())
-                        except Exception:
-                            try:
-                                sz = Path(audio_path).stat().st_size
-                                duration_sec = max(10.0, sz / 16000.0)
-                            except Exception:
-                                duration_sec = 0.0
-
-                    title_param = summary_title or (snippet[:40] if snippet else "Audio Summary")
-                    self._active_summary_player_token = launch_summary_audio_player(
-                        audio_path,
-                        depth=depth,
-                        title=title_param,
-                        token=history_id,
-                    )
-                    history_ready = False
-                    try:
-                        storage.update_audio_summary_history(
-                            history_id,
-                            status="ready",
-                            progress=100,
-                            audio_path=audio_path,
-                            duration_sec=duration_sec,
-                            title=title_param,
-                        )
-                        storage.record_audio_summary_to_history(
-                            audio_id=history_id,
-                            title=title_param,
-                            text_snippet=text_to_read,
-                            audio_path=audio_path,
-                            duration_sec=duration_sec,
-                            status="success",
-                        )
-                        history_ready = True
-                    except Exception as hexc:
-                        log.debug("Failed to update audio summary history: %s", hexc)
-
-                    if self._audio_summary_generation != gen_token:
-                        from voice_flow.audio_summary_player import close_summary_audio_player
-                        close_summary_audio_player(self._active_summary_player_token)
-                        self._active_summary_player_token = None
-                        if hasattr(self.overlay, "clear_audio_summary_status"):
-                            self.overlay.clear_audio_summary_status()
-                        return
-                    if hasattr(self.overlay, "show_audio_summary_progress"):
-                        self.overlay.show_audio_summary_progress(100, "Audio ready")
-                    if hasattr(self.overlay, "clear_audio_summary_status"):
-                        self.overlay.clear_audio_summary_status()
-                    if hasattr(self.overlay, "show_ready"):
-                        self.overlay.show_ready()
-
-                    # Disk copies are optional.  Start playback, persist the
-                    # history item, and restore the overlay before exporting.
-                    # A slow or unavailable Downloads folder must not delay
-                    # the ready path.
-                    def _export_summary_copy() -> None:
-                        try:
-                            from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
-                            clean_aname = safe_media_filename(
-                                title_param or text_to_read[:50],
-                                default="Audio_Summary",
-                                ext=Path(audio_path).suffix or ".m4a",
-                            )
-                            saved_path, _ = save_media_to_downloads(
-                                audio_path,
-                                clean_aname,
-                                copy_to_media_folder=True,
-                            )
-                            if saved_path.is_file():
-                                storage.update_audio_summary_history(history_id, downloaded=1)
-                        except Exception as export_exc:
-                            log.debug("Optional audio summary export failed: %s", export_exc)
-
-                    if history_ready:
-                        threading.Thread(
-                            target=_export_summary_copy,
-                            name="AudioSummaryExport",
-                            daemon=True,
-                        ).start()
                 except Exception as exc:
-                    is_cancelled = (
-                        self._audio_summary_generation != gen_token
-                        or "cancelled" in str(exc).lower()
-                        or getattr(exc, "code", "") == "cancelled"
-                    )
-                    final_status = "cancelled" if is_cancelled else "failed"
-                    final_error = "Cancelled by user" if is_cancelled else str(exc)
-                    try:
-                        storage.update_audio_summary_history(
-                            history_id,
-                            status=final_status,
-                            error=final_error,
-                        )
-                        storage.record_audio_summary_to_history(
-                            audio_id=history_id,
-                            title=summary_title,
-                            text_snippet=text_to_read,
-                            status=final_status,
-                            error_message=final_error,
-                        )
-                        from voice_flow.gui.api_server import invalidate_history_cache
-                        invalidate_history_cache()
-                    except Exception:
-                        pass
-                    if self._audio_summary_generation != gen_token:
-                        if hasattr(self.overlay, "clear_audio_summary_status"):
-                            self.overlay.clear_audio_summary_status()
-                        return
-                    if hasattr(self.overlay, "clear_audio_summary_status"):
-                        self.overlay.clear_audio_summary_status()
-                    audio_flow_widget.set_playing(False)
-                    audio_flow_widget.hide()
-                    if hasattr(self.overlay, "clear_selected_text"):
-                        self.overlay.clear_selected_text()
-                    if hasattr(self.overlay, "show_error"):
-                        if getattr(exc, "code", "") == "PODCAST_TOO_LONG":
-                            self.overlay.show_error("NotebookLM could not make this podcast short enough. Try again.")
-                        else:
-                            self.overlay.show_error(f"NotebookLM summary: {exc}"[:90])
-                    log.warning("Audio summary unexpected error: %s", exc)
-
-            threading.Thread(target=_summary_worker, daemon=True).start()
-        else:
-            read_mode_setting = str(storage.get_setting("audio_flow_read_mode", "explanatory") or "explanatory").lower().strip()
-            if read_mode_setting == "verbatim" or mode == "read_verbatim":
-                log.info("Audio Flow reading selected text (Verbatim Read): '%s'", snippet)
-                self.overlay.show_generating_audio()
-                tts_engine.speak(text_to_read, **speak_kwargs)
-            else:
-                log.info("Audio Flow reading selected text (Human Explanatory Narration): '%s'", snippet)
-                # An explanatory Read first prepares a conversational script.
-                # This can involve Gemini or a cache lookup, so it must never
-                # run on the Tk/hotkey thread.  The shared generation token is
-                # bumped by Stop and every new Audio Flow request, preventing a
-                # late worker from starting TTS for no-longer-selected text.
-                self.overlay.show_generating_audio("Preparing explanation...")
-
-                def _explanatory_read_worker() -> None:
-                    narrated = text_to_read
-                    try:
-                        from voice_flow.audio_explainer import audio_explainer
-                        candidate = audio_explainer.transform_for_human_reading(text_to_read)
-                        if isinstance(candidate, str) and candidate.strip():
-                            narrated = candidate.strip()
-                        else:
-                            log.warning("Audio explainer returned no usable script; falling back to direct TTS")
-                    except Exception as err:
-                        log.warning("Audio explainer transform failed (%s); falling back to direct TTS", err)
-
-                    # Hold the token lock until TTS has accepted the request.
-                    # This closes the small race where a new selection arrives
-                    # immediately after the stale-token check.
-                    with generation_lock:
-                        if self._audio_summary_generation != gen_token:
-                            log.info("Audio explanatory Read token %d invalidated before TTS", gen_token)
-                            return
-
-                        # Keep Read available even if the explainer is unavailable;
-                        # the selected source text is the safe, lossless fallback.
-                        try:
-                            tts_engine.speak(narrated, **speak_kwargs)
-                        except Exception as err:
-                            if self._audio_summary_generation == gen_token:
-                                _on_error(str(err))
-
+                    log.debug("Failed to persist completed audio summary: %s", exc)
+                self._try_open_audio_summary_job(job.job_id, automatic=True)
                 threading.Thread(
-                    target=_explanatory_read_worker,
+                    target=self._export_audio_summary_copy,
+                    args=(job.job_id, title, audio_path),
+                    name=f"AudioSummaryExport-{job.job_id[-6:]}",
                     daemon=True,
-                    name="AudioFlowExplanatoryRead",
                 ).start()
+                self._show_audio_summary_ready(job.job_id, "Audio ready")
+            elif job.status == "failed":
+                message = str(job.error or "Audio summary failed")
+                try:
+                    storage.update_audio_summary_history(job.job_id, status="failed", error=message)
+                    storage.record_audio_summary_to_history(
+                        audio_id=job.job_id, title=job.title,
+                        text_snippet=str(payload.get("text") or ""), status="failed", error_message=message,
+                    )
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
+                self._show_audio_summary_failed(job.job_id, message)
+            elif job.status == "cancelled":
+                try:
+                    storage.update_audio_summary_history(job.job_id, status="cancelled", progress=0, error="Cancelled by user")
+                    storage.record_audio_summary_to_history(
+                        audio_id=job.job_id, title=job.title,
+                        text_snippet=str(payload.get("text") or ""), status="cancelled", error_message="Cancelled by user",
+                    )
+                    from voice_flow.gui.api_server import invalidate_history_cache
+                    invalidate_history_cache()
+                except Exception:
+                    pass
+                self._clear_audio_summary_status(job.job_id)
+        finally:
+            if job.status in {"ready", "failed", "cancelled"}:
+                payloads.pop(job.job_id, None)
+                job.text = ""
+                job.run = lambda _job: None
 
+    def _export_audio_summary_copy(self, job_id: str, title: str, audio_path: str) -> None:
+        try:
+            from voice_flow.audio_summary_player import save_media_to_downloads, safe_media_filename
+            suffix = f"_{job_id}"
+            bounded_title = (title or "Audio Summary")[:70]
+            clean_name = safe_media_filename(
+                f"{bounded_title}{suffix}",
+                default="Audio_Summary",
+                ext=Path(audio_path).suffix or ".m4a",
+                max_length=105,
+            )
+            saved_path, _ = save_media_to_downloads(audio_path, clean_name, copy_to_media_folder=True)
+            if saved_path and saved_path.is_file():
+                storage.update_audio_summary_history(job_id, downloaded=1)
+        except Exception as exc:
+            log.debug("Optional audio summary export failed: %s", exc)
+
+    def _show_audio_summary_progress(self, progress: int, stage: str, job_id: str, title: str) -> None:
+        callback = getattr(self.overlay, "show_audio_summary_progress", None)
+        if not callable(callback):
+            return
+        try:
+            callback(progress, stage, job_id=job_id, title=title)
+        except Exception:
+            log.debug("Could not update Audio Summary progress row %s", job_id, exc_info=True)
+
+    def _show_audio_summary_ready(self, job_id: str, stage: str) -> None:
+        callback = getattr(self.overlay, "show_audio_summary_ready", None)
+        try:
+            if callable(callback):
+                callback(job_id, stage=stage)
+            elif hasattr(self.overlay, "show_audio_summary_progress"):
+                self._show_audio_summary_progress(100, stage, job_id, "Audio Summary")
+        except Exception:
+            log.debug("Could not show ready Audio Summary row %s", job_id, exc_info=True)
+
+    def _show_audio_summary_failed(self, job_id: str, message: str) -> None:
+        callback = getattr(self.overlay, "show_audio_summary_failed", None)
+        try:
+            if callable(callback):
+                callback(job_id, message)
+            else:
+                self._show_audio_summary_progress(0, message[:44], job_id, "Audio Summary")
+        except Exception:
+            log.debug("Could not show failed Audio Summary row %s", job_id, exc_info=True)
+
+    def _clear_audio_summary_status(self, job_id: str) -> None:
+        callback = getattr(self.overlay, "clear_audio_summary_status", None)
+        if callable(callback):
+            try:
+                callback(job_id)
+            except Exception:
+                log.debug("Could not clear Audio Summary row %s", job_id, exc_info=True)
+
+    def _try_open_audio_summary_job(self, job_id: str, *, automatic: bool) -> bool:
+        lock = self._get_read_generation_lock()
+        with lock:
+            if self.state != DictationState.IDLE or getattr(self, "_read_active", False) or getattr(self, "_read_pending", False):
+                return False
+            try:
+                if tts_engine.is_speaking():
+                    return False
+            except Exception:
+                pass
+            if getattr(self, "_audio_summary_launch_reservation", None):
+                return False
+            current = getattr(self, "_active_summary_player_token", None)
+            if automatic and current:
+                return False
+            jobs = getattr(self, "_audio_flow_jobs", None)
+            if automatic and jobs is not None and any(
+                job.job_id != job_id and job.status in {"queued", "running"}
+                for job in jobs.snapshot()
+            ):
+                return False
+            self._audio_summary_launch_reservation = job_id
+        try:
+            jobs = getattr(self, "_audio_flow_jobs", None)
+            job = jobs.get(job_id) if jobs is not None else None
+            if job is None or job.status != "ready" or not job.result:
+                self._clear_audio_summary_launch_reservation(job_id)
+                return False
+            if current:
+                from voice_flow.audio_summary_player import close_summary_audio_player
+                close_summary_audio_player(current)
+            from voice_flow.audio_summary_player import launch_summary_audio_player
+            player_token = launch_summary_audio_player(
+                str(job.result.get("audio_path") or ""),
+                depth=job.depth,
+                title=job.title,
+                token=job.job_id,
+                style=job.style,
+                close_existing=False,
+            )
+        except Exception as exc:
+            self._clear_audio_summary_launch_reservation(job_id)
+            log.warning("Could not open ready audio summary %s: %s", job_id, exc)
+            return False
+        with lock:
+            if (
+                getattr(self, "_audio_summary_launch_reservation", None) != job_id
+                or self.state != DictationState.IDLE
+                or getattr(self, "_read_active", False)
+                or getattr(self, "_read_pending", False)
+            ):
+                stale = True
+            else:
+                self._active_summary_player_token = player_token
+                self._audio_summary_launch_reservation = None
+                stale = False
+        if stale:
+            from voice_flow.audio_summary_player import close_summary_audio_player
+            close_summary_audio_player(player_token)
+            return False
+        return True
+
+    def _clear_audio_summary_launch_reservation(self, job_id: str) -> None:
+        with self._get_read_generation_lock():
+            if getattr(self, "_audio_summary_launch_reservation", None) == job_id:
+                self._audio_summary_launch_reservation = None
+
+    def cancel_audio_summary_job(self, job_id: str) -> bool:
+        jobs = getattr(self, "_audio_flow_jobs", None)
+        if jobs is None:
+            return False
+        return jobs.cancel(str(job_id or ""))
+
+    def open_audio_summary_job(self, job_id: str) -> bool:
+        return self._try_open_audio_summary_job(job_id, automatic=False)
     def _process_video_flow_pipeline(self, mode: str, text_override: str | None = None) -> None:
         """Open the primary system-wide composer for selected text."""
         if not storage.get_setting("video_flow_enabled", True):
@@ -2952,7 +3038,7 @@ class VoiceFlowApp:
         if get_video_flow_service().cancel(video_id):
             log.info("[VIDEO FLOW] Cancelled screen video %s.", video_id)
         self.video_stage = ""
-        self.overlay.clear_video_status()
+        self.overlay.clear_video_status(video_id)
 
     def _monitor_video_flow_job(self, video_id: str) -> None:
         """Keep the bar sidecar synchronized until the player is ready."""
@@ -2977,7 +3063,7 @@ class VoiceFlowApp:
                 return
             if state == "cancelled":
                 self.video_stage = ""
-                self.overlay.clear_video_status()
+                self.overlay.clear_video_status(video_id)
                 return
             stage_text = str(job.message or state or "Creating video")
             self.video_stage = stage_text
@@ -2988,21 +3074,24 @@ class VoiceFlowApp:
             )
             time.sleep(0.4)
     def _stop_audio_flow_pipeline(self) -> None:
-        """Stop active Audio Flow TTS playback and invalidate in-flight summary generation."""
-        generation_lock = getattr(self, "_audio_flow_generation_lock", None)
-        if generation_lock is None:
-            generation_lock = self._audio_flow_generation_lock = threading.RLock()
-        with generation_lock:
-            self._audio_summary_generation = getattr(self, "_audio_summary_generation", 0) + 1
-        try:
-            from voice_flow.audio_summary_player import close_summary_audio_player
-            close_summary_audio_player(getattr(self, "_active_summary_player_token", None))
-            self._active_summary_player_token = None
-        except Exception:
-            pass
-        tts_engine.stop()
+        """Stop foreground Read and an explicitly tracked summary player only."""
+        with self._get_read_generation_lock():
+            self._read_generation = getattr(self, "_read_generation", 0) + 1
+            self._read_active = False
+            self._read_pending = False
+            self._audio_summary_launch_reservation = None
+            player_token = getattr(self, "_active_summary_player_token", None)
+            if player_token:
+                try:
+                    from voice_flow.audio_summary_player import close_summary_audio_player
+                    close_summary_audio_player(player_token)
+                except Exception:
+                    pass
+                self._active_summary_player_token = None
+            tts_engine.stop()
         audio_flow_widget.set_playing(False)
-        self.overlay.show_ready()
+        if self.state == DictationState.IDLE:
+            self.overlay.show_ready()
     def _toggle_audio_flow_pause(self) -> None:
         """Stop verbatim Read playback. Read is intentionally not resumable."""
         if tts_engine.is_speaking():
@@ -3174,8 +3263,10 @@ class VoiceFlowApp:
                     self.overlay.show()
         except Exception as e:
             log.debug("Overlay restart error during reset_state_and_refresh: %s", e)
-
     def stop(self) -> None:
+        jobs = getattr(self, "_audio_flow_jobs", None)
+        if jobs is not None:
+            jobs.shutdown(timeout=2.0)
         try:
             from voice_flow.video_flow_engine.notebooklm import stop_keepalive_daemon
             stop_keepalive_daemon()

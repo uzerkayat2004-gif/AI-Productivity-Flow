@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -97,6 +99,78 @@ class NotebookLMAudioSummaryError(RuntimeError):
         self.message = _safe_error(message)
         self.payload = _safe_payload(payload)
         super().__init__(f"{self.code}: {self.message}")
+
+
+class _ProviderCancellationGuard:
+    """Forward one request's cancellation signal to its private provider."""
+
+    def __init__(self, cancelled: Any, bridge: Any, *, name: str) -> None:
+        self.cancelled = cancelled
+        self._bridge = bridge
+        self._bridge_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._name = name
+
+    def set_bridge(self, bridge: Any) -> None:
+        with self._bridge_lock:
+            self._bridge = bridge
+
+    def start(self) -> None:
+        if not callable(getattr(self._bridge, "cancel", None)):
+            return
+        self._thread = threading.Thread(
+            target=self._watch,
+            name=f"NotebookLMAudioCancel-{self._name}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _watch(self) -> None:
+        wait_for_cancel = self.cancelled.wait if isinstance(self.cancelled, threading.Event) else None
+        while not self._stop.is_set():
+            if _cancelled_value(self.cancelled):
+                with self._bridge_lock:
+                    bridge = self._bridge
+                cancel = getattr(bridge, "cancel", None)
+                if callable(cancel):
+                    try:
+                        cancel()
+                    except Exception:
+                        logger.debug("Request-scoped NotebookLM cancellation failed", exc_info=True)
+                # Cancellation may race provider Popen creation, before that
+                # provider publishes its owned process handle.
+                self._stop.wait(0.05)
+                continue
+            if callable(wait_for_cancel):
+                try:
+                    wait_for_cancel(0.1)
+                except Exception:
+                    self._stop.wait(0.1)
+            else:
+                self._stop.wait(0.1)
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            try:
+                thread.join(timeout=2.0)
+            except RuntimeError:
+                pass
+
+
+def _cancelled_value(cancelled: Any) -> bool:
+    if cancelled is None:
+        return False
+    try:
+        if callable(cancelled):
+            return bool(cancelled())
+        if hasattr(cancelled, "is_set"):
+            return bool(cancelled.is_set())
+        return bool(cancelled)
+    except Exception:
+        return False
 
 
 def _safe_error(message: Any) -> str:
@@ -341,9 +415,9 @@ class NotebookLMAudioSummaryService:
         self.provider_factory = provider_factory
         self.sleep = sleep
         self.monotonic = monotonic
-        # NotebookLM bridge setup can spawn/attach heavyweight browser and CLI
-        # resources. Only one Audio Flow request may enter it at a time.
-        self._generation_lock = threading.Lock()
+        # Keep browser and CLI resource use bounded while allowing selected
+        # text, read mode, and video work to proceed alongside two summaries.
+        self._generation_slots = threading.BoundedSemaphore(2)
 
     def _cancelled(self, cancelled: Any) -> bool:
         if cancelled is None:
@@ -375,9 +449,9 @@ class NotebookLMAudioSummaryService:
             # already abandoned, so fail closed instead of swallowing it.
             raise NotebookLMAudioSummaryError("CALLBACK_FAILED", _safe_error(exc)) from exc
 
-    def _bridge(self) -> Any:
+    def _bridge(self, *, workdir: Path | None = None) -> Any:
         kwargs: dict[str, Any] = {
-            "workdir": self.root_dir,
+            "workdir": workdir or self.root_dir,
             "poll_interval_seconds": self.poll_interval_seconds,
         }
         if self.cli_path is not None:
@@ -440,15 +514,19 @@ class NotebookLMAudioSummaryService:
         cancelled: Any = None,
         on_progress: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """Serialize expensive bridge setup while allowing stale callers to leave."""
-        while not self._generation_lock.acquire(timeout=0.05):
+        """Bound NotebookLM resource use and let waiting requests cancel promptly."""
+        queued = False
+        while not self._generation_slots.acquire(timeout=0.1):
             self._check_cancelled(cancelled)
+            if not queued:
+                self._emit(on_progress, "queued", phase="queued")
+                queued = True
         try:
             return self._generate_locked(
                 text, depth, style=style, cancelled=cancelled, on_progress=on_progress
             )
         finally:
-            self._generation_lock.release()
+            self._generation_slots.release()
 
     def _generate_locked(
         self,
@@ -458,6 +536,76 @@ class NotebookLMAudioSummaryService:
         style: str = "single",
         cancelled: Any = None,
         on_progress: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(text, str) or not text.strip():
+            raise NotebookLMAudioSummaryError("VALIDATION", "Select text before requesting a summary.")
+        if len(text.encode("utf-8")) > MAX_SOURCE_TEXT_BYTES:
+            raise NotebookLMAudioSummaryError(
+                "VALIDATION", "Selected text is too large for a NotebookLM audio summary (maximum 100,000 bytes)."
+            )
+        normalize_audio_depth(depth)
+        normalize_audio_summary_style(style)
+        self._check_cancelled(cancelled)
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        request_id = uuid.uuid4().hex
+        jobs_dir = self.root_dir / ".audio-flow-jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        request_workdir = Path(tempfile.mkdtemp(prefix=f"{request_id}-", dir=jobs_dir))
+        target_path = self.root_dir / f"{request_id}.m4a"
+        target_existed = target_path.exists()
+        guard: _ProviderCancellationGuard | None = None
+        completed = False
+        try:
+            bridge = self._bridge(workdir=request_workdir)
+            guard = _ProviderCancellationGuard(cancelled, bridge, name=request_id[:12])
+            guard.start()
+            result = self._generate_request(
+                text,
+                depth,
+                style=style,
+                cancelled=cancelled,
+                on_progress=on_progress,
+                request_id=request_id,
+                request_workdir=request_workdir,
+                bridge=bridge,
+                cancellation_guard=guard,
+            )
+            self._check_cancelled(cancelled)
+            completed = True
+            return result
+        finally:
+            if guard is not None:
+                guard.stop()
+            if not completed and not target_existed:
+                try:
+                    if (
+                        target_path.name == f"{request_id}.m4a"
+                        and target_path.resolve().parent == self.root_dir.resolve()
+                        and target_path.is_file()
+                    ):
+                        target_path.unlink()
+                except OSError:
+                    pass
+            # Only remove this method's direct child of its private workspace
+            # area; a replaced symlink or path escape must never be followed.
+            try:
+                if request_workdir.resolve().parent == jobs_dir.resolve():
+                    shutil.rmtree(request_workdir, ignore_errors=True)
+            except OSError:
+                pass
+
+    def _generate_request(
+        self,
+        text: str,
+        depth: str = "balanced",
+        *,
+        style: str = "single",
+        cancelled: Any = None,
+        on_progress: Callable[[Mapping[str, Any]], None] | None = None,
+        request_id: str,
+        request_workdir: Path,
+        bridge: Any,
+        cancellation_guard: _ProviderCancellationGuard,
     ) -> dict[str, Any]:
         """Generate a downloadable, source-grounded NotebookLM audio overview.
 
@@ -473,11 +621,7 @@ class NotebookLMAudioSummaryService:
         canonical_depth = normalize_audio_depth(depth)
         canonical_style = normalize_audio_summary_style(style)
         source_words = _source_word_count(text)
-        self._check_cancelled(cancelled)
-        self.root_dir.mkdir(parents=True, exist_ok=True)
-        request_id = uuid.uuid4().hex
         _log_resource_snapshot("start")
-        bridge = self._bridge()
         started_at = self.monotonic()
         stage_timings: dict[str, float] = {
             "auth": 0.0,
@@ -661,7 +805,16 @@ class NotebookLMAudioSummaryService:
                     if canonical_style == "single"
                     else str(budget["audio_length"])
                 )
-                target = (self.root_dir / f"{request_id}.m4a").resolve()
+                target_candidate = self.root_dir / f"{request_id}.m4a"
+                if (
+                    target_candidate.is_symlink()
+                    or target_candidate.exists()
+                    or target_candidate.parent.resolve() != self.root_dir.resolve()
+                ):
+                    raise NotebookLMAudioSummaryError(
+                        "OUTPUT_PATH_UNAVAILABLE", "The request audio output path is unavailable."
+                    )
+                target = target_candidate.resolve()
                 for audio_attempt in range(2):
                     self._check_cancelled(cancelled)
                     corrective = ""
@@ -679,7 +832,7 @@ class NotebookLMAudioSummaryService:
                             f"The prior attempt ran for {previous_duration:.1f} seconds and exceeded the ceiling. "
                             "Be substantially shorter and end immediately after the essential source points."
                         )
-                    prompt_path = self.root_dir / f"{request_id}-prompt.txt"
+                    prompt_path = request_workdir / "prompt.txt"
                     prompt_path.write_text(
                         _native_audio_prompt(canonical_style, canonical_depth, source_words, corrective=corrective),
                         encoding="utf-8",
@@ -753,9 +906,14 @@ class NotebookLMAudioSummaryService:
             except NotebookLMAudioSummaryError:
                 raise
             except Exception as exc:
+                if self._cancelled(cancelled):
+                    raise NotebookLMAudioSummaryError(
+                        "cancelled", "Audio summary generation was cancelled."
+                    ) from exc
                 if attempt == 0 and _is_auth_error(exc) and _try_heal():
                     logger.info("Auto-healed NotebookLM session after generation failure (%s); retrying audio summary", _safe_error(exc))
-                    bridge = self._bridge()
+                    bridge = self._bridge(workdir=request_workdir)
+                    cancellation_guard.set_bridge(bridge)
                     continue
                 if isinstance(exc, NotebookLMVideoError):
                     err_code = "auth_expired" if _is_auth_error(exc) else exc.code

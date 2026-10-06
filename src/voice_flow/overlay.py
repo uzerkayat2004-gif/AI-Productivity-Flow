@@ -131,6 +131,8 @@ class FloatingOverlayBar:
 
     # Layout: the last GRIP_W pixels of the bar are always the drag grip.
     GRIP_W = 14
+    # 2 running + 6 queued audio jobs + 4 retained finals + Video Flow.
+    MAX_SUMMARY_ROWS = 13
     # Redraws closer than this are skipped when nothing meaningful changed.
     REDRAW_MIN_INTERVAL = 0.040
 
@@ -190,7 +192,11 @@ class FloatingOverlayBar:
         self.audio_summary_progress = 0
         self.audio_summary_stage = ""
         self._audio_summary_animation_generation = 0
-        self.on_audio_summary_cancel: Callable[[], None] | None = None
+        self._audio_summary_jobs: dict[str, dict[str, object]] = {}
+        self.on_audio_summary_cancel: Callable[..., None] | None = None
+        self.on_audio_summary_ready: Callable[..., None] | None = None
+        self._job_animation_after_id = None
+        self._job_animation_generation = 0
 
         self.state = "HIDDEN"  # HIDDEN, READY, RECORDING, PROCESSING, DONE, ERROR
         self._anim_phase = 0.0
@@ -329,8 +335,9 @@ class FloatingOverlayBar:
     def restart_and_refresh(self) -> None:
         """Completely reset, recreate/revalidate, reposition, and bring the floating bar to front.
 
-        Resets all active/stuck states (errors, progress, audio/video jobs, selections),
-        clears user drag position to default dock, recreates window if destroyed or dead,
+        Resets the voice foreground and selection, clears user drag position to the
+        default dock, recreates the window if destroyed or dead, while retaining
+        independently managed video/audio job rows.
         restores Win32 topmost styles, and forces an immediate fresh redraw.
         """
         self.visible = True
@@ -339,13 +346,6 @@ class FloatingOverlayBar:
         self.done_label = "Done"
         self.selected_text = ""
         self._selection_expanded = False
-        self.video_job_id = ""
-        self.video_status = ""
-        self.video_progress = 0
-        self.video_stage = ""
-        self.audio_summary_status = ""
-        self.audio_summary_progress = 0
-        self.audio_summary_stage = ""
         self._hover_zone = None
         self._is_mouse_over = False
         self._anim_phase = 0.0
@@ -369,6 +369,7 @@ class FloatingOverlayBar:
                 self._position_window()
                 self._bring_to_top()
                 self._draw()
+                self._schedule_job_animation()
 
         self._run_on_ui(_do)
 
@@ -746,13 +747,9 @@ class FloatingOverlayBar:
             self.video_status = "processing"
             self.video_progress = max(0, min(100, int(progress)))
             self.video_stage = stage[:80]
-            self.selected_text = ""
-            self._selection_generation += 1
             self._video_animation_generation += 1
-            generation = self._video_animation_generation
-            if self.state == "READY":
-                self._draw()
-            self._tick_video_animation(generation)
+            self._draw_if_available()
+            self._schedule_job_animation()
         self._run_on_ui(_do)
 
     def show_video_ready(self, video_id: str) -> None:
@@ -763,8 +760,7 @@ class FloatingOverlayBar:
             self.video_progress = 100
             self.video_stage = "Video ready"
             self._video_animation_generation += 1
-            if self.state == "READY":
-                self._draw()
+            self._draw_if_available()
         self._run_on_ui(_do)
 
     def show_video_failed(self, video_id: str, message: str = "Video generation failed") -> None:
@@ -773,63 +769,151 @@ class FloatingOverlayBar:
             self.video_status = "failed"
             self.video_stage = message[:80]
             self._video_animation_generation += 1
-            if self.state == "READY":
-                self._draw()
+            self._draw_if_available()
         self._run_on_ui(_do)
 
-    def clear_video_status(self) -> None:
+    def clear_video_status(self, video_id: str | None = None) -> None:
         def _do():
+            if video_id is not None and self.video_job_id != video_id:
+                return
             self.video_job_id = ""
             self.video_status = ""
             self.video_progress = 0
             self.video_stage = ""
             self._video_animation_generation += 1
-            if self.state == "READY":
-                self._draw()
+            self._draw_if_available()
         self._run_on_ui(_do)
 
     def _tick_video_animation(self, generation: int) -> None:
-        if generation != self._video_animation_generation or self.video_status != "processing":
-            return
-        self._anim_phase += 0.16
-        if self.state == "READY":
-            self._draw()
-        if self.root:
-            self.root.after(45, lambda: self._tick_video_animation(generation))
+        self._schedule_job_animation()
 
-    def show_audio_summary_progress(self, progress: int = 0, stage: str = "Generating summary audio") -> None:
+    def show_audio_summary_progress(
+        self,
+        percent: int = 0,
+        stage: str = "Generating summary audio",
+        *,
+        job_id: str = "",
+        title: str = "",
+    ) -> None:
         """Show a persistent animated progress rail on the floating bar while an audio summary generates."""
         def _do():
-            self.audio_summary_status = "processing"
-            self.audio_summary_progress = max(0, min(100, int(progress)))
-            self.audio_summary_stage = stage[:80]
-            self.selected_text = ""
-            self._selection_generation += 1
+            row = {"status": "processing", "progress": max(0, min(100, int(percent))),
+                   "stage": str(stage or "")[:80], "title": str(title or "Audio Flow")[:36],
+                   "updated_at": time.monotonic()}
+            if job_id:
+                self._audio_summary_jobs[str(job_id)] = row
+            else:
+                self.audio_summary_status = str(row["status"])
+                self.audio_summary_progress = int(row["progress"])
+                self.audio_summary_stage = str(row["stage"])
             self._audio_summary_animation_generation += 1
-            generation = self._audio_summary_animation_generation
-            if self.state in ("READY", "SUMMARIZING", "GENERATING_AUDIO"):
-                self._draw()
-            self._tick_audio_summary_animation(generation)
+            self._draw_if_available()
+            self._schedule_job_animation()
         self._run_on_ui(_do)
 
-    def clear_audio_summary_status(self) -> None:
+    def show_audio_summary_ready(self, job_id: str, stage: str = "Audio ready", title: str | None = None) -> None:
         def _do():
-            self.audio_summary_status = ""
-            self.audio_summary_progress = 0
-            self.audio_summary_stage = ""
-            self._audio_summary_animation_generation += 1
-            if self.state in ("READY", "SUMMARIZING", "GENERATING_AUDIO"):
-                self._draw()
+            previous = self._audio_summary_jobs.get(str(job_id), {})
+            self._audio_summary_jobs[str(job_id)] = {"status": "ready", "progress": 100,
+                                                    "stage": str(stage or "Audio ready")[:80],
+                                                    "title": str(title or previous.get("title") or "Audio Flow")[:36],
+                                                    "updated_at": time.monotonic()}
+            self._draw_if_available()
         self._run_on_ui(_do)
+
+    def show_audio_summary_failed(self, job_id: str, message: str, title: str | None = None) -> None:
+        def _do():
+            previous = self._audio_summary_jobs.get(str(job_id), {})
+            self._audio_summary_jobs[str(job_id)] = {"status": "failed", "progress": 0,
+                                                    "stage": str(message or "Audio summary failed")[:80],
+                                                    "title": str(title or previous.get("title") or "Audio Flow")[:36],
+                                                    "updated_at": time.monotonic()}
+            self._draw_if_available()
+        self._run_on_ui(_do)
+
+    def clear_audio_summary_status(self, job_id: str | None = None) -> None:
+        def _do():
+            if job_id is None:
+                self._audio_summary_jobs.clear()
+                self.audio_summary_status = ""
+                self.audio_summary_progress = 0
+                self.audio_summary_stage = ""
+            else:
+                self._audio_summary_jobs.pop(str(job_id), None)
+            self._audio_summary_animation_generation += 1
+            self._draw_if_available()
+        self._run_on_ui(_do)
+
+    def _clear_legacy_audio_summary_status(self) -> None:
+        self.audio_summary_status = ""
+        self.audio_summary_progress = 0
+        self.audio_summary_stage = ""
+        self._audio_summary_animation_generation += 1
+        self._draw_if_available()
 
     def _tick_audio_summary_animation(self, generation: int) -> None:
-        if generation != self._audio_summary_animation_generation or self.audio_summary_status != "processing":
+        self._schedule_job_animation()
+
+    def _draw_if_available(self) -> None:
+        if self.canvas is not None:
+            self._draw()
+
+    def _summary_rows(self) -> list[dict[str, object]]:
+        rows = [{"kind": "video", "job_id": self.video_job_id, "status": self.video_status,
+                 "progress": self.video_progress, "stage": self.video_stage, "title": "Video Flow"}]
+        if self.audio_summary_status:
+            rows.append({"kind": "audio", "job_id": "", "status": self.audio_summary_status,
+                         "progress": self.audio_summary_progress, "stage": self.audio_summary_stage,
+                         "title": "Audio Flow"})
+        for job_id, job in self._audio_summary_jobs.items():
+            rows.append({"kind": "audio", "job_id": job_id, **job})
+        active = [row for row in rows if row.get("status")]
+        video_rows = [row for row in active if row["kind"] == "video"]
+        audio_rows = [row for row in active if row["kind"] == "audio"]
+        running = [row for row in audio_rows if row["status"] == "processing"]
+        terminal = sorted(
+            (row for row in audio_rows if row["status"] != "processing"),
+            key=lambda row: float(row.get("updated_at", 0.0)),
+            reverse=True,
+        )
+        remaining = max(0, self.MAX_SUMMARY_ROWS - len(video_rows) - len(running))
+        return video_rows + running + (terminal[:remaining] if remaining else [])
+
+    def _summary_row_metrics(self) -> tuple[int, int, int]:
+        count = len(self._summary_rows())
+        top_gap, row_height, gap = 4, 26, 2
+        if count:
+            screen_height = 768
+            for widget in (self.win, self.root):
+                try:
+                    screen_height = max(1, int(widget.winfo_screenheight()))
+                    break
+                except Exception:
+                    pass
+            available = screen_height - self._foreground_size()[1] - top_gap
+            if count * row_height + (count - 1) * gap > available:
+                row_height = max(12, min(26, (available - count + 1) // count))
+                gap = 1
+        return top_gap, row_height, gap
+
+    def _schedule_job_animation(self) -> None:
+        if not self.root or self._job_animation_after_id is not None:
+            return
+        if not any(row["status"] == "processing" for row in self._summary_rows()):
+            return
+        self._job_animation_generation += 1
+        generation = self._job_animation_generation
+        self._job_animation_after_id = self.root.after(90, lambda: self._tick_job_animation(generation))
+
+    def _tick_job_animation(self, generation: int) -> None:
+        self._job_animation_after_id = None
+        if generation != self._job_animation_generation:
+            return
+        if not any(row["status"] == "processing" for row in self._summary_rows()):
             return
         self._anim_phase += 0.16
-        if self.state in ("READY", "SUMMARIZING", "GENERATING_AUDIO"):
-            self._draw()
-        if self.root:
-            self.root.after(45, lambda: self._tick_audio_summary_animation(generation))
+        self._draw_if_available()
+        self._schedule_job_animation()
 
     def _clear_selection_if_current(self, generation: int) -> None:
         if generation == self._selection_generation and not self._is_mouse_over:
@@ -938,6 +1022,67 @@ class FloatingOverlayBar:
         w = self._drawn_width()
         grip_left = w - self.GRIP_W
 
+        if y is not None:
+            foreground_w, foreground_h = self._foreground_size()
+            rows = self._summary_row_geometry()
+            for index, (top, bottom, row) in enumerate(rows):
+                if top <= y < bottom:
+                    if x >= w - self.GRIP_W:
+                        return "grip"
+                    if x >= w - self.GRIP_W - 25:
+                        return f"summary_cancel:{index}" if row.get("status") == "processing" else f"summary_dismiss:{index}"
+                    if row.get("status") in ("ready", "failed"):
+                        return f"summary_activate:{index}"
+                    return None
+            if y >= foreground_h:
+                return None  # The 4px separators between rows are intentionally inert.
+            foreground_grip_left = foreground_w - self.GRIP_W
+            if x >= foreground_w:
+                return None
+            if x >= foreground_grip_left:
+                return "grip"
+
+            if self.state == "READING":
+                if 108 <= x < 148:
+                    return "audio_pause"
+                if 148 <= x < 184:
+                    return "audio_stop"
+                if 184 <= x < 222:
+                    return "audio_settings"
+                if 222 <= x < foreground_grip_left:
+                    return "cancel"
+                return "speak"
+            if self.state == "READY":
+                cancel_btn_left = foreground_grip_left - 11
+                if self.video_status == "processing":
+                    if cancel_btn_left <= x < foreground_grip_left:
+                        return "video_cancel"
+                elif self.audio_summary_status == "processing":
+                    if cancel_btn_left <= x < foreground_grip_left:
+                        return "audio_summary_cancel"
+                elif self.video_status in ("ready", "failed"):
+                    if not getattr(self, "_selection_expanded", False):
+                        if cancel_btn_left <= x < foreground_grip_left:
+                            return "video_cancel"
+                        return "video_status"
+                    elif foreground_w - 48 <= x < foreground_grip_left:
+                        return "video_status"
+
+                if foreground_w >= 120:
+                    settings_width = getattr(self, "settings_action_width", 26)
+                    settings_left = foreground_grip_left - settings_width
+                    video_left = settings_left - self.video_action_width
+                    if settings_left <= x < foreground_grip_left:
+                        return "settings"
+                    if video_left > 0 and video_left - 4 <= x < settings_left:
+                        return "video_flow"
+                return "speak"
+            if self.state == "RECORDING":
+                return "cancel" if x < 40 else "finish"
+            if self.state in ("PROCESSING", "SUMMARIZING", "GENERATING_AUDIO", "DONE", "ERROR"):
+                return "cancel" if x < 40 else "finish"
+            return None
+
         # Drag grip is always the rightmost 14px
         if x >= grip_left:
             return "grip"
@@ -1023,7 +1168,13 @@ class FloatingOverlayBar:
         self._is_dragging = False
         zone = self._get_zone(event.x, event.y)
         self._press_zone = zone
-        if zone == "video_cancel" and self.video_job_id:
+        if zone and zone.startswith("summary_cancel:"):
+            self._handle_summary_row_click(zone, activate=False)
+        elif zone and zone.startswith("summary_dismiss:"):
+            self._dismiss_summary_row(zone)
+        elif zone and zone.startswith("summary_activate:"):
+            self._handle_summary_row_click(zone, activate=True)
+        elif zone == "video_cancel" and self.video_job_id:
             if self.on_video_cancel:
                 self.on_video_cancel(self.video_job_id)
             self.clear_video_status()
@@ -1033,8 +1184,7 @@ class FloatingOverlayBar:
                     self.on_audio_summary_cancel()
                 except Exception:
                     pass
-            self.clear_audio_summary_status()
-            self.show_ready()
+            self._clear_legacy_audio_summary_status()
         elif zone == "grip":
             pass  # grip presses only drag the bar (handled by _on_drag)
         elif zone in ("settings", "audio_settings"):
@@ -1081,8 +1231,11 @@ class FloatingOverlayBar:
                 else:
                     self.on_finish()
 
+        was_mouse_over = self._is_mouse_over
         if zone not in ("video_flow", "settings", "audio_settings", "audio_pause"):
             self._is_mouse_over = False
+            if was_mouse_over and (self.state == "READY" or self._summary_rows()):
+                self._draw_if_available()
 
     def _on_drag(self, event: tk.Event) -> None:
         dx = event.x - self.drag_x
@@ -1116,11 +1269,13 @@ class FloatingOverlayBar:
             if hasattr(self.canvas, "config"):
                 if zone == "grip":
                     self.canvas.config(cursor="fleur")
-                elif zone in ("cancel", "finish", "video_status", "video_cancel") or self.state == "READY":
+                elif (zone in ("cancel", "finish", "video_status", "video_cancel")
+                      or (zone and zone.startswith(("summary_cancel:", "summary_activate:", "summary_dismiss:")))
+                      or self.state == "READY"):
                     self.canvas.config(cursor="hand2")
                 else:
                     self.canvas.config(cursor="arrow")
-            if self.state == "READY" or self.video_status == "processing" or zone == "grip" or previous_zone == "grip":
+            if (self.state == "READY" or self._summary_rows() or zone == "grip" or previous_zone == "grip"):
                 self._draw()
 
     def _on_leave(self, _event: tk.Event) -> None:
@@ -1135,7 +1290,7 @@ class FloatingOverlayBar:
         self._is_mouse_over = False
         if hasattr(self.canvas, "config"):
             self.canvas.config(cursor="arrow")
-        if self.state == "READY" or self.video_status == "processing":
+        if self.state == "READY" or self._summary_rows():
             self._draw()
 
     def _proximity_poll(self) -> None:
@@ -1143,7 +1298,7 @@ class FloatingOverlayBar:
         if not self.win or not getattr(self.win, "winfo_exists", lambda: True)():
             return
         try:
-            if not self.visible or self.state != "READY" or getattr(self, "_selection_expanded", False) or bool(self.video_status):
+            if not self.visible or self.state != "READY" or getattr(self, "_selection_expanded", False) or bool(self._summary_rows()):
                 return
 
             cur_pos = _get_cursor_pos()
@@ -1275,54 +1430,126 @@ class FloatingOverlayBar:
             # DONE only animates its one-shot green flash, then holds.
             self.root.after(66, lambda: self._animate(generation))
 
+    def _handle_summary_row_click(self, zone: str, *, activate: bool) -> None:
+        try:
+            index = int(zone.split(":", 1)[1])
+            row = self._summary_rows()[index]
+        except (ValueError, IndexError):
+            return
+        kind = str(row["kind"])
+        job_id = str(row.get("job_id") or "")
+        status = str(row["status"])
+        if not activate and status == "processing":
+            if kind == "video":
+                if not job_id or not self.on_video_cancel:
+                    return
+                try:
+                    result = self.on_video_cancel(job_id)
+                except Exception:
+                    return
+                if result is False:
+                    return
+                self.clear_video_status(job_id)
+            elif job_id:
+                callback = self.on_audio_summary_cancel
+                if not callback:
+                    return
+                try:
+                    result = callback(job_id)
+                except Exception:
+                    return
+                if result is False:
+                    return
+                self.clear_audio_summary_status(job_id)
+            else:
+                if not self.on_audio_summary_cancel:
+                    return
+                try:
+                    result = self.on_audio_summary_cancel()
+                except Exception:
+                    return
+                if result is False:
+                    return
+                self._clear_legacy_audio_summary_status()
+        elif activate and status in ("ready", "failed"):
+            if status == "ready" and kind == "video" and job_id:
+                if not self.on_video_ready:
+                    return
+                try:
+                    result = self.on_video_ready(job_id)
+                except Exception:
+                    return
+                if result is False:
+                    return
+                self.clear_video_status(job_id)
+            elif status == "ready" and kind == "audio" and job_id:
+                if not self.on_audio_summary_ready:
+                    return
+                try:
+                    result = self.on_audio_summary_ready(job_id)
+                except Exception:
+                    return
+                if result is False:
+                    return
+                self.clear_audio_summary_status(job_id)
+            elif status == "failed":
+                if kind == "video":
+                    self.clear_video_status(job_id)
+                elif job_id:
+                    self.clear_audio_summary_status(job_id)
+                else:
+                    self.clear_audio_summary_status()
+
+    def _dismiss_summary_row(self, zone: str) -> None:
+        try:
+            index = int(zone.split(":", 1)[1])
+            row = self._summary_rows()[index]
+        except (ValueError, IndexError):
+            return
+        if row["kind"] == "video":
+            self.clear_video_status(str(row.get("job_id") or ""))
+        elif row.get("job_id"):
+            self.clear_audio_summary_status(str(row["job_id"]))
+        else:
+            self._clear_legacy_audio_summary_status()
     # -- Drawing --
 
-    def _target_size(self) -> tuple[int, int]:
-        """Bar size for the current state/hover — geometry changes only on transitions."""
-        has_video_proc = self.video_status == "processing"
-        has_audio_proc = self.audio_summary_status == "processing"
-        has_proc = has_video_proc or has_audio_proc
-        proc_w = self.video_progress_width if has_video_proc else self.audio_summary_progress_width
-        proc_h = self.video_progress_hover_height if has_video_proc else self.audio_summary_progress_hover_height
-        proc_normal_h = self.video_progress_height if has_video_proc else self.audio_summary_progress_height
-
+    def _foreground_size(self) -> tuple[int, int]:
+        """Size of the voice controls, excluding independent background job rows."""
         if self.state == "READY":
-            sel_expanded = getattr(self, "_selection_expanded", False)
-            is_hovered = getattr(self, "_is_mouse_over", False)
-            if has_proc:
-                if is_hovered or sel_expanded:
-                    ready_width = self.ready_actions_width
-                    return (
-                        max(ready_width, proc_w),
-                        self.hover_height + proc_h + 4,
-                    )
-                return proc_w, proc_normal_h
-            if self.video_status == "failed":
-                if sel_expanded:
-                    return self.ready_actions_width + 34, self.hover_height
-                return self.video_failed_width, self.video_status_height
-            if self.video_status == "ready":
-                if sel_expanded:
-                    return self.ready_actions_width + 34, self.hover_height
-                return self.video_ready_width, self.video_status_height
-            if is_hovered or sel_expanded:
+            if (
+                getattr(self, "_is_mouse_over", False)
+                or getattr(self, "_selection_expanded", False)
+                or (self.width == self.ready_actions_width and getattr(self, "_last_drawn_width", 0) != self.width)
+            ):
                 return self.ready_actions_width, self.hover_height
             return self.idle_width, self.idle_height
         if self.state == "RECORDING":
-            extra = proc_h + 4 if has_proc else 0
-            return max(self.recording_width, proc_w if extra else 0), self.hover_height + extra
+            return self.recording_width, self.hover_height
         if self.state == "READING":
             return self.audio_playback_width, self.hover_height
         if self.state in ("PROCESSING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
-            if self.state in ("SUMMARIZING", "GENERATING_AUDIO") and has_audio_proc and not has_video_proc:
-                return proc_w, proc_normal_h
-            extra = proc_h + 4 if has_proc else 0
-            return max(self.working_width, proc_w if extra else 0), self.working_height + extra
+            return self.working_width, self.working_height
         if self.state == "DONE":
-            extra = proc_h + 4 if has_proc else 0
             outcome_width = max(self.expanded_width, 180) if self.done_label != "Done" else self.expanded_width
-            return max(outcome_width, proc_w if extra else 0), self.hover_height + extra
+            return outcome_width, self.hover_height
         return self.width, self.height
+
+    def _target_size(self) -> tuple[int, int]:
+        """Size for voice controls plus one independently clickable row per job."""
+        fg_w, fg_h = self._foreground_size()
+        rows = self._summary_rows()
+        if not rows:
+            return fg_w, fg_h
+        top_gap, row_h, gap = self._summary_row_metrics()
+        return max(fg_w, self.video_progress_width), fg_h + top_gap + len(rows) * row_h + (len(rows) - 1) * gap
+
+    def _summary_row_geometry(self) -> list[tuple[int, int, dict[str, object]]]:
+        _, foreground_h = self._foreground_size()
+        top_gap, row_h, gap = self._summary_row_metrics()
+        top = foreground_h + top_gap
+        rows = self._summary_rows()
+        return [(top + i * (row_h + gap), top + i * (row_h + gap) + row_h, row) for i, row in enumerate(rows)]
     def _draw_signature(self) -> tuple:
         """Meaningful-change key: state, hover zone, rounded level buckets.
 
@@ -1348,6 +1575,8 @@ class FloatingOverlayBar:
             self.video_status,
             self.video_stage,
             self.video_progress,
+            tuple((row["kind"], row.get("job_id"), row.get("status"), row.get("progress"), row.get("stage"))
+                  for row in self._summary_rows()),
             self.audio_summary_status,
             self.audio_summary_stage,
             self.audio_summary_progress,
@@ -1382,64 +1611,39 @@ class FloatingOverlayBar:
         c.delete("all")
         w, h = self.width, self.height
         flow_height = h
-        has_video_proc = self.video_status == "processing"
-        has_audio_proc = self.audio_summary_status == "processing"
-        has_proc = has_video_proc or has_audio_proc
-        proc_h = self.video_progress_hover_height if has_video_proc else self.audio_summary_progress_hover_height
-
-        if has_proc and self.state not in ("READY", "SUMMARIZING", "GENERATING_AUDIO"):
-            flow_height = h - proc_h - 4
+        flow_width, flow_height = self._foreground_size()
+        rows = self._summary_rows()
 
         is_rest = (
             self.state == "READY"
             and not getattr(self, "_is_mouse_over", False)
             and not getattr(self, "_selection_expanded", False)
-            and not self.video_status
-            and not self.audio_summary_status
+            and not rows
         )
         if self.state in ("PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
-            if self.state in ("SUMMARIZING", "GENERATING_AUDIO") and has_audio_proc and not has_video_proc:
-                pass  # Audio summary progress strip manages its own background pill
-            else:
-                self._draw_working_shell(w, flow_height)
-        elif self.state == "READY" and has_proc:
-            pass  # Video or audio progress strip manages its own background pill(s)
-        elif self.state == "READY" and self.video_status in ("ready", "failed") and not getattr(self, "_selection_expanded", False):
-            pass  # Dedicated ready/failed status pill manages its own background pill
-        elif not is_rest:
-            self._draw_pill(1, 1, w - 1, flow_height - 1, min(flow_height / 2, 16), self.WHITE, self.BORDER)
+            self._draw_working_shell(flow_width, flow_height)
+        elif not is_rest and self.state != "READY":
+            self._draw_pill(1, 1, flow_width - 1, flow_height - 1, min(flow_height / 2, 16), self.WHITE, self.BORDER)
 
         if self.state == "READY":
-            self._draw_ready(w, h)
+            self._draw_ready(flow_width, flow_height)
         elif self.state == "RECORDING":
-            self._draw_recording(w, flow_height)
+            self._draw_recording(flow_width, flow_height)
         elif self.state == "PROCESSING":
-            self._draw_processing(w, flow_height)
+            self._draw_processing(flow_width, flow_height)
         elif self.state == "SUMMARIZING":
-            if has_audio_proc and not has_video_proc:
-                self._draw_audio_summary_progress_strip(w, 0, h, expanded=self._is_mouse_over)
-            else:
-                self._draw_working_state(w, flow_height, "Summarizing")
+            self._draw_working_state(flow_width, flow_height, "Summarizing")
         elif self.state == "GENERATING_AUDIO":
-            if has_audio_proc and not has_video_proc:
-                self._draw_audio_summary_progress_strip(w, 0, h, expanded=self._is_mouse_over)
-            else:
-                self._draw_working_state(w, flow_height, "Generating Audio")
+            self._draw_working_state(flow_width, flow_height, "Generating Audio")
         elif self.state == "READING":
-            self._draw_reading(w, flow_height)
+            self._draw_reading(flow_width, flow_height)
         elif self.state == "DONE":
-            self._draw_done(w, flow_height)
+            self._draw_done(flow_width, flow_height)
         elif self.state == "ERROR":
-            self._draw_error(w, flow_height)
+            self._draw_error(flow_width, flow_height)
 
-        # The reserved 14px grip strip exists in every state, rest pill included.
-        self._draw_grip(w, flow_height)
-
-        if has_proc and self.state not in ("READY", "SUMMARIZING", "GENERATING_AUDIO"):
-            if has_video_proc:
-                self._draw_video_progress_strip(w, flow_height + 4, h, expanded=self._is_mouse_over)
-            elif has_audio_proc:
-                self._draw_audio_summary_progress_strip(w, flow_height + 4, h, expanded=self._is_mouse_over)
+        self._draw_grip(flow_width, flow_height)
+        self._draw_summary_rows(w)
 
         self._last_draw_at = now
         self._last_draw_sig = self._draw_signature()
@@ -1447,50 +1651,19 @@ class FloatingOverlayBar:
         self._last_drawn_width = self.width
 
     def _draw_ready(self, w: int, h: int) -> None:
-        has_video = bool(self.video_status)
-        has_audio = bool(self.audio_summary_status)
         sel_active = getattr(self, "_selection_expanded", False)
         is_expanded = self._is_mouse_over or sel_active
 
         if not is_expanded:
-            if self.video_status == "processing":
-                self._draw_video_progress_strip(w, 0, h, expanded=False)
-                return
-            if self.audio_summary_status == "processing":
-                self._draw_audio_summary_progress_strip(w, 0, h, expanded=False)
-                return
-            if self.video_status in ("ready", "failed"):
-                self._draw_video_status_pill(w, h)
-                return
-            if not has_video and not has_audio:
-                # Calm dark rest pill: no white glass, no animation.
-                self._draw_rest_pill(w, h)
-                return
-
-        if not sel_active and self.video_status in ("ready", "failed"):
-            self._draw_video_status_pill(w, h)
+            self._draw_rest_pill(w, h)
             return
 
         c = self.canvas
-        has_video_proc = self.video_status == "processing"
-        has_audio_proc = self.audio_summary_status == "processing"
-        progress_offset = (
-            self.video_progress_hover_height + 4
-            if has_video_proc
-            else (self.audio_summary_progress_hover_height + 4 if has_audio_proc else 0)
-        )
-        action_top = progress_offset
+        action_top = 0
         action_height = h - action_top
         cy = action_top + action_height / 2
-        has_status_slot = bool(has_video and self.video_status != "processing" and sel_active)
-        content_width = w - self.GRIP_W - (34 if has_status_slot else 0)
-
-        if has_video_proc:
-            self._draw_video_progress_strip(w, 0, self.video_progress_hover_height, expanded=True)
-            self._draw_pill(2, action_top + 2, w - 2, h - 2, max(2.0, min(action_height / 2 - 2, 16)), self.WHITE, self.BORDER)
-        elif has_audio_proc:
-            self._draw_audio_summary_progress_strip(w, 0, self.audio_summary_progress_hover_height, expanded=True)
-            self._draw_pill(2, action_top + 2, w - 2, h - 2, max(2.0, min(action_height / 2 - 2, 16)), self.WHITE, self.BORDER)
+        content_width = w - self.GRIP_W
+        self._draw_pill(2, action_top + 2, w - 2, h - 2, max(2.0, min(action_height / 2 - 2, 16)), self.WHITE, self.BORDER)
 
         settings_width = getattr(self, "settings_action_width", 26)
         settings_left = content_width - settings_width
@@ -1528,9 +1701,61 @@ class FloatingOverlayBar:
         settings_bg = self.ORANGE_FAINT if self._hover_zone == "settings" else self.WHITE
         self._draw_gear_icon(settings_left + settings_width / 2, cy, r=4.5, color=settings_fill, bg_color=settings_bg)
 
-        if has_status_slot:
-            c.create_line(content_width, action_top + 7, content_width, h - 7, fill=self.BORDER, width=1)
-            self._draw_video_status(w, h, compact=True)
+    def _draw_summary_rows(self, w: int) -> None:
+        c = self.canvas
+        for index, (top, bottom, row) in enumerate(self._summary_row_geometry()):
+            self._draw_pill(1, top, w - 1, bottom, 12, self.WHITE, self.BORDER)
+            kind = str(row["kind"])
+            status = str(row["status"])
+            job_id = str(row.get("job_id") or "")
+            cancel_zone = f"summary_cancel:{index}"
+            ready_zone = f"summary_activate:{index}"
+            cy = (top + bottom) / 2
+            if status == "processing":
+                title = str(row.get("title") or ("Video Flow" if kind == "video" else "Audio Flow"))
+                progress = max(0, min(100, int(row.get("progress") or 0)))
+                stage = str(row.get("stage") or "Working")
+                title = title[:20]
+                progress_label = f"{progress}%"
+                stage_room = max(4, 48 - len(title) - len(progress_label) - 6)
+                c.create_text(12, cy, text=title, fill="", state="hidden")
+                c.create_text(12, cy, text=f"{title} · {progress_label} · {stage[:stage_room]}", fill=self.INK,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                rail_left, rail_right, rail_y = 12, w - 42, bottom - 4
+                c.create_line(rail_left, rail_y, rail_right, rail_y, fill=self.ORANGE_FAINT, width=2, capstyle="round")
+                if progress:
+                    c.create_line(rail_left, rail_y, rail_left + (rail_right - rail_left) * progress / 100,
+                                  rail_y, fill=self.ORANGE, width=2, capstyle="round")
+                hover = self._hover_zone == cancel_zone
+                cx = w - self.GRIP_W - 8
+                col = self.RED if hover else self.GRAY
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=col, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=col, width=1.5, capstyle="round")
+            elif status == "ready":
+                row_title = str(row.get("title") or "Audio Flow")
+                if kind == "video":
+                    title = "▶ Video Ready — Click to play"
+                else:
+                    display_title = "Audio" if row_title in ("Audio Flow", "Audio Summary") else row_title
+                    if len(display_title) > 18:
+                        display_title = display_title[:17].rstrip() + "…"
+                    title = f"▶ {display_title} Ready — Click to play"
+                c.create_text(12, cy, text=title, fill=self.GREEN if self._hover_zone == ready_zone else self.INK,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                cx = w - self.GRIP_W - 8
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
+            else:
+                row_title = str(row.get("title") or "Audio Flow")
+                display_title = "Audio" if row_title in ("Audio Flow", "Audio Summary") else row_title
+                if kind == "audio" and len(display_title) > 18:
+                    display_title = display_title[:17].rstrip() + "…"
+                failure_label = "Video failed — click to dismiss" if kind == "video" else f"{display_title} failed — click to dismiss"
+                c.create_text(12, cy, text=failure_label, fill=self.RED,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                cx = w - self.GRIP_W - 8
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
     def _draw_rest_pill(self, w: int, h: int) -> None:
         """Calm dark rest pill: nothing drawn on it at all.
 
@@ -1964,7 +2189,7 @@ class FloatingOverlayBar:
         the [w-GRIP_W, w) hit zone coincide exactly. Subtle gray on the dark
         rest pill, current Sunrise style (gray / orange on hover) elsewhere."""
         c = self.canvas
-        if self.state == "READY" and not self._is_mouse_over and not self.video_status:
+        if self.state == "READY" and not self._is_mouse_over and not self._summary_rows():
             # Rest state draws nothing — the strip remains an invisible,
             # fully functional drag handle (cursor + drag only).
             return
