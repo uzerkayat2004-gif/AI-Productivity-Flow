@@ -1,6 +1,7 @@
 name: CI & Multi-Platform Build
 
 on:
+  workflow_dispatch:
   push:
     branches: ["*"]
   pull_request:
@@ -55,11 +56,12 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dependencies & DMG tools
         run: |
           pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-asyncio pytest-timeout
+          pip install pytest pytest-asyncio pytest-timeout pillow dmgbuild
+          brew install create-dmg || true
 
       - name: Verify core package import
         run: |
@@ -73,15 +75,18 @@ jobs:
         run: |
           pytest tests/test_platform_layer.py -v --timeout=60
 
-      - name: Build macOS Application Bundle (.app & .zip)
+      - name: Build macOS Application Bundle (.app, .dmg & .zip)
         run: |
-          python scripts/build_macos_app.py
+          python scripts/build_macos_app.py --bundle-runtime --dmg
 
       - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AI-Productivity-Flow-macOS
           path: |
+            dist/AI-Productivity-Flow-macOS.dmg
+            dist/AI-Productivity-Flow-macOS.dmg.sha256
             dist/AI-Productivity-Flow-macOS.zip
             dist/AI-Productivity-Flow-macOS.zip.sha256
           if-no-files-found: error
+
