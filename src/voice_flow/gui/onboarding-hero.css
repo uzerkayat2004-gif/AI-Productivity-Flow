@@ -1,0 +1,252 @@
+/* ============================================================
+   UPGRADED SCENE 1 WELCOME HERO (AUTHENTIC MASTER REPLICATION)
+   100% faithful to master video design. Expansive 16:9 stage
+   floating over blurred desktop app with native dual theme.
+   ============================================================ */
+
+/* 1. Modal Overlay Backdrop */
+.onboarding-overlay.welcome-hero-mode {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: clamp(10px, 2vh, 32px) clamp(16px, 2.5vw, 40px) !important;
+  margin: 0 !important;
+  background: rgba(15, 23, 42, 0.65) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  overflow-y: hidden !important;
+  overflow-x: hidden !important;
+  z-index: 1050 !important;
+  box-sizing: border-box !important;
+}
+
+[data-theme="dark"] .onboarding-overlay.welcome-hero-mode {
+  background: rgba(4, 5, 8, 0.82) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+}
+
+/* 2. Floating Modal Card Stage */
+.onboarding-card.welcome-stage {
+  position: relative !important;
+  width: min(94vw, 1340px) !important;
+  max-width: 1340px !important;
+  aspect-ratio: 16 / 9 !important;
+  max-height: 88vh !important;
+  border-radius: 26px !important;
+  background: #ffffff !important;
+  border: 1.5px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45), 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+  margin: auto !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  overflow-y: hidden !important;
+  overflow-x: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme="dark"] .onboarding-card.welcome-stage {
+  background: #181922 !important;
+  border: 1.5px solid rgba(243, 229, 216, 0.18) !important;
+  box-shadow: 0 35px 100px rgba(0, 0, 0, 0.85), 0 4px 24px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* 3. Slide 0 Container */
+.welcome-hero-slide {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  position: relative !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: none;
+}
+
+.welcome-hero-slide.active {
+  display: block !important;
+}
+
+/* 4. 16:9 Viewport */
+.scene1-stage-viewport {
+  position: relative !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  user-select: none !important;
+}
+
+/* 5. Master Video & Master Visual Elements */
+.scene1-media-element {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  display: block !important;
+  image-rendering: -webkit-optimize-contrast !important;
+  image-rendering: crisp-edges !important;
+  transform: translateZ(0) !important;
+  backface-visibility: hidden !important;
+  -webkit-backface-visibility: hidden !important;
+}
+
+/* Dual-Theme Asset Visibility */
+html[data-theme="light"] .scene1-media-element.light-only {
+  display: block !important;
+}
+html[data-theme="light"] .scene1-media-element.dark-only {
+  display: none !important;
+}
+
+html[data-theme="dark"] .scene1-media-element.light-only {
+  display: none !important;
+}
+html[data-theme="dark"] .scene1-media-element.dark-only {
+  display: block !important;
+}
+
+/* 6. Window Corner Skip Tour Pill Badge (Floats outside 16:9 stage in top-right of window, keeping stage 100% pure) */
+.scene1-skip-badge {
+  position: fixed !important;
+  top: 24px !important;
+  right: 32px !important;
+  z-index: 1100 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 8px 18px !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #64748b !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12) !important;
+}
+
+.scene1-skip-badge:hover {
+  color: #0f172a !important;
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16) !important;
+}
+
+[data-theme="dark"] .scene1-skip-badge {
+  color: #f3e5d8 !important;
+  background: rgba(24, 25, 34, 0.92) !important;
+  border-color: rgba(243, 229, 216, 0.22) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="dark"] .scene1-skip-badge:hover {
+  color: #ffffff !important;
+  background: rgba(32, 33, 44, 0.96) !important;
+  border-color: rgba(243, 229, 216, 0.4) !important;
+}
+
+/* 7. Interactive Hotspots Grid */
+.scene1-hotspots-grid {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 10 !important;
+  pointer-events: none !important;
+}
+
+.scene1-hotspot-item {
+  position: absolute !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  border-radius: 22px !important;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Card 1 Hotspot (Video Flow, tilted +3.5 deg) */
+.hotspot-card-1 {
+  left: 20.5% !important;
+  top: 22.2% !important;
+  width: 18.75% !important;
+  height: 37.5% !important;
+  transform: rotate(3.5deg) !important;
+}
+.hotspot-card-1:hover {
+  transform: rotate(3.5deg) translateY(-4px) scale(1.018) !important;
+  box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.45), 0 20px 40px rgba(255, 107, 0, 0.2) !important;
+}
+
+/* Card 2 Hotspot (Audio Flow, straight 0 deg) */
+.hotspot-card-2 {
+  left: 40.6% !important;
+  top: 21.6% !important;
+  width: 18.75% !important;
+  height: 37.5% !important;
+}
+.hotspot-card-2:hover {
+  transform: translateY(-4px) scale(1.018) !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.45), 0 20px 40px rgba(2, 132, 199, 0.2) !important;
+}
+
+/* Card 3 Hotspot (Voice Flow, tilted -3.5 deg) */
+.hotspot-card-3 {
+  left: 60.7% !important;
+  top: 22.2% !important;
+  width: 18.75% !important;
+  height: 37.5% !important;
+  transform: rotate(-3.5deg) !important;
+}
+.hotspot-card-3:hover {
+  transform: rotate(-3.5deg) translateY(-4px) scale(1.018) !important;
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.45), 0 20px 40px rgba(147, 51, 234, 0.2) !important;
+}
+
+/* Dark Mode Button Hotspot */
+.hotspot-theme {
+  left: 59.4% !important;
+  top: 76.1% !important;
+  width: 7.6% !important;
+  height: 4.4% !important;
+  border-radius: 9999px !important;
+}
+.hotspot-theme:hover {
+  transform: translateY(-1px) scale(1.03) !important;
+  box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.4), 0 6px 18px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Next Button Hotspot */
+.hotspot-next {
+  left: 67.7% !important;
+  top: 76.0% !important;
+  width: 12.5% !important;
+  height: 4.6% !important;
+  border-radius: 9999px !important;
+}
+.hotspot-next:hover {
+  transform: translateY(-1px) scale(1.025) !important;
+  box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.55), 0 10px 28px rgba(255, 107, 0, 0.45) !important;
+}
+
+[data-theme="dark"] .hotspot-next:hover {
+  box-shadow: 0 0 0 3px rgba(243, 229, 216, 0.55), 0 10px 28px rgba(243, 229, 216, 0.35) !important;
+}

@@ -33,17 +33,19 @@ def check(name, cond, extra=""):
         print(f"  FAIL  {name} {extra}")
 
 print("=== STAGE 1: dictionary boot/load + revision refresh ===")
-storage.add_dictionary_word("voice flow -> VoiceFlow")
-storage.add_dictionary_word("my path -> C:\\Users\\me\\file.txt")
+storage.add_dictionary_word("VoiceFlow")
+storage.add_dictionary_correction("voice flow", "VoiceFlow")
+storage.add_snippet("my path", r"C:\Users\me\file.txt")
 dictionary_engine.mark_dirty()
 words = dictionary_engine.refresh_words()
-check("engine loads both terms from DB", set(words) == {"voice flow -> VoiceFlow", "my path -> C:\\Users\\me\\file.txt"}, words)
+check("engine loads words and snippet from DB", set(words) == {"VoiceFlow", r"my path -> C:\Users\me\file.txt"}, words)
+check("engine loads corrections from DB", any(c["wrong_text"] == "voice flow" and c["correct_text"] == "VoiceFlow" for c in storage.get_dictionary_corrections()))
 prompt = dictionary_engine.get_initial_prompt()
-check("Whisper bias prompt includes VoiceFlow trigger", "voice flow" in prompt, repr(prompt))
+check("Whisper bias prompt includes VoiceFlow term", "VoiceFlow" in prompt, repr(prompt))
 check("no stopwords / short junk in prompt", " and " not in prompt and " the " not in prompt and " a " not in prompt, repr(prompt))
 print("  prompt:", prompt)
 
-print("\n=== STAGE 2: transcription with dictionary prompt biasing (fake model) ===")
+print("\n=== STAGE 2: transcription remains independent of dictionary hints ===")
 class Segment:
     def __init__(self, text):
         self.text = text
@@ -67,15 +69,15 @@ audio = np.ones(32000, dtype=np.float32) * 0.5  # 2s @ 16kHz
 result = t.transcribe(audio)
 calls = t.model.calls
 check("VAD pass ran first with vad_filter=True", len(calls) >= 1 and calls[0].get("vad_filter") is True)
-check("initial_prompt passed to Whisper (bias active)", calls and "voice flow" in (calls[0].get("initial_prompt") or ""))
+check("Whisper receives no dictionary prompt", calls and calls[0].get("initial_prompt") is None)
 check("VAD failure fell back to direct pass", len(calls) >= 2 and calls[1].get("vad_filter") is False)
 check("transcribe returned text", result == "we use voice flow daily", repr(result))
 
 storage.add_dictionary_word("HyperKube")
 dictionary_engine.mark_dirty()
 result2 = t.transcribe(audio)
-prompt2 = t.model.calls[-1].get("initial_prompt") or ""
-check("new term picked up WITHOUT restart (revision refresh)", "HyperKube" in prompt2, repr(prompt2))
+prompt2 = t.model.calls[-1].get("initial_prompt")
+check("new term does not enter the acoustic prompt", prompt2 is None, repr(prompt2))
 
 print("\n=== STAGE 3: polish pipeline applies dictionary post-processing ===")
 out1 = polisher.polish("we use voice flow daily", "smart_clean")
@@ -84,8 +86,8 @@ out2 = polisher.polish("open my path now", "smart_clean")
 check("snippet expansion: my path -> C:\\Users\\me\\file.txt", out2 == r"Open C:\Users\me\file.txt now.", repr(out2))
 out3 = polisher.polish("voice flow ready", "smart_clean")
 check("ultra-short path (<=3 words) still applies dictionary", out3 == "VoiceFlow ready.", repr(out3))
-out4 = polisher.polish("voice flow voice flow", "smart_clean")
-check("idempotent across dictations (no cascade)", out4 == "VoiceFlow VoiceFlow.", repr(out4))
+out4 = polisher.polish(out1, "smart_clean")
+check("idempotent across dictations (no cascade)", out4 == out1, repr(out4))
 url_safe = polisher.polish("visit voice flow at https://example.com/voiceflow", "smart_clean")
 check("URLs protected from dictionary rewrite", "https://example.com/voiceflow" in url_safe, repr(url_safe))
 

@@ -1,6 +1,4 @@
-"""Ultra-fast, high-accuracy local transcription module using faster-whisper
-with dictionary prompt-biasing, dual-pass VAD+fallback, and multi-core CPU execution.
-"""
+"""Ultra-fast, high-accuracy transcription with bounded model fallback."""
 
 from __future__ import annotations
 
@@ -15,7 +13,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from voice_flow.config import config
-from voice_flow.dictionary import dictionary_engine
 from voice_flow import nemotron_engine
 from voice_flow import stt_engines
 from voice_flow.local_model_resources import (
@@ -114,8 +111,7 @@ def _deadline_remaining(deadline: float | None, cap: float | None = None) -> flo
 
 
 class Transcriber:
-    """Pre-loaded Whisper model with dictionary prompt biasing, dual-pass
-    VAD+fallback transcription, and instant non-blocking init."""
+    """Pre-loaded speech model with dual-pass fallback and non-blocking init."""
 
     def __init__(self) -> None:
         self.model: WhisperModel | None = None
@@ -429,7 +425,7 @@ class Transcriber:
         deadline: float | None = None,
         model_ref: str | None = None,
     ) -> str:
-        """Transcribe audio with dictionary initial_prompt biasing and dual-pass accuracy.
+        """Transcribe audio independently of learned dictionary vocabulary.
 
         ``is_chunk=True`` marks a streaming-chunk call: the cloud worker gets
         the chunk-specific join budget, and a join timeout where the HTTP
@@ -443,7 +439,6 @@ class Transcriber:
             log.warning("Empty audio buffer, nothing to transcribe.")
             return ""
 
-        category = getattr(self, "category_hint", None)
         # Input conditioning BEFORE any model (cloud or local): whisper-level
         # sources are amplified, rumble/HVAC noise is filtered, room noise is
         # gated down, and a paired VAD threshold keeps the shared-room chatter
@@ -518,7 +513,11 @@ class Transcriber:
 
                 def _cloud_call():
                     try:
-                        kwargs = {"vocabulary": self._stt_hint_terms(category)}
+                        # Learned dictionary terms are deterministic output
+                        # corrections, not acoustic evidence. Passing them to
+                        # the provider can make an unspoken name appear in the
+                        # raw transcript and later become false learning data.
+                        kwargs = {"vocabulary": []}
                         if deadline is not None:
                             kwargs["deadline"] = deadline
                         try:
@@ -640,7 +639,7 @@ class Transcriber:
             log.error("Speech model failed to initialize in time.")
             return ""
 
-        return self._transcribe_local(audio, category=category, deadline=deadline, model_ref=local_model, is_chunk=is_chunk)
+        return self._transcribe_local(audio, deadline=deadline, model_ref=local_model, is_chunk=is_chunk)
 
     def _wait_for_model(self, deadline: float | None = None, model_ref: str | None = None) -> bool:
         """Wait for the background model load without crossing *deadline*."""
@@ -710,13 +709,6 @@ class Transcriber:
 
         return _is_ready()
 
-    def _stt_hint_terms(self, category: str | None) -> list[str]:
-        """Dictionary terms for cloud STT contextual biasing (spec §33)."""
-        try:
-            return dictionary_engine.get_stt_hint_terms(category)
-        except Exception:
-            return []
-
     def _transcribe_local(
         self,
         audio: NDArray[np.float32],
@@ -725,7 +717,7 @@ class Transcriber:
         model_ref: str | None = None,
         is_chunk: bool = False,
     ) -> str:
-        """Local decode: Nemotron GGUF or faster-whisper with dictionary biasing."""
+        """Decode local audio without injecting learned dictionary terms."""
         requested_model = self._local_model_name(model_ref)
         if not self._wait_for_model(deadline, model_ref=requested_model):
             log.error("Speech model failed to initialize in time.")
@@ -744,21 +736,18 @@ class Transcriber:
         else:
             clean_audio = _apply_noise_gate_and_normalize(audio)
 
-        # Route to Nemotron GGUF engine if active. It applies per-request
-        # speech-context boosts only when the GGUF embeds its SentencePiece
-        # model; older vocab-only GGUFs still receive exact deterministic
-        # dictionary post-processing below. Engines predating the vocabulary
-        # keyword keep working through the TypeError retry.
+        # Route to Nemotron GGUF without speech-context boosts. Dictionary
+        # replacements belong to the shared finalization pipeline so this
+        # method remains a truthful raw-transcript boundary.
         if nemotron_engine.is_nemotron_model(requested_model):
             eng = getattr(self, "nemotron_engine", None) or nemotron_engine.get_nemotron_engine(requested_model)
             if eng and eng.is_warm:
-                nemotron_vocabulary = self._stt_hint_terms(category) or None
                 try:
                     text = eng.transcribe(
                         clean_audio,
                         is_chunk=is_chunk,
                         deadline=deadline,
-                        vocabulary=nemotron_vocabulary,
+                        vocabulary=None,
                         language=getattr(config, "language", "en") or "en",
                     )
                 except TypeError:
@@ -769,7 +758,7 @@ class Transcriber:
                         language=getattr(config, "language", "en") or "en",
                     )
                 if text:
-                    return dictionary_engine.apply_dictionary_post_processing(text)
+                    return text
                 if not _has_audible_audio(clean_audio):
                     return ""
                 log.warning("[STT] Nemotron produced empty output for audible audio; checking Whisper fallback.")
@@ -814,9 +803,6 @@ class Transcriber:
         if not vad_params:
             vad_params = calibrate_vad_parameters("normal")
 
-        # Get dictionary initial prompt biasing
-        initial_prompt = dictionary_engine.get_initial_prompt(category)
-
         log.info("Transcribing %.1fs audio on %d CPU threads (beam=%d)...", duration, config.cpu_threads, config.beam_size)
 
         result = ""
@@ -854,7 +840,7 @@ class Transcriber:
                     beam_size=config.beam_size,
                     temperature=config.temperature,
                     language=config.language,
-                    initial_prompt=initial_prompt,
+                    initial_prompt=None,
                     # Streaming chunks already have their boundaries chosen by
                     # the recorder's silence split. A second, model-internal
                     # VAD pass can trim quiet first/last words from those
@@ -891,7 +877,7 @@ class Transcriber:
                         beam_size=config.beam_size,
                         temperature=config.temperature,
                         language=config.language,
-                        initial_prompt=initial_prompt,
+                        initial_prompt=None,
                         vad_filter=False,
                         condition_on_previous_text=False,
                     )
@@ -908,18 +894,6 @@ class Transcriber:
                 lock.release()
                 notify_models_available("speech")
 
-        # Trigger->replacement post-processing on the local path (Nemotron +
-        # faster-whisper, both passes): an explicit dictionary entry such as a
-        # user's name is an exact-match rewrite of what STT produced, so it
-        # applies here at decode time and again in the polisher — both passes
-        # are idempotent, and a dictionary failure must never lose audio text.
-        if result:
-            try:
-                rewritten = dictionary_engine.apply_dictionary_post_processing(result)
-                if isinstance(rewritten, str) and rewritten:
-                    return rewritten
-            except Exception:
-                log.warning("[STT] Dictionary post-processing unavailable; keeping raw transcript.")
         return result
 
     @property

@@ -121,12 +121,12 @@ def test_correction_targets_precede_excess_global_terms(tmp_path):
     assert "joe ee" not in hints
 
 
-def test_local_whisper_receives_dictionary_prompt_and_applies_exact_correction(tmp_path, monkeypatch):
+def test_local_whisper_uses_no_prompt_and_leaves_correction_for_finalization(tmp_path, monkeypatch):
     store = StorageEngine(str(tmp_path / "local.db"))
     store.add_dictionary_word("OpenAI")
     store.add_dictionary_correction("oh pen eye", "OpenAI")
     engine = DictionaryEngine(store)
-    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine)
+    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine, raising=False)
     monkeypatch.setattr(transcriber_module.nemotron_engine, "is_nemotron_model", lambda _ref: False)
 
     class FakeModel:
@@ -146,37 +146,24 @@ def test_local_whisper_receives_dictionary_prompt_and_applies_exact_correction(t
     audio = np.full(3200, 0.2, dtype=np.float32)
     text = transcriber._transcribe_local(audio, model_ref="base.en")
 
-    assert "OpenAI" in transcriber.model.kwargs["initial_prompt"]
-    assert text == "OpenAI works"
+    assert transcriber.model.kwargs["initial_prompt"] is None
+    assert text == "oh pen eye works"
 
 
-def test_cloud_hint_helper_returns_only_the_bounded_dictionary_terms(tmp_path, monkeypatch):
+def test_cloud_provider_dispatch_uses_no_dictionary_vocabulary(tmp_path, monkeypatch):
     store = StorageEngine(str(tmp_path / "local.db"))
     store.add_dictionary_word("OpenAI")
     store.add_snippet("sig", "signature block")
     store.add_dictionary_correction("oh pen eye", "OpenAI")
     engine = DictionaryEngine(store)
-    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine)
-
-    transcriber = object.__new__(transcriber_module.Transcriber)
-    terms = transcriber._stt_hint_terms(None)
-
-    assert terms == ["OpenAI"]
-
-
-def test_cloud_provider_dispatch_receives_filtered_dictionary_terms(tmp_path, monkeypatch):
-    store = StorageEngine(str(tmp_path / "local.db"))
-    store.add_dictionary_word("OpenAI")
-    store.add_snippet("sig", "signature block")
-    store.add_dictionary_correction("oh pen eye", "OpenAI")
-    engine = DictionaryEngine(store)
-    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine)
+    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine, raising=False)
     monkeypatch.setattr(transcriber_module, "enhance_for_stt", lambda audio, *_args, **_kwargs: (audio, "off"))
     seen = {}
 
     def fake_cloud(_audio, _model_ref, **kwargs):
         seen.update(kwargs)
-        return "OpenAI decoded"
+        vocabulary = kwargs.get("vocabulary") or []
+        return ("OpenAI " if "OpenAI" in vocabulary else "") + "decoded from audio"
 
     monkeypatch.setattr(transcriber_module.stt_engines, "transcribe_cloud", fake_cloud)
     transcriber = object.__new__(transcriber_module.Transcriber)
@@ -188,5 +175,60 @@ def test_cloud_provider_dispatch_receives_filtered_dictionary_terms(tmp_path, mo
         model_ref="groq/whisper-large-v3-turbo",
     )
 
-    assert text == "OpenAI decoded"
-    assert seen["vocabulary"] == ["OpenAI"]
+    assert text == "decoded from audio"
+    assert seen.get("vocabulary") == []
+
+
+@pytest.mark.parametrize(
+    "model_ref,constructor_path",
+    [
+        ("deepgram/flux-general-en", "voice_flow.flux_stream.FluxStreamTranscriber"),
+        ("deepgram/nova-3", "voice_flow.flux_stream.NovaStreamTranscriber"),
+        ("local/nemotron-speech-streaming-en-0.6b", "voice_flow.nemotron_engine.NemotronStreamTranscriber"),
+    ],
+)
+def test_native_stream_startup_receives_no_global_dictionary_vocabulary(
+    tmp_path, monkeypatch, model_ref, constructor_path,
+):
+    from voice_flow import main as main_module
+    from voice_flow import stt_engines
+
+    store = StorageEngine(str(tmp_path / "stream.db"))
+    store.add_dictionary_word("HyperKube")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(main_module, "dictionary_engine", engine)
+    monkeypatch.setattr(
+        engine,
+        "get_stt_hint_terms",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ordinary stream startup must not read recognition hints")
+        ),
+    )
+    monkeypatch.setattr(stt_engines, "prewarm_cloud_stt", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "voice_flow.nemotron_engine.is_nemotron_model",
+        lambda selected: str(selected or "").lower().startswith("local/nemotron"),
+    )
+    constructed = []
+
+    class NeutralStream:
+        def __init__(self, *args, **kwargs):
+            constructed.append((args, kwargs))
+
+        def submit_frame(self, *_args, **_kwargs):
+            return None
+
+        def start_session(self, **kwargs):
+            self.started = kwargs
+
+    monkeypatch.setattr(constructor_path, NeutralStream)
+    app = object.__new__(main_module.VoiceFlowApp)
+    app.audio = SimpleNamespace(on_audio_frame=None, split_silence_seconds=0.0, max_chunk_seconds=0.0)
+    app._streaming_stt_enabled = lambda: True
+    app._stream_stt = SimpleNamespace()
+    session = SimpleNamespace(stt_model_ref=model_ref, app_category="Work")
+
+    app._start_stream_for_session(session)
+
+    assert constructed == [((), {})]
+    assert app._stream_stt.started == {"model_ref": model_ref}

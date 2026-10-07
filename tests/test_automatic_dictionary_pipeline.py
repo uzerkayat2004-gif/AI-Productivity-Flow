@@ -87,6 +87,21 @@ def test_three_successful_corrections_activate_word_and_rule_without_ui(writer):
     assert engine.apply_dictionary_post_processing("use land graph for routing") == "use LangGraph for routing"
 
 
+def test_spacing_only_correction_activates_through_saved_pipeline(writer):
+    store, save = writer
+    for _ in range(3):
+        save(
+            "we use open ai for transcription",
+            "We use OpenAI for transcription",
+            metadata=accepted_metadata(),
+        )
+    assert "OpenAI" in store.get_dictionary_words()
+    assert any(
+        row["wrong_text"] == "open ai" and row["correct_text"] == "OpenAI"
+        for row in store.get_dictionary_corrections()
+    )
+
+
 @pytest.mark.parametrize("status,insertion,metadata", [
     ("paste_failed", "failed", accepted_metadata()),
     ("success", "ready_to_paste", accepted_metadata()),

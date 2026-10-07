@@ -109,8 +109,6 @@ def test_active_decode_keeps_old_model_alive_until_its_segment_generator_finishe
             return segments(), None
 
     monkeypatch.setattr(transcriber_module.nemotron_engine, "is_nemotron_model", lambda _ref: False)
-    monkeypatch.setattr(transcriber_module.dictionary_engine, "get_initial_prompt", lambda _category: "")
-    monkeypatch.setattr(transcriber_module.dictionary_engine, "apply_dictionary_post_processing", lambda text: text)
     transcriber = _bare_transcriber()
     old = _StreamingModel()
     old_ref = weakref.ref(old)

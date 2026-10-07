@@ -44,18 +44,16 @@ def test_vad_failure_uses_direct_audio_fallback(monkeypatch) -> None:
         text = "fallback words"
 
     calls = []
+    prompts = []
 
     def transcribe(data, **kwargs):
         calls.append(kwargs.get("vad_filter"))
+        prompts.append(kwargs.get("initial_prompt"))
         if kwargs.get("vad_filter"):
             raise RuntimeError("vad failed")
         return iter([Segment()]), None
 
     transcriber.model.transcribe = transcribe
-    monkeypatch.setattr(
-        "voice_flow.transcriber.dictionary_engine.get_initial_prompt",
-        lambda *args, **kwargs: "",
-    )
     monkeypatch.setattr("voice_flow.transcriber.config.sample_rate", 16000)
     try:
         from voice_flow.storage import storage
@@ -64,6 +62,7 @@ def test_vad_failure_uses_direct_audio_fallback(monkeypatch) -> None:
         pass
     assert transcriber.transcribe(audio) == "fallback words"
     assert calls == [True, False]
+    assert prompts == [None, None]
 
 
 def test_resample_failure_discards_audio(monkeypatch) -> None:

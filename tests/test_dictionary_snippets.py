@@ -255,7 +255,12 @@ def get(url, path):
 
 def test_api_does_not_suggest_terms_already_activated_by_repeated_use(store, monkeypatch):
     for _ in range(3):
-        store.record_lexicon_candidate("Kubernetes", "cuber netties", source="usage-history")
+        store.add_dictation(
+            "we use Kubernetes for routing",
+            "We use Kubernetes for routing",
+            status="success",
+            insertion_status="pasted",
+        )
     with api_server(store, monkeypatch) as url:
         status, suggestions = get(url, "/api/dictionary/suggestions")
     assert status == 200
@@ -270,10 +275,17 @@ def test_repeated_name_mishearing_automatically_activates_with_correction(store)
 
     pairs = extract_correction_pairs("please ask joe ee to review", "Please ask Joey to review")
     assert ("Joey", "joe ee") in pairs
-    for term, variant in pairs:
-        store.record_lexicon_candidate(term, variant, source="correction")
-        store.record_lexicon_candidate(term, variant, source="correction")
-        store.record_lexicon_candidate(term, variant, source="correction")
+    for _ in range(3):
+        record = store.add_dictation(
+            "please ask joe ee to review",
+            "Please ask Joey to review",
+            status="success",
+            insertion_status="pasted",
+        )
+        for term, variant in pairs:
+            store.record_lexicon_candidate(
+                term, variant, source="correction", history_id=record.id
+            )
     assert "Joey" in store.get_dictionary_words()
     assert any(row["wrong_text"] == "joe ee" and row["correct_text"] == "Joey" for row in store.get_dictionary_corrections())
     assert store.get_lexicon_suggestions() == []
@@ -297,15 +309,45 @@ def test_ignored_internal_candidate_never_activates(store):
 
 def test_heard_as_correction_activates_only_after_repeated_evidence(store):
     """Canonical term and heard-as correction activate together at threshold."""
-    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    records = [
+        store.add_dictation(
+            "we use cuber netties for routing",
+            "We use Kubernetes for routing",
+            status="success",
+            insertion_status="pasted",
+        )
+        for _ in range(3)
+    ]
+    store.record_lexicon_candidate(
+        "Kubernetes", "cuber netties", source="correction", history_id=records[0].id
+    )
+    store.record_lexicon_candidate(
+        "Kubernetes", "cuber netties", source="correction", history_id=records[1].id
+    )
     assert store.get_lexicon_suggestions() == []
     assert "Kubernetes" not in store.get_dictionary_words()
     assert store.get_dictionary_corrections() == []
-    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
+    store.record_lexicon_candidate(
+        "Kubernetes", "cuber netties", source="correction", history_id=records[2].id
+    )
     assert "Kubernetes" in store.get_dictionary_words()
     assert any(row["wrong_text"] == "cuber netties" and row["correct_text"] == "Kubernetes" for row in store.get_dictionary_corrections())
     assert store.get_lexicon_suggestions() == []
+
+
+def test_candidate_calls_without_history_stay_pending(store):
+    for _ in range(3):
+        assert not store.record_lexicon_candidate(
+            "Kubernetes", "cuber netties", source="correction"
+        )
+    assert "Kubernetes" not in store.get_dictionary_words()
+    assert store.get_dictionary_corrections() == []
+    with store._get_conn_ctx() as conn:
+        candidate = conn.execute(
+            "SELECT evidence, state FROM lexicon_candidates "
+            "WHERE term = 'Kubernetes' AND variant = 'cuber netties'"
+        ).fetchone()
+    assert (candidate["evidence"], candidate["state"]) == (3, "candidate")
 
 
 def test_api_correction_crud(store, monkeypatch):

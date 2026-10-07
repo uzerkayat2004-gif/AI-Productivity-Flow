@@ -901,19 +901,13 @@ class VoiceFlowApp:
         if not self._streaming_stt_enabled():
             return
         if str(model_ref or "").lower().startswith("deepgram/flux-"):
-            self._stream_stt = FluxStreamTranscriber(
-                dictionary_engine.get_stt_hint_terms(getattr(session, "app_category", None))
-            )
+            self._stream_stt = FluxStreamTranscriber()
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif str(model_ref or "").lower().startswith("deepgram/nova-3"):
-            self._stream_stt = NovaStreamTranscriber(
-                dictionary_engine.get_stt_hint_terms(getattr(session, "app_category", None))
-            )
+            self._stream_stt = NovaStreamTranscriber()
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif is_nemotron_model(model_ref):
-            self._stream_stt = NemotronStreamTranscriber(
-                dictionary_engine.get_stt_hint_terms(getattr(session, "app_category", None))
-            )
+            self._stream_stt = NemotronStreamTranscriber()
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif isinstance(self._stream_stt, (FluxStreamTranscriber, NovaStreamTranscriber, NemotronStreamTranscriber)):
             self._stream_stt = StreamTranscriber(self.transcriber)
