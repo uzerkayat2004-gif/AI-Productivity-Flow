@@ -1,3 +1,0 @@
-spawn_backend starting
-python.exe found at C:\Python314\python.exe
-Started PID 23548
