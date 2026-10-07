@@ -242,12 +242,147 @@ def test_finalization_applies_joined_vocabulary_alias_once_with_polishing_on_or_
     monkeypatch.setattr(main_module, "polisher", TextPolisher())
     monkeypatch.setattr(main_module, "smart_format", lambda text, *_args: text.lower())
     session = DictationSession(123, "Editor", "personal", "personal_very_casual", 0.0, cleanup_level="cleanup_light")
+    trace = []
 
-    result = object.__new__(VoiceFlowApp)._finalize_text("Please send the Hyper Kube update.", session)
+    result = object.__new__(VoiceFlowApp)._finalize_text(
+        "Please send the Hyper Kube update.", session, dictionary_trace=trace,
+    )
 
     assert "HyperKube" in result
     assert "Hyper Kube" not in result
     assert result.count("HyperKube") == 1
+    assert len(trace) == 1
+    assert trace[0]["from"].casefold() == "hyper kube"
+    assert trace[0]["to"] == "HyperKube"
+
+
+@pytest.mark.parametrize("polishing_enabled", [True, False])
+def test_finalization_expands_custom_snippet_once_with_truthful_trace(monkeypatch, tmp_path, polishing_enabled: bool) -> None:
+    from voice_flow.dictionary import DictionaryEngine
+    from voice_flow.polisher import TextPolisher
+    from voice_flow.storage import StorageEngine
+    import voice_flow.polisher as polish_module
+
+    store = StorageEngine(str(tmp_path / "snippets.db"))
+    store.add_snippet("sig", "Regards, Ada")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(main_module, "dictionary_engine", engine)
+    monkeypatch.setattr(polish_module, "dictionary_engine", engine)
+    monkeypatch.setattr(
+        polish_module.storage,
+        "get_setting",
+        lambda key, default=None: (
+            polishing_enabled if key == "polishing_enabled"
+            else "local/deterministic" if key == "voice_flow_polish_model"
+            else default
+        ),
+    )
+    monkeypatch.setattr(main_module, "polisher", TextPolisher())
+    monkeypatch.setattr(main_module, "smart_format", lambda text, *_args: text)
+    session = DictationSession(123, "Editor", "personal", "smart_clean", 0.0, cleanup_level="cleanup_light")
+    trace = []
+
+    result = object.__new__(VoiceFlowApp)._finalize_text(
+        "Please use sig", session, dictionary_trace=trace,
+    )
+
+    assert "Regards, Ada" in result
+    assert trace == [{"from": "sig", "to": "Regards, Ada"}]
+
+
+@pytest.mark.parametrize("polishing_enabled", [True, False])
+def test_finalization_keeps_transcript_when_dictionary_is_unavailable(monkeypatch, polishing_enabled: bool) -> None:
+    from voice_flow.polisher import TextPolisher
+    import voice_flow.polisher as polish_module
+
+    class UnavailableDictionary:
+        def apply_dictionary_post_processing(self, *_args, **_kwargs):
+            raise OSError("dictionary unavailable")
+
+        def restore_dictionary_spelling(self, *_args, **_kwargs):
+            raise OSError("dictionary unavailable")
+
+    unavailable = UnavailableDictionary()
+    monkeypatch.setattr(main_module, "dictionary_engine", unavailable)
+    monkeypatch.setattr(polish_module, "dictionary_engine", unavailable)
+    monkeypatch.setattr(
+        polish_module.storage,
+        "get_setting",
+        lambda key, default=None: (
+            polishing_enabled if key == "polishing_enabled"
+            else "local/deterministic" if key == "voice_flow_polish_model"
+            else default
+        ),
+    )
+    monkeypatch.setattr(main_module, "polisher", TextPolisher())
+    monkeypatch.setattr(main_module, "smart_format", lambda text, *_args: text)
+    session = DictationSession(123, "Editor", "personal", "smart_clean", 0.0, cleanup_level="cleanup_none")
+
+    result = object.__new__(VoiceFlowApp)._finalize_text(
+        "keep every raw word", session, dictionary_trace=[],
+    )
+
+    assert result == "keep every raw word"
+
+
+@pytest.mark.parametrize("polishing_enabled", [True, False])
+def test_raw_decoder_and_finalizer_apply_a_correction_chain_only_once(
+    monkeypatch, tmp_path, polishing_enabled: bool,
+) -> None:
+    import threading
+    import voice_flow.polisher as polish_module
+    import voice_flow.transcriber as transcriber_module
+    from voice_flow.dictionary import DictionaryEngine
+    from voice_flow.polisher import TextPolisher
+    from voice_flow.storage import StorageEngine
+
+    store = StorageEngine(str(tmp_path / "single-pass.db"))
+    store.add_dictionary_correction("first", "second")
+    store.add_dictionary_correction("second", "third")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(transcriber_module, "dictionary_engine", engine, raising=False)
+    monkeypatch.setattr(transcriber_module.nemotron_engine, "is_nemotron_model", lambda _ref: False)
+    monkeypatch.setattr(main_module, "dictionary_engine", engine)
+    monkeypatch.setattr(polish_module, "dictionary_engine", engine)
+    monkeypatch.setattr(
+        polish_module.storage,
+        "get_setting",
+        lambda key, default=None: (
+            polishing_enabled if key == "polishing_enabled"
+            else "local/deterministic" if key == "voice_flow_polish_model"
+            else default
+        ),
+    )
+
+    class Segment:
+        text = "first"
+
+    class RawModel:
+        def transcribe(self, _audio, **_kwargs):
+            return [Segment()], None
+
+    transcriber = object.__new__(transcriber_module.Transcriber)
+    transcriber.model = RawModel()
+    transcriber._lock = threading.Lock()
+    transcriber._transcribe_lock = threading.Lock()
+    transcriber._wait_for_model = lambda *_args, **_kwargs: True
+    raw = transcriber._transcribe_local(
+        np.full(3200, 0.2, dtype=np.float32), model_ref="base.en",
+    )
+
+    monkeypatch.setattr(main_module, "polisher", TextPolisher())
+    monkeypatch.setattr(main_module, "smart_format", lambda text, *_args: text)
+    session = DictationSession(
+        123, "Editor", "personal", "smart_clean", 0.0, cleanup_level="cleanup_light",
+    )
+    trace = []
+    result = object.__new__(VoiceFlowApp)._finalize_text(
+        raw, session, dictionary_trace=trace,
+    )
+
+    assert raw == "first"
+    assert result == "second."
+    assert trace == [{"from": "First", "to": "second"}]
 
 
 def test_polish_mode_normalization_uses_the_three_persisted_policy_values() -> None:

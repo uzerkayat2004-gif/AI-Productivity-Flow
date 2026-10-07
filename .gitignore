@@ -55,7 +55,8 @@ video_flow_renderer/dist/
 video_flow_renderer/.cache/
 
 # Test output directories
-scratch/
+scratch/**
+!scratch/generate_launcher.py
 .pytest_cache/
 
 # Databases and Local User Data
@@ -82,8 +83,25 @@ probe_temp_worker.txt
 !src/voice_flow/gui/assets/**
 !website/**
 
+# Local onboarding development/reference assets — not shipped
+src/voice_flow/gui/assets/onboarding/audio_flow_demo.mp4
+src/voice_flow/gui/assets/onboarding/ref_hero_authentic.png
+src/voice_flow/gui/assets/onboarding/video_flow_demo.mp4
+src/voice_flow/gui/assets/onboarding/voice_flow_demo.mp4
+
 # Local audit, experiment, and scratch directories
 video-flow-*/
+video-flow-visual-upgrade/
+tests_archived_v5/
+docs/DOCUMENTATION_REALIGNMENT.md
+docs/VOICE_FLOW_NEXT_ACTIONS.md
+third_party/code2video/**
+!third_party/code2video/LICENSE
+!third_party/code2video/UPSTREAM.md
+!third_party/code2video/prompts/stage1.py
+!third_party/code2video/prompts/stage2.py
+!third_party/code2video/src/api_config.json
+!third_party/code2video/src/gpt_request.py
 storyboard/
 plan/
 nvmodels.json

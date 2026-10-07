@@ -520,9 +520,24 @@ class TestLearnedVocabularyStorage(unittest.TestCase):
 
     def test_candidate_autoactivates_on_third_observation(self):
         st = self._db()
-        self.assertFalse(st.record_lexicon_candidate("LangGraph", "land graph"))
-        self.assertFalse(st.record_lexicon_candidate("LangGraph", "land graph"))
-        self.assertTrue(st.record_lexicon_candidate("LangGraph", "land graph"))
+        records = [
+            st.add_dictation(
+                "we use land graph for routing",
+                "We use LangGraph for routing",
+                status="success",
+                insertion_status="pasted",
+            )
+            for _ in range(3)
+        ]
+        self.assertFalse(st.record_lexicon_candidate(
+            "LangGraph", "land graph", history_id=records[0].id
+        ))
+        self.assertFalse(st.record_lexicon_candidate(
+            "LangGraph", "land graph", history_id=records[1].id
+        ))
+        self.assertTrue(st.record_lexicon_candidate(
+            "LangGraph", "land graph", history_id=records[2].id
+        ))
         self.assertIn("LangGraph", st.get_dictionary_words())
         self.assertEqual(st.get_lexicon_suggestions(), [])
         self.assertEqual(st.get_dictionary_corrections()[0]["wrong_text"], "land graph")
@@ -534,9 +549,20 @@ class TestLearnedVocabularyStorage(unittest.TestCase):
 
     def test_repeated_use_activates_dictionary_word_without_approval(self):
         st = self._db()
-        st.record_lexicon_candidate("LangGraph", "land graph")
-        st.record_lexicon_candidate("LangGraph", "land graph")
-        self.assertTrue(st.record_lexicon_candidate("LangGraph", "land graph"))
+        records = [
+            st.add_dictation(
+                "we use land graph for routing",
+                "We use LangGraph for routing",
+                status="success",
+                insertion_status="pasted",
+            )
+            for _ in range(3)
+        ]
+        st.record_lexicon_candidate("LangGraph", "land graph", history_id=records[0].id)
+        st.record_lexicon_candidate("LangGraph", "land graph", history_id=records[1].id)
+        self.assertTrue(st.record_lexicon_candidate(
+            "LangGraph", "land graph", history_id=records[2].id
+        ))
         self.assertIn("LangGraph", st.get_dictionary_words())
 
     def test_migration_autoactivates_only_repeated_raw_terms_and_preserves_unqualified_autocaptured(self):

@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import re
 
-from voice_flow.vocabulary_learning import is_noise_variant, is_useful_term, strip_protected_spans
+from voice_flow.vocabulary_learning import (
+    is_noise_variant,
+    is_plausible_spelling_correction,
+    is_useful_term,
+    strip_protected_spans,
+)
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "so", "to", "for", "of",
@@ -39,15 +44,45 @@ _MAX_TERMS = 5
 _MIN_DISTINCT_CONTENT_TOKENS = 2
 
 
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[^\W_]+", strip_protected_spans(text), flags=re.UNICODE)
+def _tokenize(text: str) -> tuple[list[str], list[int]]:
+    """Return words plus sentence IDs so context never crosses punctuation."""
+    safe = strip_protected_spans(text)
+    words: list[str] = []
+    sentence_ids: list[int] = []
+    sentence_id = 0
+    previous_end = 0
+    for match in re.finditer(r"[^\W_]+", safe, flags=re.UNICODE):
+        if re.search(r"[.!?]", safe[previous_end:match.start()]):
+            sentence_id += 1
+        words.append(match.group(0))
+        sentence_ids.append(sentence_id)
+        previous_end = match.end()
+    return words, sentence_ids
 
 
-def _is_candidate_word(word: str) -> bool:
+def _sentence_context(
+    words: list[str], sentence_ids: list[int], start: int, end: int, term: str
+) -> str:
+    sentence_id = sentence_ids[start]
+    left = start
+    while left > 0 and sentence_ids[left - 1] == sentence_id and start - left < 5:
+        left -= 1
+    right = end
+    while right < len(words) and sentence_ids[right] == sentence_id and right - end < 4:
+        right += 1
+    return " ".join(words[left:start] + [term] + words[end:right])
+
+
+def _is_candidate_word(word: str, variant: str, context: str) -> bool:
     w = word.lower()
     if len(w) < _MIN_LEN or w in _STOPWORDS or w in _COMMON_WORDS:
         return False
-    return is_useful_term(word, allow_sentence_initial=True)
+    return is_plausible_spelling_correction(word, variant) and is_useful_term(
+        word,
+        allow_sentence_initial=True,
+        context=context,
+        correction_variant=variant,
+    )
 
 
 def _content_tokens(tokens: list[str]) -> set[str]:
@@ -66,6 +101,12 @@ def _has_distinct_context(raw_seg: list[str]) -> bool:
     if len(raw_seg) < 2:
         return True
     return len(_content_tokens(raw_seg)) >= _MIN_DISTINCT_CONTENT_TOKENS
+
+
+def _same_joined_letters(left: str, right: str) -> bool:
+    return re.sub(r"[^\w]", "", left, flags=re.UNICODE).casefold() == re.sub(
+        r"[^\w]", "", right, flags=re.UNICODE
+    ).casefold()
 
 
 def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple[str, str]]:
@@ -90,8 +131,8 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
     try:
         import difflib
 
-        raw_words = _tokenize(raw_transcript)
-        final_words = _tokenize(final_text)
+        raw_words, raw_sentences = _tokenize(raw_transcript)
+        final_words, final_sentences = _tokenize(final_text)
         if not raw_words or not final_words:
             return []
         # Original casing is kept for the emitted text; only the alignment
@@ -111,6 +152,8 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
             final_seg = final_words[j1:j2]
             if not raw_seg or not final_seg:
                 continue
+            if len(set(raw_sentences[i1:i2])) != 1 or len(set(final_sentences[j1:j2])) != 1:
+                continue
             if len(pairs) >= _MAX_TERMS:
                 return pairs
             # Pattern A (spec §35): multiword mishearing collapses into one
@@ -118,10 +161,11 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
             if len(final_seg) == 1 and 1 <= len(raw_seg) <= 3:
                 variant = " ".join(raw_seg).lower()
                 term = final_seg[0]
-                if variant.casefold() != term.casefold() and _is_candidate_word(term) \
+                context = _sentence_context(raw_words, raw_sentences, i1, i2, term)
+                if variant.casefold() != term.casefold() and _is_candidate_word(term, variant, context) \
                         and not is_noise_variant(variant) \
                         and len(variant) >= _MIN_LEN and not any(w.lower() in _STOPWORDS for w in raw_seg) \
-                        and _has_distinct_context(raw_seg):
+                        and (_has_distinct_context(raw_seg) or _same_joined_letters(variant, term)):
                     key = (term.casefold(), variant)
                     if key not in seen_pairs:
                         seen_pairs.add(key)
@@ -129,10 +173,14 @@ def extract_correction_pairs(raw_transcript: str, final_text: str) -> list[tuple
                 continue
             # Pattern B: 1:1 word swap — "open ai" -> "OpenAI", "py torch" -> "PyTorch".
             if len(raw_seg) == len(final_seg):
-                for variant, term in zip(raw_seg, final_seg):
+                for offset, (variant, term) in enumerate(zip(raw_seg, final_seg)):
                     if variant.casefold() == term.casefold():
                         continue
-                    if not _is_candidate_word(term):
+                    raw_position = i1 + offset
+                    context = _sentence_context(
+                        raw_words, raw_sentences, raw_position, raw_position + 1, term
+                    )
+                    if not _is_candidate_word(term, variant, context):
                         continue
                     if variant.lower() in _STOPWORDS or len(variant) < _MIN_LEN or is_noise_variant(variant):
                         continue

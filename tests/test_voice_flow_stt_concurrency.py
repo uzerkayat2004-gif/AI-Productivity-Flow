@@ -302,8 +302,6 @@ def test_streaming_local_decode_preserves_quiet_chunk_boundary_words(monkeypatch
     transcriber._wait_for_model = lambda *_args, **_kwargs: True
     transcriber._local_model_name = lambda *_args, **_kwargs: "tiny.en"
     monkeypatch.setattr(transcriber_module.nemotron_engine, "is_nemotron_model", lambda _ref: False)
-    monkeypatch.setattr(transcriber_module.dictionary_engine, "get_initial_prompt", lambda _category: "")
-    monkeypatch.setattr(transcriber_module.dictionary_engine, "apply_dictionary_post_processing", lambda text: text)
 
     text = transcriber._transcribe_local(audio, is_chunk=True)
 

@@ -42,6 +42,7 @@
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
   <link rel="stylesheet" href="workspace-ui.css?v=20261005-audiopolish">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
+  <link rel="stylesheet" href="onboarding-hero.css">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
 
@@ -2276,226 +2277,43 @@
 
   <div id="onboarding-overlay" class="onboarding-overlay hidden">
     <div class="onboarding-card">
-      <canvas id="onboarding-confetti-canvas" class="onboarding-confetti-canvas"></canvas>
 
-      <!-- SLIDE 0: WELCOME & PURPOSE -->
-      <div class="onboarding-slide" data-slide="0">
-        <!-- Brand Header with Circular Logo Emblem -->
-        <div class="brand-header">
-          <div class="logo-emblem">
-            <img src="assets/logo.png" alt="AI Productivity Flow" class="app-logo">
-          </div>
-          <h1 class="main-title">
-            Welcome to <span class="highlight">AI Productivity Flow</span>
-          </h1>
-          <p class="tagline">
-            Turn voice and ideas into high-speed desktop workflows.
-          </p>
-        </div>
+      <!-- SLIDE 0: AUTHENTIC SCENE 1 WELCOME HERO (100% FAITHFUL TO MASTER VIDEO) -->
+      <div class="onboarding-slide welcome-hero-slide" data-slide="0">
+        <div class="scene1-stage-viewport">
+          <!-- Light Mode Master Video (Native 1080p, identical to master video) -->
+          <video id="scene1-hero-video" class="scene1-media-element light-only" src="assets/onboarding/scene_1_master.mp4" poster="assets/onboarding/scene_1_master_poster.png" autoplay loop muted playsinline></video>
+          <!-- Dark Mode Master Scene (Native dark theme palette #0f1015 & #f3e5d8) -->
+          <img id="scene1-hero-dark-img" class="scene1-media-element dark-only" src="assets/onboarding/scene_1_master_dark.png" alt="AI Productivity Flow Welcome Scene" />
 
-        <!-- 3 Rich Visual Showcase Cards (Visual UI Mockups, No Walls of Text) -->
-        <div class="visual-features-grid" aria-label="Core Capabilities">
-
-          <!-- Feature 1: Video Flow (Mini Video Player Mockup) -->
-          <article class="visual-card card-video" id="card-feature-1" onclick="gotoOnboardingSlide(1)">
-            <div class="card-header-bar">
-              <div class="icon-squircle icon-video">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="2" y="6" width="13" height="12" rx="2.5"></rect>
-                  <polygon points="17 9 22 6 22 18 17 15"></polygon>
-                </svg>
-              </div>
-              <div class="card-title-group">
-                <h2 class="card-title">1. Video Flow</h2>
-                <span class="card-subtitle">Visual Explainer Engine</span>
-              </div>
-            </div>
-
-            <!-- Video Player Window Mockup -->
-            <div class="mockup-window window-dark">
-              <div class="window-header">
-                <div class="window-dots">
-                  <span class="dot-red"></span>
-                  <span class="dot-yellow"></span>
-                  <span class="dot-green"></span>
-                </div>
-                <span class="window-title">explainer_slide_01.mp4</span>
-              </div>
-              <div class="video-slide-canvas">
-                <div class="slide-chart-preview">
-                  <div class="chart-bars">
-                    <span style="height: 35px;"></span>
-                    <span style="height: 55px;"></span>
-                    <span style="height: 75px;"></span>
-                    <span style="height: 98px;"></span>
-                  </div>
-                  <div class="slide-text-mock">
-                    <strong>AI Video Flow</strong>
-                    <div class="mock-line" style="width: 80px;"></div>
-                    <div class="mock-line" style="width: 65px;"></div>
-                  </div>
-                </div>
-                <div class="play-button-overlay">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                    <polygon points="6 4 20 12 6 20 6 4"></polygon>
-                  </svg>
-                </div>
-              </div>
-              <div class="video-timeline-bar">
-                <div class="timeline-progress" style="width: 48%;"></div>
-                <div class="timeline-scrubber" style="left: 48%;"></div>
-              </div>
-              <div class="video-status-row">
-                <span class="video-time">0:42 / 1:30</span>
-                <span class="badge-hd">1080p</span>
-              </div>
-            </div>
-
-            <div class="card-feature-badge badge-video">
-              Auto Slides · Motion Graphics · Voiceover
-            </div>
-          </article>
-
-          <!-- Feature 2: Audio Flow (Selected Text & Waveforms Mockup) -->
-          <article class="visual-card card-audio" id="card-feature-2" onclick="gotoOnboardingSlide(2)">
-            <div class="card-header-bar">
-              <div class="icon-squircle icon-audio">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
-                  <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
-                </svg>
-              </div>
-              <div class="card-title-group">
-                <h2 class="card-title">2. Audio Flow</h2>
-                <span class="card-subtitle">Smart Text-to-Speech</span>
-              </div>
-            </div>
-
-            <!-- Audio Studio Mockup -->
-            <div class="mockup-window window-light window-blue">
-              <div class="selected-text-box">
-                <span class="mock-label">Selected Document Text:</span>
-                <div class="highlighted-text">
-                  Turn long articles into <mark>natural studio audio</mark>.
-                </div>
-              </div>
-
-              <!-- Waveform visualizer -->
-              <div class="waveforms-visualizer" id="waveforms-container">
-                <span></span><span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span><span></span>
-                <span></span><span></span><span></span><span></span><span></span><span></span>
-              </div>
-
-              <div class="audio-controls-row">
-                <div class="audio-play-circle">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <polygon points="6 4 20 12 6 20 6 4"></polygon>
-                  </svg>
-                </div>
-                <span class="voice-name">Neural Voice · Alex</span>
-                <span class="badge-speed">1.0x</span>
-              </div>
-            </div>
-
-            <div class="card-feature-badge badge-audio">
-              Instant Hotkey · 50+ Voices · Zero Lag
-            </div>
-          </article>
-
-          <!-- Feature 3: Voice Flow (Floating Dictation Capsule Mockup) -->
-          <article class="visual-card card-voice" id="card-feature-3" onclick="gotoOnboardingSlide(3)">
-            <div class="card-header-bar">
-              <div class="icon-squircle icon-voice">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                  <line x1="12" y1="19" x2="12" y2="23"></line>
-                  <line x1="8" y1="23" x2="16" y2="23"></line>
-                </svg>
-              </div>
-              <div class="card-title-group">
-                <h2 class="card-title">3. Voice Flow</h2>
-                <span class="card-subtitle">Universal AI Dictation</span>
-              </div>
-            </div>
-
-            <!-- Dictation Mockup -->
-            <div class="mockup-window window-light window-purple">
-              <div class="dictation-pill-mock">
-                <div class="mic-circle-pulse">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-                  </svg>
-                </div>
-                <span class="dictate-status">Listening...</span>
-                <div class="mini-soundbars">
-                  <span></span><span></span><span></span><span></span>
-                </div>
-              </div>
-
-              <div class="dictation-text-box">
-                <div class="live-transcribed-text">
-                  "Ship the new onboarding update..."<span class="blinking-cursor">|</span>
-                </div>
-                <div class="grammar-polish-badge">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  <span>AI Grammar Polish · Auto-Punctuation</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="card-feature-badge badge-voice">
-              Global Hotkey · Works in Every App
-            </div>
-          </article>
-
-        </div>
-
-        <!-- Sleek Floating Subtitles Caption Pill (Compact, Never takes huge space!) -->
-        <div class="subtitles-caption-pill" id="subtitles-box-0">
-          <div class="caption-audio-indicator">
-            <span></span><span></span><span></span><span></span>
-          </div>
-          <p class="caption-text" id="subtitle-text-0">
-            Welcome to AI Productivity Flow! We're thrilled to have you here.
-          </p>
-        </div>
-
-        <!-- Corner Navigation Row -->
-        <footer class="nav-corner-row">
-          <div class="step-indicator-pill">
-            <span class="step-dot"></span>
-            <span>Step 1 of 5 · Welcome</span>
-          </div>
-          <button class="btn-corner-next" onclick="nextOnboardingSlide()">
-            <span>Next: Video Flow</span>
-            <span class="arrow">→</span>
+          <!-- Top-Right Skip Tour Button -->
+          <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+            <span>Skip Tour</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
-        </footer>
-      </div>
 
-      <!-- SLIDE 1: VIDEO FLOW -->
-      <div class="onboarding-slide" data-slide="1">
-        <span class="onboarding-kicker">FEATURE 1 · VIDEO FLOW</span>
-        <h2>🎬 Video Flow: Visual Summaries &amp; Explainers</h2>
-        <p class="onboarding-copy">Welcome to Video Flow, our first core feature. If you have a lengthy article, research paper, or complex notes that you want to understand visually, Video Flow transforms your document into an animated visual explainer right on your screen.</p>
-        <div class="onboarding-demo">
-          <div class="onboarding-demo-video">
-            <span class="onboarding-demo-play">▶</span>
-            <small>Article → Visual Explanation Motion Graphic</small>
+          <!-- 1:1 Interactive Hotspot Grid (Clickable targets precisely aligned over the visual elements) -->
+          <div class="scene1-hotspots-grid">
+            <!-- 1. Video Flow Card Target -->
+            <button class="scene1-hotspot-item hotspot-card-1" onclick="gotoOnboardingSlide(1)" title="Video Flow - Feature 1" aria-label="1. Video Flow"></button>
+            <!-- 2. Audio Flow Card Target -->
+            <button class="scene1-hotspot-item hotspot-card-2" onclick="gotoOnboardingSlide(2)" title="Audio Flow - Feature 2" aria-label="2. Audio Flow"></button>
+            <!-- 3. Voice Flow Card Target -->
+            <button class="scene1-hotspot-item hotspot-card-3" onclick="gotoOnboardingSlide(3)" title="Voice Flow - Feature 3" aria-label="3. Voice Flow"></button>
+
+            <!-- Dark / Light Mode Toggle Button Target -->
+            <button class="scene1-hotspot-item hotspot-theme" id="scene1-theme-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode" aria-label="Toggle Theme"></button>
+
+            <!-- Next: Video Flow Button Target -->
+            <button class="scene1-hotspot-item hotspot-next" id="scene1-next-btn" onclick="startOnboardingTour()" title="Next: Video Flow" aria-label="Next: Video Flow"></button>
           </div>
         </div>
-        <p class="onboarding-hint">Switch seamlessly from audio to visual understanding in one click.</p>
       </div>
-
-      <!-- SLIDE 2: AUDIO FLOW -->
-      <div class="onboarding-slide" data-slide="2">
-        <span class="onboarding-kicker">FEATURE 2 · AUDIO FLOW</span>
+      <!-- SLIDE 1: AUDIO FLOW -->
+      <div class="onboarding-slide" data-slide="1">
+        <span class="onboarding-kicker">FEATURE 1 · AUDIO FLOW</span>
         <h2>🔊 Audio Flow: Instant Text to Speech &amp; Summaries</h2>
-        <p class="onboarding-copy">Next is Audio Flow, our second feature. Imagine scrolling through Twitter or reading a long document that you don't want to read. Simply select the text, and a small Audio Flow button appears. Click it to convert the article into a spoken audio summary.</p>
+        <p class="onboarding-copy">Welcome to Audio Flow, our first feature. Imagine scrolling through Twitter or reading a long document that you don't want to read. Simply select the text, and a small Audio Flow button appears. Click it to convert the article into a spoken audio summary.</p>
         <div class="onboarding-demo">
           <div class="onboarding-demo-doc">
             <span class="onboarding-demo-sel">"Long Twitter thread or article selected..."</span>
@@ -2503,6 +2321,20 @@
           </div>
         </div>
         <p class="onboarding-hint">Pause anytime to read at your own pace or adjust narration speed.</p>
+      </div>
+
+      <!-- SLIDE 2: VIDEO FLOW -->
+      <div class="onboarding-slide" data-slide="2">
+        <span class="onboarding-kicker">FEATURE 2 · VIDEO FLOW</span>
+        <h2>🎬 Video Flow: Visual Summaries &amp; Explainers</h2>
+        <p class="onboarding-copy">Next is Video Flow, our second feature. If you want to convert that article into a visual summary, Video Flow transforms your document into an animated visual explainer right on your screen.</p>
+        <div class="onboarding-demo">
+          <div class="onboarding-demo-video">
+            <span class="onboarding-demo-play">▶</span>
+            <small>Article → Visual Explanation Motion Graphic</small>
+          </div>
+        </div>
+        <p class="onboarding-hint">Switch seamlessly from audio to visual understanding in one click.</p>
       </div>
 
       <!-- SLIDE 3: VOICE FLOW DICTATION FOCUS -->
@@ -2528,7 +2360,7 @@
         <ul class="onboarding-tools">
           <li><span>🔊</span><div><strong>1. Audio Summary</strong><small>Convert long articles &amp; text into spoken summaries</small></div></li>
           <li><span>🎬</span><div><strong>2. Visual Summary</strong><small>Transform documents into animated visual explainer videos</small></div></li>
-          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small id="onboarding-dictate-desc">Speak your thoughts &amp; dictate across any application</small></div></li>
+          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small>Speak your thoughts &amp; dictate across any Windows application</small></div></li>
           <li><span>📄</span><div><strong>4. Article Conversion</strong><small>Convert articles into audio or visual formats</small></div></li>
           <li><span>📊</span><div><strong>5. Insights &amp; History</strong><small>Track telemetry, speaking velocity, streaks, and dictionary</small></div></li>
         </ul>

@@ -6879,7 +6879,7 @@ const scene1Timeline = [
 ];
 
 function updateOnboardingScene1Subtitles(time) {
-  const subEl = document.getElementById("subtitle-text-0");
+  const subEl = document.getElementById("scene1-subtitle-text") || document.getElementById("subtitle-text-0");
   if (!subEl) return;
 
   const currentMatch = scene1Timeline.find(item => time >= item.start && time <= item.end);
@@ -6888,7 +6888,7 @@ function updateOnboardingScene1Subtitles(time) {
     setTimeout(() => {
       subEl.textContent = currentMatch.text;
       subEl.style.opacity = "1";
-    }, 100);
+    }, 70);
   }
 
   // Dynamic visual card highlighting based on voiceover in Scene 1
@@ -7035,11 +7035,17 @@ function renderOnboardingDots() {
   ).join("");
 }
 
+
 function renderOnboardingSlide() {
   const card = document.querySelector(".onboarding-card");
   if (card) {
-    card.classList.toggle("scene-wide", onboardingSlide === 0);
+    card.classList.toggle("welcome-stage", onboardingSlide === 0);
   }
+  const overlay = document.getElementById("onboarding-overlay");
+  if (overlay) {
+    overlay.classList.toggle("welcome-hero-mode", onboardingSlide === 0);
+  }
+
   document.querySelectorAll(".onboarding-slide").forEach(s => {
     const slideIdx = Number(s.getAttribute("data-slide") || (s.dataset && s.dataset.slide) || 0);
     s.classList.toggle("active", slideIdx === onboardingSlide);
@@ -7048,8 +7054,22 @@ function renderOnboardingSlide() {
   const player = document.getElementById("onboarding-player");
   if (player) player.style.display = onboardingSlide === 0 ? "none" : "flex";
 
+  // Synchronize Scene 1 theme toggle button
+  const curTheme = document.documentElement.getAttribute("data-theme") || "light";
+  const s1Icon = document.getElementById("scene1-theme-icon");
+  const s1Label = document.getElementById("scene1-theme-label");
+  if (s1Icon) s1Icon.textContent = curTheme === "dark" ? "☀️" : "🌙";
+  if (s1Label) s1Label.textContent = curTheme === "dark" ? "Light Mode" : "Dark Mode";
+
+  // Auto-play or pause master video on slide 0
+  const heroVid = document.getElementById("scene1-hero-video");
   if (onboardingSlide === 0) {
-    setTimeout(initOnboardingConfetti, 100);
+    if (heroVid) {
+      heroVid.currentTime = 0;
+      heroVid.play().catch(() => {});
+    }
+  } else {
+    if (heroVid) heroVid.pause();
   }
 
   // Auto-navigate app background to match current tour topic
@@ -7063,6 +7083,9 @@ function renderOnboardingSlide() {
 let onboardingAudioPlayer = null;
 
 function getOnboardingAudioPath(slideIdx) {
+  if (slideIdx === 0) {
+    return "/assets/onboarding/scene_1_mixed.mp3";
+  }
   return `/assets/onboarding/slide_${slideIdx}.mp3`;
 }
 
@@ -7081,11 +7104,13 @@ function speakOnboardingNarration() {
   const audioPath = getOnboardingAudioPath(onboardingSlide);
   onboardingAudioPlayer = new Audio(audioPath);
   
-  onboardingAudioPlayer.addEventListener("timeupdate", () => {
-    if (onboardingSlide === 0) {
-      updateOnboardingScene1Subtitles(onboardingAudioPlayer.currentTime);
-    }
-  });
+  if (onboardingSlide === 0) {
+    onboardingAudioPlayer.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer) {
+        updateOnboardingScene1Subtitles(onboardingAudioPlayer.currentTime);
+      }
+    });
+  }
 
   onboardingAudioPlayer.addEventListener("ended", () => {
     updateOnboardingNarrationUI(true);

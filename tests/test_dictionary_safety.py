@@ -231,24 +231,15 @@ def test_correction_extraction_requires_distinct_context_for_multitoken_variants
     assert all(variant.casefold() != "hey hey" for _, variant in pairs)
 
 
-def test_trigger_post_processing_applies_inside_local_decode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression: explicit trigger->replacement rules must run on the local
-    STT return path (faster-whisper), not only inside the polisher."""
+def test_local_whisper_returns_raw_text_without_dictionary_prompt_or_rewrite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The decoder must not turn stored spellings into acoustic evidence."""
     import threading
 
     import numpy as np
 
     from voice_flow.transcriber import Transcriber
 
-    engine = _engine(monkeypatch, ["myname -> MyName"])
-    monkeypatch.setattr(
-        "voice_flow.transcriber.dictionary_engine.apply_dictionary_post_processing",
-        engine.apply_dictionary_post_processing,
-    )
-    monkeypatch.setattr(
-        "voice_flow.transcriber.dictionary_engine.get_initial_prompt",
-        lambda *args, **kwargs: "",
-    )
+    _engine(monkeypatch, ["myname -> MyName"])
     monkeypatch.setattr("voice_flow.transcriber.config.sample_rate", 16000)
 
     class _Segment:
@@ -256,6 +247,7 @@ def test_trigger_post_processing_applies_inside_local_decode(monkeypatch: pytest
 
     class _FakeModel:
         def transcribe(self, data, **kwargs):
+            self.kwargs = kwargs
             return iter([_Segment()]), None
 
     transcriber = object.__new__(Transcriber)
@@ -265,27 +257,19 @@ def test_trigger_post_processing_applies_inside_local_decode(monkeypatch: pytest
     monkeypatch.setattr("voice_flow.transcriber.nemotron_engine.is_nemotron_model", lambda *a: False)
 
     audio = np.ones(32000, dtype=np.float32) * 0.5
-    assert transcriber._transcribe_local(audio) == "call MyName now"
+    assert transcriber._transcribe_local(audio) == "call myname now"
+    assert transcriber.model.kwargs["initial_prompt"] is None
 
 
-def test_nemotron_path_receives_vocabulary_and_post_processing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression: Nemotron decode gets dictionary hint terms and its raw
-    output still runs trigger->replacement post-processing."""
+def test_nemotron_path_uses_no_vocabulary_and_returns_raw_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nemotron recognition remains independent of the learned dictionary."""
     import threading
 
     import numpy as np
 
     from voice_flow.transcriber import Transcriber
 
-    engine = _engine(monkeypatch, ["MyName", "Kubernetes"])
-    monkeypatch.setattr(
-        "voice_flow.transcriber.dictionary_engine.apply_dictionary_post_processing",
-        engine.apply_dictionary_post_processing,
-    )
-    monkeypatch.setattr(
-        "voice_flow.transcriber.dictionary_engine.get_stt_hint_terms",
-        lambda category=None, limit=15: ["MyName", "Kubernetes"],
-    )
+    _engine(monkeypatch, ["MyName", "Kubernetes"])
     monkeypatch.setattr("voice_flow.transcriber.config.sample_rate", 16000)
 
     seen: dict = {}
@@ -310,5 +294,5 @@ def test_nemotron_path_receives_vocabulary_and_post_processing(monkeypatch: pyte
     monkeypatch.setattr(Transcriber, "_wait_for_model", lambda self, *a, **k: True)
 
     audio = np.ones(32000, dtype=np.float32) * 0.5
-    assert transcriber._transcribe_local(audio, model_ref="nemotron-test") == "call MyName now"
-    assert seen.get("vocabulary") == ["MyName", "Kubernetes"]
+    assert transcriber._transcribe_local(audio, model_ref="nemotron-test") == "call myname now"
+    assert seen.get("vocabulary") is None
