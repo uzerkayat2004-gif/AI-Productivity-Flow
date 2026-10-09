@@ -579,9 +579,9 @@ async function safeFetchJson(url, options = {}) {
           if (!data.error) {
             data.error = `Server returned status ${res.status}`;
           }
-          if (data.success === undefined) {
-            data.success = false;
-          }
+          data.success = false;
+          data.ok = false;
+          data.status = res.status;
         }
       }
       return data;
@@ -704,24 +704,22 @@ async function checkOverlayStatus() {
 async function showFloatingOverlay() {
   try {
     const data = await safeFetchJson("/api/overlay/show", { method: "POST" });
-    if (data && data.success !== false) {
-      if (typeof vfToast === "function") vfToast("Floating bar brought to front.");
-    }
+    if (data?.success !== true) throw new Error(data?.error || "Could not show the floating bar.");
+    if (typeof vfToast === "function") vfToast("Floating bar brought to front.");
     return data;
   } catch (err) {
-    console.error("Error showing floating bar:", err);
+    settingsError(err.message || "Could not show the floating bar.");
   }
 }
 
 async function resetFloatingOverlayPosition() {
   try {
     const data = await safeFetchJson("/api/overlay/reset-position", { method: "POST" });
-    if (data && data.success !== false) {
-      if (typeof vfToast === "function") vfToast("Floating bar reset to default position.");
-    }
+    if (data?.success !== true) throw new Error(data?.error || "Could not reset floating bar position.");
+    if (typeof vfToast === "function") vfToast("Floating bar reset to default position.");
     return data;
   } catch (err) {
-    console.error("Error resetting floating bar position:", err);
+    settingsError(err.message || "Could not reset floating bar position.");
   }
 }
 
@@ -1095,12 +1093,53 @@ async function selectStyleCard(categoryKey, cardId) {
 // --- User-Configurable Trigger & Hotkey Settings ---
 let _isRecordingHotkey = false;
 let _hotkeyKeydownListener = null;
+let _hotkeyKeyupListener = null;
+let _shortcutDraft = null;
+let _shortcutDraftReady = false;
+let _shortcutDialogGeneration = 0;
+let _shortcutLoadGeneration = 0;
+let _shortcutCaptureToken = null;
+let _shortcutCaptureHeartbeat = null;
+let _shortcutCaptureGeneration = 0;
+let _shortcutBlurListener = null;
+let _micCatalog = [];
+let _shortcutSavePending = false;
+let _micSelectionPending = false;
+let _micCatalogGeneration = 0;
 
-async function loadHotkeySettings() {
-  try {
-    const res = await safeFetchJson("/api/settings/hotkey");
-    if (!res || !res.success) return;
+function shortcutMessage(message, error = false) {
+  const status = document.getElementById("shortcut-settings-status");
+  if (status) { status.textContent = message; status.style.color = error ? "var(--danger-color, #c33)" : "var(--text-muted)"; }
+}
 
+async function recorderLease(action, token) {
+  const result = await safeFetchJson("/api/settings/hotkey/recorder", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action, token}),
+  });
+  if (!result || !result.success) throw new Error(result?.error || "Could not record shortcut. Try again.");
+  return result;
+}
+
+function stopShortcutRecorder(restore = true) {
+  const wasRecording = _isRecordingHotkey || !!document.getElementById("record-hotkey-btn")?.disabled;
+  _shortcutCaptureGeneration++;
+  _isRecordingHotkey = false;
+  if (_hotkeyKeydownListener) window.removeEventListener("keydown", _hotkeyKeydownListener, true);
+  if (_hotkeyKeyupListener) window.removeEventListener("keyup", _hotkeyKeyupListener, true);
+  if (_shortcutBlurListener) window.removeEventListener("blur", _shortcutBlurListener);
+  _hotkeyKeydownListener = _hotkeyKeyupListener = _shortcutBlurListener = null;
+  clearInterval(_shortcutCaptureHeartbeat); _shortcutCaptureHeartbeat = null;
+  const token = _shortcutCaptureToken; _shortcutCaptureToken = null;
+  if (token) recorderLease("end", token).catch(() => shortcutMessage("Shortcut recording stopped. Please wait a moment before dictating.", true));
+  const input = document.getElementById("custom-hotkey-input");
+  if (restore && wasRecording && input) input.value = input.dataset.previousValid || "Alt+Space";
+  const btn = document.getElementById("record-hotkey-btn");
+  if (btn) {btn.textContent = "Record shortcut"; btn.disabled = false; btn.style.background = ""; btn.style.color = "";}
+}
+
+
+function renderHotkeySettings(res) {
     const trigger = res.hotkey_trigger || "ctrl_win";
     const customKey = res.custom_hotkey || "Alt+Space";
     const customType = res.custom_trigger_type || "hold";
@@ -1109,6 +1148,7 @@ async function loadHotkeySettings() {
     const pttLabel = res.push_to_talk_shortcut || "Ctrl+Win";
 
     _currentCustomTriggerType = customType;
+    if (_shortcutDraft) _shortcutDraft = {...res};
 
     // 1. Update Main Settings Panel
     const mainSelect = document.getElementById("setting-hotkey-trigger-select");
@@ -1120,9 +1160,9 @@ async function loadHotkeySettings() {
     const dispKbd = document.getElementById("ptt-display-kbd");
     if (dispKbd) dispKbd.textContent = mode === "ptt_only" ? "PTT Only" : (mode === "toggle_only" ? "Toggle Only" : "Hybrid");
 
-    const modeLabels = { hybrid: "Smart Hybrid", ptt_only: "Strict Hold to Talk", toggle_only: "Strict Tap to Toggle" };
+    const modeLabels = { hybrid: "Smart Hybrid", ptt_only: "Strict Hold to Talk", toggle_only: "Strict Tap to Toggle", disabled: "Dictation shortcuts off" };
     const modeBadge = document.getElementById("dictation-mode-badge");
-    if (modeBadge) modeBadge.textContent = modeLabels[mode] || mode;
+    if (modeBadge) modeBadge.textContent = mode === "disabled" ? modeLabels.disabled : (trigger === "custom" ? ({hold:"Hold to speak",toggle:"Tap to toggle",double_tap:"Double tap"}[customType] || customType) : (trigger === "double_ctrl" ? "Double tap" : modeLabels[mode] || mode));
 
     // 2. Update Sub-Modal Elements
     const modalSelect = document.getElementById("modal-hotkey-trigger-select");
@@ -1141,7 +1181,7 @@ async function loadHotkeySettings() {
 
     // Highlight trigger behavior card for standard mode
     document.querySelectorAll("#standard-behavior-section .shortcut-option-card").forEach(c => c.classList.remove("active-option"));
-    const cardId = mode === "ptt_only" ? "shortcut-mode-ptt" : (mode === "toggle_only" ? "shortcut-mode-toggle" : "shortcut-mode-hybrid");
+    const cardId = mode === "disabled" ? null : (mode === "ptt_only" ? "shortcut-mode-ptt" : (mode === "toggle_only" ? "shortcut-mode-toggle" : "shortcut-mode-hybrid"));
     const card = document.getElementById(cardId);
     if (card) card.classList.add("active-option");
 
@@ -1164,6 +1204,16 @@ async function loadHotkeySettings() {
       customBadge.textContent = customType === "double_tap" ? "Double Tap" : (customType === "toggle" ? "Toggle" : "Hold PTT");
     }
 
+}
+
+async function loadHotkeySettings(initialDraft = false) {
+  const generation = ++_shortcutLoadGeneration;
+  const dialogGeneration = _shortcutDialogGeneration;
+  try {
+    const res = await safeFetchJson("/api/settings/hotkey");
+    if (!res || !res.success || generation !== _shortcutLoadGeneration || dialogGeneration !== _shortcutDialogGeneration) return;
+    if (_shortcutDraft && _shortcutDraftReady && !initialDraft) return res;
+    renderHotkeySettings(res);
     return res;
   } catch (err) {
     console.error("Failed to load hotkey settings:", err);
@@ -1171,6 +1221,7 @@ async function loadHotkeySettings() {
 }
 
 async function saveHotkeySettings(newSettings, showToast = true) {
+  const dialogGeneration = _shortcutDialogGeneration;
   try {
     const res = await safeFetchJson("/api/settings/hotkey", {
       method: "POST",
@@ -1178,7 +1229,9 @@ async function saveHotkeySettings(newSettings, showToast = true) {
       body: JSON.stringify(newSettings),
     });
     if (res && res.success) {
-      await loadHotkeySettings();
+      if (dialogGeneration !== _shortcutDialogGeneration) return res;
+      ++_shortcutLoadGeneration;
+      renderHotkeySettings({...res.settings, success:true});
       if (showToast && typeof vfToast === "function") {
         const triggerNames = {
           ctrl_win: "Ctrl + Win",
@@ -1190,11 +1243,15 @@ async function saveHotkeySettings(newSettings, showToast = true) {
           custom: newSettings.custom_hotkey || "Custom Key",
         };
         const updatedLabel = triggerNames[newSettings.hotkey_trigger] || newSettings.push_to_talk_shortcut || "Settings";
-        vfToast(`Shortcut updated: ${updatedLabel}`);
+        vfToast(`Shortcut updated: ${updatedLabel}${res.warnings?.length ? ". " + res.warnings.join(" ") : ""}`);
       }
+      if (res.warnings?.length) shortcutMessage(res.warnings.join(" "));
       return res;
     }
+    throw new Error(res?.error || "Could not save shortcut settings.");
   } catch (err) {
+    if (dialogGeneration !== _shortcutDialogGeneration) return;
+    shortcutMessage(err.message || "Could not save shortcut settings.", true);
     console.error("Error saving hotkey settings:", err);
     if (showToast && typeof vfToast === "function") {
       vfToast("Failed to save shortcut settings", true);
@@ -1202,17 +1259,25 @@ async function saveHotkeySettings(newSettings, showToast = true) {
   }
 }
 
-function openShortcutDialog() {
+async function openShortcutDialog(initialTrigger = null) {
+  const dialogGeneration = ++_shortcutDialogGeneration;
   const modal = document.getElementById("shortcuts-sub-modal");
   if (modal) {
     modal.classList.remove("hidden");
-    loadHotkeySettings();
+    _shortcutDraft = {};
+    _shortcutDraftReady = false;
+    shortcutMessage("Changes apply when you save.");
+    const loaded = await loadHotkeySettings(true);
+    if (dialogGeneration !== _shortcutDialogGeneration) return;
+    _shortcutDraftReady = !!loaded;
+    if (loaded && initialTrigger) onModalHotkeyTriggerChange(initialTrigger);
+    if (!loaded) shortcutMessage("Could not load shortcuts. Close this dialog and try again.", true);
   }
 }
 
-function onHotkeyTriggerSelectChange(value) {
+async function onHotkeyTriggerSelectChange(value) {
   if (value === "custom") {
-    openShortcutDialog();
+    await openShortcutDialog("custom");
   } else {
     saveHotkeySettings({ hotkey_trigger: value });
   }
@@ -1254,14 +1319,14 @@ function selectCustomTriggerType(type, el) {
 }
 
 function onModalHotkeyTriggerChange(value) {
+  shortcutMessage(["ctrl_win","single_ctrl","double_ctrl","alt_space","alt_tab"].includes(value) ? "This shortcut may also be used by Windows or another app. Save to apply your choice." : "Changes apply when you save.");
   const customPanel = document.getElementById("custom-hotkey-panel");
   if (customPanel) {
     customPanel.style.display = (value === "custom") ? "block" : "none";
   }
   const modalSelect = document.getElementById("modal-hotkey-trigger-select");
   if (modalSelect) modalSelect.value = value;
-  const mainSelect = document.getElementById("setting-hotkey-trigger-select");
-  if (mainSelect) mainSelect.value = value;
+  if (_shortcutDraft) _shortcutDraft.hotkey_trigger = value;
 
   // Sync category tabs
   document.querySelectorAll(".trigger-cat-tab").forEach(t => t.classList.remove("active"));
@@ -1275,95 +1340,89 @@ function onModalHotkeyTriggerChange(value) {
 }
 
 function onToggleMiddleClickChange(enabled) {
-  saveHotkeySettings({ middle_click_enabled: enabled }, false);
+  if (_shortcutDraft) _shortcutDraft.middle_click_enabled = enabled;
 }
 
 function selectShortcutMode(modeName, el) {
   if (el) {
     document.querySelectorAll("#standard-behavior-section .shortcut-option-card").forEach(card => card.classList.remove("active-option"));
     el.classList.add("active-option");
-    saveHotkeySettings({ dictation_trigger_mode: modeName });
+    if (_shortcutDraft) _shortcutDraft.dictation_trigger_mode = modeName;
   }
 }
 
-function toggleRecordHotkey() {
+async function toggleRecordHotkey() {
   const btn = document.getElementById("record-hotkey-btn");
-  const hint = document.getElementById("record-hotkey-hint");
   const input = document.getElementById("custom-hotkey-input");
+  const hint = document.getElementById("record-hotkey-hint");
   if (!btn || !input) return;
-
-  if (_isRecordingHotkey) {
-    // Stop recording
-    _isRecordingHotkey = false;
-    btn.textContent = "🎙️ Record Any Key";
-    btn.style.background = "";
-    btn.style.color = "";
-    if (input.value.endsWith("...") || !input.value.trim()) {
-      input.value = input.dataset.previousValid || "Alt+Space";
-    }
-    if (hint) hint.innerHTML = "Recorded: <b>" + (input.value || "Alt+Space") + "</b>. Click <b>Save &amp; Apply</b> to persist.";
-    if (_hotkeyKeydownListener) {
-      window.removeEventListener("keydown", _hotkeyKeydownListener, true);
-      _hotkeyKeydownListener = null;
-    }
-    return;
-  }
-
-  // Start recording
-  input.dataset.previousValid = (input.value && !input.value.endsWith("...")) ? input.value.trim() : "Alt+Space";
-  _isRecordingHotkey = true;
-  btn.textContent = "🔴 Stop Recording";
-  btn.style.background = "var(--primary-orange)";
-  btn.style.color = "#fff";
-  if (hint) hint.innerHTML = "<b>Listening...</b> Press your key or combination now (e.g. F8, Space, CapsLock, Alt+Space).";
-
-  _hotkeyKeydownListener = function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-
+  if (_isRecordingHotkey || btn.disabled) {stopShortcutRecorder(); return;}
+  const generation = ++_shortcutCaptureGeneration;
+  btn.disabled = true;
+  input.dataset.previousValid = input.value.trim() || "Alt+Space";
+  try {
+    const lease = await recorderLease("begin");
+    if (generation !== _shortcutCaptureGeneration) {await recorderLease("end", lease.token); return;}
+    _shortcutCaptureToken = lease.token;
+  } catch (err) {btn.disabled = false;shortcutMessage(err.message, true);return;}
+  btn.disabled = false; _isRecordingHotkey = true;
+  btn.textContent = "Cancel recording";
+  if (hint) hint.textContent = "Press your shortcut, then release all keys. Escape cancels.";
+  const held = new Map();
+  let candidate = [];
+  const keyName = e => ({Control:"Ctrl",Alt:"Alt",Shift:"Shift",Meta:"Win"," ":"Space",ArrowUp:"Up",ArrowDown:"Down",ArrowLeft:"Left",ArrowRight:"Right"}[e.key] || (e.key.length === 1 ? e.key.toUpperCase() : e.key));
+  _hotkeyKeydownListener = e => {
+    e.preventDefault();e.stopPropagation();
+    if (e.key === "Escape") {stopShortcutRecorder();return;}
+    if (e.repeat) return;
+    held.set(e.code || e.key, keyName(e));
     const parts = [];
-    if (e.ctrlKey) parts.push("Ctrl");
-    if (e.altKey) parts.push("Alt");
-    if (e.shiftKey) parts.push("Shift");
-    if (e.metaKey) parts.push("Win");
-
-    let key = e.key;
-    if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
-      if (key === " ") key = "Space";
-      else if (key === "CapsLock") key = "CapsLock";
-      else if (key.length === 1) key = key.toUpperCase();
-      parts.push(key);
-
-      const combo = parts.join("+");
-      input.value = combo;
-      toggleRecordHotkey(); // Auto stop on complete combo
-    } else {
-      input.value = parts.join("+") + "...";
-    }
+    if (e.ctrlKey) parts.push("Ctrl");if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");if (e.metaKey) parts.push("Win");
+    for (const name of held.values()) if (!["Ctrl","Alt","Shift","Win"].includes(name)) parts.push(name);
+    if (parts.length >= candidate.length) candidate = [...new Set(parts)];
+    input.value = candidate.join("+") + "...";
   };
-
+  _hotkeyKeyupListener = e => {
+    e.preventDefault();e.stopPropagation();held.delete(e.code || e.key);
+    if (held.size || !candidate.length) return;
+    input.value = candidate.join("+");
+    stopShortcutRecorder(false);
+    if (hint) hint.textContent = "Recorded: " + input.value + ". Save to apply this shortcut.";
+  };
+  _shortcutBlurListener = () => stopShortcutRecorder();
   window.addEventListener("keydown", _hotkeyKeydownListener, true);
+  window.addEventListener("keyup", _hotkeyKeyupListener, true);
+  window.addEventListener("blur", _shortcutBlurListener);
+  _shortcutCaptureHeartbeat = setInterval(async () => {
+    const token = _shortcutCaptureToken;
+    if (!token) return;
+    try {await recorderLease("renew", token);} catch (err) {stopShortcutRecorder();shortcutMessage(err.message, true);}
+  }, 10000);
 }
 
 function clearRecordedHotkey() {
+  stopShortcutRecorder();
   const input = document.getElementById("custom-hotkey-input");
   if (input) input.value = "Alt+Space";
   const hint = document.getElementById("record-hotkey-hint");
-  if (hint) hint.textContent = "Click Record Any Key, then press your desired key or combination.";
+  if (hint) hint.textContent = "Click Record shortcut, then press your shortcut and release all keys.";
 }
 
 function resetHotkeyDefaults() {
-  saveHotkeySettings({
-    hotkey_trigger: "ctrl_win",
-    custom_hotkey: "Alt+Space",
-    custom_trigger_type: "hold",
-    dictation_trigger_mode: "hybrid",
-    middle_click_enabled: true,
-    push_to_talk_shortcut: "Ctrl+Win"
-  });
+  stopShortcutRecorder();
+  onModalHotkeyTriggerChange("ctrl_win");
+  document.getElementById("custom-hotkey-input").value = "Alt+Space";
+  document.getElementById("modal-toggle-middle-click").checked = true;
+  selectCustomTriggerType("hold", document.getElementById("custom-opt-hold"));
+  selectShortcutMode("hybrid", document.getElementById("shortcut-mode-hybrid"));
+  shortcutMessage("Defaults selected. Save to apply.");
 }
 
-function saveAndApplyHotkeyModal() {
+async function saveAndApplyHotkeyModal() {
+  if (_shortcutSavePending) return;
+  if (!_shortcutDraftReady) {shortcutMessage("Wait for shortcuts to load before saving. Close and try again if needed.", true);return;}
+  if (_isRecordingHotkey || document.getElementById("record-hotkey-btn")?.disabled) {shortcutMessage("Finish recording your shortcut before saving.", true);return;}
   const modalSelect = document.getElementById("modal-hotkey-trigger-select");
   const customInput = document.getElementById("custom-hotkey-input");
   const middleToggle = document.getElementById("modal-toggle-middle-click");
@@ -1376,7 +1435,7 @@ function saveAndApplyHotkeyModal() {
   }
   const middleEnabled = middleToggle ? middleToggle.checked : true;
 
-  let activeMode = "hybrid";
+  let activeMode = _shortcutDraft?.dictation_trigger_mode || "hybrid";
   if (document.getElementById("shortcut-mode-ptt")?.classList.contains("active-option")) activeMode = "ptt_only";
   if (document.getElementById("shortcut-mode-toggle")?.classList.contains("active-option")) activeMode = "toggle_only";
 
@@ -1385,7 +1444,11 @@ function saveAndApplyHotkeyModal() {
   if (document.getElementById("custom-opt-hold")?.classList.contains("active-option")) customTrigType = "hold";
   if (document.getElementById("custom-opt-toggle")?.classList.contains("active-option")) customTrigType = "toggle";
 
-  saveHotkeySettings({
+  const dialogGeneration = _shortcutDialogGeneration;
+  _shortcutSavePending = true;
+  const saveButton = document.getElementById("shortcut-save-btn");
+  if (saveButton) saveButton.disabled = true;
+  const result = await saveHotkeySettings({
     hotkey_trigger: trigger,
     custom_hotkey: customKey,
     custom_trigger_type: customTrigType,
@@ -1393,7 +1456,9 @@ function saveAndApplyHotkeyModal() {
     dictation_trigger_mode: activeMode,
   });
 
-  closeSubModal("shortcuts-sub-modal");
+  _shortcutSavePending = false;
+  if (saveButton) saveButton.disabled = false;
+  if (result?.success && dialogGeneration === _shortcutDialogGeneration) closeSubModal("shortcuts-sub-modal");
 }
 
 async function changePushToTalkKey() {
@@ -1409,80 +1474,71 @@ function openMicrophoneDialog() {
 }
 
 function closeSubModal(modalId) {
+  if (modalId === "shortcuts-sub-modal") {++_shortcutDialogGeneration; ++_shortcutLoadGeneration; stopShortcutRecorder(); _shortcutDraft = null; _shortcutDraftReady = false; loadHotkeySettings();}
   const modal = document.getElementById(modalId);
   if (modal) modal.classList.add("hidden");
 }
 
 // Dynamic Hardware Audio Input Detection & Hardware Routing
-async function loadHardwareMicrophones() {
+async function loadHardwareMicrophones(refresh = false) {
+  const generation = ++_micCatalogGeneration;
   const container = document.getElementById("mic-devices-list");
+  const status = document.getElementById("mic-settings-status");
   if (!container) return;
-
+  if (status) status.textContent = "Refreshing microphones...";
   try {
-    const [micsRes, savedMicRes] = await Promise.all([
-      safeFetchJson("/api/microphones"),
-      safeFetchJson("/api/settings/get?key=selected_mic_device"),
-    ]);
-    const mics = Array.isArray(micsRes) ? micsRes : [];
-    const savedMic = (savedMicRes && savedMicRes.value) ? String(savedMicRes.value) : "";
-
-    if (!mics || mics.length === 0) {
-      mics.push({ index: 0, name: "Headset (Max Pro)" });
-    }
-
-    let activeIdx = 0;
-    if (savedMic) {
-      const foundIdx = mics.findIndex(m => m.name === savedMic || String(m.index) === savedMic);
-      if (foundIdx >= 0) activeIdx = foundIdx;
-    }
-
-    container.innerHTML = mics.map((mic, i) => {
-      const isSelected = i === activeIdx;
-      return `
-        <div class="mic-option-card ${isSelected ? 'selected-mic' : ''}" onclick="selectMicrophoneDevice('${escapeJs(mic.name)}', ${mic.index}, this)">
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-main);">${escapeHtml(mic.name)}</div>
-          ${isSelected ? `
-            <div class="audio-signal-bars">
-              <span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span><span class="bar active"></span>
-            </div>
-          ` : ''}
-        </div>
-      `;
+    const result = await safeFetchJson(refresh ? "/api/microphones?refresh=1" : "/api/microphones");
+    if (generation !== _micCatalogGeneration) return;
+    if (!result || !result.success) throw new Error(result?.error || "Could not refresh microphones.");
+    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}, ...(result.display_devices || result.devices)];
+    const available = result.preferred_available;
+    container.innerHTML = _micCatalog.map((mic,i) => {
+      const selected = available && mic.identity === result.selected_identity;
+      return `<button type="button" class="mic-option-card ${selected ? 'selected-mic' : ''}" onclick="selectMicrophoneDeviceByRow(${i}, this)" ${mic.ambiguous ? 'disabled' : ''} style="text-align:left;">${escapeHtml(mic.name)}${selected ? '<span class="kbd-pill">Selected</span>' : ''}${mic.ambiguous ? '<span>Unavailable</span>' : ''}</button>`;
     }).join("");
-
+    const selected = _micCatalog.find(m=>m.identity === result.selected_identity);
+    const name = available ? selected?.name || "Windows default microphone" : "Preferred microphone disconnected";
     const badge = document.getElementById("current-mic-badge");
-    if (badge && mics[activeIdx]) { badge.textContent = mics[activeIdx].name; badge.title = mics[activeIdx].name; }
-    const micDesc = document.getElementById("current-mic-desc");
-    if (micDesc && mics[activeIdx]) micDesc.textContent = mics[activeIdx].name;
-
-  } catch (err) {
-    console.error("Error detecting hardware microphones:", err);
+    if (badge) {badge.textContent=name;badge.title=name;}
+    const desc = document.getElementById("current-mic-desc");if(desc)desc.textContent=name;
+    if (status && result.busy) status.textContent = "Finish dictation before refreshing microphones. Your current selection is unchanged.";
+    else if (status) status.textContent = available ? "Choose a microphone for your next dictation." : `${result.preferred_name || "Your preferred microphone"} is unavailable. Reconnect it or choose Windows default microphone to dictate.`;
+    return true;
+  } catch(err) {
+    if (generation !== _micCatalogGeneration) return;
+    container.innerHTML = '<button type="button" class="mic-option-card" onclick="selectMicrophoneDeviceByRow(0,this)">Windows default microphone</button>';
+    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}];
+    if(status)status.textContent=err.message || "Could not refresh microphones. Try again.";
+    return false;
   }
 }
 
-async function selectMicrophoneDevice(micName, micIndex, el) {
-  const badge = document.getElementById("current-mic-badge");
-  if (badge) { badge.textContent = micName; badge.title = micName; }
-  const desc = document.getElementById("current-mic-desc");
-  if (desc) desc.textContent = micName;
-  if (el) {
-    document.querySelectorAll("#mic-devices-list .mic-option-card").forEach(c => c.classList.remove("selected-mic"));
-    el.classList.add("selected-mic");
-  }
+async function selectMicrophoneDeviceByRow(index, el) {
+  const mic = _micCatalog[index];
+  if (!mic || mic.ambiguous) return;
+  return selectMicrophoneDevice(mic.name, mic.index, el, mic.identity);
+}
 
+async function selectMicrophoneDevice(micName, micIndex, el, identity) {
+  if (_micSelectionPending) return;
+  _micSelectionPending = true;
+  const status = document.getElementById("mic-settings-status");
+  if (el) el.disabled = true;
+  if (status) status.textContent = "Saving microphone...";
   try {
-    await safeFetchJson("/api/microphones/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: micName, index: micIndex }),
-    });
-    if (typeof vfToast === "function") vfToast(`Microphone selected: ${micName}`);
-  } catch (err) {
-    console.error("Error setting active microphone:", err);
-    if (typeof vfToast === "function") vfToast("Failed to select microphone.", true);
-  }
-
-  closeSubModal('mic-sub-modal');
+    const payload = identity === undefined ? {name:micName,index:micIndex} : {identity};
+    const result = await safeFetchJson("/api/microphones/select", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if (!result?.success) throw new Error(result?.error || "Could not select microphone.");
+    const savedName = result.name || micName;
+    const badge = document.getElementById("current-mic-badge");
+    if (badge) {badge.textContent = savedName; badge.title = savedName;}
+    const description = document.getElementById("current-mic-desc");
+    if (description) description.textContent = savedName;
+    const refreshed = await loadHardwareMicrophones();
+    if (typeof vfToast === "function") vfToast(`Microphone selected: ${result.name || micName}. Applies to your next dictation.`);
+    if(status && refreshed)status.textContent="Microphone saved. Applies to your next dictation.";
+  } catch(err) {if(status)status.textContent=err.message || "Could not select microphone.";if(typeof vfToast === "function")vfToast(err.message,true);}
+  finally {_micSelectionPending = false;if(el)el.disabled=false;}
 }
 
 // Home Page Data Aggregator (loads both History & Insights metrics immediately)
@@ -2791,7 +2847,9 @@ async function saveChipEdit(oldText, newText) {
 }
 
 
-function applyTheme(theme, saveToServer = true) {
+function applyTheme(theme, saveToServer = true) {return saveDashboardTheme(theme, saveToServer);}
+
+function paintTheme(theme) {
   const next = theme === "dark" ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", next);
 
@@ -2815,67 +2873,95 @@ function applyTheme(theme, saveToServer = true) {
     : '<svg class="lucide" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
   if (label) label.textContent = next === "dark" ? "Dark Mode" : "Light Mode";
 
-  // 3. Persist permanently to backend SQLite DB
-  if (saveToServer) {
-    try {
-      fetch("/api/settings/theme", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: next }),
-        keepalive: true,
-      }).catch(() => {});
-    } catch (e) {}
-  }
 }
 
-function toggleTheme() {
+let _dashboardThemeGeneration = 0;
+let _dashboardThemePending = false;
+async function saveDashboardTheme(theme, saveToServer = true) {
+  const next = theme === "dark" ? "dark" : "light";
+  if (!saveToServer) {paintTheme(next);return true;}
+  if (_dashboardThemePending) return false;
+  _dashboardThemePending = true;
+  const generation = ++_dashboardThemeGeneration;
+  try {
+    const response = await fetch("/api/settings/theme", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({theme:next})});
+    const data = await response.json();
+    if(!response.ok || data?.success!==true){if(data?.saved===true && generation===_dashboardThemeGeneration)paintTheme(data.theme === "dark" || data.theme === "light" ? data.theme : next);throw new Error(data?.error || "Could not save dashboard theme.");}
+    if(generation!==_dashboardThemeGeneration)return false;
+    paintTheme(data.theme === "dark" || data.theme === "light" ? data.theme : next);
+    return true;
+  } catch(err) {if(typeof vfToast === "function")vfToast(err.message || "Could not save dashboard theme.",true);return false;}
+  finally {_dashboardThemePending=false;}
+}
+async function toggleTheme() {
   const current = document.documentElement.getAttribute("data-theme") || "light";
   const next = current === "dark" ? "light" : "dark";
-  applyTheme(next, true);
-  if (typeof showToast === "function") {
-    showToast(next === "dark" ? "Dark Mode enabled (saved)" : "Light Mode enabled (saved)", next === "dark" ? "🌙" : "☀️");
-  }
+  if(await applyTheme(next,true))if(typeof showToast === "function")showToast(next === "dark" ? "Dark Mode enabled (saved)" : "Light Mode enabled (saved)", next === "dark" ? "🌙" : "☀️");
 }
-
-// Initial self-healing theme bootstrap:
+async function loadDashboardTheme() {
+  const generation = ++_dashboardThemeGeneration;
+  try {
+    const response = await fetch("/api/settings/theme");
+    const data = await response.json();
+    if(!response.ok || generation!==_dashboardThemeGeneration || _dashboardThemePending)return;
+    if(data.theme === "dark" || data.theme === "light")paintTheme(data.theme);
+  } catch(_) {}
+}
 (async function bootstrapTheme() {
-  // Step A: Read local storage first
-  let localChoice = null;
   try {
-    localChoice = localStorage.getItem("vf-theme") || localStorage.getItem("voiceflow_theme") || localStorage.getItem("theme");
-  } catch (e) {}
-
-  // If local choice is valid, ensure DOM and labels reflect it without an unnecessary server write
-  if (localChoice === "dark" || localChoice === "light") {
-    applyTheme(localChoice, false);
-  }
-
-  // Step B: Query backend DB for the true persistent setting
-  try {
-    const res = await fetch("/api/settings/theme");
-    if (res.ok) {
-      const data = await res.json();
-      const serverChoice = data && (data.theme === "dark" || data.theme === "light") ? data.theme : null;
-      if (serverChoice) {
-        if (!localChoice) {
-          // If browser had empty local storage (e.g. after reboot/cache clear), adopt the persistent server choice!
-          applyTheme(serverChoice, false);
-        } else if (localChoice !== serverChoice) {
-          // Sync server to match user's explicit local choice
-          fetch("/api/settings/theme", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ theme: localChoice }),
-          }).catch(() => {});
-        }
-      }
-    }
-  } catch (e) {
-    // Best-effort network sync
-  }
+    const localChoice = localStorage.getItem("vf-theme") || localStorage.getItem("voiceflow_theme") || localStorage.getItem("theme");
+    if(localChoice === "dark" || localChoice === "light")paintTheme(localChoice);
+  } catch(_) {}
+  await loadDashboardTheme();
 })();
 
 // Settings Modal Controls
+let _settingsGeneration = 0;
+let _updateCheckPending = false;
+const _settingEpoch = Object.create(null);
+const _settingPending = Object.create(null);
+const _settingConfirmed = Object.create(null);
+
+function settingsError(message) {
+  if (typeof vfToast === "function") vfToast(message, true);
+}
+
+function loadSettingControl(key, apply) {
+  const generation = _settingsGeneration;
+  const epoch = _settingEpoch[key] || 0;
+  return safeFetchJson("/api/settings/get?key=" + key).then(res => {
+    if (generation !== _settingsGeneration || epoch !== (_settingEpoch[key] || 0) || _settingPending[key]) return;
+    if (!res || res.success === false) throw new Error(res?.error || "Could not load setting.");
+    _settingConfirmed[key] = res.value;
+    apply(res.value);
+  }).catch(err => {if (generation === _settingsGeneration) settingsError(err.message || "Could not load setting.");});
+}
+
+async function saveSettingControl(key, value, apply, message) {
+  if (_settingPending[key]) {apply(_settingConfirmed[key]);return false;}
+  const previous = Object.prototype.hasOwnProperty.call(_settingConfirmed, key) ? _settingConfirmed[key] : (typeof value === "boolean" ? !value : localStorage.getItem(key) || "light");
+  _settingConfirmed[key] = previous;
+  const generation = _settingsGeneration;
+  _settingPending[key] = true;
+  const controlIds={click_to_paste_enabled:"toggle-click-to-paste",show_in_taskbar:"toggle-show-in-taskbar",on_screen_ui_theme:"toggle-on-screen-ui-theme",anonymous_crash_reports:"toggle-anonymous-crash-reports"};
+  const control=document.getElementById(controlIds[key]);if(control)control.disabled=true;
+  _settingEpoch[key] = (_settingEpoch[key] || 0) + 1;
+  try {
+    const res = await safeFetchJson("/api/settings/update", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,value})});
+    if(generation !== _settingsGeneration)return res?.success===true;
+    if (res?.success !== true) {
+      if (res?.saved === true) {_settingConfirmed[key] = res.value === undefined ? value : res.value;apply(_settingConfirmed[key]);}
+      else apply(previous);
+      throw new Error(res?.error || "Could not save setting.");
+    }
+    _settingConfirmed[key] = res.value === undefined ? value : res.value;
+    apply(_settingConfirmed[key]);
+    if (typeof vfToast === "function") vfToast(message);
+    return true;
+  } catch(err) {if(generation !== _settingsGeneration)return false;apply(_settingConfirmed[key]);settingsError(err.message || "Could not save setting.");return false;}
+  finally {_settingPending[key] = false;if(control)control.disabled=false;}
+}
+
 function openSettings(tab = "general") {
   const modal = document.getElementById("settings-modal");
   if (modal) {
@@ -2883,59 +2969,26 @@ function openSettings(tab = "general") {
     switchSettingsTab(tab);
     // Sync Hotkey and Dictation Trigger Settings
     loadHotkeySettings();
-    // Sync active Microphone badge
-    safeFetchJson("/api/settings/get?key=selected_mic_device").then(res => {
-      const micName = (res && res.value) || "Default";
-      const badge = document.getElementById("current-mic-badge");
-      if (badge) { badge.textContent = micName || "Default"; badge.title = micName || "Default"; }
-    }).catch(() => {});
-    // Sync Dictation mode badge
-    safeFetchJson("/api/settings/get?key=dictation_trigger_mode").then(res => {
-      const mode = (res && res.value) || "hybrid";
-      const labels = { hybrid: "Smart Hybrid", ptt_only: "Strict Hold to Talk", toggle_only: "Strict Tap to Toggle" };
-      const badge = document.getElementById("dictation-mode-badge");
-      if (badge) badge.textContent = labels[mode] || mode;
-    }).catch(() => {});
-    // Sync Click-to-Paste toggle state
-    safeFetchJson("/api/settings/get?key=click_to_paste_enabled").then(res => {
-      const toggle = document.getElementById("toggle-click-to-paste");
-      if (toggle) toggle.checked = res && res.value === true;
-    }).catch(() => {});
-    // Sync Taskbar visibility toggle
-    safeFetchJson("/api/settings/get?key=show_in_taskbar").then(res => {
-      const toggle = document.getElementById("toggle-show-in-taskbar");
-      if (toggle) toggle.checked = res ? res.value !== false : true;
-    }).catch(() => {});
-    // Sync On-Screen UI Color theme
-    safeFetchJson("/api/settings/get?key=on_screen_ui_theme").then(res => {
-      const theme = (res && res.value) || localStorage.getItem("on_screen_ui_theme") || "light";
-      updateOnScreenUIThemeButtons(theme);
-    }).catch(() => {});
+    loadHardwareMicrophones();
+    loadSettingControl("click_to_paste_enabled", value => {const el=document.getElementById("toggle-click-to-paste");if(el)el.checked=value===true;});
+    loadSettingControl("show_in_taskbar", value => {const el=document.getElementById("toggle-show-in-taskbar");if(el)el.checked=value!==false;});
+    loadSettingControl("anonymous_crash_reports", value => {const el=document.getElementById("toggle-anonymous-crash-reports");if(el)el.checked=value===true;});
+    loadSettingControl("on_screen_ui_theme", value => updateOnScreenUIThemeButtons(value === "dark" ? "dark" : "light"));
     // Sync Auto-Startup status
     checkAutoStartStatus();
   }
 }
 
 function toggleOnScreenUITheme(checked) {
-  setOnScreenUITheme(checked ? "dark" : "light");
+  return setOnScreenUITheme(checked ? "dark" : "light");
 }
 
 async function setOnScreenUITheme(theme) {
   theme = theme === "dark" ? "dark" : "light";
-  try {
-    updateOnScreenUIThemeButtons(theme);
-    try { localStorage.setItem("on_screen_ui_theme", theme); } catch (_) {}
-    await safeFetchJson("/api/settings/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "on_screen_ui_theme", value: theme })
-    });
-    if (typeof vfToast === "function") {
-      vfToast(`On-screen UI set to ${theme === "dark" ? "Dark Mode" : "Light Mode"}.`);
-    }
-  } catch (err) {
-    console.warn("Could not save on-screen UI theme:", err);
-  }
+  return saveSettingControl("on_screen_ui_theme", theme, value => {
+    updateOnScreenUIThemeButtons(value);
+    try {localStorage.setItem("on_screen_ui_theme", value);} catch (_) {}
+  }, `On-screen UI set to ${theme === "dark" ? "Dark Mode" : "Light Mode"}.`);
 }
 
 function updateOnScreenUIThemeButtons(theme) {
@@ -2958,11 +3011,15 @@ function updateOnScreenUIThemeButtons(theme) {
 }
 
 async function checkAutoStartStatus() {
+  const generation = _settingsGeneration;
+  const epoch = _settingEpoch.autostart_enabled || 0;
   const toggle = document.getElementById("toggle-autostart");
   const badge = document.getElementById("autostart-status-badge");
   try {
     const res = await safeFetchJson("/api/settings/autostart/status");
+    if (generation !== _settingsGeneration || epoch !== (_settingEpoch.autostart_enabled || 0) || _settingPending.autostart_enabled) return;
     if (res && res.success) {
+      _settingConfirmed.autostart_enabled = !!res.enabled;
       if (toggle) {
         toggle.disabled = false;
         toggle.checked = !!res.enabled;
@@ -2991,112 +3048,78 @@ async function checkAutoStartStatus() {
 }
 
 async function toggleAutoStartSetting(checked) {
-  const badge = document.getElementById("autostart-status-badge");
+  const key="autostart_enabled", toggle=document.getElementById("toggle-autostart"),badge=document.getElementById("autostart-status-badge");
+  if(_settingPending[key])return;
+  const previous=Object.prototype.hasOwnProperty.call(_settingConfirmed,key)?_settingConfirmed[key]:!checked;
+  _settingPending[key]=true;_settingEpoch[key]=(_settingEpoch[key]||0)+1;
+  if(toggle)toggle.disabled=true;
+  const generation=_settingsGeneration;
+  let value=previous, unavailable=false;
   try {
-    const res = await safeFetchJson("/api/settings/autostart/toggle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: checked }),
-    });
-    if (res && res.success) {
-      if (badge) {
-        badge.textContent = checked ? "✓ Enabled" : "✕ Disabled";
-        badge.className = `status-badge ${checked ? "status-connected" : "status-error"}`;
-      }
-      if (typeof vfToast === "function") vfToast(res.message || `Auto-startup ${checked ? "enabled" : "disabled"}.`);
-    } else {
-      throw new Error((res && res.error) || "Toggle failed");
-    }
-  } catch (err) {
-    console.error("Error toggling autostart:", err);
-    const toggle = document.getElementById("toggle-autostart");
-    if (toggle) toggle.checked = !checked;
-    if (badge) {
-      badge.textContent = !checked ? "✓ Enabled" : "✕ Disabled";
-      badge.className = `status-badge ${!checked ? "status-connected" : "status-error"}`;
-    }
-    if (typeof vfToast === "function") vfToast("Failed to update auto-startup setting.", true);
-  }
+    const res=await safeFetchJson("/api/settings/autostart/toggle",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:!!checked})});
+    if(generation!==_settingsGeneration)return;
+    if(res?.success!==true){if(typeof res?.enabled==="boolean"){value=res.enabled;_settingConfirmed[key]=value;}else if(res?.enabled===null){unavailable=true;}else if(res?.saved===true){value=!!checked;_settingConfirmed[key]=value;}throw new Error(res?.error||"Could not update auto-startup.");}
+    value=res.enabled===undefined?!!checked:!!res.enabled;_settingConfirmed[key]=value;
+    if(typeof vfToast === "function")vfToast(res.message||`Auto-startup ${value?"enabled":"disabled"}.`);
+  }catch(err){if(generation===_settingsGeneration)settingsError(err.message||"Could not update auto-startup.");}
+  finally {_settingPending[key]=false;if(toggle)toggle.disabled=false;if(generation===_settingsGeneration){if(toggle){toggle.checked=value;toggle.disabled=unavailable;}if(badge){badge.textContent=unavailable?"Unavailable":value?"✓ Enabled":"✕ Disabled";badge.className=`status-badge ${!unavailable&&value?"status-connected":"status-error"}`;}}}
+}
+
+async function toggleAnonymousCrashReports(checked) {
+  return saveSettingControl(
+    "anonymous_crash_reports",
+    !!checked,
+    value => {
+      const el = document.getElementById("toggle-anonymous-crash-reports");
+      if (el) el.checked = (value === true);
+    },
+    `Anonymous crash reporting ${checked ? "enabled (thank you!)" : "disabled"}.`
+  );
 }
 
 async function toggleShowInTaskbarSetting(checked) {
-  const toggle = document.getElementById("toggle-show-in-taskbar");
-  try {
-    const res = await safeFetchJson("/api/settings/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "show_in_taskbar", value: !!checked }),
-    });
-    if (!res || res.success === false) {
-      throw new Error((res && res.error) || "Could not save taskbar setting");
-    }
-    if (typeof vfToast === "function") {
-      vfToast(`Taskbar visibility ${checked ? "enabled" : "hidden (system tray only)"}.`);
-    }
-  } catch (err) {
-    console.error("Error toggling taskbar setting:", err);
-    // Never leave the switch showing a state the backend refused to save.
-    if (toggle) toggle.checked = !checked;
-    if (typeof vfToast === "function") vfToast("Failed to update taskbar setting.", true);
-  }
+  return saveSettingControl("show_in_taskbar", !!checked, value => {const el=document.getElementById("toggle-show-in-taskbar");if(el)el.checked=value!==false;}, `Taskbar visibility ${checked ? "enabled" : "hidden (system tray only)"}.`);
 }
 
 let _isRestartingApp = false;
 async function triggerDeepAppRestart() {
   if (_isRestartingApp) return;
-  if (!await vfConfirm({
-    title: "Restart AI Productivity Flow",
-    badge: "Desktop App",
-    icon: "🔄",
-    message: "Are you sure you want to deeply restart AI Productivity Flow? This will close and restart the desktop app, reset the floating overlay bar, and restart all backend services.",
-    confirmText: "Restart App",
-    cancelText: "Cancel",
-    type: "restart"
-  })) {
-    return;
-  }
   _isRestartingApp = true;
-  if (typeof vfToast === "function") vfToast("Initiating AI Productivity Flow deep restart...");
+  let accepted = false;
   try {
-    const res = await safeFetchJson("/api/app/restart", { method: "POST" });
-    if (res && res.message && typeof vfToast === "function") {
-      vfToast(res.message);
-    }
-  } catch (_) {}
-  setTimeout(() => {
-    try { window.location.reload(); } catch (_) { _isRestartingApp = false; }
-  }, 2500);
+    if (!await vfConfirm({title:"Restart AI Productivity Flow",badge:"Desktop App",icon:"🔄",message:"Restart the desktop app and engine? Finish your current work first.",confirmText:"Restart App",cancelText:"Cancel",type:"restart"})) return;
+    const res = await safeFetchJson("/api/app/restart", {method:"POST"});
+    if (res?.success !== true) throw new Error(res?.error || "Could not restart the app.");
+    accepted = true;
+    if(typeof vfToast === "function")vfToast(res.message || "Restarting AI Productivity Flow...");
+    setTimeout(() => {try {window.location.reload();} catch (_) {_isRestartingApp=false;}},2500);
+  } catch(err) {settingsError(err.message || "Could not restart the app.");}
+  finally {if(!accepted)_isRestartingApp=false;}
 }
 
+let _isClearingAudioCache = false;
 async function clearAudioRecordingsCache() {
-  if (!await vfConfirm({
-    title: "Clear Audio Recordings Cache",
-    badge: "Disk Cleanup",
-    icon: "🧹",
-    message: "Clear audio recordings cache? This will delete temporary audio files to free up disk space. Your dictation text history will NOT be deleted.",
-    confirmText: "Clear Cache",
-    cancelText: "Cancel",
-    type: "warning"
-  })) {
-    return;
-  }
+  if (_isClearingAudioCache) return;
+  _isClearingAudioCache = true;
   try {
-    const res = await safeFetchJson("/api/storage/clear-audio-cache", { method: "POST" });
-    if (res && res.success) {
-      if (typeof vfToast === "function") vfToast(res.message || `Cleared ${res.deleted_count || 0} audio recordings.`);
-    } else {
-      if (typeof vfToast === "function") vfToast("Cache cleared successfully.");
-    }
-  } catch (err) {
-    console.error("Error clearing audio cache:", err);
-    if (typeof vfToast === "function") vfToast("Audio cache cleared.");
-  }
+    if (!await vfConfirm({title:"Clear Audio Recordings Cache",badge:"Disk Cleanup",icon:"🧹",message:"Remove abandoned temporary audio files? Dictation history and retained recovery recordings stay available.",confirmText:"Clear Cache",cancelText:"Cancel",type:"warning"})) return;
+    const res = await safeFetchJson("/api/storage/clear-audio-cache", {method:"POST"});
+    if(res?.success!==true)throw new Error(res?.error || "Could not clear audio cache.");
+    if(typeof vfToast === "function")vfToast(res.message || (res.deleted_count ? `Removed ${res.deleted_count} temporary audio files.` : "No temporary audio files needed removal."));
+  } catch(err) {settingsError(err.message || "Could not clear audio cache.");}
+  finally {_isClearingAudioCache=false;}
 }
 
 async function closeSettings() {
+  ++_settingsGeneration;
+  ++_accountStatusGeneration;
+  ++_googleSignInGeneration;
+  clearInterval(googleAuthPollTimer);googleAuthPollTimer=null;_googleSignInPending=false;
+  const signInButton=document.getElementById("btn-google-signin");if(signInButton)signInButton.disabled=false;
+  const signInText=document.getElementById("btn-google-signin-text");if(signInText)signInText.textContent="Continue with Google";
   const modal = document.getElementById("settings-modal");
   if (modal) modal.classList.add("hidden");
-  if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
+  if (typeof closeSubModal === "function") for (const id of ["account-switch-sub-modal","shortcuts-sub-modal","mic-sub-modal"]) closeSubModal(id);
 }
 
 function switchSettingsTab(tabId, el = null) {
@@ -6809,18 +6832,7 @@ async function togglePolishingSetting(checked) {
 }
 
 async function toggleClickToPasteSetting(checked) {
-  try {
-    await safeFetchJson("/api/settings/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "click_to_paste_enabled", value: !!checked }),
-    });
-    if (typeof vfToast === "function") {
-      vfToast(checked ? "Deferred Click-to-Paste ON (Right-click to paste)" : "Direct Auto-Paste ON");
-    }
-  } catch (err) {
-    console.error("Error toggling Click-to-Paste:", err);
-  }
+  return saveSettingControl("click_to_paste_enabled", !!checked, value => {const el=document.getElementById("toggle-click-to-paste");if(el)el.checked=value===true;}, checked ? "Click-to-Paste enabled. Right-click to paste." : "Direct auto-paste enabled.");
 }
 
 async function toggleVideoFlowFeature(checked) {
@@ -6848,10 +6860,9 @@ async function toggleVideoFlowFeature(checked) {
 const ONBOARDING_NARRATION = [
   "Welcome to AI Productivity Flow! We're thrilled to have you here. AI Productivity Flow is your completely free, 100% open-source personal productivity companion. Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy. Whether you want to generate visual explainer videos, listen to instant audio summaries of long articles, or dictate and polish text into any app effortlessly... it's all built right here for you. In this quick tour, we'll walk you through how everything works, starting with our first feature: Video Flow. Let's dive right in!",
   "Welcome to Video Flow, our first core feature. If you have a lengthy article, research paper, or complex notes that you want to understand visually, Video Flow is built for you. Simply paste your text or select an article, and Video Flow transforms it into an animated visual explainer with dynamic motion graphics, slide layouts, and natural audio narration. You can watch the full explainer right here on your screen, switch visual styles, or export your video in seconds. Next up, let's explore our second feature: Audio Flow!",
-  "Next is Audio Flow, our second feature. Imagine scrolling through Twitter and coming across a lengthy article that you don't want to read. Simply select the text, and a small audio button will appear. Click it to select the summary option, converting the article into an audio summary.",
-  "Now that you have all the context about the article, you can use the Voice Flow feature to post about the article by speaking, and it will write it down for you. Zoom in on your context and let your voice write down your thoughts.",
-  "Here is an overview of all five features built into AI Productivity Flow: Visual Summaries, Audio Summaries, Voice Flow Dictation, Article Conversion, and Feedback Insights.",
-  "We hope you enjoy using AI Productivity Flow! If you like the app, please visit our GitHub repository to check reports, provide feedback, and give us a star on GitHub. Your feedback is appreciated!",
+  "Welcome to Audio Flow, our second core feature. Imagine scrolling through Twitter or browsing a lengthy article that you do not have time to read. With Audio Flow, simply highlight the text or tap the summary shortcut, and an instant floating menu appears right over your content. Click Summary, and Audio Flow immediately generates a natural, source-grounded spoken summary with an interactive waveform player and dockable progress widget. You can adjust playback speeds, download the MP3, or keep listening while you continue working, without ever switching apps. Next up, let us discover our third feature: Voice Flow!",
+  "Welcome to Voice Flow, our third core feature. Now that you have full context from your article, you can post your thoughts or reply instantly by speaking. Simply speak naturally into any application, and Voice Flow transcribes and polishes your words directly into the active field in real time. Zero copy pasting, zero app switching. Next, let us connect with our community and get you started!",
+  "Welcome to our community! AI Productivity Flow is 100% free and open source, built to supercharge your daily workflow. If you find this helpful, please star us on GitHub, share your feedback, and report any ideas or issues to shape future updates. Next, let us head into the workspace and configure your API keys and hotkeys. Click Get Started to begin!"
 ];
 
 // Dedicated pre-recorded narrator voice & explanatory pacing configuration
@@ -6863,8 +6874,7 @@ const ONBOARDING_PAGE_MAP = {
   1: "videoflow",
   2: "audioflow",
   3: "home",
-  4: "insights",
-  5: "home"
+  4: "providers"
 };
 
 const scene1Timeline = [
@@ -6878,7 +6888,251 @@ const scene1Timeline = [
   { start: 34.8, end: 40.5, text: "starting with our first feature: Video Flow. Let's dive right in!" }
 ];
 
-function updateOnboardingScene1Subtitles(time) {
+const scene2Timeline = [
+  { start: 0.0, end: 3.4, text: "Welcome to Video Flow, our first core feature." },
+  { start: 3.4, end: 9.15, text: "If you have a lengthy article, research paper, or complex notes that you want to understand visually," },
+  { start: 9.15, end: 14.2, text: "Video Flow is built for you. Simply paste your text or select an article," },
+  { start: 14.2, end: 20.0, text: "and Video Flow transforms it into an animated visual explainer with dynamic motion graphics," },
+  { start: 20.0, end: 26.35, text: "slide layouts, and natural audio narration. You can watch the full explainer right here on your screen," },
+  { start: 26.35, end: 30.8, text: "switch visual styles, or export your video in seconds." },
+  { start: 30.8, end: 35.6, text: "Next up, let's explore our second feature: Audio Flow!" }
+];
+
+function updateOnboardingScene2Subtitles(time) {
+  const subEl = document.getElementById("scene2-subtitle-text");
+  if (!subEl) return;
+
+  const currentMatch = scene2Timeline.find(item => time >= item.start && time <= item.end);
+  if (currentMatch && subEl.textContent !== currentMatch.text) {
+    subEl.textContent = currentMatch.text;
+    subEl.style.opacity = "0.7";
+    requestAnimationFrame(() => {
+      subEl.style.transition = "opacity 0.2s ease";
+      subEl.style.opacity = "1";
+    });
+  }
+}
+
+function updateScene2Video(isPlaying) {
+  const vid = document.getElementById("scene2-demo-video");
+  if (!vid) return;
+  if (isPlaying) {
+    if (vid.paused) {
+      const p = vid.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } else {
+    if (!vid.paused) {
+      try { vid.pause(); } catch (e) {}
+    }
+  }
+}
+
+const scene3Timeline = [
+  { start: 0.0, end: 2.7, text: "Welcome to Audio Flow, our second core feature." },
+  { start: 2.7, end: 8.0, text: "Imagine scrolling through Twitter or browsing a lengthy article that you do not have time to read." },
+  { start: 8.0, end: 15.9, text: "With Audio Flow, simply highlight the text or tap the summary shortcut, and an instant floating menu appears right over your content." },
+  { start: 15.9, end: 25.9, text: "Click Summary, and Audio Flow immediately generates a natural, source-grounded spoken summary with an interactive waveform player and dockable progress widget." },
+  { start: 25.9, end: 33.7, text: "You can adjust playback speeds, download the MP3, or keep listening while you continue working, without ever switching apps." },
+  { start: 33.7, end: 38.0, text: "Next up, let us discover our third feature: Voice Flow!" }
+];
+
+function updateOnboardingScene3Subtitles(time) {
+  const subEl = document.getElementById("scene3-subtitle-text");
+  if (!subEl) return;
+
+  const currentMatch = scene3Timeline.find(item => time >= item.start && time <= item.end);
+  if (currentMatch && subEl.textContent !== currentMatch.text) {
+    subEl.textContent = currentMatch.text;
+    subEl.style.opacity = "0.7";
+    requestAnimationFrame(() => {
+      subEl.style.transition = "opacity 0.2s ease";
+      subEl.style.opacity = "1";
+    });
+  }
+}
+
+function updateScene3Video(isPlaying) {
+  const vid = document.getElementById("scene3-demo-video");
+  if (!vid) return;
+  if (isPlaying) {
+    if (vid.paused) {
+      const p = vid.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } else {
+    if (!vid.paused) {
+      try { vid.pause(); } catch (e) {}
+    }
+  }
+}
+
+const scene4Timeline = [
+  { start: 0.0, end: 2.86, text: "Welcome to Voice Flow, our third core feature." },
+  { start: 2.86, end: 9.45, text: "Now that you have full context from your article, you can post your thoughts or reply instantly by speaking." },
+  { start: 9.45, end: 20.92, text: "Simply speak naturally into any application, and Voice Flow transcribes and polishes your words directly into the active field in real time." },
+  { start: 20.92, end: 28.51, text: "Zero copy pasting, zero app switching. Next, let us connect with our community and get you started!" }
+];
+
+function updateOnboardingScene4Subtitles(time) {
+  const subEl = document.getElementById("scene4-subtitle-text");
+  if (!subEl) return;
+
+  const currentMatch = scene4Timeline.find(item => time >= item.start && time <= item.end);
+  if (currentMatch && subEl.textContent !== currentMatch.text) {
+    subEl.textContent = currentMatch.text;
+    subEl.style.opacity = "0.7";
+    requestAnimationFrame(() => {
+      subEl.style.transition = "opacity 0.2s ease";
+      subEl.style.opacity = "1";
+    });
+  }
+}
+
+const scene5Timeline = [
+  { start: 0.0, end: 6.86, text: "Welcome to our community! AI Productivity Flow is 100% free and open source, built to supercharge your daily workflow." },
+  { start: 6.86, end: 14.73, text: "If you find this helpful, please star us on GitHub, share your feedback, and report any ideas or issues to shape future updates." },
+  { start: 14.73, end: 22.09, text: "Next, let us head into the workspace and configure your API keys and hotkeys. Click Get Started to begin!" }
+];
+
+function updateOnboardingScene5Subtitles(time) {
+  const subEl = document.getElementById("scene5-subtitle-text");
+  if (!subEl) return;
+
+  const currentMatch = scene5Timeline.find(item => time >= item.start && time <= item.end);
+  if (currentMatch && subEl.textContent !== currentMatch.text) {
+    subEl.textContent = currentMatch.text;
+    subEl.style.opacity = "0.7";
+    requestAnimationFrame(() => {
+      subEl.style.transition = "opacity 0.2s ease";
+      subEl.style.opacity = "1";
+    });
+  }
+
+  // Dynamic visual card highlighting based on voiceover in Scene 5
+  const c1 = document.getElementById("s5-card-1");
+  const c2 = document.getElementById("s5-card-2");
+  const c3 = document.getElementById("s5-card-3");
+  if (c1 && c2 && c3) {
+    c1.classList.remove("highlight-active");
+    c2.classList.remove("highlight-active");
+    c3.classList.remove("highlight-active");
+
+    if (time >= 6.86 && time < 11.5) {
+      c1.classList.add("highlight-active");
+    } else if (time >= 11.5 && time < 14.73) {
+      c2.classList.add("highlight-active");
+    } else if (time >= 14.73 && time <= 22.09) {
+      c3.classList.add("highlight-active");
+    }
+  }
+}
+
+function updateScene4Video(isPlaying) {
+  const vid = document.getElementById("scene4-demo-video");
+  if (!vid) return;
+  if (isPlaying) {
+    if (vid.paused) {
+      const p = vid.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  } else {
+    if (!vid.paused) {
+      try { vid.pause(); } catch (e) {}
+    }
+  }
+}
+
+let _hoveredScene1Card = null;
+
+function updateScene1CardVideos(time, isNarrating) {
+  const v1 = document.getElementById("card-video-1");
+  const v2 = document.getElementById("card-video-2");
+  const v3 = document.getElementById("card-video-3");
+  if (!v1 && !v2 && !v3) return;
+
+  // Identify active card based on narrator timestamps
+  let activeCard = 0;
+  if (isNarrating) {
+    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+      activeCard = 1; // Video Flow
+    } else if (time >= 22.8 && time < 25.8) {
+      activeCard = 2; // Audio Flow
+    } else if (time >= 25.8 && time < 29.5) {
+      activeCard = 3; // Voice Flow
+    }
+  }
+
+  const list = [
+    { id: 1, el: v1 },
+    { id: 2, el: v2 },
+    { id: 3, el: v3 }
+  ];
+
+  list.forEach(({ id, el }) => {
+    if (!el) return;
+    const shouldPlay = (_hoveredScene1Card === id) || (activeCard === id);
+    if (shouldPlay) {
+      if (el.paused) {
+        const p = el.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => {});
+        }
+      }
+    } else {
+      if (!el.paused) {
+        el.pause();
+      }
+    }
+  });
+}
+
+function stopScene1CardVideos(resetTime = false) {
+  _hoveredScene1Card = null;
+  [1, 2, 3].forEach(id => {
+    const el = document.getElementById(`card-video-${id}`);
+    if (el) {
+      if (!el.paused) {
+        try { el.pause(); } catch (e) {}
+      }
+      if (resetTime) {
+        try { el.currentTime = 0; } catch (e) {}
+      }
+    }
+  });
+}
+
+function initScene1CardHoverPreviews() {
+  [1, 2, 3].forEach(id => {
+    const card = document.getElementById(`card-feature-${id}`);
+    if (!card || card._hoverPreviewBound) return;
+    card._hoverPreviewBound = true;
+
+    card.addEventListener("pointerenter", () => {
+      _hoveredScene1Card = id;
+      const t = (typeof onboardingAudioPlayer !== "undefined" && onboardingAudioPlayer && !isNaN(onboardingAudioPlayer.currentTime)) ? onboardingAudioPlayer.currentTime : 0;
+      const isNarrating = typeof onboardingAudioPlayer !== "undefined" &&
+        onboardingAudioPlayer &&
+        !onboardingAudioPlayer.paused &&
+        !onboardingNarrationPaused;
+      updateScene1CardVideos(t, isNarrating);
+    });
+
+    card.addEventListener("pointerleave", () => {
+      if (_hoveredScene1Card === id) {
+        _hoveredScene1Card = null;
+      }
+      const t = (typeof onboardingAudioPlayer !== "undefined" && onboardingAudioPlayer && !isNaN(onboardingAudioPlayer.currentTime)) ? onboardingAudioPlayer.currentTime : 0;
+      const isNarrating = typeof onboardingAudioPlayer !== "undefined" &&
+        onboardingAudioPlayer &&
+        !onboardingAudioPlayer.paused &&
+        !onboardingNarrationPaused;
+      updateScene1CardVideos(t, isNarrating);
+    });
+  });
+}
+
+function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
   const subEl = document.getElementById("scene1-subtitle-text") || document.getElementById("subtitle-text-0");
   if (!subEl) return;
 
@@ -6909,6 +7163,15 @@ function updateOnboardingScene1Subtitles(time) {
       c3.classList.add("highlight-purple");
     }
   }
+
+  const isNarrating = typeof isNarratingOverride === "boolean"
+    ? isNarratingOverride
+    : (typeof onboardingAudioPlayer !== "undefined" &&
+       onboardingAudioPlayer &&
+       !onboardingAudioPlayer.paused &&
+       !onboardingNarrationPaused);
+
+  updateScene1CardVideos(time, isNarrating);
 }
 
 let _confettiAnimId = null;
@@ -6997,20 +7260,24 @@ function setOnboardingFlag(key, value) {
 }
 
 async function maybeShowOnboarding() {
-  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
-  if (localFlag === "true" || localFlag === "1") return;
+  const v2Seen = onboardingFlag("vf_onboarding.v2_seen");
+  if (v2Seen === "1") {
+    const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
+    if (localFlag === "true" || localFlag === "1") return;
 
-  try {
-    const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
-    const data = await res.json();
-    if (data.success && data.value === true) {
-      setOnboardingFlag("hasViewedOnboarding", "true");
-      setOnboardingFlag("vf_onboarding.done", "1");
-      return;
-    }
-  } catch (e) {}
+    try {
+      const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
+      const data = await res.json();
+      if (data.success && data.value === true) {
+        setOnboardingFlag("hasViewedOnboarding", "true");
+        setOnboardingFlag("vf_onboarding.done", "1");
+        return;
+      }
+    } catch (e) {}
+  }
 
-  // First time launch: mark hasViewedOnboarding = true immediately so it never shows again on future launches
+  // Display upgraded Scene 1 onboarding hero on user's desktop app
+  setOnboardingFlag("vf_onboarding.v2_seen", "1");
   setOnboardingFlag("hasViewedOnboarding", "true");
   setOnboardingFlag("vf_onboarding.done", "1");
   fetch("/api/settings/update", {
@@ -7039,11 +7306,11 @@ function renderOnboardingDots() {
 function renderOnboardingSlide() {
   const card = document.querySelector(".onboarding-card");
   if (card) {
-    card.classList.toggle("welcome-stage", onboardingSlide === 0);
+    card.classList.toggle("welcome-stage", onboardingSlide >= 0 && onboardingSlide <= 4);
   }
   const overlay = document.getElementById("onboarding-overlay");
   if (overlay) {
-    overlay.classList.toggle("welcome-hero-mode", onboardingSlide === 0);
+    overlay.classList.toggle("welcome-hero-mode", onboardingSlide >= 0 && onboardingSlide <= 4);
   }
 
   document.querySelectorAll(".onboarding-slide").forEach(s => {
@@ -7052,24 +7319,70 @@ function renderOnboardingSlide() {
   });
   renderOnboardingDots();
   const player = document.getElementById("onboarding-player");
-  if (player) player.style.display = onboardingSlide === 0 ? "none" : "flex";
+  if (player) player.style.display = (onboardingSlide >= 0 && onboardingSlide <= 4) ? "none" : "flex";
 
-  // Synchronize Scene 1 theme toggle button
+  // Synchronize Scene 1, Scene 2, Scene 3, Scene 4, and Scene 5 theme toggle buttons
   const curTheme = document.documentElement.getAttribute("data-theme") || "light";
-  const s1Icon = document.getElementById("scene1-theme-icon");
-  const s1Label = document.getElementById("scene1-theme-label");
-  if (s1Icon) s1Icon.textContent = curTheme === "dark" ? "☀️" : "🌙";
-  if (s1Label) s1Label.textContent = curTheme === "dark" ? "Light Mode" : "Dark Mode";
+  ["scene1", "scene2", "scene3", "scene4", "scene5"].forEach(prefix => {
+    const icon = document.getElementById(`${prefix}-theme-icon`);
+    const label = document.getElementById(`${prefix}-theme-label`);
+    if (icon) icon.textContent = curTheme === "dark" ? "☀️" : "🌙";
+    if (label) label.textContent = curTheme === "dark" ? "Light Mode" : "Dark Mode";
+  });
 
-  // Auto-play or pause master video on slide 0
+  // Slide 0: auto-play or pause master video
   const heroVid = document.getElementById("scene1-hero-video");
   if (onboardingSlide === 0) {
     if (heroVid) {
       heroVid.currentTime = 0;
       heroVid.play().catch(() => {});
     }
+    initScene1CardHoverPreviews();
   } else {
     if (heroVid) heroVid.pause();
+    stopScene1CardVideos(true);
+  }
+
+  // Slide 1: auto-play or pause Scene 2 Video Flow desktop demo video
+  const s2Vid = document.getElementById("scene2-demo-video");
+  if (onboardingSlide === 1) {
+    if (s2Vid) {
+      s2Vid.currentTime = 0;
+      s2Vid.play().catch(() => {});
+    }
+  } else {
+    if (s2Vid) {
+      s2Vid.pause();
+      s2Vid.currentTime = 0;
+    }
+  }
+
+  // Slide 2: auto-play or pause Scene 3 Audio Flow desktop demo video
+  const s3Vid = document.getElementById("scene3-demo-video");
+  if (onboardingSlide === 2) {
+    if (s3Vid) {
+      s3Vid.currentTime = 0;
+      s3Vid.play().catch(() => {});
+    }
+  } else {
+    if (s3Vid) {
+      s3Vid.pause();
+      s3Vid.currentTime = 0;
+    }
+  }
+
+  // Slide 3: auto-play or pause Scene 4 Voice Flow desktop demo video
+  const s4Vid = document.getElementById("scene4-demo-video");
+  if (onboardingSlide === 3) {
+    if (s4Vid) {
+      s4Vid.currentTime = 0;
+      s4Vid.play().catch(() => {});
+    }
+  } else {
+    if (s4Vid) {
+      s4Vid.pause();
+      s4Vid.currentTime = 0;
+    }
   }
 
   // Auto-navigate app background to match current tour topic
@@ -7079,14 +7392,32 @@ function renderOnboardingSlide() {
   }
 }
 
-// Embedded pre-recorded narration player (Deepgram Aura Zeus Professional Male)
+// Embedded pre-recorded narration player
 let onboardingAudioPlayer = null;
+let _onboardingNarrationTimer = null;
+let _onboardingAudioUnlockerInstalled = false;
+let _currentUnlockSlide = -1;
+let _currentAudioSlideToken = 0;
 
 function getOnboardingAudioPath(slideIdx) {
+  let rel = `assets/onboarding/slide_${slideIdx}.mp3`;
   if (slideIdx === 0) {
-    return "/assets/onboarding/scene_1_mixed.mp3";
+    rel = "assets/onboarding/scene_1_mixed.mp3";
+  } else if (slideIdx === 1) {
+    rel = "assets/onboarding/scene_2_mixed.mp3";
+  } else if (slideIdx === 2) {
+    rel = "assets/onboarding/scene_3_mixed.mp3";
+  } else if (slideIdx === 3) {
+    rel = "assets/onboarding/scene_4_mixed.mp3";
+  } else if (slideIdx === 4) {
+    rel = "assets/onboarding/scene_5_mixed.mp3";
   }
-  return `/assets/onboarding/slide_${slideIdx}.mp3`;
+  try {
+    if (window.location && window.location.origin && window.location.origin !== "null") {
+      return `${window.location.origin}/${rel}`;
+    }
+  } catch (e) {}
+  return rel;
 }
 
 function updateOnboardingNarrationUI(paused) {
@@ -7094,41 +7425,210 @@ function updateOnboardingNarrationUI(paused) {
   const label = document.getElementById("onboarding-narration-label");
   if (btn) btn.textContent = paused ? "▶" : "⏸";
   if (label) label.textContent = paused ? "Paused" : "Narrating…";
+
+  // Synchronize Scene 1, Scene 2, Scene 3, Scene 4, and Scene 5 dedicated sound buttons and visual wave animations
+  ["scene1", "scene2", "scene3", "scene4", "scene5"].forEach(prefix => {
+    const sBtn = document.getElementById(`${prefix}-audio-btn`);
+    const sIcon = document.getElementById(`${prefix}-audio-icon`);
+    const sText = document.getElementById(`${prefix}-audio-text`);
+    const sWave = document.getElementById(`${prefix}-wave-indicator`);
+    if (sBtn) {
+      sBtn.classList.toggle("paused", paused);
+      sBtn.setAttribute("title", paused ? "Click to play voiceover narration" : "Click to pause voiceover narration");
+    }
+    if (sIcon) sIcon.textContent = paused ? "▶" : "🔊";
+    if (sText) sText.textContent = paused ? "Play Narration" : "Voiceover";
+    if (sWave) sWave.classList.toggle("paused", paused);
+  });
+
+  // Synchronize Scene 1 preview video states with narration
+  if (paused) {
+    stopScene1CardVideos(false);
+  } else {
+    const curTime = (onboardingAudioPlayer && !isNaN(onboardingAudioPlayer.currentTime)) ? onboardingAudioPlayer.currentTime : 0;
+    updateScene1CardVideos(curTime, true);
+  }
+
+  // Synchronize Scene 2 desktop demo video
+  if (onboardingSlide === 1) {
+    updateScene2Video(!paused);
+  }
+
+  // Synchronize Scene 3 desktop demo video
+  if (onboardingSlide === 2) {
+    updateScene3Video(!paused);
+  }
+
+  // Synchronize Scene 4 desktop demo video
+  if (onboardingSlide === 3) {
+    updateScene4Video(!paused);
+  }
+
+  // Synchronize Scene 5 card highlights
+  if (onboardingSlide === 4 && paused) {
+    ["s5-card-1", "s5-card-2", "s5-card-3"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove("highlight-active");
+    });
+  }
+}
+
+function installOnboardingGestureUnlocker() {
+  if (_onboardingAudioUnlockerInstalled) return;
+  _onboardingAudioUnlockerInstalled = true;
+  _currentUnlockSlide = onboardingSlide;
+
+  const unlockAudio = (evt) => {
+    // If user clicked any navigation or action buttons, do NOT unlock old audio
+    if (evt && evt.target && (
+      evt.target.closest("#scene1-audio-btn") ||
+      evt.target.closest("#scene2-audio-btn") ||
+      evt.target.closest("#scene3-audio-btn") ||
+      evt.target.closest("#scene4-audio-btn") ||
+      evt.target.closest("#scene5-audio-btn") ||
+      evt.target.closest("#onboarding-narration-toggle") ||
+      evt.target.closest(".s1-card") ||
+      evt.target.closest(".s1-next") ||
+      evt.target.closest(".s2-next-btn") ||
+      evt.target.closest(".s2-back-btn") ||
+      evt.target.closest(".s3-next-btn") ||
+      evt.target.closest(".s3-back-btn") ||
+      evt.target.closest(".s4-next-btn") ||
+      evt.target.closest(".s4-back-btn") ||
+      evt.target.closest(".s5-finish-btn") ||
+      evt.target.closest(".s5-back-btn") ||
+      evt.target.closest(".scene1-skip-badge")
+    )) {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+      _onboardingAudioUnlockerInstalled = false;
+      return;
+    }
+    if (onboardingAudioPlayer && onboardingAudioPlayer.paused && onboardingSlide === _currentUnlockSlide) {
+      onboardingAudioPlayer.play().then(() => {
+        onboardingNarrationPaused = false;
+        updateOnboardingNarrationUI(false);
+      }).catch(() => {});
+    }
+    window.removeEventListener("pointerdown", unlockAudio);
+    window.removeEventListener("keydown", unlockAudio);
+    window.removeEventListener("touchstart", unlockAudio);
+    _onboardingAudioUnlockerInstalled = false;
+  };
+
+  window.addEventListener("pointerdown", unlockAudio, { passive: true });
+  window.addEventListener("keydown", unlockAudio, { passive: true });
+  window.addEventListener("touchstart", unlockAudio, { passive: true });
 }
 
 function speakOnboardingNarration() {
   stopOnboardingNarration();
   onboardingNarrationPaused = false;
-  updateOnboardingNarrationUI(false);
 
-  const audioPath = getOnboardingAudioPath(onboardingSlide);
-  onboardingAudioPlayer = new Audio(audioPath);
+  const targetSlide = onboardingSlide;
+  const slideToken = ++_currentAudioSlideToken;
+  const audioPath = getOnboardingAudioPath(targetSlide);
+  const player = new Audio(audioPath);
+  player.preload = "auto";
+  onboardingAudioPlayer = player;
   
-  if (onboardingSlide === 0) {
-    onboardingAudioPlayer.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer) {
-        updateOnboardingScene1Subtitles(onboardingAudioPlayer.currentTime);
+  if (targetSlide === 0) {
+    player.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer === player && onboardingSlide === 0) {
+        updateOnboardingScene1Subtitles(player.currentTime, !player.paused);
+      }
+    });
+  } else if (targetSlide === 1) {
+    player.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer === player && onboardingSlide === 1) {
+        updateOnboardingScene2Subtitles(player.currentTime);
+      }
+    });
+  } else if (targetSlide === 2) {
+    player.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer === player && onboardingSlide === 2) {
+        updateOnboardingScene3Subtitles(player.currentTime);
+      }
+    });
+  } else if (targetSlide === 3) {
+    player.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer === player && onboardingSlide === 3) {
+        updateOnboardingScene4Subtitles(player.currentTime);
+      }
+    });
+  } else if (targetSlide === 4) {
+    player.addEventListener("timeupdate", () => {
+      if (onboardingAudioPlayer === player && onboardingSlide === 4) {
+        updateOnboardingScene5Subtitles(player.currentTime);
       }
     });
   }
 
-  onboardingAudioPlayer.addEventListener("ended", () => {
-    updateOnboardingNarrationUI(true);
+  player.addEventListener("ended", () => {
+    if (onboardingAudioPlayer === player) {
+      updateOnboardingNarrationUI(true);
+    }
+  });
+  player.addEventListener("pause", () => {
+    if (onboardingAudioPlayer === player) {
+      updateOnboardingNarrationUI(true);
+    }
+  });
+  player.addEventListener("playing", () => {
+    if (onboardingAudioPlayer === player) {
+      onboardingNarrationPaused = false;
+      updateOnboardingNarrationUI(false);
+    }
   });
 
-  onboardingAudioPlayer.play().catch(err => {
-    console.warn("Could not play embedded onboarding audio:", err);
-  });
+  const playPromise = player.play();
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      if (slideToken !== _currentAudioSlideToken || onboardingSlide !== targetSlide) {
+        try {
+          player.pause();
+          player.currentTime = 0;
+          player.removeAttribute("src");
+          player.src = "";
+          player.load();
+        } catch (e) {}
+        return;
+      }
+      updateOnboardingNarrationUI(false);
+    }).catch(err => {
+      if (slideToken !== _currentAudioSlideToken || onboardingSlide !== targetSlide) return;
+      console.warn("Could not play embedded onboarding audio (user gesture may be required):", err);
+      updateOnboardingNarrationUI(true);
+      installOnboardingGestureUnlocker();
+    });
+  }
 }
 
 function stopOnboardingNarration() {
+  if (_onboardingNarrationTimer) {
+    clearTimeout(_onboardingNarrationTimer);
+    _onboardingNarrationTimer = null;
+  }
   if (onboardingAudioPlayer) {
     try {
       onboardingAudioPlayer.pause();
       onboardingAudioPlayer.currentTime = 0;
+      onboardingAudioPlayer.removeAttribute("src");
+      onboardingAudioPlayer.src = "";
+      onboardingAudioPlayer.load();
     } catch (e) {}
     onboardingAudioPlayer = null;
   }
+  _onboardingAudioUnlockerInstalled = false;
+  stopScene1CardVideos(true);
+  updateScene2Video(false);
+  updateScene3Video(false);
+  updateScene4Video(false);
+  ["s5-card-1", "s5-card-2", "s5-card-3"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("highlight-active");
+  });
 }
 
 function makeButton(label, onclick) {
@@ -7163,10 +7663,14 @@ function toggleOnboardingNarration() {
 
 function gotoOnboardingSlide(idx) {
   if (idx < 0 || idx >= ONBOARDING_NARRATION.length) return;
+  if (_onboardingNarrationTimer) {
+    clearTimeout(_onboardingNarrationTimer);
+    _onboardingNarrationTimer = null;
+  }
+  stopOnboardingNarration();
   onboardingSlide = idx;
   renderOnboardingSlide();
-  stopOnboardingNarration();
-  setTimeout(speakOnboardingNarration, 350);
+  _onboardingNarrationTimer = setTimeout(speakOnboardingNarration, 250);
 }
 
 function nextOnboardingSlide() {
@@ -7175,7 +7679,7 @@ function nextOnboardingSlide() {
 }
 
 function prevOnboardingSlide() {
-  gotoOnboardingSlide(Math.max(1, onboardingSlide - 1));
+  gotoOnboardingSlide(Math.max(0, onboardingSlide - 1));
 }
 
 function startOnboardingTour() {
@@ -7191,6 +7695,651 @@ function finishOnboarding() {
   setOnboardingFlag("vf_onboarding.done", "1");
   const overlay = document.getElementById("onboarding-overlay");
   if (overlay) overlay.classList.add("hidden");
+
+  // Prompt for anonymous crash reporting consent if never set
+  if (!localStorage.getItem("vf_crash_reporting_prompted")) {
+    safeFetchJson("/api/settings/all").then(async res => {
+      const allSettings = res?.settings || {};
+      if (!Object.prototype.hasOwnProperty.call(allSettings, "anonymous_crash_reports")) {
+        localStorage.setItem("vf_crash_reporting_prompted", "1");
+        const consent = await vfConfirm({
+          title: "Help Improve AI Productivity Flow",
+          badge: "Privacy & Stability",
+          icon: "🛡️",
+          message: "Would you like to send anonymous crash reports via Sentry to help us diagnose issues? Reports NEVER include audio, transcripts, or personal data, and this can be changed anytime in Settings.",
+          confirmText: "Enable Anonymous Reports",
+          cancelText: "No Thanks",
+        });
+        await toggleAnonymousCrashReports(!!consent);
+      }
+    }).catch(() => {});
+  }
+
+  // Directly navigate user to Audio Flow feature inside the app
+  if (typeof switchPage === "function") {
+    switchPage("audioflow");
+  }
+
+  // Launch the interactive Audio Flow in-app guide automatically
+  setTimeout(() => {
+    if (typeof startAudioFlowGuide === "function") {
+      startAudioFlowGuide();
+    }
+  }, 450);
+}
+
+// ==========================================================================
+// AUDIO FLOW IN-APP GUIDANCE ENGINE
+// ==========================================================================
+
+const AUDIOFLOW_GUIDE_STEPS = [
+  {
+    step: 1,
+    counter: "STEP 1 OF 4 · READ & SUMMARY",
+    title: "Read & Summary Modes",
+    desc: "Listen to text word-for-word or create two-voice podcast summaries.",
+    targetId: "af-voice-card",
+    secondaryTargetId: "af-summary-model-hero",
+    spotlightLabel: "Core Modes",
+    nextLabel: "Next: Gemini Setup →",
+    audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
+    timeline: [
+      { start: 0.1, end: 2.73, text: "Welcome inside Audio Flow!" },
+      { start: 2.68, end: 5.86, text: "Here, you have two powerful ways to listen." },
+      { start: 5.86, end: 11.13, text: "With Read mode on the left, you can hear any selected text read aloud word-for-word." },
+      { start: 11.13, end: 18.15, text: "You can choose from dozens of natural voices and adjust reading speeds from 0.75x up to 2x." },
+      { start: 18.15, end: 21.97, text: "On the right is Summary mode, powered by NotebookLM." },
+      { start: 21.97, end: 28.69, text: "It extracts key ideas from lengthy articles, and you can even listen in an engaging two-voice podcast format." },
+      { start: 28.69, end: 33.33, text: "Let's move to Step 2 to explore API keys and Gemini setup." }
+    ]
+  },
+  {
+    step: 2,
+    counter: "STEP 2 OF 4 · GEMINI SETUP",
+    title: "Gemini Setup & API Keys",
+    desc: "Connect your free Gemini key to unlock NotebookLM and custom AI models.",
+    targetId: "audio-detail-header-bar",
+    secondaryTargetId: "audio-detail-connections-card",
+    spotlightLabel: "Gemini API Key Setup",
+    nextLabel: "Next: History & Downloads →",
+    audioSrc: "assets/onboarding/af_guide_step2_mixed.mp3",
+    timeline: [
+      { start: 0.1, end: 3.41, text: "Step 2 is connecting your API keys." },
+      { start: 3.36, end: 9.16, text: "AI Productivity Flow includes Microsoft Edge voices completely free out of the box." },
+      { start: 9.16, end: 15.4, text: "To unlock Gemini AI, Deepgram, or OpenAI, click the Gemini card right here." },
+      { start: 15.4, end: 25.51, text: "Click 'Get API Key' to open Google AI Studio in one click, copy your free key, paste it in the field, and tap 'Test Connection' to verify it." },
+      { start: 25.51, end: 29.26, text: "All keys are stored and encrypted locally on your computer." },
+      { start: 29.26, end: 33.0, text: "Next, let's explore history and audio downloads." }
+    ]
+  },
+  {
+    step: 3,
+    counter: "STEP 3 OF 4 · SUMMARY HISTORY",
+    title: "History & MP3 Downloads",
+    desc: "Replay past waveforms and download MP3s with a single click.",
+    targetId: "af-history-panel",
+    spotlightLabel: "Summary History & Downloads",
+    nextLabel: "Next: Screen Workflow →",
+    audioSrc: "assets/onboarding/af_guide_step3_mixed.mp3",
+    timeline: [
+      { start: 0.1, end: 3.26, text: "Step 3 is your Audio Summary History." },
+      { start: 3.21, end: 7.77, text: "You can toggle this bar open or closed anytime to see your past work." },
+      { start: 7.77, end: 12.41, text: "Every summary you create is automatically saved in your offline library." },
+      { start: 12.41, end: 22.7, text: "You can search past notes, replay waveforms, and download the MP3 audio file with one click—perfect for listening on your phone during your commute or sharing with your team." },
+      { start: 22.7, end: 27.02, text: "Next, let's see how to use Audio Flow directly on your screen!" }
+    ]
+  },
+  {
+    step: 4,
+    counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
+    title: "Instant Screen & Twitter Shortcut",
+    desc: "",
+    targetId: "af-guide-screen-sim",
+    isSimulation: true,
+    spotlightLabel: "Twitter & Screen Shortcut",
+    nextLabel: "Finish & Start Listening 🚀",
+    audioSrc: "assets/onboarding/af_guide_step4_mixed.mp3",
+    timeline: [
+      { start: 0.1, end: 6.11, text: "Finally, the true superpower of Audio Flow is that you never need to copy-paste or switch apps." },
+      { start: 6.06, end: 13.29, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reading a PDF, simply highlight any text." },
+      { start: 13.29, end: 17.38, text: "An instant floating quick-action menu appears right by your cursor." },
+      { start: 17.38, end: 24.86, text: "Click Summary or Read, and a floating player appears on your desktop with live waveforms and playback controls while you keep working." },
+      { start: 24.86, end: 27.52, text: "You're now ready to use Audio Flow." },
+      { start: 27.52, end: 29.98, text: "Click Get Started to explore!" }
+    ]
+  }
+];
+
+let _currentAfGuideStep = 1;
+let _afGuideAudioPlayer = null;
+let _afGuideNarrationPaused = false;
+let _afGuideSlideToken = 0;
+let _afGuideTimer = null;
+
+function _afGuideForceZeroScroll() {
+  const mc = document.querySelector(".main-content");
+  if (mc && mc.scrollTop !== 0) mc.scrollTop = 0;
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
+  if (document.documentElement && document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
+  if (document.body && document.body.scrollTop !== 0) document.body.scrollTop = 0;
+}
+
+function _afGuideBlockAppEvent(e) {
+  const guideCard = document.getElementById("af-guide-card");
+  if (guideCard && guideCard.contains(e.target)) {
+    return; // Allow clicks/taps on HUD buttons (Next, Close, Back, Voiceover, dots)
+  }
+  // Strictly prevent any and all interaction with the underlying application
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _afGuidePreventScrollEvent(e) {
+  _afGuideForceZeroScroll();
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _afGuidePreventKeyEvent(e) {
+  if (e.key === "Escape") {
+    stopAudioFlowGuide();
+    e.preventDefault();
+    return;
+  }
+  const guideCard = document.getElementById("af-guide-card");
+  if (guideCard && guideCard.contains(document.activeElement)) {
+    if (e.key === "Enter" || e.key === " ") return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+const _afGuideEventTypes = ["click", "mousedown", "mouseup", "pointerdown", "pointerup", "touchstart", "touchend", "contextmenu", "dblclick"];
+
+function updateAudioFlowGuideSubtitles(time, stepIdx) {
+  const subEl = document.getElementById("af-guide-subtitle-text");
+  if (!subEl) return;
+  const stepObj = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj || !stepObj.timeline) return;
+
+  const match = stepObj.timeline.find(item => time >= item.start && time <= item.end);
+  if (match && subEl.textContent !== match.text) {
+    subEl.style.opacity = "0.3";
+    setTimeout(() => {
+      subEl.textContent = match.text;
+      subEl.style.opacity = "1";
+    }, 60);
+  }
+}
+
+function updateAudioFlowGuideAudioUI(paused) {
+  const btn = document.getElementById("af-guide-audio-btn");
+  const icon = document.getElementById("af-guide-audio-icon");
+  const text = document.getElementById("af-guide-audio-text");
+  const wave = document.getElementById("af-guide-wave-indicator");
+
+  if (btn) btn.classList.toggle("paused", paused);
+  if (icon) icon.textContent = paused ? "▶" : "🔊";
+  if (text) text.textContent = paused ? "Play" : "Voiceover";
+  if (wave) wave.classList.toggle("paused", paused);
+}
+
+function stopAudioFlowGuideAudio() {
+  if (_afGuideTimer) {
+    clearTimeout(_afGuideTimer);
+    _afGuideTimer = null;
+  }
+  if (_afGuideAudioPlayer) {
+    try {
+      _afGuideAudioPlayer.pause();
+      _afGuideAudioPlayer.currentTime = 0;
+      _afGuideAudioPlayer.removeAttribute("src");
+      _afGuideAudioPlayer.src = "";
+      _afGuideAudioPlayer.load();
+    } catch (e) {}
+    _afGuideAudioPlayer = null;
+  }
+  _afGuideNarrationPaused = false;
+  updateAudioFlowGuideAudioUI(true);
+}
+
+function playAudioFlowGuideNarration(stepIdx) {
+  stopAudioFlowGuideAudio();
+  _afGuideNarrationPaused = false;
+
+  const stepObj = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj || !stepObj.audioSrc) return;
+
+  const token = ++_afGuideSlideToken;
+  let audioPath = stepObj.audioSrc;
+  try {
+    if (window.location && window.location.origin && window.location.origin !== "null") {
+      audioPath = `${window.location.origin}/${stepObj.audioSrc}`;
+    }
+  } catch (e) {}
+
+  const player = new Audio(audioPath);
+  player.preload = "auto";
+  _afGuideAudioPlayer = player;
+
+  player.addEventListener("timeupdate", () => {
+    if (_afGuideAudioPlayer === player && _currentAfGuideStep === stepIdx) {
+      updateAudioFlowGuideSubtitles(player.currentTime, stepIdx);
+    }
+  });
+
+  player.addEventListener("ended", () => {
+    if (_afGuideAudioPlayer === player) {
+      updateAudioFlowGuideAudioUI(true);
+    }
+  });
+  player.addEventListener("pause", () => {
+    if (_afGuideAudioPlayer === player) {
+      updateAudioFlowGuideAudioUI(true);
+    }
+  });
+  player.addEventListener("playing", () => {
+    if (_afGuideAudioPlayer === player) {
+      _afGuideNarrationPaused = false;
+      updateAudioFlowGuideAudioUI(false);
+    }
+  });
+
+  const p = player.play();
+  if (p && typeof p.then === "function") {
+    p.then(() => {
+      if (token !== _afGuideSlideToken || _currentAfGuideStep !== stepIdx) {
+        try { player.pause(); player.src = ""; } catch (e) {}
+        return;
+      }
+      updateAudioFlowGuideAudioUI(false);
+    }).catch(err => {
+      if (token !== _afGuideSlideToken || _currentAfGuideStep !== stepIdx) return;
+      console.warn("Autoplay gesture unlock required for guide audio:", err);
+      updateAudioFlowGuideAudioUI(true);
+    });
+  }
+}
+
+function toggleAudioFlowGuideAudio() {
+  if (!_afGuideAudioPlayer) {
+    playAudioFlowGuideNarration(_currentAfGuideStep);
+    return;
+  }
+  if (_afGuideAudioPlayer.paused) {
+    _afGuideAudioPlayer.play().then(() => {
+      _afGuideNarrationPaused = false;
+      updateAudioFlowGuideAudioUI(false);
+    }).catch(() => {});
+  } else {
+    _afGuideAudioPlayer.pause();
+    _afGuideNarrationPaused = true;
+    updateAudioFlowGuideAudioUI(true);
+  }
+}
+
+function positionAfGuideSpotlight(stepObj) {
+  _afGuideForceZeroScroll();
+  const box = document.getElementById("af-guide-spotlight-box");
+  const label = document.getElementById("af-guide-spotlight-label");
+  if (!box) return;
+
+  if (label) {
+    label.textContent = stepObj.spotlightLabel || "FEATURE SPOTLIGHT";
+  }
+
+  if (stepObj.isSimulation) {
+    box.style.display = "none";
+    return;
+  }
+
+  box.style.display = "block";
+  let target = document.getElementById(stepObj.targetId);
+  if (!target) {
+    box.style.display = "none";
+    return;
+  }
+
+  let r = target.getBoundingClientRect();
+  let top = r.top;
+  let left = r.left;
+  let right = r.right;
+  let bottom = r.bottom;
+
+  if (stepObj.secondaryTargetId) {
+    const sec = document.getElementById(stepObj.secondaryTargetId);
+    if (sec) {
+      const r2 = sec.getBoundingClientRect();
+      top = Math.min(top, r2.top);
+      left = Math.min(left, r2.left);
+      right = Math.max(right, r2.right);
+      bottom = Math.max(bottom, r2.bottom);
+    }
+  }
+
+  if (stepObj.step === 2) {
+    // Generously encompass the entire connections card including the "+ Add" button
+    const connCard = document.getElementById("audio-detail-connections-card");
+    if (connCard) {
+      const cr = connCard.getBoundingClientRect();
+      if (cr.bottom > 0) bottom = Math.max(bottom, cr.bottom);
+      if (cr.right > 0) right = Math.max(right, cr.right);
+      if (cr.left > 0) left = Math.min(left, cr.left);
+    }
+    const addCont = document.getElementById("audio-add-conn-container");
+    if (addCont) {
+      const ar = addCont.getBoundingClientRect();
+      if (ar.bottom > 0) bottom = Math.max(bottom, ar.bottom + 8);
+    }
+    const addBtn = document.querySelector("#audio-add-conn-container button");
+    if (addBtn) {
+      const br = addBtn.getBoundingClientRect();
+      if (br.bottom > 0) bottom = Math.max(bottom, br.bottom + 8);
+    }
+  }
+
+  const pad = 14;
+  box.style.top = `${Math.max(6, top - pad)}px`;
+  box.style.left = `${Math.max(6, left - pad)}px`;
+  box.style.width = `${Math.max(40, (right - left) + pad * 2)}px`;
+  box.style.height = `${Math.max(40, (bottom - top) + pad * 2)}px`;
+}
+
+function _injectAfGuideDemoHistoryCard() {
+  const cardsContainer = document.getElementById("af-library-cards");
+  const emptyState = document.getElementById("af-history-empty");
+  const gridContainer = document.getElementById("af-library-grid");
+  if (!cardsContainer) return;
+  if (emptyState) emptyState.style.display = "none";
+  if (gridContainer) gridContainer.style.display = "block";
+  cardsContainer.innerHTML = `
+    <article class="af-library-card af-guide-demo-card" id="af-guide-sample-card">
+      <div class="af-card-thumb">
+        <div class="af-thumb-art">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v18M16 8v8M8 8v8M20 11v2M4 11v2"/>
+          </svg>
+        </div>
+        <span class="af-card-status af-card-status-ready">Ready</span>
+      </div>
+      <div class="af-card-body">
+        <h3 class="af-card-title">Deep Learning &amp; Multimodal AI — 3 min summary</h3>
+        <div class="af-card-meta">
+          <span>Today, 2:15 PM</span>
+          <span>· 3:12</span>
+          <span class="af-depth-pill">Balanced</span>
+        </div>
+        <p class="af-card-snippet">NotebookLM extracted 5 key insights from your highlighted article. Ready to replay or download.</p>
+        <div class="af-card-actions">
+          <button type="button" class="af-icon-btn" onclick="playAudioSummary('demo-sample', 'Deep Learning & Multimodal AI', 'balanced')">▶ Play</button>
+          <button type="button" class="af-icon-btn af-download-btn is-downloaded" onclick="alert('Sample preview: MP3 download')">↓ MP3</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function _cleanAfGuideDemoHistoryCard() {
+  if (typeof renderAudioSummaryHistory === "function") {
+    renderAudioSummaryHistory();
+  }
+}
+
+async function gotoAudioFlowGuideStep(stepIdx) {
+  if (stepIdx < 1 || stepIdx > AUDIOFLOW_GUIDE_STEPS.length) return;
+  const prevStep = _currentAfGuideStep;
+  _currentAfGuideStep = stepIdx;
+  const stepObj = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+
+  _afGuideForceZeroScroll();
+
+  // Cleanup leaving Step 2: restore provider overview and disconnect observer
+  if (prevStep === 2 && stepIdx !== 2) {
+    if (window._afGuideConnCardObserver) {
+      window._afGuideConnCardObserver.disconnect();
+      window._afGuideConnCardObserver = null;
+    }
+    if (typeof closeAudioProviderDetail === "function") {
+      closeAudioProviderDetail();
+    }
+  }
+
+  // Cleanup leaving Step 3: restore real history state and remove elevation
+  if (prevStep === 3 && stepIdx !== 3) {
+    document.body.classList.remove("af-guide-step3-active");
+    if (afSummaries.length === 0) {
+      _cleanAfGuideDemoHistoryCard();
+    }
+  }
+
+  // Cleanup leaving Step 4: pause demo video
+  if (prevStep === 4 && stepIdx !== 4) {
+    const vid = document.getElementById("af-guide-real-demo-video");
+    if (vid) vid.pause();
+  }
+
+  // Step 2 Action: Open Gemini detail view & observe connections card
+  if (stepIdx === 2) {
+    document.body.classList.remove("af-guide-step3-active");
+    if (typeof openAudioProviderDetail === "function") {
+      await openAudioProviderDetail("gemini");
+    }
+    if (window.ResizeObserver && !window._afGuideConnCardObserver) {
+      const connCard = document.getElementById("audio-detail-connections-card");
+      if (connCard) {
+        window._afGuideConnCardObserver = new ResizeObserver(() => {
+          if (_currentAfGuideStep === 2) {
+            const s2 = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === 2);
+            if (s2) positionAfGuideSpotlight(s2);
+          }
+        });
+        window._afGuideConnCardObserver.observe(connCard);
+      }
+    }
+    [80, 200, 450, 800].forEach(ms => {
+      setTimeout(() => {
+        if (_currentAfGuideStep === 2) {
+          const s2 = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === 2);
+          if (s2) positionAfGuideSpotlight(s2);
+        }
+      }, ms);
+    });
+  }
+
+  // Step 3 Action: Elevate history panel to top and show rich demo card
+  if (stepIdx === 3) {
+    if (currentAudioProvider === "gemini" && typeof closeAudioProviderDetail === "function") {
+      closeAudioProviderDetail();
+    }
+    document.body.classList.add("af-guide-step3-active");
+    const historyPanel = document.getElementById("af-history-panel");
+    if (historyPanel) historyPanel.open = true;
+    if (afSummaries.length === 0) {
+      _injectAfGuideDemoHistoryCard();
+    }
+  }
+
+  // Step 4 Action: Auto-play Twitter screen workflow video
+  if (stepIdx === 4) {
+    document.body.classList.remove("af-guide-step3-active");
+    const vid = document.getElementById("af-guide-real-demo-video");
+    if (vid) {
+      vid.currentTime = 0;
+      vid.play().catch(() => {});
+    }
+  }
+
+  // Step 4 UI Layout Toggle
+  const card = document.getElementById("af-guide-card");
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (card) {
+    card.classList.toggle("is-step4", stepIdx === 4);
+  }
+  if (overlay) {
+    overlay.classList.toggle("is-step4-active", stepIdx === 4);
+  }
+
+  const counterEl = document.getElementById("af-guide-step-counter");
+  const titleEl = document.getElementById("af-guide-title");
+  const descEl = document.getElementById("af-guide-desc");
+  const nextBtn = document.getElementById("af-guide-btn-next");
+  const backBtn = document.getElementById("af-guide-btn-back");
+  const simWidget = document.getElementById("af-guide-screen-sim");
+  const subEl = document.getElementById("af-guide-subtitle-text");
+
+  if (counterEl) counterEl.textContent = stepObj.counter;
+  if (titleEl) titleEl.textContent = stepObj.title;
+  if (descEl) descEl.textContent = stepObj.desc;
+  if (nextBtn) nextBtn.textContent = stepObj.nextLabel;
+  if (backBtn) backBtn.style.visibility = (stepIdx === 1) ? "hidden" : "visible";
+
+  if (simWidget) {
+    simWidget.style.display = stepObj.isSimulation ? "flex" : "none";
+  }
+
+  if (subEl && stepObj.timeline && stepObj.timeline[0]) {
+    subEl.textContent = stepObj.timeline[0].text;
+  }
+
+  const dots = document.getElementById("af-guide-dots");
+  if (dots) {
+    dots.innerHTML = AUDIOFLOW_GUIDE_STEPS.map(s =>
+      `<span class="${s.step === stepIdx ? "active" : ""}" onclick="gotoAudioFlowGuideStep(${s.step})"></span>`
+    ).join("");
+  }
+
+  setTimeout(() => {
+    _afGuideForceZeroScroll();
+    positionAfGuideSpotlight(stepObj);
+  }, 60);
+
+  if (_afGuideTimer) clearTimeout(_afGuideTimer);
+  _afGuideTimer = setTimeout(() => {
+    playAudioFlowGuideNarration(stepIdx);
+  }, 200);
+}
+
+function nextAudioFlowGuideStep() {
+  if (_currentAfGuideStep >= AUDIOFLOW_GUIDE_STEPS.length) {
+    stopAudioFlowGuide();
+    return;
+  }
+  gotoAudioFlowGuideStep(_currentAfGuideStep + 1);
+}
+
+function prevAudioFlowGuideStep() {
+  gotoAudioFlowGuideStep(Math.max(1, _currentAfGuideStep - 1));
+}
+
+function startAudioFlowGuide() {
+  if (typeof switchPage === "function") {
+    switchPage("audioflow");
+  }
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (!overlay) return;
+
+  _afGuideForceZeroScroll();
+
+  // 1. Lock scrolling on body and HTML
+  document.body.classList.add("af-guide-active");
+
+  // 2. Attach capture-phase interaction blockers: NO button or link in app can be clicked
+  for (const ev of _afGuideEventTypes) {
+    window.addEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
+    document.addEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
+  }
+
+  // 3. Attach scroll and wheel blockers
+  window.addEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
+  window.addEventListener("keydown", _afGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.addEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
+    mc.addEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  overlay.classList.remove("hidden");
+  gotoAudioFlowGuideStep(1);
+
+  window.addEventListener("resize", _onAfGuideResize);
+}
+
+function _onAfGuideResize() {
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (overlay && !overlay.classList.contains("hidden")) {
+    _afGuideForceZeroScroll();
+    const stepObj = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === _currentAfGuideStep);
+    if (stepObj) positionAfGuideSpotlight(stepObj);
+  }
+}
+
+function stopAudioFlowGuide() {
+  stopAudioFlowGuideAudio();
+  window.removeEventListener("resize", _onAfGuideResize);
+
+  // Remove capture listeners
+  for (const ev of _afGuideEventTypes) {
+    window.removeEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
+    document.removeEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
+  }
+  window.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
+  window.removeEventListener("keydown", _afGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.removeEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
+    mc.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  if (window._afGuideConnCardObserver) {
+    window._afGuideConnCardObserver.disconnect();
+    window._afGuideConnCardObserver = null;
+  }
+
+  // Restore CSS state
+  document.body.classList.remove("af-guide-active");
+  document.body.classList.remove("af-guide-step3-active");
+
+  const card = document.getElementById("af-guide-card");
+  if (card) card.classList.remove("is-step4");
+
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (overlay) {
+    overlay.classList.remove("is-step4-active");
+    overlay.classList.add("hidden");
+  }
+
+  const vid = document.getElementById("af-guide-real-demo-video");
+  if (vid) vid.pause();
+  if (currentAudioProvider === "gemini" && typeof closeAudioProviderDetail === "function") {
+    closeAudioProviderDetail();
+  }
+  if (afSummaries.length === 0) {
+    _cleanAfGuideDemoHistoryCard();
+  }
+  setOnboardingFlag("vf_onboarding.af_guided", "1");
 }
 
 function replayOnboarding() {
@@ -7534,7 +8683,7 @@ async function openAudioProviderDetail(providerId) {
     delBtn.style.display = isCustom ? "inline-flex" : "none";
   }
 
-  loadAudioProviderDetails(providerId);
+  await loadAudioProviderDetails(providerId);
 }
 
 function closeAudioProviderDetail() {
@@ -7749,6 +8898,13 @@ async function loadAudioProviderDetails(providerId) {
 
   } catch (err) {
     console.error("Error loading audio provider details:", err);
+  } finally {
+    if (_currentAfGuideStep === 2) {
+      const s = AUDIOFLOW_GUIDE_STEPS.find(x => x.step === 2);
+      if (s) {
+        requestAnimationFrame(() => positionAfGuideSpotlight(s));
+      }
+    }
   }
 }
 
@@ -9847,8 +11003,12 @@ async function deleteAudioCustomModel(modelId, providerId) {
 // ============================================================================
 
 let currentAccountData = null;
+let _accountStatusGeneration = 0;
+let _accountMutationPending = false;
 let currentAuthMode = "signin"; // "signin" | "signup"
 let googleAuthPollTimer = null;
+let _googleSignInGeneration = 0;
+let _googleSignInPending = false;
 
 async function initAccountAuth() {
   await loadAccountSettingsView();
@@ -9867,10 +11027,12 @@ function switchAccountTab(tab) {
 }
 
 async function loadAccountSettingsView() {
+  const generation = ++_accountStatusGeneration;
   try {
     const res = await safeFetchJson(`/api/auth/status?t=${Date.now()}`);
-    if (!res || !res.success) return;
+    if (!res || !res.success) throw new Error(res?.error || "Could not load account settings.");
 
+    if (generation !== _accountStatusGeneration) return;
     currentAccountData = res;
     const isGuest = !res.authenticated || !!res.is_guest || (res.active_account && res.active_account.email === "primary@flow.local" && !res.active_account.google_id);
     const isAuthenticated = !isGuest && !!res.active_account;
@@ -9971,7 +11133,7 @@ async function loadAccountSettingsView() {
       }
     }
   } catch (err) {
-    console.debug("[ACCOUNT] Failed to load account view:", err);
+    if(generation === _accountStatusGeneration)settingsError(err.message || "Could not load account settings.");
   }
 }
 
@@ -10044,6 +11206,9 @@ async function handleSwitchAccountFromModal(accountId) {
 }
 
 async function handleSwitchAccountDirect(accountId) {
+  if(_accountMutationPending)return;
+  _accountMutationPending=true;
+  ++_accountStatusGeneration;
   try {
     if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
     const res = await fetch("/api/auth/switch", {
@@ -10053,6 +11218,7 @@ async function handleSwitchAccountDirect(accountId) {
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
+      if(data.saved===true){await loadAccountSettingsView();reloadAllApplicationMemory();}
       throw new Error(data.error || "Failed to switch account.");
     }
     await loadAccountSettingsView();
@@ -10063,10 +11229,13 @@ async function handleSwitchAccountDirect(accountId) {
   } catch (err) {
     if (typeof vfAlert === "function") vfAlert("Could not switch account: " + err.message);
     else if (typeof vfToast === "function") vfToast("Could not switch account: " + err.message, true);
-  }
+  } finally {_accountMutationPending=false;}
 }
 
 async function handleSimpleSignOut() {
+  if(_accountMutationPending)return;
+  _accountMutationPending=true;
+  try {
   if (!await vfConfirm({
     title: "Sign Out",
     badge: "Account Session",
@@ -10078,20 +11247,26 @@ async function handleSimpleSignOut() {
   })) return;
   try {
     if (typeof closeSubModal === "function") closeSubModal("account-switch-sub-modal");
-    await fetch("/api/auth/logout", {
+    const response = await fetch("/api/auth/logout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+    const data = await response.json();
+    if (!response.ok || data?.success !== true) {if(data?.saved===true){await loadAccountSettingsView();reloadAllApplicationMemory();}throw new Error(data?.error || "Could not sign out.");}
     await loadAccountSettingsView();
     reloadAllApplicationMemory();
     if (typeof vfToast === "function") vfToast("Signed out.");
   } catch (err) {
-    console.debug("[ACCOUNT] Sign out error:", err);
+    settingsError(err.message || "Could not sign out.");
   }
+  } finally {_accountMutationPending=false;}
 }
 
 async function handleGoogleAccountSignIn() {
+  if(_googleSignInPending)return;
+  _googleSignInPending=true;
+  const generation=++_googleSignInGeneration;
   const btn = document.getElementById("btn-google-signin");
   const btnText = document.getElementById("btn-google-signin-text");
   const feedback = document.getElementById("simple-account-feedback");
@@ -10111,19 +11286,24 @@ async function handleGoogleAccountSignIn() {
       throw new Error(data.error || "Could not launch Google Sign-In.");
     }
 
+    if(generation!==_googleSignInGeneration)return;
     const pairToken = data.pair_token;
     if (btnText) btnText.textContent = "Waiting for Google authorization in browser...";
     if (typeof vfToast === "function") vfToast("Opening Google Sign-In in browser...");
 
     if (googleAuthPollTimer) clearInterval(googleAuthPollTimer);
 
+    let polling=false;
     let attempts = 0;
     const maxAttempts = 80; // ~120s
     googleAuthPollTimer = setInterval(async () => {
+      if(polling || generation!==_googleSignInGeneration)return;
+      polling=true;
       attempts++;
       if (attempts > maxAttempts) {
         clearInterval(googleAuthPollTimer);
         googleAuthPollTimer = null;
+        _googleSignInPending=false;polling=false;
         if (btn) btn.disabled = false;
         if (btnText) btnText.textContent = "Continue with Google";
         if (feedback) {
@@ -10136,7 +11316,10 @@ async function handleGoogleAccountSignIn() {
       try {
         const pollRes = await fetch(`/api/auth/google/status?pair_token=${encodeURIComponent(pairToken)}&t=${Date.now()}`);
         const pollData = await pollRes.json();
+        if(generation!==_googleSignInGeneration)return;
+        if(!pollRes.ok || pollData?.success===false)throw new Error(pollData?.error||"Could not check sign-in status.");
         if (pollData && pollData.claimed) {
+          _googleSignInPending=false;
           clearInterval(googleAuthPollTimer);
           googleAuthPollTimer = null;
           if (btn) btn.disabled = false;
@@ -10151,10 +11334,13 @@ async function handleGoogleAccountSignIn() {
             vfToast("Signed in as " + (pollData.active_account?.username || pollData.active_account?.email || "Google user"));
           }
         }
-      } catch (_) {}
+      } catch (err) {if(generation===_googleSignInGeneration && feedback){feedback.className="account-feedback-msg error";feedback.textContent=err.message || "Could not check sign-in status.";}}
+      finally {polling=false;}
     }, 1500);
 
   } catch (err) {
+    if(generation!==_googleSignInGeneration)return;
+    _googleSignInPending=false;
     if (btn) btn.disabled = false;
     if (btnText) btnText.textContent = "Continue with Google";
     if (feedback) {
@@ -10165,6 +11351,9 @@ async function handleGoogleAccountSignIn() {
 }
 
 function reloadAllApplicationMemory() {
+  if(typeof loadDashboardTheme === "function")loadDashboardTheme();
+  ++_settingsGeneration;
+  for(const key of Object.keys(_settingConfirmed))delete _settingConfirmed[key];
   // Seamlessly reload all application state without page reload
   resetAllSubViews();
   resetPageScroll();
@@ -10509,7 +11698,10 @@ try {
 } catch (_) {}
 
 async function checkForAppUpdates(manual = false) {
+  if(_updateCheckPending)return;
+  _updateCheckPending=true;
   const btn = document.getElementById("btn-check-updates");
+  if(btn)btn.disabled=true;
   const row = document.getElementById("update-status-row");
   const msg = document.getElementById("update-status-message");
 
@@ -10524,7 +11716,7 @@ async function checkForAppUpdates(manual = false) {
     const data = await res.json();
     if (btn) btn.textContent = "Check for updates";
 
-    if (!data || !data.success) {
+    if (!res.ok || !data || !data.success) {
       if (manual && row && msg) {
         row.style.display = "flex";
         msg.innerHTML = '<span style="color:var(--danger,#ef4444);">Could not check for updates. Check internet access.</span>';
@@ -10562,7 +11754,7 @@ async function checkForAppUpdates(manual = false) {
       row.style.display = "flex";
       msg.innerHTML = '<span style="color:var(--danger,#ef4444);">Could not check for updates. Check internet access.</span>';
     }
-  }
+  } finally {_updateCheckPending=false;if(btn)btn.disabled=false;}
 }
 
 try {

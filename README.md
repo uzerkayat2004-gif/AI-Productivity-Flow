@@ -129,6 +129,17 @@ Voice Flow lets you speak naturally and injects clean, formatted text directly i
 * **Encrypted Backups**: The `.flowvault` export/import format secures account profiles, preferences, and custom dictionaries using **AES-256-GCM** encryption.
 * **Loopback Desktop API**: The internal GUI HTTP and WebSocket server binds strictly to `127.0.0.1:8991` with Origin, Host, and port verification to prevent cross-origin browser access.
 
+### Telemetry & Crash Reporting
+
+AI Productivity Flow is strictly privacy-first:
+* **Completely Opt-In & Disabled by Default**: Zero telemetry or diagnostic network requests occur unless you explicitly toggle crash reporting on.
+* **Zero Audio / Transcript Exposure**: Crash reports never contain microphone audio, speech transcripts, dictation text, clipboard contents, or request payloads.
+* **Strict Privacy Scrubbing**: Stack traces and error messages pass through a local privacy scrubber before leaving your machine:
+  * Personal username paths (e.g. `/Users/<username>/...` and `C:\Users\<username>\...`) are scrubbed and replaced with `[REDACTED]`.
+  * API keys and secrets (`OPENAI_*`, `ANTHROPIC_*`, `GROQ_*`, `GEMINI_*`, `DEEPGRAM_*`, `SENTRY_*`, `AWS_*`, etc.) are stripped.
+  * Performance tracing and user profiling are completely disabled (0% sample rate).
+* **How to Verify or Change**: Open **Settings -> System -> Maintenance** to toggle "Send anonymous crash reports (via Sentry)" at any time. You can also run `voice-flow --test-crash-reporting` to test your current preference.
+
 ---
 
 ## ⌨️ Global Shortcuts

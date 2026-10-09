@@ -15,3 +15,6 @@ v1.0.0 — First public release: Video Flow, Audio Flow, Voice Flow. Windows ins
 ### Professional Installers
 - **Windows (`AI-Productivity-Flow-Setup-x64.exe`)**: Modern Inno Setup wizard, official app icon, publisher "Uzer Kayat", Start Menu shortcut, optional Desktop shortcut, and clean uninstaller in Windows Apps & Features.
 - **macOS (`AI-Productivity-Flow-macOS.dmg`)**: Branded drag-to-Applications installer with custom artwork matching the website palette, official icon, and universal support. Secondary `.zip` archive provided.
+
+### Privacy & Reliability
+- **Opt-in Crash Reporting (Sentry)**: Privacy-preserving crash reporting that is disabled by default, scrubs personal paths and API keys, never captures audio/transcripts, and requires explicit user consent.

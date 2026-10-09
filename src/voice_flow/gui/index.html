@@ -42,7 +42,7 @@
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
   <link rel="stylesheet" href="workspace-ui.css?v=20261005-audiopolish">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
-  <link rel="stylesheet" href="onboarding-hero.css">
+  <link rel="stylesheet" href="onboarding-hero.css?v=20261007-vector">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
 
@@ -207,10 +207,13 @@
 
         <nav class="nav-group">
 
+          <div class="nav-item" onclick="replayOnboarding()" title="Welcome Tour & Overview">
+            <span class="nav-icon"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
+            <span class="nav-label">Welcome Tour</span>
+          </div>
+
           <div class="nav-item" onclick="openSettings('general')">
-
             <span class="nav-icon"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> <span class="nav-label">Settings</span>
-
           </div>
 
           <div class="nav-item theme-nav-item" id="theme-toggle-nav" onclick="toggleTheme()" title="Switch between Light and Dark mode">
@@ -718,10 +721,10 @@
 </div></article>
 <article class="flow-card flow-ux flow-mode flow-mode-cleanup"><div aria-hidden="true" class="flow-mode-art"><svg fill="none" viewbox="0 0 120 120"><circle class="flow-art-disc" cx="60" cy="60" r="52"></circle><circle class="flow-art-ring" cx="60" cy="60" r="43"></circle><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><path d="m46 47 7 7 14-15M43 71h34M43 81h25"></path></g></svg></div><div class="flow-card-head"><span aria-hidden="true" class="flow-mode-step">02</span>
 <span aria-hidden="true" class="flow-feature-icon flow-feature-icon-secondary"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewbox="0 0 24 24"><path d="m15 3 1.5 4.5L21 9l-4.5 1.5L15 15l-1.5-4.5L9 9l4.5-1.5ZM4 15h6M4 19h13M4 5h3"></path></svg></span>
-<h2 class="flow-card-title">Text cleanup</h2>
+<h2 class="flow-card-title">Polishing</h2>
 <p class="flow-card-sub">Tidy up your words after dictation.</p>
 <label class="toggle-switch flow-card-toggle">
-<input aria-label="Turn text cleanup on or off" autocomplete="off" id="toggle-polishing" onchange="togglePolishingSetting(this.checked)" type="checkbox"/>
+<input aria-label="Turn polishing on or off" autocomplete="off" id="toggle-polishing" onchange="togglePolishingSetting(this.checked)" type="checkbox"/>
 <span class="toggle-slider"></span>
 </label>
 </div><div class="flow-mode-controls">
@@ -738,7 +741,7 @@
 <details class="flow-disclosure flow-card-details">
 <summary>More options</summary>
 <div class="flow-legacy-line">Fallback: <strong id="vf-polish-active-engine">Local Deterministic</strong></div>
-<p class="flow-details-hint">When cleanup is off, your saved cleanup model is remembered and restored when you turn it back on.</p>
+<p class="flow-details-hint">Off keeps your cleanup level and dictionary corrections. On enables polishing styles and voice commands. Your saved model is remembered.</p>
 </details>
 </div></article>
 </div>
@@ -998,20 +1001,19 @@
 
             </div>
 
-            <div style="display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip af2-toggle-chip">
-
-              <span style="font-size: 13px; font-weight: 700; color: var(--text);">Enabled</span>
-
-              <span id="exec-audio-status-badge" class="audio-status-badge" hidden style="display: none;">&#9679; Audio Flow Active</span>
-
-              <label class="toggle-switch">
-
-                <input type="checkbox" id="toggle-audio-flow-titlebar" checked onchange="toggleAudioFlowSetting(this.checked)">
-
-                <span class="toggle-slider"></span>
-
-              </label>
-
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <button type="button" class="af-guide-trigger-btn" id="af-guide-trigger-btn" onclick="startAudioFlowGuide()" title="Interactive step-by-step Audio Flow guide" aria-label="Audio Flow Feature Guide">
+                <span class="af-guide-btn-icon">🎧</span>
+                <span>Feature Guide</span>
+              </button>
+              <div style="display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip af2-toggle-chip">
+                <span style="font-size: 13px; font-weight: 700; color: var(--text);">Enabled</span>
+                <span id="exec-audio-status-badge" class="audio-status-badge" hidden style="display: none;">&#9679; Audio Flow Active</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="toggle-audio-flow-titlebar" checked onchange="toggleAudioFlowSetting(this.checked)">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
             </div>
 
           </div>
@@ -1213,7 +1215,7 @@
 
         <!-- AUDIO FLOW PROVIDER DETAIL VIEW -->
         <div id="audio-providers-view-detail" style="display: none; margin-bottom: 24px;">
-          <div class="detail-header-bar">
+          <div class="detail-header-bar" id="audio-detail-header-bar">
             <button class="btn-back" onclick="closeAudioProviderDetail()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
               <span>Back to Audio Flow</span>
@@ -1233,7 +1235,7 @@
           </div>
 
           <!-- CONNECTIONS CARD (9ROUTER STYLE) -->
-          <div class="nine-router-card">
+          <div class="nine-router-card" id="audio-detail-connections-card">
             <div class="connections-header-9r">
               <h2 class="connections-title-9r">Connections</h2>
               <div class="connections-controls-9r">
@@ -2273,6 +2275,83 @@
     </main>
   </div>
 
+  <!-- IN-APP AUDIO FLOW INTERACTIVE FEATURE GUIDANCE OVERLAY -->
+  <div id="audioflow-guide-overlay" class="af-guide-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="af-guide-title">
+    <div class="af-guide-backdrop" onclick="/* prevent click through */"></div>
+    <div id="af-guide-spotlight-box" class="af-guide-spotlight-box">
+      <span class="af-guide-spotlight-pulse"></span>
+      <span class="af-guide-spotlight-label" id="af-guide-spotlight-label">FEATURE SPOTLIGHT</span>
+    </div>
+
+    <!-- Floating Step Guidance Dialog Card -->
+    <div id="af-guide-card" class="af-guide-card" role="region" aria-label="Audio Flow Guidance">
+      <!-- Card Header: Step Pill, Audio Toggle, & Close -->
+      <div class="af-guide-card-head">
+        <div class="af-guide-step-tag">
+          <span class="af-guide-dot"></span>
+          <span id="af-guide-step-counter">STEP 1 OF 4 · READ &amp; SUMMARY</span>
+        </div>
+        <div class="af-guide-head-right">
+          <button class="af-guide-audio-btn" id="af-guide-audio-btn" onclick="toggleAudioFlowGuideAudio()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+            <span id="af-guide-audio-icon">🔊</span>
+            <span id="af-guide-audio-text">Voiceover</span>
+          </button>
+          <button class="af-guide-close-btn" onclick="stopAudioFlowGuide()" title="Close guide" aria-label="Close guide">✕</button>
+        </div>
+      </div>
+
+      <!-- Step Title & Description -->
+      <h2 class="af-guide-title" id="af-guide-title">The Two Core Modes: Read &amp; Summary</h2>
+      <p class="af-guide-desc" id="af-guide-desc">Hear exact text read aloud word-for-word, or extract key ideas into an engaging two-voice podcast summary.</p>
+
+      <!-- Step 4 Real Video Showcase Widget: Twitter / Screen Workflow -->
+      <div id="af-guide-screen-sim" class="af-guide-screen-sim" style="display: none;">
+        <div class="af-sim-window">
+          <div class="af-sim-bar">
+            <span class="af-sim-dot red"></span>
+            <span class="af-sim-dot yellow"></span>
+            <span class="af-sim-dot green"></span>
+            <span class="af-sim-url">twitter.com / x.com · Live Highlight Demo</span>
+          </div>
+          <div class="af-sim-video-wrap">
+            <video id="af-guide-real-demo-video" class="af-sim-video" src="assets/onboarding/s3_audioflow_demo.mp4" poster="assets/onboarding/s3_audioflow_poster.jpg" playsinline muted loop preload="auto"></video>
+            <div class="af-sim-video-overlay-badge">
+              <span class="af-sim-live-dot"></span>
+              <span>Twitter Screen Demo</span>
+            </div>
+          </div>
+          <div class="af-sim-video-caption">
+            <span>💡 Highlight any tweet or text across Windows to trigger floating instant audio.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Synchronized Caption Pill -->
+      <div class="af-guide-caption-pill">
+        <span class="af-guide-wave" id="af-guide-wave-indicator" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span class="af-guide-caption-text" id="af-guide-subtitle-text">Welcome inside Audio Flow! Here, you have two powerful ways to listen.</span>
+      </div>
+
+      <!-- Bottom Navigation Controls -->
+      <div class="af-guide-actions">
+        <button class="af-guide-btn-back" id="af-guide-btn-back" onclick="prevAudioFlowGuideStep()">
+          ← Back
+        </button>
+        <div class="af-guide-dots" id="af-guide-dots">
+          <span class="active" onclick="gotoAudioFlowGuideStep(1)"></span>
+          <span onclick="gotoAudioFlowGuideStep(2)"></span>
+          <span onclick="gotoAudioFlowGuideStep(3)"></span>
+          <span onclick="gotoAudioFlowGuideStep(4)"></span>
+        </div>
+        <button class="af-guide-btn-next" id="af-guide-btn-next" onclick="nextAudioFlowGuideStep()">
+          Next: API Keys →
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ONBOARDING: WELCOME SCREEN + NARRATED TOUR -->
 
   <div id="onboarding-overlay" class="onboarding-overlay hidden">
@@ -2281,108 +2360,673 @@
       <!-- SLIDE 0: AUTHENTIC SCENE 1 WELCOME HERO (100% FAITHFUL TO MASTER VIDEO) -->
       <div class="onboarding-slide welcome-hero-slide" data-slide="0">
         <div class="scene1-stage-viewport">
-          <!-- Light Mode Master Video (Native 1080p, identical to master video) -->
-          <video id="scene1-hero-video" class="scene1-media-element light-only" src="assets/onboarding/scene_1_master.mp4" poster="assets/onboarding/scene_1_master_poster.png" autoplay loop muted playsinline></video>
-          <!-- Dark Mode Master Scene (Native dark theme palette #0f1015 & #f3e5d8) -->
-          <img id="scene1-hero-dark-img" class="scene1-media-element dark-only" src="assets/onboarding/scene_1_master_dark.png" alt="AI Productivity Flow Welcome Scene" />
+          <!-- Native vector Scene 1: every element is live HTML/SVG so it stays razor-sharp at any size / DPI -->
+          <div class="s1-stage" id="s1-stage">
+            <!-- Background: soft colour fields + silky vector ribbons -->
+            <div class="s1-bg"></div>
+            <svg class="s1-ribbons" id="s1-ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true"></svg>
 
-          <!-- Top-Right Skip Tour Button -->
+            <!-- Floating side cards -->
+            <div class="s1-side s1-side-1">
+              <div class="s1-side-row">
+                <svg class="s1-side-ic" viewBox="0 0 48 48"><defs><linearGradient id="s1g-doc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fdba74"/><stop offset="1" stop-color="#ea580c"/></linearGradient></defs><rect x="2" y="2" width="44" height="44" rx="12" fill="url(#s1g-doc)"/><path d="M15 11h13l7 7v19a2 2 0 0 1-2 2H15a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z" fill="#fff"/><path d="M28 11v7h7" fill="#fed7aa"/><rect x="17" y="23" width="14" height="2.6" rx="1.3" fill="#f97316"/><rect x="17" y="28" width="14" height="2.6" rx="1.3" fill="#f97316"/><rect x="17" y="33" width="9" height="2.6" rx="1.3" fill="#f97316"/></svg>
+                <span class="s1-side-title">Summarize<br>this article</span>
+              </div>
+              <span class="s1-side-line"></span><span class="s1-side-line short"></span>
+            </div>
+
+            <div class="s1-side s1-side-2">
+              <div class="s1-side-row">
+                <svg class="s1-side-ic" viewBox="0 0 48 48"><defs><linearGradient id="s1g-mic" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><rect x="16" y="4" width="16" height="26" rx="8" fill="url(#s1g-mic)"/><path d="M10 22a14 14 0 0 0 28 0" fill="none" stroke="#7c3aed" stroke-width="3.4" stroke-linecap="round"/><path d="M24 36v7M17 44h14" stroke="#7c3aed" stroke-width="3.4" stroke-linecap="round"/><rect x="19" y="9" width="3" height="10" rx="1.5" fill="#ede9fe" opacity=".8"/></svg>
+                <span class="s1-side-title">Meeting notes<br>in seconds</span>
+              </div>
+              <div class="s1-eq" aria-hidden="true">
+                <i style="--h:10"></i><i style="--h:22"></i><i style="--h:14"></i><i style="--h:30"></i><i style="--h:18"></i><i style="--h:36"></i><i style="--h:12"></i><i style="--h:26"></i><i style="--h:40"></i><i style="--h:20"></i><i style="--h:30"></i><i style="--h:14"></i><i style="--h:24"></i><i style="--h:34"></i><i style="--h:16"></i><i style="--h:28"></i><i style="--h:10"></i><i style="--h:22"></i><i style="--h:30"></i><i style="--h:12"></i><i style="--h:20"></i><i style="--h:8"></i>
+              </div>
+            </div>
+
+            <div class="s1-side s1-side-3">
+              <div class="s1-side-row">
+                <svg class="s1-side-ic" viewBox="0 0 48 48"><defs><linearGradient id="s1g-pdf" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f87171"/><stop offset="1" stop-color="#dc2626"/></linearGradient></defs><rect x="2" y="2" width="44" height="44" rx="12" fill="url(#s1g-pdf)"/><path d="M24 11c-2 0-2.4 3-1 7.5 1.6 5.2 5.4 11.2 9.6 13.6 2.6 1.4 4.6.8 4.4-1-.2-1.8-4.4-2.6-10.6-1.4-6 1.2-11.6 4-12.6 6.6-.8 2 1.6 2.8 3.6.6 2.6-2.8 5.2-9.6 6.2-15.2.8-4.6 2.4-10.7.4-10.7z" fill="none" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/></svg>
+                <span class="s1-side-title">Explain this<br>PDF visually</span>
+              </div>
+              <span class="s1-side-line"></span><span class="s1-side-line short"></span>
+            </div>
+
+            <div class="s1-side s1-side-4">
+              <div class="s1-side-row">
+                <svg class="s1-side-ic" viewBox="0 0 48 48"><defs><linearGradient id="s1g-voice" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><path d="M20 6c-8 0-14 6-14 14 0 5 2.4 8.6 4 11v11h14v-5h4a3 3 0 0 0 3-3v-5l3-1-3-6c0-9-3-16-11-16z" fill="url(#s1g-voice)"/><path d="M35 17a8 8 0 0 1 0 12M39 13a14 14 0 0 1 0 20" fill="none" stroke="#8b5cf6" stroke-width="2.8" stroke-linecap="round"/></svg>
+                <span class="s1-side-title">Voice<br>commands</span>
+              </div>
+              <span class="s1-side-line"></span><span class="s1-side-line short"></span>
+            </div>
+
+            <!-- Handwritten note + app dock -->
+            <div class="s1-hand">Works inside the apps<br>you already use</div>
+            <svg class="s1-hand-arrow" viewBox="0 0 80 50" aria-hidden="true"><path d="M76 6C50 4 24 14 10 40" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M4 30l6 12 12-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="s1-dock">
+              <span class="s1-app s1-app-word">W</span>
+              <span class="s1-app s1-app-chrome"><i></i></span>
+              <span class="s1-app s1-app-notion">N</span>
+              <span class="s1-app s1-app-notes"><i></i><i></i><i></i></span>
+              <svg class="s1-app s1-app-vscode" viewBox="0 0 48 48"><path d="M34 4l10 5v30l-10 5-18-16-8 6-4-2V16l4-2 8 6zM34 14L22 24l12 10z" fill="#0a7ad4" fill-rule="evenodd"/><path d="M34 4l10 5v30l-10 5z" fill="#1f9cf0"/></svg>
+            </div>
+
+            <!-- Header -->
+            <div class="s1-logo"><img src="assets/onboarding/s1_logo.png" alt="" /></div>
+            <h1 class="s1-title">Welcome to <span>AI Productivity Flow</span></h1>
+            <p class="s1-sub">From <b class="c-video">text to video</b>. From <b class="c-audio">text to audio</b>. From <b class="c-voice">voice to text</b>.</p>
+            <p class="s1-note">Without switching apps.</p>
+
+            <!-- Three feature cards -->
+            <button class="s1-card s1-card-1" id="card-feature-1" onclick="gotoOnboardingSlide(1)" aria-label="1. Video Flow">
+              <span class="s1-card-body">
+                <span class="s1-card-head">
+                  <span class="s1-card-ic"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="12" height="10" rx="2.4" fill="#fff"/><path d="M16 11l5-3.2v8.4L16 13z" fill="#fff"/></svg></span>
+                  <span class="s1-card-titles"><b>1. Video Flow</b><small>Turn text into visual explanations</small></span>
+                  <span class="s1-badge"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" fill="currentColor"/></svg>FEATURED</span>
+                </span>
+                <span class="s1-prev"><video class="s1-prev-video" id="card-video-1" src="assets/onboarding/s1_prev_video.mp4" poster="assets/onboarding/s1_prev_video.jpg" muted playsinline loop preload="auto"></video></span>
+                <span class="s1-card-foot">Auto Slides · Motion Graphics · Voiceover</span>
+              </span>
+            </button>
+
+            <button class="s1-card s1-card-2" id="card-feature-2" onclick="gotoOnboardingSlide(2)" aria-label="2. Audio Flow">
+              <span class="s1-card-body">
+                <span class="s1-card-head">
+                  <span class="s1-card-ic"><svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><rect x="3" y="13" width="5" height="8" rx="2" fill="#fff"/><rect x="16" y="13" width="5" height="8" rx="2" fill="#fff"/></svg></span>
+                  <span class="s1-card-titles"><b>2. Audio Flow</b><small>Convert selected text into audio</small></span>
+                  <span class="s1-badge">Deepgram</span>
+                </span>
+                <span class="s1-prev"><video class="s1-prev-video" id="card-video-2" src="assets/onboarding/audio_flow_demo.mp4" poster="assets/onboarding/s1_prev_audio.png" muted playsinline loop preload="auto"></video></span>
+                <span class="s1-card-foot">Instant Hotkey · 50+ Voices · Zero Lag</span>
+              </span>
+            </button>
+
+            <button class="s1-card s1-card-3" id="card-feature-3" onclick="gotoOnboardingSlide(3)" aria-label="3. Voice Flow">
+              <span class="s1-card-body">
+                <span class="s1-card-head">
+                  <span class="s1-card-ic"><svg viewBox="0 0 24 24"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="#fff"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+                  <span class="s1-card-titles"><b>3. Voice Flow</b><small>Hey Voice Flow make this as a prompt.</small></span>
+                  <span class="s1-badge">AI Polish</span>
+                </span>
+                <span class="s1-prev"><video class="s1-prev-video" id="card-video-3" src="assets/onboarding/voice_flow_demo.mp4" poster="assets/onboarding/s1_prev_voice.png" muted playsinline loop preload="auto"></video></span>
+                <span class="s1-card-foot">Global Hotkey · Works in Every App · Zero Lag</span>
+              </span>
+            </button>
+
+            <!-- Trust strip -->
+            <div class="s1-trust">
+              <div class="s1-trust-item">
+                <svg viewBox="0 0 24 24"><path d="M7.5 10V7.5a4.5 4.5 0 0 1 9 0V10" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="4.5" y="10" width="15" height="11" rx="3" fill="#f59e0b"/><circle cx="12" cy="15.5" r="1.8" fill="#fff"/></svg>
+                <div><b>Local-first &amp; Private</b><small>Your data stays on your device</small></div>
+              </div>
+              <div class="s1-trust-item">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#22c55e"/><path d="M7.5 12.3l3 3 6-6.3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <div><b>Works offline &amp; with your keys</b><small>Use local models or your own API keys</small></div>
+              </div>
+              <div class="s1-trust-item">
+                <svg viewBox="0 0 24 24"><path d="M13.5 2L5 13.5h6L9.5 22 19 9.5h-6.2z" fill="#f59e0b"/></svg>
+                <div><b>Open Source</b><small>Free forever · Apache-2.0</small></div>
+              </div>
+              <div class="s1-trust-item">
+                <svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 20h6M12 16.5V20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <div><b>Windows &amp; macOS</b><small>Built for your workflow</small></div>
+              </div>
+            </div>
+
+            <!-- Live caption pill -->
+            <div class="s1-caption">
+              <span class="s1-wave" id="scene1-wave-indicator" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="s1-caption-text" id="scene1-subtitle-text">Welcome to AI Productivity Flow! We're thrilled to have you here.</span>
+              <button class="s1-audio-toggle" id="scene1-audio-btn" onclick="toggleOnboardingNarration()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+                <span class="s1-audio-icon" id="scene1-audio-icon">🔊</span>
+                <span class="s1-audio-text" id="scene1-audio-text">Voiceover</span>
+              </button>
+            </div>
+
+            <!-- Bottom navigation -->
+            <div class="s1-step"><i></i>Step 1 of 5 · Welcome</div>
+            <button class="s1-theme" id="scene1-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+              <span class="s1-theme-ic" aria-hidden="true">
+                <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+              </span>
+              <span id="scene1-theme-label">Dark Mode</span>
+            </button>
+            <button class="s1-next" id="scene1-next-btn" onclick="startOnboardingTour()">Next: Video Flow <span aria-hidden="true">→</span></button>
+          </div>
+
+          <!-- Skip Tour (outside the scaled stage so it keeps a constant, crisp size) -->
           <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
             <span>Skip Tour</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
-
-          <!-- 1:1 Interactive Hotspot Grid (Clickable targets precisely aligned over the visual elements) -->
-          <div class="scene1-hotspots-grid">
-            <!-- 1. Video Flow Card Target -->
-            <button class="scene1-hotspot-item hotspot-card-1" onclick="gotoOnboardingSlide(1)" title="Video Flow - Feature 1" aria-label="1. Video Flow"></button>
-            <!-- 2. Audio Flow Card Target -->
-            <button class="scene1-hotspot-item hotspot-card-2" onclick="gotoOnboardingSlide(2)" title="Audio Flow - Feature 2" aria-label="2. Audio Flow"></button>
-            <!-- 3. Voice Flow Card Target -->
-            <button class="scene1-hotspot-item hotspot-card-3" onclick="gotoOnboardingSlide(3)" title="Voice Flow - Feature 3" aria-label="3. Voice Flow"></button>
-
-            <!-- Dark / Light Mode Toggle Button Target -->
-            <button class="scene1-hotspot-item hotspot-theme" id="scene1-theme-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode" aria-label="Toggle Theme"></button>
-
-            <!-- Next: Video Flow Button Target -->
-            <button class="scene1-hotspot-item hotspot-next" id="scene1-next-btn" onclick="startOnboardingTour()" title="Next: Video Flow" aria-label="Next: Video Flow"></button>
-          </div>
         </div>
       </div>
-      <!-- SLIDE 1: AUDIO FLOW -->
-      <div class="onboarding-slide" data-slide="1">
-        <span class="onboarding-kicker">FEATURE 1 · AUDIO FLOW</span>
-        <h2>🔊 Audio Flow: Instant Text to Speech &amp; Summaries</h2>
-        <p class="onboarding-copy">Welcome to Audio Flow, our first feature. Imagine scrolling through Twitter or reading a long document that you don't want to read. Simply select the text, and a small Audio Flow button appears. Click it to convert the article into a spoken audio summary.</p>
-        <div class="onboarding-demo">
-          <div class="onboarding-demo-doc">
-            <span class="onboarding-demo-sel">"Long Twitter thread or article selected..."</span>
-            <span class="onboarding-demo-fab">🔊</span>
-          </div>
-        </div>
-        <p class="onboarding-hint">Pause anytime to read at your own pace or adjust narration speed.</p>
-      </div>
+      <!-- SLIDE 1: AUTHENTIC SCENE 2 VIDEO FLOW DEMO -->
+      <div class="onboarding-slide welcome-hero-slide" data-slide="1">
+        <div class="scene2-stage-viewport">
+          <div class="s2-stage" id="s2-stage">
+            <!-- Background: soft color fields + silky vector ribbons -->
+            <div class="s1-bg"></div>
+            <svg class="s1-ribbons" id="s2-ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true"></svg>
 
-      <!-- SLIDE 2: VIDEO FLOW -->
-      <div class="onboarding-slide" data-slide="2">
-        <span class="onboarding-kicker">FEATURE 2 · VIDEO FLOW</span>
-        <h2>🎬 Video Flow: Visual Summaries &amp; Explainers</h2>
-        <p class="onboarding-copy">Next is Video Flow, our second feature. If you want to convert that article into a visual summary, Video Flow transforms your document into an animated visual explainer right on your screen.</p>
-        <div class="onboarding-demo">
-          <div class="onboarding-demo-video">
-            <span class="onboarding-demo-play">▶</span>
-            <small>Article → Visual Explanation Motion Graphic</small>
-          </div>
-        </div>
-        <p class="onboarding-hint">Switch seamlessly from audio to visual understanding in one click.</p>
-      </div>
-
-      <!-- SLIDE 3: VOICE FLOW DICTATION FOCUS -->
-      <div class="onboarding-slide" data-slide="3">
-        <span class="onboarding-kicker">FEATURE 3 · VOICE FLOW</span>
-        <h2>🗣️ Voice Flow: Speak &amp; Post Your Thoughts</h2>
-        <p class="onboarding-copy">Now that you have all the context about the article, you can use the Voice Flow feature to post about the article by speaking, and it will write it down for you. Zoom in on your context and let your voice do the writing.</p>
-        <div class="onboarding-kbd-diagram">
-          <span class="kbd-pill">🖱️ Hold Middle Click</span>
-          <span class="onboarding-kbd-arrow">→</span>
-          <span class="kbd-pill">💬 Speak Your Thoughts</span>
-          <span class="onboarding-kbd-arrow">→</span>
-          <span class="kbd-pill">⌨️ Release — Text Appears</span>
-        </div>
-        <p class="onboarding-hint">AI polishing automatically cleans grammar and spoken punctuation as you talk.</p>
-      </div>
-
-      <!-- SLIDE 4: SUMMARY OF ALL FEATURES -->
-      <div class="onboarding-slide" data-slide="4">
-        <span class="onboarding-kicker">FEATURE SUMMARY</span>
-        <h2>⚡ Complete System Capabilities Overview</h2>
-        <p class="onboarding-copy">Here is the complete overview of all integrated features built into AI Productivity Flow:</p>
-        <ul class="onboarding-tools">
-          <li><span>🔊</span><div><strong>1. Audio Summary</strong><small>Convert long articles &amp; text into spoken summaries</small></div></li>
-          <li><span>🎬</span><div><strong>2. Visual Summary</strong><small>Transform documents into animated visual explainer videos</small></div></li>
-          <li><span>🗣️</span><div><strong>3. Voice Flow Dictation</strong><small>Speak your thoughts &amp; dictate across any Windows application</small></div></li>
-          <li><span>📄</span><div><strong>4. Article Conversion</strong><small>Convert articles into audio or visual formats</small></div></li>
-          <li><span>📊</span><div><strong>5. Insights &amp; History</strong><small>Track telemetry, speaking velocity, streaks, and dictionary</small></div></li>
-        </ul>
-      </div>
-
-      <!-- SLIDE 5: GITHUB & FEEDBACK -->
-      <div class="onboarding-slide" data-slide="5">
-        <span class="onboarding-kicker">COMMUNITY &amp; FEEDBACK</span>
-        <h2>⭐ Join Us on GitHub &amp; Give Feedback</h2>
-        <p class="onboarding-copy">If you like AI Productivity Flow, please give us a star on GitHub! You can access reports and provide feedback to help us build the best voice tools for everyone.</p>
-        <div class="onboarding-github-box">
-          <div class="github-badge-card">
-            <span style="font-size: 28px;">⭐</span>
-            <div>
-              <strong>Star AI Productivity Flow on GitHub</strong>
-              <small>Access reports, file issues, and share your feedback</small>
+            <!-- Top Header -->
+            <div class="s2-header">
+              <span class="s2-badge">
+                <svg viewBox="0 0 24 24"><rect x="3" y="7" width="12" height="10" rx="2.4" fill="currentColor"/><path d="M16 11l5-3.2v8.4L16 13z" fill="currentColor"/></svg>
+                FEATURE 1 · VIDEO FLOW
+              </span>
+              <h1 class="s2-title">Transform Any Text into <span>Visual Explanations</span></h1>
+              <p class="s2-sub">Paste any text or select an article — Video Flow creates animated motion slides with voiceover.</p>
             </div>
-            <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" class="btn-github-link">Give Star ⭐</a>
+
+            <!-- Expansive Desktop Computer Monitor Display in Center -->
+            <div class="s2-monitor-wrapper">
+              <div class="s2-monitor-frame" id="s2-desktop-frame">
+                <!-- Monitor Top Bezel with Camera Dot & Display Spec -->
+                <div class="s2-monitor-bezel-top">
+                  <div class="s2-bezel-left">
+                    <span class="s2-monitor-dot"></span>
+                    <span class="s2-monitor-brand">AI PRODUCTIVITY FLOW</span>
+                  </div>
+                  <div class="s2-monitor-cam" aria-hidden="true"></div>
+                  <div class="s2-bezel-right">
+                    <span class="s2-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                  </div>
+                </div>
+
+                <!-- Active 16:9 Screen Display -->
+                <div class="s2-screen-viewport">
+                  <video id="scene2-demo-video" class="s2-screen-video" src="assets/onboarding/s2_videoflow_demo.mp4" poster="assets/onboarding/s2_videoflow_poster.jpg" muted playsinline loop preload="auto"></video>
+                </div>
+              </div>
+
+              <!-- Monitor Stand Neck & Base Pedestal -->
+              <div class="s2-stand-neck" aria-hidden="true"></div>
+              <div class="s2-stand-base" aria-hidden="true"></div>
+
+              <!-- Monitor Ambient Radial Glow -->
+              <div class="s2-monitor-glow" aria-hidden="true"></div>
+            </div>
+
+            <!-- Bottom Control and Subtitle Bar -->
+            <div class="s2-controls">
+              <div class="s1-step s2-step"><i></i>Step 2 of 5 · Video Flow</div>
+
+              <div class="s1-caption s2-caption">
+                <span class="s1-wave" id="scene2-wave-indicator" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="s1-caption-text" id="scene2-subtitle-text">Welcome to Video Flow, our first core feature.</span>
+                <button class="s1-audio-toggle" id="scene2-audio-btn" onclick="toggleOnboardingNarration()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+                  <span class="s1-audio-icon" id="scene2-audio-icon">🔊</span>
+                  <span class="s1-audio-text" id="scene2-audio-text">Voiceover</span>
+                </button>
+              </div>
+
+              <div class="s2-actions">
+                <button class="s2-theme-btn" id="scene2-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+                  <span class="s1-theme-ic" aria-hidden="true">
+                    <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+                  </span>
+                  <span id="scene2-theme-label">Dark Mode</span>
+                </button>
+                <button class="s2-back-btn" onclick="gotoOnboardingSlide(0)" title="Back to Welcome">
+                  <span>← Back</span>
+                </button>
+                <button class="s2-next-btn" id="scene2-next-btn" onclick="gotoOnboardingSlide(2)">
+                  Next: Audio Flow <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Skip Tour Badge -->
+            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+              <span>Skip Tour</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+
           </div>
         </div>
-        <p class="onboarding-hint">Your feedback and support drive our next updates!</p>
-        <button class="onboarding-cta" onclick="finishOnboarding()">Finish Tour &amp; Start Using AI Productivity Flow</button>
+      </div>
+
+      <!-- SLIDE 2: AUTHENTIC SCENE 3 AUDIO FLOW DEMO -->
+      <div class="onboarding-slide welcome-hero-slide" data-slide="2">
+        <div class="scene3-stage-viewport">
+          <div class="s3-stage" id="s3-stage">
+            <!-- Background: soft color fields + silky vector ribbons -->
+            <div class="s1-bg"></div>
+            <svg class="s1-ribbons" id="s3-ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true"></svg>
+
+            <!-- Top Header -->
+            <div class="s3-header">
+              <span class="s3-badge">
+                <svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><rect x="3" y="13" width="5" height="8" rx="2" fill="currentColor"/><rect x="16" y="13" width="5" height="8" rx="2" fill="currentColor"/></svg>
+                FEATURE 2 · AUDIO FLOW
+              </span>
+              <h1 class="s3-title">Convert Any Article into <span>Instant Audio Summaries</span></h1>
+              <p class="s3-sub">Highlight text or select an article — Audio Flow plays a natural spoken summary without leaving your workflow.</p>
+            </div>
+
+            <!-- Expansive Desktop Computer Monitor Display in Center -->
+            <div class="s3-monitor-wrapper">
+              <div class="s3-monitor-frame" id="s3-desktop-frame">
+                <!-- Monitor Top Bezel with Camera Dot & Display Spec -->
+                <div class="s3-monitor-bezel-top">
+                  <div class="s3-bezel-left">
+                    <span class="s3-monitor-dot"></span>
+                    <span class="s3-monitor-brand">AI PRODUCTIVITY FLOW</span>
+                  </div>
+                  <div class="s3-monitor-cam" aria-hidden="true"></div>
+                  <div class="s3-bezel-right">
+                    <span class="s3-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                  </div>
+                </div>
+
+                <!-- Active 16:9 Screen Display -->
+                <div class="s3-screen-viewport">
+                  <video id="scene3-demo-video" class="s3-screen-video" src="assets/onboarding/s3_audioflow_demo.mp4" poster="assets/onboarding/s3_audioflow_poster.jpg" muted playsinline loop preload="auto"></video>
+                </div>
+              </div>
+
+              <!-- Monitor Stand Neck & Base Pedestal -->
+              <div class="s3-stand-neck" aria-hidden="true"></div>
+              <div class="s3-stand-base" aria-hidden="true"></div>
+
+              <!-- Monitor Ambient Radial Glow -->
+              <div class="s3-monitor-glow" aria-hidden="true"></div>
+            </div>
+
+            <!-- Bottom Control and Subtitle Bar -->
+            <div class="s3-controls">
+              <div class="s1-step s3-step"><i></i>Step 3 of 5 · Audio Flow</div>
+
+              <div class="s1-caption s3-caption">
+                <span class="s1-wave" id="scene3-wave-indicator" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="s1-caption-text" id="scene3-subtitle-text">Welcome to Audio Flow, our second core feature.</span>
+                <button class="s1-audio-toggle" id="scene3-audio-btn" onclick="toggleOnboardingNarration()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+                  <span class="s1-audio-icon" id="scene3-audio-icon">🔊</span>
+                  <span class="s1-audio-text" id="scene3-audio-text">Voiceover</span>
+                </button>
+              </div>
+
+              <div class="s3-actions">
+                <button class="s3-theme-btn" id="scene3-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+                  <span class="s1-theme-ic" aria-hidden="true">
+                    <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+                  </span>
+                  <span id="scene3-theme-label">Dark Mode</span>
+                </button>
+                <button class="s3-back-btn" onclick="gotoOnboardingSlide(1)" title="Back to Video Flow">
+                  <span>← Back</span>
+                </button>
+                <button class="s3-next-btn" id="scene3-next-btn" onclick="gotoOnboardingSlide(3)">
+                  Next: Voice Flow <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Skip Tour Badge -->
+            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+              <span>Skip Tour</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 3: AUTHENTIC SCENE 4 VOICE FLOW DEMO -->
+      <div class="onboarding-slide welcome-hero-slide" data-slide="3">
+        <div class="scene4-stage-viewport">
+          <div class="s4-stage" id="s4-stage">
+            <!-- Background: soft color fields + silky vector ribbons -->
+            <div class="s1-bg"></div>
+            <svg class="s1-ribbons" id="s4-ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true"></svg>
+
+            <!-- Top Header -->
+            <div class="s4-header">
+              <span class="s4-badge">
+                <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+                FEATURE 3 · VOICE FLOW
+              </span>
+              <h1 class="s4-title">Speak Naturally and <span>Dictate Directly into Any App</span></h1>
+              <p class="s4-sub">With full context at hand, speak your thoughts or replies — Voice Flow transcribes and polishes your words in real time with zero copy-pasting.</p>
+            </div>
+
+            <!-- Expansive Desktop Computer Monitor Display in Center -->
+            <div class="s4-monitor-wrapper">
+              <div class="s4-monitor-frame" id="s4-desktop-frame">
+                <!-- Monitor Top Bezel with Camera Dot & Display Spec -->
+                <div class="s4-monitor-bezel-top">
+                  <div class="s4-bezel-left">
+                    <span class="s4-monitor-dot"></span>
+                    <span class="s4-monitor-brand">AI PRODUCTIVITY FLOW</span>
+                  </div>
+                  <div class="s4-monitor-cam" aria-hidden="true"></div>
+                  <div class="s4-bezel-right">
+                    <span class="s4-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                  </div>
+                </div>
+
+                <!-- Active 16:9 Screen Display -->
+                <div class="s4-screen-viewport">
+                  <video id="scene4-demo-video" class="s4-screen-video" src="assets/onboarding/s4_voiceflow_demo.mp4" poster="assets/onboarding/s4_voiceflow_poster.jpg" muted playsinline loop preload="auto"></video>
+                </div>
+              </div>
+
+              <!-- Monitor Stand Neck & Base Pedestal -->
+              <div class="s4-stand-neck" aria-hidden="true"></div>
+              <div class="s4-stand-base" aria-hidden="true"></div>
+
+              <!-- Monitor Ambient Radial Glow -->
+              <div class="s4-monitor-glow" aria-hidden="true"></div>
+            </div>
+
+            <!-- Bottom Control and Subtitle Bar -->
+            <div class="s4-controls">
+              <div class="s1-step s4-step"><i></i>Step 4 of 5 · Voice Flow</div>
+
+              <div class="s1-caption s4-caption">
+                <span class="s1-wave" id="scene4-wave-indicator" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="s1-caption-text" id="scene4-subtitle-text">Welcome to Voice Flow, our third core feature.</span>
+                <button class="s1-audio-toggle" id="scene4-audio-btn" onclick="toggleOnboardingNarration()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+                  <span class="s1-audio-icon" id="scene4-audio-icon">🔊</span>
+                  <span class="s1-audio-text" id="scene4-audio-text">Voiceover</span>
+                </button>
+              </div>
+
+              <div class="s4-actions">
+                <button class="s4-theme-btn" id="scene4-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+                  <span class="s1-theme-ic" aria-hidden="true">
+                    <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+                  </span>
+                  <span id="scene4-theme-label">Dark Mode</span>
+                </button>
+                <button class="s4-back-btn" onclick="gotoOnboardingSlide(2)" title="Back to Audio Flow">
+                  <span>← Back</span>
+                </button>
+                <button class="s4-next-btn" id="scene4-next-btn" onclick="gotoOnboardingSlide(4)">
+                  Next: Community &amp; Feedback <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Skip Tour Badge -->
+            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+              <span>Skip Tour</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 4: AUTHENTIC SCENE 5 COMMUNITY & FEEDBACK -->
+      <div class="onboarding-slide welcome-hero-slide" data-slide="4">
+        <div class="scene5-stage-viewport">
+          <div class="s5-stage" id="s5-stage">
+            <!-- Background: soft color fields + silky vector ribbons -->
+            <div class="s1-bg"></div>
+            <svg class="s1-ribbons" id="s5-ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true"></svg>
+
+            <!-- Floating side cards (matching Scene 1 aesthetic) -->
+            <div class="s5-side s5-side-1" aria-hidden="true">
+              <div class="s5-side-row">
+                <span class="s5-side-ic">⭐</span>
+                <span class="s5-side-title">Public GitHub<br>100% Free</span>
+              </div>
+              <span class="s5-side-line"></span><span class="s5-side-line short"></span>
+            </div>
+
+            <div class="s5-side s5-side-2" aria-hidden="true">
+              <div class="s5-side-row">
+                <span class="s5-side-ic">🔒</span>
+                <span class="s5-side-title">Local Privacy<br>Zero Telemetry</span>
+              </div>
+              <span class="s5-side-line"></span><span class="s5-side-line short"></span>
+            </div>
+
+            <div class="s5-side s5-side-3" aria-hidden="true">
+              <div class="s5-side-row">
+                <span class="s5-side-ic">💡</span>
+                <span class="s5-side-title">Community<br>Feedback</span>
+              </div>
+              <span class="s5-side-line"></span><span class="s5-side-line short"></span>
+            </div>
+
+            <div class="s5-side s5-side-4" aria-hidden="true">
+              <div class="s5-side-row">
+                <span class="s5-side-ic">⚡</span>
+                <span class="s5-side-title">Quick Setup<br>&lt; 60 seconds</span>
+              </div>
+              <span class="s5-side-line"></span><span class="s5-side-line short"></span>
+            </div>
+
+            <!-- Top Header -->
+            <div class="s5-header">
+              <span class="s5-badge">
+                <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/></svg>
+                STEP 5 · COMMUNITY &amp; FEEDBACK
+              </span>
+              <h1 class="s5-title">Join Our Open-Source Community &amp; <span>Shape the Future</span></h1>
+              <p class="s5-sub">AI Productivity Flow is 100% free and open source. Star our project on GitHub, share feedback, report ideas, or get ready to configure your workflow.</p>
+            </div>
+
+            <!-- Center Presentation: 3-Pillar Animated Tilted Cards -->
+            <div class="s5-showcase-wrapper">
+              <!-- Ambient Color Orbs for Depth -->
+              <div class="s5-orb s5-orb-1" aria-hidden="true"></div>
+              <div class="s5-orb s5-orb-2" aria-hidden="true"></div>
+              <div class="s5-orb s5-orb-3" aria-hidden="true"></div>
+
+              <!-- Pillar 1: GitHub Repository & Star (Tilted) -->
+              <div class="s5-card s5-card-github" id="s5-card-1"
+                   onclick="window.open('https://github.com/uzerkayat2004-gif/AI-Productivity-Flow', '_blank')"
+                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"
+                   role="button" tabindex="0"
+                   title="Click anywhere to open our GitHub repository and star the project">
+                <div class="s5-card-head">
+                  <div class="s5-card-ic s5-ic-github">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                  </div>
+                  <div class="s5-card-titles">
+                    <b>Star on GitHub</b>
+                    <small>100% Free · Community Built</small>
+                  </div>
+                  <span class="s5-badge s5-badge-gh">v2.4 · MIT</span>
+                </div>
+
+                <div class="s5-card-prev">
+                  <div class="s5-widget s5-widget-code">
+                    <div class="s5-widget-bar">
+                      <span class="dot red"></span>
+                      <span class="dot yellow"></span>
+                      <span class="dot green"></span>
+                      <span class="title">git clone ai-productivity-flow</span>
+                    </div>
+                    <div class="s5-widget-code-body">
+                      <code><span class="c-dim">$</span> git clone ai-productivity-flow.git</code>
+                      <div class="s5-code-stats">
+                        <span>✦ 100% Free</span>
+                        <span>✦ MIT License</span>
+                        <span>✦ Zero Telemetry</span>
+                        <span>✦ Offline</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p class="s5-card-desc">100% transparent public source code and roadmap. Zero telemetry — star on GitHub to support free development!</p>
+
+                  <div class="s5-card-btn s5-card-btn-github">
+                    <span>Give a Star on GitHub</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                </div>
+
+                <div class="s5-card-foot s5-foot-gh">
+                  100% Free Forever · MIT &amp; Apache-2.0
+                </div>
+              </div>
+
+              <!-- Pillar 2: Community Feedback & Ideas (Straight) -->
+              <div class="s5-card s5-card-feedback" id="s5-card-2"
+                   onclick="window.open('https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues', '_blank')"
+                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"
+                   role="button" tabindex="0"
+                   title="Click anywhere to submit feedback, report ideas, or open discussions">
+                <div class="s5-card-head">
+                  <div class="s5-card-ic s5-ic-feedback">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  </div>
+                  <div class="s5-card-titles">
+                    <b>Feedback &amp; Ideas</b>
+                    <small>Shape Upcoming Updates</small>
+                  </div>
+                  <span class="s5-badge s5-badge-fb">DISCUSSIONS</span>
+                </div>
+
+                <div class="s5-card-prev">
+                  <div class="s5-widget s5-widget-feedback">
+                    <div class="s5-widget-chips">
+                      <span class="s5-chip">🎙️ Whisper STT</span>
+                      <span class="s5-chip">⚡ Custom Hotkeys</span>
+                      <span class="s5-chip">🎧 Audio Flow</span>
+                      <span class="s5-chip">🎨 Visual Themes</span>
+                    </div>
+                    <div class="s5-widget-quote">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/></svg>
+                      <span>"Built directly with developer &amp; user feedback."</span>
+                    </div>
+                  </div>
+
+                  <p class="s5-card-desc">Have feature requests, workflow suggestions, or bug reports? Share your thoughts directly to guide new updates.</p>
+
+                  <div class="s5-card-btn s5-card-btn-feedback">
+                    <span>Submit Feedback &amp; Ideas</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                  </div>
+                </div>
+
+                <div class="s5-card-foot s5-foot-fb">
+                  Feature Requests · Ideas · Bug Reports
+                </div>
+              </div>
+
+              <!-- Pillar 3: In-App Onboarding & Setup (Tilted) -->
+              <div class="s5-card s5-card-start highlight" id="s5-card-3"
+                   onclick="finishOnboarding()"
+                   onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"
+                   role="button" tabindex="0"
+                   title="Click anywhere to enter the application workspace and start setup">
+                <div class="s5-card-head">
+                  <div class="s5-card-ic s5-ic-start">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  </div>
+                  <div class="s5-card-titles">
+                    <b>Enter App &amp; Setup</b>
+                    <small>Launch Your Workflow</small>
+                  </div>
+                  <span class="s5-badge s5-badge-start">LAUNCH</span>
+                </div>
+
+                <div class="s5-card-prev">
+                  <div class="s5-widget s5-widget-checklist">
+                    <div class="s5-check-item done">
+                      <span class="s5-check-icon">✓</span>
+                      <div class="s5-check-content">
+                        <span class="s5-check-title">Feature Tour Completed</span>
+                      </div>
+                    </div>
+                    <div class="s5-check-item active">
+                      <span class="s5-check-icon dot">●</span>
+                      <div class="s5-check-content">
+                        <span class="s5-check-title">Configure Speech API Key</span>
+                      </div>
+                    </div>
+                    <div class="s5-check-item">
+                      <span class="s5-check-icon ring">○</span>
+                      <div class="s5-check-content">
+                        <span class="s5-check-title">Dictate &amp; Summarize Anywhere</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p class="s5-card-desc">Tour complete! Step into your workspace to configure API keys (Groq, Deepgram, Whisper) and start dictating.</p>
+
+                  <div class="s5-card-btn s5-card-btn-start">
+                    <span>Enter Workspace &amp; Setup 🚀</span>
+                  </div>
+                </div>
+
+                <div class="s5-card-foot s5-foot-start">
+                  Works Offline · Local First · Your Keys
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Trust strip (matching Scene 1 bottom-anchored confidence bar) -->
+            <div class="s5-trust" aria-hidden="true">
+              <div class="s5-trust-item">
+                <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#f59e0b"/></svg>
+                <div><b>100% Free Forever</b><small>MIT &amp; Apache-2.0</small></div>
+              </div>
+              <div class="s5-trust-item">
+                <svg viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="11" rx="3" fill="#22c55e"/><circle cx="12" cy="15.5" r="1.8" fill="#fff"/><path d="M7.5 10V7.5a4.5 4.5 0 0 1 9 0V10" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
+                <div><b>Private &amp; Local-First</b><small>No cloud telemetry</small></div>
+              </div>
+              <div class="s5-trust-item">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="#3b82f6"/></svg>
+                <div><b>Community Driven</b><small>Direct creator feedback</small></div>
+              </div>
+              <div class="s5-trust-item">
+                <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#ff6b00"/></svg>
+                <div><b>Works Offline &amp; Keys</b><small>Your keys · Zero vendor lock</small></div>
+              </div>
+            </div>
+
+            <!-- Bottom Control and Subtitle Bar -->
+            <div class="s5-controls">
+              <div class="s1-step s5-step"><i></i>Step 5 of 5 · Community &amp; Feedback</div>
+
+              <div class="s1-caption s5-caption">
+                <span class="s1-wave" id="scene5-wave-indicator" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="s1-caption-text" id="scene5-subtitle-text">Welcome to our community! AI Productivity Flow is 100% free and open source, built to supercharge your daily workflow.</span>
+                <button class="s1-audio-toggle" id="scene5-audio-btn" onclick="toggleOnboardingNarration()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+                  <span class="s1-audio-icon" id="scene5-audio-icon">🔊</span>
+                  <span class="s1-audio-text" id="scene5-audio-text">Voiceover</span>
+                </button>
+              </div>
+
+              <div class="s5-actions">
+                <button class="s5-theme-btn" id="scene5-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+                  <span class="s1-theme-ic" aria-hidden="true">
+                    <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+                  </span>
+                  <span id="scene5-theme-label">Dark Mode</span>
+                </button>
+                <button class="s5-back-btn" onclick="gotoOnboardingSlide(3)" title="Back to Voice Flow">
+                  <span>← Back</span>
+                </button>
+                <button class="s5-finish-btn" id="scene5-finish-btn" onclick="finishOnboarding()">
+                  Get Started <span aria-hidden="true">🚀</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Skip Tour Badge -->
+            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+              <span>Skip Tour</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+
+          </div>
+        </div>
       </div>
 
       <!-- TOUR PLAYER BAR -->
@@ -2519,14 +3163,23 @@
 </label>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Deep Restart <span aria-label="About Deep Restart" class="info-tip" data-tip="Resets the floating bar position, flushes runtime buffers, and restarts the engine cleanly." tabindex="0">i</span></div>
+<div class="setting-title">Deep Restart <span aria-label="About Deep Restart" class="info-tip" data-tip="Flushes runtime buffers and restarts the engine cleanly, preserving the floating bar position." tabindex="0">i</span></div>
 </div>
 <button class="action-btn" onclick="triggerDeepAppRestart()">Restart Engine</button>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Dictation history lives safely in ~/.voice_flow/voice_flow.db. This removes temporary audio files only." tabindex="0">i</span></div>
+<div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Remove abandoned temporary audio files. Dictation history and retained recovery recordings stay available." tabindex="0">i</span></div>
 </div>
 <button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
+</div><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Send anonymous crash reports (via Sentry) <span aria-label="About Crash Reports" class="info-tip" data-tip="Crash reports never include your audio, transcripts, or personal data. You can change this anytime in Settings." tabindex="0">i</span></div>
+<div style="font-size:12px;color:var(--text-muted,#888);margin-top:2px;">Crash reports never include your audio, transcripts, or personal data. You can change this anytime in Settings. <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow#telemetry--crash-reporting" target="_blank" style="color:var(--primary-orange,#ea580c);text-decoration:none;">Docs ↗</a></div>
+</div>
+<label class="toggle-switch">
+<input id="toggle-anonymous-crash-reports" onchange="toggleAnonymousCrashReports(this.checked)" type="checkbox"/>
+<span class="toggle-slider"></span>
+</label>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">About &amp; Updates</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
 <div class="setting-title" style="display:flex;align-items:center;gap:8px;">
@@ -2537,6 +3190,8 @@
 <div style="font-size:12px;color:var(--text-muted,#888);margin-top:4px;display:flex;gap:12px;">
 <a href="https://ai-productivity-flow.vercel.app/" target="_blank" style="color:var(--primary-orange,#ea580c);text-decoration:none;">Website ↗</a>
 <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow" target="_blank" style="color:var(--primary-orange,#ea580c);text-decoration:none;">GitHub ↗</a>
+<span style="color:var(--text-muted,#888);">·</span>
+<span>Crash reporting powered by Sentry (opt-in)</span>
 </div>
 </div>
 <div class="vf-row-control">
@@ -2647,10 +3302,12 @@
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800;">Microphone Input</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Detected hardware microphones. The selected device is used for all dictation.</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose an input for dictation, or follow your Windows default microphone.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
       </div>
+      <button type="button" class="action-btn" onclick="loadHardwareMicrophones(true)">Refresh microphones</button>
+      <p id="mic-settings-status" role="status" aria-live="polite" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></p>
       <div id="mic-devices-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; margin-top: 12px;"></div>
     </div>
   </div>
@@ -2662,11 +3319,12 @@
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800; color: var(--text-color);">Dictation Shortcuts &amp; Triggers</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose your primary trigger style, record any custom key, and fine-tune trigger behavior.</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose your primary trigger style, record a custom shortcut, and fine-tune trigger behavior.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('shortcuts-sub-modal')">✕</button>
       </div>
 
+      <p id="shortcut-settings-status" role="status" aria-live="polite" style="font-size:12px;color:var(--text-muted);"></p>
       <!-- 3 TRIGGER CATEGORIES QUICK SWITCHER -->
       <div style="margin-top: 14px;">
         <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Trigger Category</label>
@@ -2703,7 +3361,7 @@
         </select>
       </div>
 
-      <!-- CUSTOM KEY RECORDER & 3 BEHAVIOR OPTIONS (visible when custom selected) -->
+      <!-- CUSTOM SHORTCUT & 3 BEHAVIOR OPTIONS (visible when custom selected) -->
       <div id="custom-hotkey-panel" style="margin-top: 14px; padding: 16px; background: var(--bg-sidebar); border-radius: var(--radius-md); border: 1.5px solid var(--primary-orange); display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
           <span style="font-size: 12px; font-weight: 800; color: var(--primary-orange); letter-spacing: 0.5px;">CUSTOM KEY RECORDER</span>
@@ -2712,10 +3370,10 @@
 
         <div style="display: flex; gap: 8px; align-items: center;">
           <input type="text" id="custom-hotkey-input" placeholder="e.g. F8, Alt+Space, CapsLock" style="flex: 1; padding: 10px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-color); font-weight: 700; font-family: monospace; font-size: 14px;" readonly>
-          <button type="button" id="record-hotkey-btn" class="action-btn" onclick="toggleRecordHotkey()" style="white-space: nowrap; font-weight: 700; padding: 10px 14px;">🎙️ Record Any Key</button>
-          <button type="button" class="action-btn" onclick="clearRecordedHotkey()" style="padding: 10px 12px;" title="Reset to Alt+Space">✕</button>
+          <button type="button" id="record-hotkey-btn" class="action-btn" onclick="toggleRecordHotkey()" style="white-space: nowrap; font-weight: 700; padding: 10px 14px;">Record shortcut</button>
+          <button type="button" class="action-btn" onclick="clearRecordedHotkey()" style="padding: 10px 12px;" title="Clear recording and restore Alt+Space" aria-label="Clear shortcut recording">✕</button>
         </div>
-        <div id="record-hotkey-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">Click <b>Record Any Key</b>, then press any single key (e.g. F8, Space, CapsLock) or combination (Alt+Space, Ctrl+Shift+D).</div>
+        <div id="record-hotkey-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">Click <b>Record shortcut</b>, press your key or combination, then release all keys. Escape cancels.</div>
 
         <!-- 3 OPTIONS FOR CUSTOM KEY BEHAVIOR -->
         <div style="margin-top: 14px;">
@@ -2723,21 +3381,21 @@
           <div style="display: flex; flex-direction: column; gap: 6px;">
             <div class="shortcut-option-card" id="custom-opt-double" onclick="selectCustomTriggerType('double_tap', this)">
               <div>
-                <div class="shortcut-card-title">1. Double Tap / Double Click Key</div>
+                <div class="shortcut-card-title">Double tap shortcut</div>
                 <div class="shortcut-card-desc">Press twice quickly to start/stop dictation. Holding the key will never start dictation.</div>
               </div>
               <span class="kbd-pill">Double Tap</span>
             </div>
             <div class="shortcut-option-card active-option" id="custom-opt-hold" onclick="selectCustomTriggerType('hold', this)">
               <div>
-                <div class="shortcut-card-title">2. Hold to Speak (Push-to-Talk)</div>
+                <div class="shortcut-card-title">Hold to speak</div>
                 <div class="shortcut-card-desc">Hold key while speaking, release when done to transcribe &amp; paste instantly.</div>
               </div>
               <span class="kbd-pill">Hold PTT</span>
             </div>
             <div class="shortcut-option-card" id="custom-opt-toggle" onclick="selectCustomTriggerType('toggle', this)">
               <div>
-                <div class="shortcut-card-title">3. Tap to Toggle</div>
+                <div class="shortcut-card-title">Tap to toggle</div>
                 <div class="shortcut-card-desc">Tap once to start dictating, tap again when finished. Ideal for long passages.</div>
               </div>
               <span class="kbd-pill">Single Tap</span>
@@ -2762,7 +3420,8 @@
 
       <!-- SECTION 3: DICTATION TRIGGER BEHAVIOR (for standard shortcuts) -->
       <div id="standard-behavior-section" style="margin-top: 14px;">
-        <label style="font-size: 13px; font-weight: 700; color: var(--text-color); display: block; margin-bottom: 8px;">Trigger Behavior Mode</label>
+        <p style="font-size:12px;color:var(--text-muted);">Custom shortcuts use the behavior selected above. Double Ctrl always uses double tap.</p>
+        <label style="font-size: 13px; font-weight: 700; color: var(--text-color); display: block; margin-bottom: 8px;">Behavior for standard shortcuts and mouse</label>
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <div class="shortcut-option-card active-option" id="shortcut-mode-hybrid" onclick="selectShortcutMode('hybrid', this)">
             <div>
@@ -2791,7 +3450,8 @@
       <!-- SECTION 4: ACTIONS -->
       <div style="margin-top: 18px; display: flex; justify-content: flex-end; gap: 10px;">
         <button type="button" class="action-btn" onclick="resetHotkeyDefaults()" style="opacity: 0.8;">Reset Defaults</button>
-        <button type="button" class="action-btn" onclick="saveAndApplyHotkeyModal()" style="background: var(--primary-orange); color: #fff; font-weight: 700; border-color: var(--primary-orange);">Save &amp; Apply</button>
+        <button type="button" class="action-btn" onclick="closeSubModal('shortcuts-sub-modal')">Cancel</button>
+        <button type="button" id="shortcut-save-btn" class="action-btn" onclick="saveAndApplyHotkeyModal()" style="background: var(--primary-orange); color: #fff; font-weight: 700; border-color: var(--primary-orange);">Save &amp; Apply</button>
       </div>
     </div>
   </div>
@@ -3436,5 +4096,6 @@
   <script src="app.js?v=20261006-dictionary-auto-final-nlm-recovery"></script>
   <script src="video-flow.js?v=20261006_nlm_recovery"></script>
   <script src="splash.js?v=20260913-cinematic-studio"></script>
+  <script src="onboarding-hero.js?v=20261007-vector"></script>
 </body>
 </html>

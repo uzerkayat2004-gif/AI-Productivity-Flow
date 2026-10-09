@@ -21,6 +21,16 @@ AI Productivity Flow takes the security and privacy of user data, audio streams,
 * **Encrypted Account Vaults**: Full account export and migration archives (`.flowvault`) are encrypted with **AES-256-GCM** using a user-specified password.
 * **Loopback Desktop API**: The internal GUI HTTP and WebSocket server binds exclusively to `127.0.0.1:8991` and verifies `Host` and `Origin` headers to protect against cross-site request attacks.
 
+## 📡 Crash Reporting & Telemetry (Sentry)
+
+AI Productivity Flow optionally integrates Sentry for anonymous, opt-in crash diagnostics:
+- **Zero Default Network Transmission**: Crash reporting is disabled by default (`anonymous_crash_reports: false`). No SDK initialization or network requests happen unless the user explicitly opts in.
+- **Data Scrubbing Rules**:
+  - **Local Username Anonymization**: All file paths containing `/Users/<username>/...` or `C:\Users\<username>\...` have the username replaced with `[REDACTED]`.
+  - **Secret Redaction**: Environment variables and request headers containing API keys or tokens (`OPENAI_*`, `ANTHROPIC_*`, `GROQ_*`, `GEMINI_*`, `DEEPGRAM_*`, `SENTRY_*`, `AWS_*`, etc.) are stripped.
+  - **Zero Audio & Transcript Data**: Keywords associated with audio, transcripts, recordings, and dictation are redacted, and request bodies/query parameters are dropped.
+- **Designated Sentry Ingest Domain**: Telemetry reports (when opted-in) are sent directly and exclusively to the EU Sentry ingest endpoint `*.ingest.de.sentry.io`.
+
 ---
 
 ## 🚨 Reporting a Vulnerability

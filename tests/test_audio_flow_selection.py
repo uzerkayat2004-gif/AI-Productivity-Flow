@@ -429,6 +429,9 @@ def test_audio_summary_pipeline_worker_forwards_saved_summary_style(monkeypatch,
     time.sleep(0.3)  # Allow worker thread to execute
     assert len(generate_calls) == 1
     assert generate_calls[0] == ("Long document text for summary", "short", saved_style)
+    if app.overlay.summary_rows:
+        job_id = list(app.overlay.summary_rows.keys())[0]
+        app.open_audio_summary_job(job_id)
     assert launched_tokens == ["short"]
 
 
@@ -493,6 +496,9 @@ def test_summary_export_runs_after_ready_and_failed_copy_does_not_mark_downloade
             summary_depth="short",
         )
         assert export_started.wait(1.0), (events, app.overlay.states, history_updates)
+        if app.overlay.summary_rows:
+            job_id = list(app.overlay.summary_rows.keys())[0]
+            app.open_audio_summary_job(job_id)
         assert events == ["history", "player"]
         assert not any(update.get("downloaded") == 1 for update in history_updates)
     finally:

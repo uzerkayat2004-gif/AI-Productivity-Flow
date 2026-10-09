@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import math
 import mimetypes
 import os
@@ -35,6 +36,7 @@ from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandle
 import sounddevice as sd
 
 from voice_flow.config import config
+log = logging.getLogger(__name__)
 from voice_flow.dictionary import dictionary_engine, generated_spaced_aliases
 from voice_flow.provider_registry import get_all_provider_specs, get_provider_spec
 from voice_flow.provider_validation import validate_provider_key
@@ -175,6 +177,73 @@ def invalidate_history_cache(key: str | None = None) -> None:
                 _API_CACHE.pop(k, None)
         else:
             _API_CACHE.clear()
+
+
+def apply_settings_overlay(path, data=None):
+    """Run only reversible UI operations; surface missing runtime or failures."""
+    data = data or {}
+    overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
+    if overlay is None:
+        raise RuntimeError("Floating bar is unavailable. Start Voice Flow and try again.")
+    if path == "/api/overlay/reset-and-refresh":
+        reason = settings_busy_reason()
+        if reason:
+            raise RuntimeError(reason)
+        reset = getattr(runtime_controller, "reset_state_and_refresh", None)
+        if callable(reset):
+            reset()
+        else:
+            overlay.restart_and_refresh()
+    elif path == "/api/overlay/reset-position":
+        overlay.reset_position()
+    elif path == "/api/overlay/refresh":
+        overlay.refresh()
+    elif path in {"/api/overlay/show", "/api/app/restore-and-refresh"}:
+        overlay.show()
+        if path == "/api/app/restore-and-refresh":
+            overlay.refresh()
+    elif path == "/api/overlay/hide":
+        overlay.hide()
+    elif path == "/api/overlay/toggle":
+        visible = bool(getattr(overlay, "visible", getattr(overlay, "_visible", False)))
+        setter = getattr(overlay, "set_visible", None)
+        if callable(setter):
+            setter(not visible)
+        else:
+            overlay.hide() if visible else overlay.show()
+    elif path == "/api/overlay/dock":
+        dock = data.get("dock", "bottom")
+        if dock not in {"bottom", "left", "right"}:
+            raise ValueError("Unknown floating bar dock position.")
+        if overlay.set_dock(dock) is False:
+            raise RuntimeError("Floating bar dock position could not be applied.")
+
+
+def apply_on_screen_theme():
+    overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
+    if overlay is not None:
+        overlay.refresh()
+
+
+def settings_busy_reason():
+    """Read current voice state and durable media work without starting services."""
+    controller = runtime_controller
+    if controller is not None:
+        if getattr(controller, "_read_pending", False) is True or getattr(controller, "_read_active", False) is True:
+            return "Finish the current Audio Flow reading before continuing."
+        audio = getattr(controller, "audio", None)
+        if getattr(audio, "is_recording", False) is True:
+            return "Finish the current recording before changing this setting."
+        state = getattr(controller, "state", None)
+        state = str(getattr(state, "value", state) or "").lower()
+        if state in {"recording", "processing", "transcribing", "inserting"}:
+            return "Finish the current dictation before continuing."
+    try:
+        if storage.has_active_media_jobs():
+            return "Finish or cancel active Audio Flow and Video Flow jobs first."
+    except Exception:
+        return "Active media work could not be checked. Try again."
+    return None
 
 
 def _sync_active_storage() -> None:
@@ -699,6 +768,14 @@ def _is_physical_microphone(name: str) -> bool:
     return not any(pat in low for pat in _MIC_VIRTUAL_PATTERNS)
 
 
+def _microphone_catalog():
+    from voice_flow.microphone_devices import query_input_catalog
+    result = query_input_catalog(sd)
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return result["devices"]
+
+
 class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
     """Handles static GUI files + API endpoints (/api/history, /api/insights, /api/dictionary, /api/microphones, /api/apikeys)."""
 
@@ -839,6 +916,87 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         except (OSError, ValueError):
             self.send_json_response({"success": False, "error": "Summary audio is unavailable"}, 404)
 
+    def _serve_static_asset(self, req_path: str) -> None:
+        """Serve static assets with full HTTP Range request support for audio and video streaming."""
+        try:
+            rel = req_path.lstrip("/").replace("\\", "/")
+            asset_path = (Path(GUI_DIR) / rel).resolve()
+            gui_root = Path(GUI_DIR).resolve()
+            if not str(asset_path).startswith(str(gui_root)) or not asset_path.is_file():
+                self.send_error(404, "File not found")
+                return
+
+            total = asset_path.stat().st_size
+            if total <= 0:
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            ext = asset_path.suffix.lower()
+            mime = mimetypes.guess_type(str(asset_path))[0]
+            if not mime:
+                if ext == ".mp3":
+                    mime = "audio/mpeg"
+                elif ext == ".mp4":
+                    mime = "video/mp4"
+                elif ext == ".wav":
+                    mime = "audio/wav"
+                elif ext == ".ogg":
+                    mime = "audio/ogg"
+                elif ext == ".svg":
+                    mime = "image/svg+xml"
+                elif ext in (".jpg", ".jpeg"):
+                    mime = "image/jpeg"
+                elif ext == ".png":
+                    mime = "image/png"
+                else:
+                    mime = "application/octet-stream"
+
+            start, end = 0, total - 1
+            range_header = (self.headers.get("Range") or "").strip()
+            is_range = False
+
+            if range_header:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+                if match:
+                    raw_start, raw_end = match.groups()
+                    if not raw_start:
+                        suffix = int(raw_end or "0")
+                        start = max(0, total - suffix)
+                    else:
+                        start = int(raw_start)
+                        end = int(raw_end) if raw_end else end
+                    if start < total and end >= start:
+                        end = min(end, total - 1)
+                        is_range = True
+
+            length = end - start + 1
+            self.send_response(206 if is_range else 200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            if is_range:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+            self.end_headers()
+
+            with asset_path.open("rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            try:
+                super().do_GET()
+            except Exception:
+                pass
+
     def do_GET(self):
         global video_flow_provider_service
         if not self._host_is_allowed():
@@ -908,7 +1066,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             force = qs.get("force", ["0"])[0] in ("1", "true", "yes")
             result = check_for_updates(force=force)
-            self.send_json_response({"success": True, **result})
+            self.send_json_response({**result, "success": bool(result.get("checked")) and not result.get("error")})
             return
         if path == "/api/auth/status":
             _sync_active_storage()
@@ -1081,26 +1239,17 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             })
         elif path in ("/api/overlay/show", "/api/overlay/reset-position", "/api/overlay/reset-and-refresh", "/api/overlay/refresh", "/api/app/restore-and-refresh"):
             global _app_refresh_generation
-            _app_refresh_generation += 1
-            overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
-            if runtime_controller and hasattr(runtime_controller, "reset_state_and_refresh"):
-                runtime_controller.reset_state_and_refresh()
-            elif overlay and hasattr(overlay, "restart_and_refresh"):
-                overlay.restart_and_refresh()
-            if overlay:
-                if hasattr(overlay, "show"):
-                    overlay.show()
-                elif hasattr(overlay, "show_ready"):
-                    overlay.show_ready()
-                if path == "/api/overlay/reset-position" and hasattr(overlay, "reset_position"):
-                    overlay.reset_position()
-                if hasattr(overlay, "refresh") and path in ("/api/overlay/refresh", "/api/overlay/reset-and-refresh"):
-                    overlay.refresh()
-            self.send_json_response({
-                "success": True,
-                "message": "Floating bar refreshed and reset",
-                "generation": _app_refresh_generation,
-            })
+            if path == "/api/overlay/reset-and-refresh":
+                reason = settings_busy_reason()
+                if reason:
+                    self.send_json_response({"success": False, "error": reason}, 409)
+                    return
+            try:
+                apply_settings_overlay(path)
+                _app_refresh_generation += 1
+                self.send_json_response({"success": True, "generation": _app_refresh_generation})
+            except Exception:
+                self.send_json_response({"success": False, "error": "Floating bar could not be updated. Finish active work and try again."}, 503)
         elif path == "/api/app/ui-refresh-status":
             self.send_json_response({
                 "success": True,
@@ -1153,6 +1302,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "dictation_trigger_mode": "hybrid",
                 "autostart_enabled": True,
                 "show_in_taskbar": True,
+                "anonymous_crash_reports": False,
                 "selected_mic_device": "",
                 "voice_flow_polish_model": "local/deterministic",
                 "voice_flow_polish_speed_mode": "balanced",
@@ -1869,88 +2019,27 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"connections": all_conns, "custom_providers": _public_custom_providers(storage.get_voice_flow_custom_providers())})
         elif path == "/api/microphones":
             try:
-                devices = sd.query_devices()
-                # One row per physical mic: group aliases of the same
-                # hardware (MME/DirectSound/WASAPI copies share a
-                # normalized name) and report the most stable host API
-                # for capture. WDM-KS kernel rows are excluded outright
-                # (raw ghosts like "Microphone Array 1/2", "Input
-                # (@System32...)"), as are virtual aliases, loopback
-                # taps and output endpoints leaked as inputs.
-                hostapis = [h["name"] for h in sd.query_hostapis()]
-                # DirectSound first: a name that exists on exactly one
-                # device resolves unambiguously in audio.py (WASAPI's
-                # "Headset (CP60)" collides with 3 same-name rows).
-                api_rank = {"Windows DirectSound": 0, "MME": 1,
-                            "Windows WASAPI": 2}
-
-                def _canon(name: str) -> str:
-                    # Normalize one physical mic across host APIs.
-                    # PortAudio MME truncates names at 31 chars
-                    # ("Microphone Array (Realtek(R) Au"), so restore the
-                    # common truncated prefix before stripping suffixes.
-                    n = (name or "").strip()
-                    if n == "Microphone Array (Realtek(R) Au":
-                        n = "Microphone Array (Realtek(R) Audio)"
-                    n = re.sub(r"\s*\(\s*Realtek\(R\)\s*(Au dio|Audio?)\s*\)\s*$",
-                               "", n, flags=re.IGNORECASE).strip()
-                    # WDM-KS "… HD Audio Mic input" is the SAME Realtek
-                    # array/mic as the MME/DirectSound "… (Realtek(R)
-                    # Audio)"; collapse both to the bare kind.
-                    n = re.sub(r"\s*\(?\s*Realtek HD Audio Mic input(\s+with SST)?\s*\)?\s*$",
-                               "", n, flags=re.IGNORECASE).strip()
-                    n = re.sub(r"\s*\(\s*Realtek HD Audio Mic input(\s+with SST)?\s*\)\s*$",
-                               "", n, flags=re.IGNORECASE).strip()
-                    n = re.sub(r"\s*\d+\s*(\(.*\))?\s*$", lambda m: (" " + m.group(1)) if m.group(1) else "", n).strip()
-                    return n or name.strip()
-
-                best: dict[str, dict] = {}
-                for idx, d in enumerate(devices):
-                    if d["max_input_channels"] <= 0:
-                        continue
-                    raw = d["name"].strip()
-                    if not _is_physical_microphone(raw):
-                        continue
-                    api = hostapis[d["hostapi"]] if 0 <= d["hostapi"] < len(hostapis) else ""
-                    if api not in api_rank:
-                        continue
-                    key = _canon(raw).lower()
-                    rank = api_rank.get(api, 9)
-                    cur = best.get(key)
-                    entry = {"index": idx, "name": cur["name"] if cur else raw,
-                             "api": api, "_rank": rank,
-                             "channels": int(d["max_input_channels"]),
-                             "rate": float(d["default_samplerate"])}
-                    if cur is None or rank < cur["_rank"]:
-                        entry["name"] = raw
-                        best[key] = entry
-                # NOTE: no per-request open-probe here — inside the live
-                # backend process a second open can refuse while the
-                # recorder holds the device, which wrongly empties the
-                # list. Static rules above (virtual-name + WDM-KS
-                # exclusion) already drop the ghosts; selection of a
-                # dead row falls back to the system default in audio.py.
-                mics = [{"index": e["index"], "name": e["name"]}
-                        for _, e in sorted(best.items(),
-                                           key=lambda kv: (kv[1]["_rank"], kv[0]))]
-                # Keep legacy keys ("selected_microphone", "n_device",
-                # "selected_mic_device") pointing at a surviving row so an
-                # earlier pick of a now-hidden alias keeps working.
-                if mics:
-                    names = {m["name"] for m in mics}
-                    canon = {_canon(m["name"]).lower(): m for m in mics}
-                    for _key in ("selected_mic_device", "selected_microphone"):
-                        saved = storage.get_setting(_key, None)
-                        if saved in (None, "") or saved in names:
-                            continue
-                        hit = canon.get(_canon(str(saved)).lower())
-                        if hit is not None:
-                            storage.save_setting(_key, hit["name"])
-                            if _key == "selected_microphone":
-                                storage.save_setting("n_device", hit["index"])
-                self.send_json_response(mics)
+                from voice_flow.microphone_devices import resolve_input_device, load_microphone_preference, display_input_catalog, query_input_catalog
+                refresh = urllib.parse.parse_qs(parsed.query).get("refresh", [""])[0] in ("1", "true")
+                discovery = query_input_catalog(sd, refresh=refresh)
+                if discovery.get("error") and not discovery.get("busy"):
+                    raise RuntimeError(discovery["error"])
+                catalog = discovery["devices"]
+                preferred = load_microphone_preference(storage)
+                chosen = resolve_input_device(preferred, catalog) if preferred not in (None, "") else None
+                preferred_name = chosen["name"] if chosen else (preferred if isinstance(preferred, str) else "Your preferred microphone")
+                if isinstance(preferred, str) and preferred.startswith("vfmic:"):
+                    try:
+                        identity_parts = json.loads(preferred[6:])
+                        preferred_name = identity_parts[0] if isinstance(identity_parts, list) and len(identity_parts) == 2 and isinstance(identity_parts[0], str) else "Your preferred microphone"
+                    except (ValueError, TypeError):
+                        preferred_name = "Your preferred microphone"
+                self.send_json_response({"success": True, "devices": catalog, "display_devices": display_input_catalog(catalog, chosen["identity"] if chosen else None),
+                    "preferred": preferred, "preferred_name": preferred_name, "preferred_available": preferred in (None, "") or chosen is not None,
+                    "selected_identity": chosen["identity"] if chosen else None,
+                    "default_name": "Windows default microphone", "refreshed": discovery.get("refreshed", False), "busy": discovery.get("busy", False)})
             except Exception:
-                self.send_json_response([])
+                self.send_json_response({"success": False, "error": "Could not refresh microphones. Try again.", "devices": []}, 503)
         elif path == "/api/policy/get":
             policy = storage.get_exec_policy_options()
             self.send_json_response({"success": True, "policy": policy})
@@ -2455,6 +2544,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if path.startswith("/api/"):
                 self.send_json_response({"success": False, "error": f"API endpoint '{path}' not found."}, 404)
                 return
+            if path.startswith("/assets/"):
+                self._serve_static_asset(path)
+                return
             super().do_GET()
 
     def do_POST(self):
@@ -2509,6 +2601,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         path = urllib.parse.urlparse(self.path).path
 
+        if path in {"/auth/logout", "/auth/desktop/session", "/api/auth/google", "/api/auth/google/start", "/api/auth/register", "/api/auth/login", "/api/auth/switch", "/api/auth/logout", "/api/app/restart", "/api/storage/clear-audio-cache", "/api/overlay/reset-and-refresh"}:
+            reason = settings_busy_reason()
+            if reason:
+                self.send_json_response({"success": False, "error": reason}, 409)
+                return
+
         if path == "/auth/logout":
             from voice_flow.google_auth import handle_logout
             handle_logout(self)
@@ -2547,6 +2645,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 res = am.register_account(email=email, username=username, password=password, avatar_color=avatar_color)
                 self.send_json_response(res)
             except Exception as e:
+                from voice_flow.account_manager import AccountRuntimeApplyError, AccountRuntimeBusyError
+                if isinstance(e, AccountRuntimeBusyError):
+                    self.send_json_response({"success": False, "saved": False, "error": str(e)}, 409)
+                    return
+                if isinstance(e, AccountRuntimeApplyError):
+                    self.send_json_response({"success": False, "saved": True, "error": str(e)}, 503)
+                    return
                 self.send_json_response({"success": False, "error": str(e)}, 400)
             return
 
@@ -2559,6 +2664,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 res = am.authenticate_account(email_or_username=email_or_username, password=password)
                 self.send_json_response(res)
             except Exception as e:
+                from voice_flow.account_manager import AccountRuntimeApplyError, AccountRuntimeBusyError
+                if isinstance(e, AccountRuntimeBusyError):
+                    self.send_json_response({"success": False, "saved": False, "error": str(e)}, 409)
+                    return
+                if isinstance(e, AccountRuntimeApplyError):
+                    self.send_json_response({"success": False, "saved": True, "error": str(e)}, 503)
+                    return
                 self.send_json_response({"success": False, "error": str(e)}, 401)
             return
 
@@ -2579,6 +2691,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     "accounts": accounts,
                 })
             except Exception as e:
+                from voice_flow.account_manager import AccountRuntimeApplyError, AccountRuntimeBusyError
+                if isinstance(e, AccountRuntimeBusyError):
+                    self.send_json_response({"success": False, "saved": False, "error": str(e)}, 409)
+                    return
+                if isinstance(e, AccountRuntimeApplyError):
+                    self.send_json_response({"success": False, "saved": True, "error": str(e)}, 503)
+                    return
                 self.send_json_response({"success": False, "error": str(e)}, 400)
             return
 
@@ -2603,6 +2722,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 )
                 self.send_json_response(res)
             except Exception as e:
+                from voice_flow.account_manager import AccountRuntimeApplyError, AccountRuntimeBusyError
+                if isinstance(e, AccountRuntimeBusyError):
+                    self.send_json_response({"success": False, "saved": False, "error": str(e)}, 409)
+                    return
+                if isinstance(e, AccountRuntimeApplyError):
+                    self.send_json_response({"success": False, "saved": True, "error": str(e)}, 503)
+                    return
                 self.send_json_response({"success": False, "error": str(e)}, 400)
             return
 
@@ -2610,9 +2736,16 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.account_manager import get_account_manager
             token = data.get("session_token")
             am = get_account_manager()
-            am.logout_account(token)
-            invalidate_history_cache()
-            self.send_json_response({"success": True})
+            try:
+                am.logout_account(token)
+                invalidate_history_cache()
+                self.send_json_response({"success": True})
+            except Exception as exc:
+                from voice_flow.account_manager import AccountRuntimeBusyError
+                if isinstance(exc, AccountRuntimeBusyError):
+                    self.send_json_response({"success": False, "saved": False, "error": str(exc)}, 409)
+                else:
+                    self.send_json_response({"success": False, "saved": True, "error": "Account logout could not apply runtime preferences."}, 503)
             return
 
         if path == "/api/auth/vault/export":
@@ -3924,6 +4057,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 if not isinstance(enabled, bool):
                     self.send_json_response({"success": False, "error": "enabled must be a boolean"}, 400)
                     return
+                previous_status = get_launch_at_login()
+                if previous_status.error:
+                    self.send_json_response({"success": False, "error": "Current auto-start state is unavailable."}, 503)
+                    return
+                previous = previous_status.applied
                 result = set_launch_at_login(enabled)
                 if not result.applied:
                     self.send_json_response({
@@ -3932,7 +4070,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         "error": result.error or "Could not update auto-startup.",
                     }, 500)
                     return
-                storage.save_setting("autostart_enabled", enabled)
+                if not storage.save_setting("autostart_enabled", enabled):
+                    rollback = set_launch_at_login(previous)
+                    actual_status = get_launch_at_login()
+                    self.send_json_response({"success": False, "saved": False, "rollback_applied": rollback.applied,
+                        "enabled": None if actual_status.error else actual_status.applied,
+                        "error": "Auto-start preference could not be saved."}, 500)
+                    return
                 from voice_flow.platform import get_backend
                 backend = get_backend()
                 os_label = "macOS login" if backend.name == "macos" else "Windows sign-in"
@@ -3943,63 +4087,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
         elif path == "/api/storage/clear-audio-cache":
             try:
-                deleted_count = 0
-                if hasattr(archive, "root") and archive.root.is_dir():
-                    for wav in archive.root.glob("*.wav"):
-                        try:
-                            wav.unlink(missing_ok=True)
-                            deleted_count += 1
-                        except Exception:
-                            pass
-                self.send_json_response({
-                    "success": True,
-                    "deleted_count": deleted_count,
-                    "message": f"Cleared {deleted_count} cached audio recording(s)."
-                })
-            except Exception as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 500)
+                result = archive.clear_temporary_cache()
+                ok = not result["errors"]
+                self.send_json_response({"success": ok, **result,
+                    "deleted_count": result["deleted"],
+                    "message": "Temporary audio cache cleared; retained recordings preserved." if ok else "Some temporary files could not be removed."}, 200 if ok else 500)
+            except Exception:
+                self.send_json_response({"success": False, "error": "Could not clear temporary audio cache."}, 500)
 
         elif path in ("/api/overlay/show", "/api/overlay/hide", "/api/overlay/toggle", "/api/overlay/reset-position", "/api/overlay/reset-and-refresh", "/api/overlay/refresh", "/api/overlay/dock", "/api/app/restore-and-refresh"):
             global _app_refresh_generation
-            _app_refresh_generation += 1
-            overlay = getattr(runtime_controller, "overlay", None) if runtime_controller else None
-
-            def _apply_overlay_actions():
-                try:
-                    if runtime_controller and hasattr(runtime_controller, "reset_state_and_refresh") and path in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh"):
-                        runtime_controller.reset_state_and_refresh()
-                    elif overlay:
-                        if path in ("/api/overlay/reset-and-refresh", "/api/app/restore-and-refresh"):
-                            if hasattr(overlay, "restart_and_refresh"):
-                                overlay.restart_and_refresh()
-                            elif hasattr(overlay, "show"):
-                                overlay.show()
-                        elif path == "/api/overlay/show":
-                            if hasattr(overlay, "show"):
-                                overlay.show()
-                            if type(overlay).__name__ == "_MockOverlay" and hasattr(overlay, "reset_position"):
-                                overlay.reset_position()
-                        elif path == "/api/overlay/reset-position" and hasattr(overlay, "reset_position"):
-                            overlay.reset_position()
-                        elif path == "/api/overlay/refresh" and hasattr(overlay, "refresh"):
-                            overlay.refresh()
-                        elif path == "/api/overlay/hide" and hasattr(overlay, "hide"):
-                            overlay.hide()
-                        elif path == "/api/overlay/toggle":
-                            if hasattr(overlay, "win") and overlay.win and hasattr(overlay, "hide") and getattr(overlay, "_visible", True):
-                                overlay.hide()
-                            elif hasattr(overlay, "show"):
-                                overlay.show()
-                        elif path == "/api/overlay/dock" and hasattr(overlay, "set_dock"):
-                            overlay.set_dock(data.get("dock", "bottom"))
-                except Exception:
-                    pass
-
-            if path in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh"):
-                threading.Thread(target=_apply_overlay_actions, daemon=True).start()
-            else:
-                _apply_overlay_actions()
-            self.send_json_response({"success": True, "generation": _app_refresh_generation})
+            try:
+                apply_settings_overlay(path, data)
+                _app_refresh_generation += 1
+                self.send_json_response({"success": True, "generation": _app_refresh_generation})
+            except ValueError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+            except Exception:
+                self.send_json_response({"success": False, "error": "Floating bar could not be updated. Finish active work and try again."}, 503)
 
         elif path in (
             "/api/video-flow/notebooklm/auth/check",
@@ -4399,6 +4504,22 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             storage.save_setting("exec_audio_summary_allow_external_ai", consent)
             self.send_json_response({"success": True, "consent": consent})
 
+        elif path == "/api/settings/hotkey/recorder":
+            action = data.get("action") if isinstance(data, dict) else None
+            hotkeys = getattr(runtime_controller, "hotkeys", None) if runtime_controller else None
+            method_name = {"begin": "begin_shortcut_capture", "renew": "renew_shortcut_capture", "end": "end_shortcut_capture"}.get(action)
+            if not method_name or hotkeys is None or not callable(getattr(hotkeys, method_name, None)):
+                self.send_json_response({"success": False, "error": "Shortcut recording is unavailable. Try again when dictation is ready."}, 503)
+                return
+            token = secrets.token_urlsafe(24) if action == "begin" else data.get("token")
+            if not isinstance(token, str) or not token or len(token) > 128:
+                self.send_json_response({"success": False, "error": "Shortcut recording expired. Start again."}, 400)
+                return
+            if not getattr(hotkeys, method_name)(token):
+                self.send_json_response({"success": False, "error": "Finish dictation before recording a shortcut, or start the shortcut recorder again."}, 409)
+                return
+            self.send_json_response({"success": True, "token": token, "expires_in": 30})
+
         elif path == "/api/settings/hotkey":
             if not isinstance(data, dict):
                 self.send_json_response({"success": False, "error": "Invalid request body: JSON object required"}, 400)
@@ -4430,10 +4551,19 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             valid_custom_types = {"double_tap", "hold", "mouse_button", "toggle"}
             if "custom_trigger_type" in payload and payload["custom_trigger_type"] is not None:
                 ct = str(payload["custom_trigger_type"]).lower().strip()
-                if ct in valid_custom_types:
-                    payload["custom_trigger_type"] = ct
+                if ct not in valid_custom_types:
+                    self.send_json_response({"success": False, "error": "Choose a supported custom shortcut behavior."}, 400)
+                    return
+                payload["custom_trigger_type"] = ct
 
-            updated = storage.save_hotkey_settings(payload) if hasattr(storage, "save_hotkey_settings") else {}
+            try:
+                updated = storage.save_hotkey_settings(payload)
+            except ValueError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 400)
+                return
+            except Exception:
+                self.send_json_response({"success": False, "error": "Could not save shortcuts. Try again."}, 500)
+                return
             # Live reload hook to switch active triggers immediately without restarting
             try:
                 if runtime_controller is not None:
@@ -4443,8 +4573,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         runtime_controller.hotkeys.reload_config(updated)
             except Exception as exc:
                 log.warning("Could not live reload hotkeys: %s", exc)
+                self.send_json_response({"success": False, "saved": True, "error": "Shortcut was saved, but could not be applied. Try saving again."}, 503)
+                return
 
-            self.send_json_response({"success": True, "message": "Hotkey settings updated and reloaded", "settings": updated})
+            from voice_flow.hotkey_config import parse_hotkey_string
+            shortcut = updated.get("custom_hotkey") if updated.get("hotkey_trigger") == "custom" else updated.get("push_to_talk_shortcut")
+            warnings = parse_hotkey_string(shortcut).get("warnings", [])
+            self.send_json_response({"success": True, "message": "Shortcut settings saved", "settings": updated, "warnings": warnings})
 
         elif path == "/api/settings/update":
             key = str(data.get("key") or "").strip()
@@ -4463,6 +4598,13 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 # AI polishing is a Boolean safety switch.  Accepting a
                 # truthy string such as "false" makes a saved Off setting
                 # silently turn back on after a reload.
+                boolean_keys = {"click_to_paste_enabled", "show_in_taskbar", "voice_flow_enabled", "audio_flow_enabled", "video_flow_enabled", "press_enter_enabled", "has_viewed_onboarding", "has_celebrated_first_dictation", "anonymous_crash_reports"}
+                if key in boolean_keys and not isinstance(val, bool):
+                    self.send_json_response({"success": False, "error": key + " must be a boolean"}, 400)
+                    return
+                if key in {"on_screen_ui_theme", "vf_theme"} and (not isinstance(val, str) or val not in {"light", "dark"}):
+                    self.send_json_response({"success": False, "error": "Theme must be light or dark"}, 400)
+                    return
                 if key == "polishing_enabled" and not isinstance(val, bool):
                     self.send_json_response({"success": False, "error": "polishing_enabled must be a boolean"}, 400)
                     return
@@ -4473,6 +4615,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     if not isinstance(val, bool):
                         self.send_json_response({"success": False, "error": "autostart_enabled must be a boolean"}, 400)
                         return
+                    previous_status = get_launch_at_login()
+                    if previous_status.error:
+                        self.send_json_response({"success": False, "error": "Current auto-start state is unavailable."}, 503)
+                        return
+                    previous_autostart = previous_status.applied
                     result = set_launch_at_login(val)
                     if not result.applied:
                         self.send_json_response({
@@ -4480,9 +4627,50 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             "error": result.error or "Could not update auto-startup.",
                         }, 500)
                         return
+                hotkey_keys = {"hotkey_trigger", "custom_hotkey", "custom_trigger_type", "dictation_trigger_mode", "middle_click_enabled", "ctrl_key_dictation_enabled", "push_to_talk_shortcut"}
+                if key in hotkey_keys:
+                    try:
+                        updated = storage.save_hotkey_settings({key: val})
+                    except ValueError as exc:
+                        self.send_json_response({"success": False, "error": str(exc)}, 400)
+                        return
+                    except Exception:
+                        self.send_json_response({"success": False, "error": "Could not save shortcuts. Try again."}, 500)
+                        return
+                    try:
+                        if runtime_controller is not None and hasattr(runtime_controller, "reload_hotkeys"):
+                            runtime_controller.reload_hotkeys(updated)
+                        elif runtime_controller is not None and getattr(runtime_controller, "hotkeys", None) is not None:
+                            runtime_controller.hotkeys.reload_config(updated)
+                    except Exception:
+                        self.send_json_response({"success": False, "saved": True, "error": "Shortcut was saved, but could not be applied. Try saving again."}, 503)
+                        return
+                    self.send_json_response({"success": True, "key": key, "value": updated.get(key)})
+                    return
+                if key == "anonymous_crash_reports" and val is True:
+                    try:
+                        from voice_flow.crash_reporting import init_crash_reporting
+                        init_crash_reporting()
+                    except Exception:
+                        pass
                 if not storage.save_setting(key, val):
+                    if key == "autostart_enabled":
+                        set_launch_at_login(previous_autostart)
                     self.send_json_response({"success": False, "error": "Could not save setting"}, 500)
                     return
+                try:
+                    invalidate = getattr(runtime_controller, "invalidate_cached_setting", None)
+                    if callable(invalidate):
+                        invalidate(key)
+                except Exception:
+                    self.send_json_response({"success": False, "saved": True, "value": val, "error": "Setting saved, but could not be applied immediately."}, 503)
+                    return
+                if key == "on_screen_ui_theme":
+                    try:
+                        apply_on_screen_theme()
+                    except Exception:
+                        self.send_json_response({"success": False, "saved": True, "value": val, "error": "Theme saved, but floating bar could not refresh."}, 503)
+                        return
                 if key == "polishing_enabled" and val is False:
                     try:
                         from voice_flow.local_model_resources import request_model_cleanup
@@ -4496,9 +4684,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     # native window style immediately so the switch takes effect.
                     try:
                         from voice_flow.gui.desktop_launcher import _apply_taskbar_visibility
-                        _apply_taskbar_visibility(None, bool(val))
+                        applied = _apply_taskbar_visibility(None, val)
+                        if applied is False:
+                            raise RuntimeError("Taskbar visibility could not be applied")
                     except Exception:
-                        pass
+                        self.send_json_response({"success": False, "saved": True, "value": val, "error": "Taskbar setting saved, but could not be applied."}, 503)
+                        return
                 if key in ("hotkey_trigger", "custom_hotkey", "dictation_trigger_mode", "middle_click_enabled", "ctrl_key_dictation_enabled", "push_to_talk_shortcut"):
                     try:
                         if hasattr(storage, "save_hotkey_settings"):
@@ -5275,7 +5466,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if theme not in ("light", "dark"):
                 self.send_json_response({"success": False, "error": "Theme must be light or dark"}, 400)
             else:
-                storage.save_setting("vf_theme", theme)
+                if not storage.save_setting("vf_theme", theme):
+                    self.send_json_response({"success": False, "error": "Could not save dashboard theme."}, 500)
+                    return
                 self.send_json_response({"success": True, "theme": theme})
 
         elif path == "/api/settings/on-screen-ui-theme":
@@ -5283,7 +5476,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if theme not in ("light", "dark"):
                 self.send_json_response({"success": False, "error": "Theme must be light or dark"}, 400)
             else:
-                storage.save_setting("on_screen_ui_theme", theme)
+                if not storage.save_setting("on_screen_ui_theme", theme):
+                    self.send_json_response({"success": False, "error": "Could not save on-screen theme."}, 500)
+                    return
+                try:
+                    apply_on_screen_theme()
+                except Exception:
+                    self.send_json_response({"success": False, "saved": True, "theme": theme, "error": "Theme saved, but floating bar could not refresh."}, 503)
+                    return
                 self.send_json_response({"success": True, "theme": theme})
 
         elif path == "/api/video-flow/videos/save-to-downloads":
@@ -5960,32 +6160,26 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
 
         elif path == "/api/microphones/select":
+            if not isinstance(data, dict):
+                self.send_json_response({"success": False, "error": "Choose a microphone."}, 400)
+                return
             try:
-                # Frontend sends { name, index } (app.js selectMicrophoneDevice).
-                name = str(data.get("name") or data.get("device_id") or "").strip()
-                index = data.get("index", data.get("device_index"))
-                if (not name) and (index is None):
-                    self.send_json_response({"success": False, "error": "Microphone name or index required."}, 400)
+                from voice_flow.microphone_devices import resolve_input_device
+                if "identity" in data:
+                    preference = data["identity"]
                 else:
-                    storage.save_setting("selected_microphone", name or index)
-                    if index is not None:
-                        storage.save_setting("n_device", index)
-                    # The recorder engine restores its device from
-                    # "selected_mic_device" (main.py -> config -> audio.start).
-                    # Write the same pick there — prefer the device name (it
-                    # survives re-enumeration; an index does not), fall back
-                    # to the index when the frontend sent no name.
-                    storage.save_setting("selected_mic_device", name or index)
-                    # Apply live: dictation started right now must use the
-                    # newly picked device, not wait for a restart.
-                    try:
-                        from voice_flow.config import config as _cfg
-                        _cfg.selected_mic_device = name or index
-                    except Exception:
-                        pass
-                    self.send_json_response({"success": True})
-            except Exception as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 500)
+                    preference = data.get("name") or data.get("device_id") or data.get("index", data.get("device_index"))
+                is_default = "identity" in data and preference is None
+                row = None if is_default else resolve_input_device(preference, _microphone_catalog())
+                if not is_default and row is None:
+                    self.send_json_response({"success": False, "error": "That microphone is unavailable. Refresh the list or choose Windows default."}, 400)
+                    return
+                identity = row["identity"] if row else None
+                storage.save_microphone_settings(identity, row["index"] if row else None)
+                config.selected_mic_device = identity
+                self.send_json_response({"success": True, "identity": identity, "name": row["name"] if row else "Windows default microphone"})
+            except Exception:
+                self.send_json_response({"success": False, "error": "Could not select microphone. Try again."}, 500)
 
         elif path == "/api/providers/connections/reorder":
             provider = str(data.get("provider") or "").strip().lower()

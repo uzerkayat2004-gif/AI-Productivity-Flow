@@ -17,14 +17,17 @@ if TYPE_CHECKING:
 
 from voice_flow.config import config
 from voice_flow.vad import AdaptiveVAD
+from voice_flow.microphone_devices import (
+    audio_library_needs_refresh,
+    build_input_catalog,
+    has_uncertain_audio_stream,
+    register_recorder,
+    resolve_input_device,
+    retain_uncertain_stream,
+    serialized_audio_devices,
+)
 
 log = logging.getLogger(__name__)
-
-# The saved mic name can go stale (renamed/unplugged device) and then fails
-# the per-start query every time before the default-device fallback kicks in.
-# Warn once so the first occurrence stays visible in diagnostics; later starts
-# fall back silently instead of spamming the log.
-_stale_device_warned_once = False
 
 # Chunk-split tuning: a pause this quiet for this long closes the current
 # streaming chunk; nonstop speech is force-split at the hard cap.
@@ -46,7 +49,9 @@ class AudioRecorder:
     def __init__(self) -> None:
         self._buffer: list[NDArray[np.float32]] = []
         self._stream: sd.InputStream | None = None
+        self._uncertain_stream = None
         self._recording = False
+        self.last_device_error: str | None = None
         self._lock = threading.Lock()
         # Serializes stream construction/start against stop/close.  The audio
         # callback still uses _lock only, so it cannot block device teardown.
@@ -80,7 +85,9 @@ class AudioRecorder:
         self._startup_stream_buffered_samples = 0
         self._startup_stream_overflow = False
         self._stream_input_failed = False
+        self._input_overflow_count = 0
         self._vad = AdaptiveVAD(min_speech_rms=_SILENCE_RMS)
+        register_recorder(self)
 
     # -- public API --
 
@@ -104,10 +111,19 @@ class AudioRecorder:
         with self._lock:
             return bool(self._startup_stream_overflow or self._stream_input_failed)
 
+    @serialized_audio_devices
     def start(self, device: str | int | None = None) -> bool:
         """Start capture and return whether the input stream was opened successfully."""
-        global _stale_device_warned_once
         with self._lifecycle_lock:
+            uncertain = getattr(self, "_uncertain_stream", None)
+            if uncertain is not None:
+                if getattr(uncertain, "closed", False) is not True:
+                    self.last_device_error = "Microphone did not close. Close Voice Flow before recording again."
+                    return False
+                self._uncertain_stream = None
+            if has_uncertain_audio_stream():
+                self.last_device_error = "Microphone did not close. Close Voice Flow before recording again."
+                return False
             with self._lock:
                 if self._recording:
                     return True
@@ -120,6 +136,7 @@ class AudioRecorder:
                 self._last_voice_mono = None
                 self._chunk_voice_samples = 0
                 self._level = 0.0
+                self._input_overflow_count = 0
                 # Preserve an explicit startup-buffering request. VoiceFlowApp
                 # arms begin_stream_input_buffering() BEFORE calling start(), so
                 # clearing the flag here silently discarded every frame that
@@ -141,104 +158,78 @@ class AudioRecorder:
             if self._stream is not None:
                 try:
                     self._stream.stop()
-                    self._stream.close()
                 except Exception:
                     pass
+                try:
+                    self._stream.close()
+                except Exception:
+                    if self._remember_uncertain_stream(self._stream):
+                        return False
                 self._stream = None
 
-            target_device = device if device is not None else config.selected_mic_device
-            if target_device is not None:
-                # Fast validation: check whether target_device exists among active input devices
-                # to prevent 10-20s driver hang when a disconnected Bluetooth/USB headset is selected.
-                device_valid = False
+            self.last_device_error = None
+            if audio_library_needs_refresh(sd):
+                self.last_device_error = "Microphone discovery failed. Choose Refresh devices before recording."
+                return False
+            preference = device if device is not None else config.selected_mic_device
+            target_device = None
+            selected_info = None
+            if preference not in (None, ""):
                 try:
-                    all_devs = sd.query_devices()
-                    if isinstance(target_device, int):
-                        if 0 <= target_device < len(all_devs) and all_devs[target_device].get("max_input_channels", 0) > 0:
-                            device_valid = True
-                    elif isinstance(target_device, str):
-                        for dev in all_devs:
-                            if dev.get("max_input_channels", 0) > 0 and target_device.lower() in dev.get("name", "").lower():
-                                device_valid = True
-                                break
-                    else:
-                        device_valid = True
-                except Exception as dev_err:
-                    log.debug("[AUDIO] Device query check exception: %s", dev_err)
-                    device_valid = True
-
-                if not device_valid:
-                    log.warning("[AUDIO] Configured mic '%s' not found in active input devices; falling back to default device immediately.", target_device)
-                    target_device = None
-                    config.selected_mic_device = None
+                    devices = sd.query_devices()
                     try:
-                        from voice_flow.storage import storage
-                        storage.save_setting("selected_mic_device", None)
-                        storage.save_setting("selected_microphone", None)
+                        hostapis = sd.query_hostapis()
                     except Exception:
-                        pass
+                        hostapis = []
+                    selected_info = resolve_input_device(preference, build_input_catalog(devices, hostapis))
+                except Exception as exc:
+                    self.last_device_error = f"Cannot inspect microphone devices: {exc}"
+                    log.warning("[AUDIO] %s", self.last_device_error)
+                    return False
+                if selected_info is None:
+                    self.last_device_error = "Selected microphone unavailable. Reconnect it or choose Windows default."
+                    log.warning("[AUDIO] %s", self.last_device_error)
+                    return False
+                target_device = selected_info["index"]
 
             target_sr = int(getattr(config, "sample_rate", 16000) or 16000)
-            target_ch = 1
-            stream = None
-
-            # 1. Attempt native 16000Hz 1ch capture directly (eliminates heavy CPU resampling)
-            kwargs = {
-                "samplerate": target_sr,
-                "channels": target_ch,
-                "dtype": "float32",
-                "blocksize": 1024,
-                "callback": self._audio_callback,
-            }
+            kwargs = {"samplerate": target_sr, "channels": 1, "dtype": "float32",
+                      "blocksize": 1024, "callback": self._audio_callback}
             if target_device is not None:
                 kwargs["device"] = target_device
-
+            stream = None
+            last_error = None
+            # Format negotiation always stays on the chosen endpoint. A rate
+            # rejection is not evidence that the preferred microphone vanished.
             try:
                 stream = sd.InputStream(**kwargs)
-                self._native_sr = target_sr
-                self._native_ch = target_ch
-            except Exception as e:
-                # Handle stale/disconnected configured device
-                if target_device is not None:
-                    if not _stale_device_warned_once:
-                        _stale_device_warned_once = True
-                        log.warning("[AUDIO] Configured mic '%s' unavailable (%s); resetting to system default device.", target_device, e)
-                    kwargs.pop("device", None)
-                    config.selected_mic_device = None
+                self._native_sr, self._native_ch = target_sr, 1
+            except Exception as exc:
+                last_error = exc
+                if selected_info is None:
                     try:
-                        from voice_flow.storage import storage
-                        storage.save_setting("selected_mic_device", None)
-                        storage.save_setting("selected_microphone", None)
-                    except Exception:
-                        pass
-                    # Retry at 16000Hz on default device
-                    try:
-                        stream = sd.InputStream(**kwargs)
-                        self._native_sr = target_sr
-                        self._native_ch = target_ch
-                    except Exception:
-                        stream = None
-
-                # 2. If 16000Hz was rejected by the driver, query and use hardware default rate
-                if stream is None:
-                    try:
-                        dev_info = sd.query_devices(kwargs.get("device") if kwargs.get("device") is not None else sd.default.device[0], kind="input")
-                        hw_sr = int(dev_info.get("default_samplerate", 44100))
-                        hw_ch = max(1, min(2, int(dev_info.get("max_input_channels", 1))))
-                    except Exception:
-                        hw_sr, hw_ch = 44100, 1
-                    kwargs["samplerate"] = hw_sr
-                    kwargs["channels"] = hw_ch
-                    self._native_sr = hw_sr
-                    self._native_ch = hw_ch
-                    try:
-                        stream = sd.InputStream(**kwargs)
-                    except Exception as e2:
-                        log.error("[AUDIO] Failed to open input stream at hardware rate (%d Hz): %s", hw_sr, e2)
+                        selected_info = sd.query_devices(kind="input")
+                    except Exception as query_error:
+                        last_error = query_error
+                if selected_info is not None:
+                    hardware_rate = int(selected_info.get("default_samplerate", 44100) or 44100)
+                    channel_count = int(selected_info.get("max_input_channels", 1) or 1)
+                    formats = [(hardware_rate, 1)]
+                    if channel_count >= 2:
+                        formats.append((hardware_rate, 2))
+                    for rate, channels in formats:
+                        if (rate, channels) == (target_sr, 1):
+                            continue
+                        kwargs.update(samplerate=rate, channels=channels)
+                        try:
+                            stream = sd.InputStream(**kwargs)
+                            self._native_sr, self._native_ch = rate, channels
+                            break
+                        except Exception as format_error:
+                            last_error = format_error
             if stream is None:
-                log.error("[AUDIO] Failed to start input stream", exc_info=True)
-                with self._lock:
-                    self._recording = False
+                self.last_device_error = f"Could not open the selected microphone: {last_error}"
+                log.error("[AUDIO] %s", self.last_device_error)
                 return False
             with self._lock:
                 self._recording = True
@@ -249,11 +240,12 @@ class AudioRecorder:
                 # recorder flagged as recording with no stream — the next
                 # start() would early-return True and dictation would capture
                 # nothing until process restart.
-                log.error("[AUDIO] Input stream failed to start: %s", e)
+                self.last_device_error = f"Selected microphone failed to start: {e}"
+                log.error("[AUDIO] %s", self.last_device_error)
                 try:
                     stream.close()
                 except Exception:
-                    pass
+                    self._remember_uncertain_stream(stream)
                 with self._lock:
                     self._recording = False
                 return False
@@ -276,6 +268,7 @@ class AudioRecorder:
         """
         return self._stop_capture(take_open_chunk=True)
 
+    @serialized_audio_devices
     def _stop_capture(self, *, take_open_chunk: bool) -> tuple[NDArray[np.float32], NDArray[np.float32] | None, float]:
         """Quiesce device callbacks, close the microphone stream, and atomically snapshot capture buffers."""
         with self._lifecycle_lock:
@@ -295,6 +288,7 @@ class AudioRecorder:
                     stream.close()
                 except Exception as e:
                     log.debug("[AUDIO] Error closing stream: %s", e)
+                    self._remember_uncertain_stream(stream)
 
             with self._lock:
                 # stop() quiesces callbacks. Until it returns, the driver's
@@ -316,10 +310,18 @@ class AudioRecorder:
                 self._last_voice_mono = None
                 self._chunk_voice_samples = 0
                 self._chunk_overlap_prefix_seconds = 0.0
-                if not self._buffer:
-                    return np.array([], dtype=np.float32), tail, tail_overlap
-                raw = np.concatenate(self._buffer, axis=0)
+                input_overflows = int(getattr(self, "_input_overflow_count", 0))
+                self._input_overflow_count = 0
+                raw = np.concatenate(self._buffer, axis=0) if self._buffer else None
                 self._buffer.clear()
+
+        if input_overflows:
+            # The driver dropped samples before callback delivery.  Reporting
+            # it once after capture avoids callback I/O; neither the stream nor
+            # the raw archive can reconstruct those missing device samples.
+            log.warning("[AUDIO] Input device overflowed %d time(s); captured audio may be incomplete", input_overflows)
+        if raw is None:
+            return np.array([], dtype=np.float32), tail, tail_overlap
 
         # Convert multi-channel to 1D mono
         if raw.ndim > 1:
@@ -354,9 +356,11 @@ class AudioRecorder:
         """Stop recording and discard the buffer."""
         self.stop()
 
+    @serialized_audio_devices
     def close(self) -> None:
         """Explicitly stop and tear down the hardware audio stream."""
         with self._lifecycle_lock:
+            uncertain = getattr(self, "_uncertain_stream", None)
             with self._lock:
                 self._recording = False
                 self._level = 0.0
@@ -372,6 +376,7 @@ class AudioRecorder:
                 self._startup_stream_buffered_samples = 0
                 self._startup_stream_overflow = False
                 self._stream_input_failed = False
+                self._input_overflow_count = 0
                 self._replaying_stream_input = False
             if stream is not None:
                 try:
@@ -381,7 +386,23 @@ class AudioRecorder:
                 try:
                     stream.close()
                 except Exception:
+                    self._remember_uncertain_stream(stream)
+
+            if uncertain is not None and uncertain is not stream:
+                try:
+                    uncertain.close()
+                except Exception:
                     pass
+                if getattr(uncertain, "closed", False) is True:
+                    self._uncertain_stream = None
+
+    def _remember_uncertain_stream(self, stream) -> bool:
+        if getattr(stream, "closed", False) is True:
+            return False
+        self._uncertain_stream = stream
+        retain_uncertain_stream(stream)
+        self.last_device_error = "Microphone did not close. Close Voice Flow before recording again."
+        return True
 
     def begin_stream_input_buffering(self) -> None:
         """Buffer initial capture until the session's stream is armed.
@@ -515,6 +536,8 @@ class AudioRecorder:
         with self._lock:
             if not self._recording:
                 return
+            if status is not None and bool(getattr(status, "input_overflow", False)):
+                self._input_overflow_count = int(getattr(self, "_input_overflow_count", 0)) + 1
             # Device drivers should provide finite float32 samples, but a
             # transient NaN/Inf must not poison the level meter, silence split,
             # or the archived buffer when a driver misbehaves.

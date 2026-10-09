@@ -263,7 +263,14 @@ jobs:
             fi
             security delete-keychain "$KEYCHAIN_PATH" || true
           else
-            echo "macOS signing and notarization skipped (MACOS_CERT / MACOS_CERT_PASSWORD not configured)."
+            echo "macOS signing skipped (MACOS_CERT / MACOS_CERT_PASSWORD not configured); applying ad-hoc codesign..."
+            codesign --force --deep --sign - "dist/AI Productivity Flow.app"
+            python scripts/build_macos_app.py --dmg-only
+            cd dist
+            rm -f AI-Productivity-Flow-macOS.zip AI-Productivity-Flow-macOS.zip.sha256
+            zip -r -y AI-Productivity-Flow-macOS.zip "AI Productivity Flow.app"
+            shasum -a 256 AI-Productivity-Flow-macOS.zip > AI-Productivity-Flow-macOS.zip.sha256
+            cd ..
           fi
 
           # Ensure hashes are fresh
@@ -292,13 +299,40 @@ jobs:
                   'AI Productivity Flow.app/Contents/Resources/AppIcon.icns',
                   'AI Productivity Flow.app/Contents/Resources/src/voice_flow/__init__.py',
                   'AI Productivity Flow.app/Contents/Resources/src/voice_flow/_version.py',
-                  'AI Productivity Flow.app/Contents/Resources/runtime/site-packages'
+                  'AI Productivity Flow.app/Contents/Resources/runtime/python/bin/python3'
               ]
               missing = [r for r in required if not any(n.startswith(r) for n in names)]
               if missing:
                   sys.exit(f'macOS zip smoke test failed! Missing entries: {missing}')
           print('macOS zip smoke test passed (runtime dependencies verified)!')
           "
+
+      - name: 20-Second App Launch Check
+        run: |
+          LAUNCHER="dist/AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher"
+          chmod +x "$LAUNCHER"
+          LOG_FILE="$RUNNER_TEMP/macos_launch.log"
+          echo "Starting app in background for 20-second survival check..."
+          "$LAUNCHER" > "$LOG_FILE" 2>&1 &
+          APP_PID=$!
+          
+          for i in $(seq 1 20); do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              wait "$APP_PID" || true
+              EXIT_CODE=$?
+              echo "App process crashed or exited prematurely after ${i}s (exit code ${EXIT_CODE})!"
+              echo "=== App Output Log ==="
+              cat "$LOG_FILE" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          echo "App survived 20 seconds successfully! Stopping background process..."
+          kill -TERM "$APP_PID" 2>/dev/null || true
+          sleep 2
+          kill -KILL "$APP_PID" 2>/dev/null || true
+          echo "Launch check cleanly verified." 
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4

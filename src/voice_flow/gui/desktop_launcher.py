@@ -42,6 +42,13 @@ if sys.platform != "win32":
             except Exception:
                 pass
 
+# Ensure WebView2 allows audio autoplay without requiring initial user gesture
+_wv2_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+if "--autoplay-policy=no-user-gesture-required" not in _wv2_args:
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+        f"{_wv2_args} --autoplay-policy=no-user-gesture-required".strip()
+    )
+
 webview = None  # type: ignore[assignment]
 
 if not os.environ.get("CI"):
@@ -80,6 +87,12 @@ if sys.stdout is None:
     sys.stderr = DummyWriter()
 
 _launcher_log_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_launcher.log"
+
+try:
+    from voice_flow.crash_reporting import init_crash_reporting
+    init_crash_reporting()
+except Exception:
+    pass
 
 
 def _launcher_log(message: str) -> None:
@@ -147,8 +160,8 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _poke_overlay_show() -> None:
-    """Signal the background main engine to unhide, reset dock position, and bring the floating bar to front."""
-    for endpoint in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh", "/api/overlay/show"):
+    """Bring the floating bar forward and redraw it without resetting active state."""
+    for endpoint in ("/api/app/restore-and-refresh", "/api/overlay/show", "/api/overlay/refresh"):
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -324,23 +337,85 @@ def is_api_server_ready(timeout: float = 0.2) -> bool:
         return False
 
 
-def _apply_taskbar_visibility(window, visible: bool) -> None:
-    """Set the native window's taskbar style after pywebview creates it."""
+def _apply_taskbar_visibility(window, visible: bool) -> bool:
+    """Apply taskbar styles only to this installation's verified desktop window."""
     if not sys.platform.startswith("win"):
-        return
+        return False
     try:
         import ctypes
+        import psutil
         user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, "AI Productivity Flow") or user32.FindWindowW(None, "Voice Flow")
-        if not hwnd:
-            return
-        GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x80, 0x40000
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW if visible else (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0001 | 0x0002 | 0x0004)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetLastError.argtypes = [ctypes.c_ulong]
+        kernel32.SetLastError.restype = None
+        kernel32.GetLastError.argtypes = []
+        kernel32.GetLastError.restype = ctypes.c_ulong
+        hwnd_type = ctypes.c_void_p
+        pid_type = ctypes.c_ulong
+        user32.GetWindowThreadProcessId.argtypes = [hwnd_type, ctypes.POINTER(pid_type)]
+        user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+        user32.GetWindowTextW.argtypes = [hwnd_type, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        user32.SetWindowPos.argtypes = [hwnd_type, hwnd_type, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        user32.SetWindowPos.restype = ctypes.c_int
+        get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+        set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+        get_style.argtypes = [hwnd_type, ctypes.c_int]
+        get_style.restype = ctypes.c_ssize_t
+        set_style.argtypes = [hwnd_type, ctypes.c_int, ctypes.c_ssize_t]
+        set_style.restype = ctypes.c_ssize_t
+        project = Path(__file__).resolve().parents[3]
+
+        def owned(hwnd):
+            pid = pid_type()
+            if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
+                return False
+            if pid.value == os.getpid():
+                return True
+            process = psutil.Process(pid.value)
+            arguments = process.cmdline()
+            return ("-m" in arguments
+                    and arguments[arguments.index("-m") + 1] == "voice_flow.gui.desktop_launcher"
+                    and Path(process.cwd()).resolve() in {project, project / "src"})
+
+        candidates = []
+        native = getattr(window, "native", None) if window is not None else None
+        handle = getattr(native, "Handle", None)
+        if handle is not None:
+            to_int64 = getattr(handle, "ToInt64", None)
+            candidates.append(int(to_int64() if callable(to_int64) else handle))
+        else:
+            callback_type = ctypes.WINFUNCTYPE(ctypes.c_int, hwnd_type, ctypes.c_ssize_t)
+            def collect(hwnd, _parameter):
+                title = ctypes.create_unicode_buffer(256)
+                user32.GetWindowTextW(hwnd, title, len(title))
+                if title.value in {"AI Productivity Flow", "Voice Flow"}:
+                    candidates.append(hwnd)
+                return 1
+            user32.EnumWindows.argtypes = [callback_type, ctypes.c_ssize_t]
+            user32.EnumWindows.restype = ctypes.c_int
+            if not user32.EnumWindows(callback_type(collect), 0):
+                return False
+        for hwnd in candidates:
+            try:
+                if not owned(hwnd):
+                    continue
+            except (psutil.Error, OSError, ValueError, IndexError):
+                continue
+            kernel32.SetLastError(0)
+            style = get_style(hwnd, -20)
+            if style == 0 and kernel32.GetLastError():
+                return False
+            style = (style | 0x40000) & ~0x80 if visible else (style | 0x80) & ~0x40000
+            kernel32.SetLastError(0)
+            previous = set_style(hwnd, -20, style)
+            if previous == 0 and kernel32.GetLastError():
+                return False
+            return bool(user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0001 | 0x0002 | 0x0004))
+        return False
     except Exception as exc:
         print(f"[SYSTEM WARNING] Could not apply taskbar preference: {exc}")
+        return False
 
 
 def _apply_window_icon(ico_path: str, window=None, hwnd=None) -> None:
@@ -445,7 +520,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
                 break
             time.sleep(0.05)
 
-    # If backend engine is ready, send signal to reset dock and ensure floating bar is 100% visible
+    # If the backend is ready, bring the floating bar forward without changing active work.
     if is_api_server_ready(timeout=0.5):
         threading.Thread(target=_poke_overlay_show, daemon=True).start()
     else:
@@ -663,7 +738,7 @@ def _focus_existing_window() -> bool:
         if os.path.exists(ico_path):
             _apply_window_icon(ico_path, hwnd=hwnd)
 
-        # Re-trigger floating bar display & position reset so user sees the bar immediately
+        # Re-trigger floating bar display so the user sees it immediately.
         threading.Thread(target=_poke_overlay_show, daemon=True).start()
         # Silently touch/refresh NotebookLM session when window is focused
         threading.Thread(target=_poke_keepalive_refresh, daemon=True).start()

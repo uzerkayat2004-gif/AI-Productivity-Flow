@@ -20,6 +20,7 @@ from typing import Any
 
 from voice_flow.vocabulary_learning import (
     extract_vocabulary_candidates,
+    is_ambiguous_spaced_alias,
     is_noise_variant,
     is_useful_term,
 )
@@ -51,6 +52,20 @@ def _dictionary_term_occurrences(text: str, term: str) -> int:
 
 
 # Keep module-level helpers small and deterministic; storage owns persistence.
+
+
+def _visible_dictionary_corrections(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    """Hide unsafe legacy automatic mappings without deleting user data."""
+    visible: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        automatic_candidate_id = item.pop("automatic_candidate_id", None)
+        if automatic_candidate_id is not None and is_ambiguous_spaced_alias(
+            str(item.get("correct_text") or ""), str(item.get("wrong_text") or "")
+        ):
+            continue
+        visible.append(item)
+    return visible
 
 
 # ---------------------------------------------------------------------------
@@ -167,8 +182,14 @@ class DictationRecord:
     processing_metadata: dict[str, Any] | None = None
 
 
-def resolve_active_db_path() -> str:
-    """Return the database path for the currently active account, or fallback to default DB_PATH."""
+def resolve_active_db_path(*, fallback_on_error: bool = True) -> str | None:
+    """Return the active account database path.
+
+    Startup callers retain the legacy root fallback when account state cannot
+    be read. Runtime repointing disables that fallback: a transient accounts
+    database error must keep the last known-good account instead of switching
+    live dictionary/history reads to the unrelated root database.
+    """
     try:
         from voice_flow.account_manager import get_account_manager
         am = get_account_manager()
@@ -178,7 +199,8 @@ def resolve_active_db_path() -> str:
             if p:
                 return str(p)
     except Exception:
-        pass
+        if not fallback_on_error:
+            return None
     return DB_PATH
 
 
@@ -217,12 +239,19 @@ class StorageEngine:
         if getattr(self, "_custom_db", False):
             return False
         try:
-            target = resolve_active_db_path()
+            try:
+                target = resolve_active_db_path(fallback_on_error=False)
+            except TypeError:
+                # Preserve lightweight zero-argument resolver doubles used by
+                # integrations while the production resolver reports failure
+                # explicitly through ``None``.
+                target = resolve_active_db_path()
         except Exception:
             log.debug("Could not resolve active DB path for repoint", exc_info=True)
-            target = DB_PATH
+            return False
         if not target:
-            target = DB_PATH
+            log.warning("Could not resolve active account database; keeping %s", self.db_path)
+            return False
         if os.path.normcase(os.path.abspath(target)) == os.path.normcase(os.path.abspath(self.db_path)):
             return False
         try:
@@ -1683,12 +1712,27 @@ class StorageEngine:
 
     def get_dictionary_revision(self) -> int:
         """Return a monotonic revision used to refresh in-process vocabulary."""
-        with self._get_conn_ctx() as conn:
+        database_uri = Path(os.path.abspath(self.db_path)).as_uri() + "?mode=ro"
+        conn = sqlite3.connect(database_uri, uri=True, timeout=15.0)
+        try:
             row = conn.execute("SELECT value FROM settings WHERE key = 'dictionary_revision'").fetchone()
             try:
-                return int(row["value"]) if row else 0
+                return int(row[0]) if row else 0
             except (TypeError, ValueError):
                 return 0
+        finally:
+            conn.close()
+
+    def get_dictionary_cache_token(self) -> tuple[str, int]:
+        """Identify one account's persisted dictionary snapshot.
+
+        Revisions are monotonic only within a database. Two accounts can both
+        be at revision 1, so consumers must pair the number with the database
+        identity before reusing in-process rules.
+        """
+        with self._lexicon_lock:
+            database = os.path.normcase(os.path.realpath(os.path.abspath(self.db_path)))
+            return database, self.get_dictionary_revision()
 
     def _bump_dictionary_revision(self, conn: sqlite3.Connection) -> None:
         row = conn.execute("SELECT value FROM settings WHERE key = 'dictionary_revision'").fetchone()
@@ -3347,6 +3391,25 @@ class StorageEngine:
         except Exception:
             return False
 
+    def has_active_media_jobs(self) -> bool:
+        """Read durable job state without initializing workers or providers."""
+        with self._get_conn_ctx() as conn:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table, column, predicate in (
+                ("history", "status", "app_name IN ('Audio Flow','Video Flow') AND "),
+                ("audio_summary_history", "status", ""),
+                ("video_flow_jobs", "state", ""),
+            ):
+                if table not in tables:
+                    continue
+                if table == "video_flow_jobs":
+                    if conn.execute("SELECT 1 FROM video_flow_jobs WHERE lower(state) NOT IN ('complete','completed','ready','failed','cancelled','canceled') LIMIT 1").fetchone():
+                        return True
+                    continue
+                if conn.execute(f"SELECT 1 FROM {table} WHERE {predicate}lower({column}) IN ('queued','pending','running','processing','in_progress','generating','rendering','synthesizing') LIMIT 1").fetchone():
+                    return True
+        return False
+
     def get_setting(self, key: str, default: Any = None) -> Any:
         """Retrieve a setting value by key."""
         with self._get_conn_ctx() as conn:
@@ -3359,7 +3422,7 @@ class StorageEngine:
                 value = _json.loads(row["value"])
             except (ValueError, TypeError):
                 value = row["value"]
-            if key in {"polishing_enabled", "dictionary_auto_learning_enabled"}:
+            if key in {"polishing_enabled", "dictionary_auto_learning_enabled", "click_to_paste_enabled", "show_in_taskbar", "autostart_enabled", "voice_flow_enabled", "audio_flow_enabled", "video_flow_enabled", "press_enter_enabled", "middle_click_enabled", "ctrl_key_dictation_enabled", "has_viewed_onboarding", "has_celebrated_first_dictation", "anonymous_crash_reports"}:
                 # Older callers saved booleans as strings. Normalize at the
                 # read boundary without rewriting stored settings.
                 if isinstance(value, str):
@@ -3379,6 +3442,14 @@ class StorageEngine:
                 except (ValueError, TypeError):
                     result[row["key"]] = row["value"]
             return result
+
+    def save_microphone_settings(self, identity: str | None, index: int | None) -> None:
+        """Store one explicit microphone choice atomically across legacy keys."""
+        import json as _json
+        with self._get_conn() as conn:
+            for key, value in (("selected_mic_device", identity), ("selected_microphone", identity), ("n_device", index)):
+                conn.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))", (key, _json.dumps(value)))
+            conn.commit()
 
     def get_hotkey_settings(self) -> dict[str, Any]:
         """Retrieve current user-configurable hotkey and trigger settings."""
@@ -3403,6 +3474,10 @@ class StorageEngine:
         else:
             ptt_label = label_map.get(trigger, "Ctrl+Win")
         custom_trigger_type = str(self.get_setting("custom_trigger_type", "hold") or "hold").lower().strip()
+        if trigger == "custom":
+            from voice_flow.hotkey_config import parse_hotkey_string
+            if parse_hotkey_string(custom_key)["is_double"]:
+                custom_trigger_type = "double_tap"
         return {
             "hotkey_trigger": trigger,
             "custom_hotkey": custom_key,
@@ -3416,7 +3491,49 @@ class StorageEngine:
     def save_hotkey_settings(self, data: dict[str, Any]) -> dict[str, Any]:
         """Persist user-configurable hotkey settings and synchronize labels."""
         if not isinstance(data, dict):
-            return self.get_hotkey_settings()
+            raise ValueError("Shortcut settings must be an object.")
+
+        # Validate the entire request before changing any saved preference.
+        data = dict(data)
+        from voice_flow.hotkey_config import parse_hotkey_string
+        allowed = {
+            "hotkey_trigger": {"ctrl_win", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"},
+            "dictation_trigger_mode": {"hybrid", "ptt_only", "toggle_only", "disabled"},
+            "custom_trigger_type": {"hold", "toggle", "double_tap", "mouse_button"},
+        }
+        for key, choices in allowed.items():
+            if key in data:
+                value = str(data[key]).strip().lower()
+                if value not in choices:
+                    raise ValueError(f"Choose a supported {key.replace('_', ' ')}.")
+                data[key] = value
+        for key in ("middle_click_enabled", "ctrl_key_dictation_enabled"):
+            if key in data and not isinstance(data[key], bool):
+                raise ValueError(f"{key.replace('_', ' ')} must be on or off.")
+        for key in ("custom_hotkey", "push_to_talk_shortcut"):
+            if key not in data:
+                continue
+            if key == "push_to_talk_shortcut" and str(data[key]).lower() in {"single ctrl", "double ctrl", "middle mouse button", "middle_click"}:
+                continue
+            parsed = parse_hotkey_string(data[key])
+            if not parsed["valid"]:
+                raise ValueError(parsed["error"] or "Choose a supported shortcut.")
+            data[key] = parsed["canonical"]
+            if parsed["is_double"]:
+                if data.get("custom_trigger_type", "double_tap") != "double_tap":
+                    raise ValueError("A double-tap shortcut must use Double tap behavior.")
+                data["custom_trigger_type"] = "double_tap"
+
+        effective_custom = data.get("custom_hotkey", self.get_setting("custom_hotkey", "Alt+Space"))
+        effective_trigger = data.get("hotkey_trigger", self.get_setting("hotkey_trigger", "ctrl_win"))
+        if effective_trigger == "custom" and parse_hotkey_string(effective_custom)["is_double"]:
+            if data.get("custom_trigger_type", "double_tap") != "double_tap":
+                raise ValueError("A double-tap shortcut must use Double tap behavior.")
+            data["custom_trigger_type"] = "double_tap"
+
+        pending = {}
+        def stage(key, value):
+            pending[key] = value
 
         label_map = {
             "ctrl_win": "Ctrl+Win",
@@ -3440,7 +3557,7 @@ class StorageEngine:
 
         if "push_to_talk_shortcut" in data and data["push_to_talk_shortcut"] is not None:
             ptt_str = str(data["push_to_talk_shortcut"]).strip()
-            self.save_setting("push_to_talk_shortcut", ptt_str)
+            stage("push_to_talk_shortcut", ptt_str)
             ptt_lower = ptt_str.lower()
             if ptt_lower in reverse_label_map:
                 trigger_from_ptt = reverse_label_map[ptt_lower]
@@ -3452,38 +3569,45 @@ class StorageEngine:
 
         if "hotkey_trigger" in data and data["hotkey_trigger"] is not None:
             trigger = str(data["hotkey_trigger"]).lower().strip()
-            self.save_setting("hotkey_trigger", trigger)
+            stage("hotkey_trigger", trigger)
             if trigger in label_map:
-                self.save_setting("push_to_talk_shortcut", label_map[trigger])
+                stage("push_to_talk_shortcut", label_map[trigger])
             elif trigger == "custom":
                 custom_str = str(data.get("custom_hotkey") or self.get_setting("custom_hotkey", "Alt+Space") or "Alt+Space").strip()
-                self.save_setting("push_to_talk_shortcut", custom_str)
+                stage("push_to_talk_shortcut", custom_str)
 
             if trigger in ("single_ctrl", "double_ctrl"):
-                self.save_setting("ctrl_key_dictation_enabled", True)
+                stage("ctrl_key_dictation_enabled", True)
             elif "ctrl_key_dictation_enabled" not in data:
-                self.save_setting("ctrl_key_dictation_enabled", False)
+                stage("ctrl_key_dictation_enabled", False)
 
         if "custom_hotkey" in data and data["custom_hotkey"] is not None:
             custom_val = str(data["custom_hotkey"]).strip()
             if custom_val:
-                self.save_setting("custom_hotkey", custom_val)
+                stage("custom_hotkey", custom_val)
                 if data.get("hotkey_trigger") == "custom":
-                    self.save_setting("push_to_talk_shortcut", custom_val)
+                    stage("push_to_talk_shortcut", custom_val)
 
         if "custom_trigger_type" in data and data["custom_trigger_type"] is not None:
             ct = str(data["custom_trigger_type"]).lower().strip()
             if ct in ("double_tap", "hold", "mouse_button", "toggle"):
-                self.save_setting("custom_trigger_type", ct)
+                stage("custom_trigger_type", ct)
 
         if "dictation_trigger_mode" in data and data["dictation_trigger_mode"] is not None:
-            self.save_setting("dictation_trigger_mode", str(data["dictation_trigger_mode"]).lower().strip())
+            stage("dictation_trigger_mode", str(data["dictation_trigger_mode"]).lower().strip())
 
         if "middle_click_enabled" in data and data["middle_click_enabled"] is not None:
-            self.save_setting("middle_click_enabled", bool(data["middle_click_enabled"]))
+            stage("middle_click_enabled", bool(data["middle_click_enabled"]))
 
         if "ctrl_key_dictation_enabled" in data and data["ctrl_key_dictation_enabled"] is not None:
-            self.save_setting("ctrl_key_dictation_enabled", bool(data["ctrl_key_dictation_enabled"]))
+            stage("ctrl_key_dictation_enabled", bool(data["ctrl_key_dictation_enabled"]))
+
+        # Commit the validated draft together; failed writes never report success.
+        import json as _json
+        with self._get_conn() as conn:
+            for key, value in pending.items():
+                conn.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))", (key, _json.dumps(value)))
+            conn.commit()
 
         # Synchronize in-memory config singleton
         try:
@@ -4106,13 +4230,15 @@ class StorageEngine:
                     exp = (s["expansion"] or "").strip()
                     if trig and exp:
                         words.append(f"{trig} -> {exp}")
-                corrections = [dict(row) for row in conn.execute(
-                    "SELECT dc.id, dc.wrong_text, dc.correct_text, dc.created_at, dc.updated_at "
+                correction_rows = conn.execute(
+                    "SELECT dc.id, dc.wrong_text, dc.correct_text, dc.automatic_candidate_id, "
+                    "dc.created_at, dc.updated_at "
                     "FROM dictionary_corrections dc LEFT JOIN lexicon_candidates lc "
                     "ON lc.id = dc.automatic_candidate_id "
                     "WHERE dc.automatic_candidate_id IS NULL OR lc.state = 'active' "
                     "ORDER BY dc.wrong_text COLLATE NOCASE"
-                )]
+                ).fetchall()
+                corrections = _visible_dictionary_corrections(correction_rows)
                 return self._lexicon_revision, words, corrections
 
     def get_snippet_snapshot(self) -> tuple[int, list[dict[str, Any]]]:
@@ -4126,13 +4252,14 @@ class StorageEngine:
     def get_dictionary_corrections(self) -> list[dict[str, Any]]:
         with self._get_conn_ctx() as conn:
             rows = conn.execute(
-                "SELECT dc.id, dc.wrong_text, dc.correct_text, dc.created_at, dc.updated_at "
+                "SELECT dc.id, dc.wrong_text, dc.correct_text, dc.automatic_candidate_id, "
+                "dc.created_at, dc.updated_at "
                 "FROM dictionary_corrections dc LEFT JOIN lexicon_candidates lc "
                 "ON lc.id = dc.automatic_candidate_id "
                 "WHERE dc.automatic_candidate_id IS NULL OR lc.state = 'active' "
                 "ORDER BY dc.wrong_text COLLATE NOCASE"
             ).fetchall()
-            return [dict(row) for row in rows]
+            return _visible_dictionary_corrections(rows)
 
     # -- learned vocabulary candidates (spec SS34-37) --------------------
 
