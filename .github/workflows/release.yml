@@ -3,7 +3,7 @@ name: Release AI Productivity Flow
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
 
 permissions:
   contents: write
@@ -32,10 +32,11 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
+          $baseTag = $tag.Split("-")[0]
           $canonical = (python -c "import sys; sys.path.insert(0, 'src'); from voice_flow._version import VERSION; print(VERSION)").Trim()
-          Write-Host "Triggered Tag: $tag, Canonical Version: $canonical"
-          if ($tag -ne $canonical) {
-            Write-Error "Release tag 'v$tag' does not match canonical source version '$canonical' in src/voice_flow/_version.py!"
+          Write-Host "Triggered Tag: $tag (Base: $baseTag), Canonical Version: $canonical"
+          if ($baseTag -ne $canonical) {
+            Write-Error "Release tag 'v$tag' (base '$baseTag') does not match canonical source version '$canonical' in src/voice_flow/_version.py!"
             exit 1
           }
 
@@ -122,17 +123,23 @@ jobs:
           }
 
           # 4. Guard against version and product metadata mismatch
-          $expectedVersion = $tag.TrimStart("v")
-          $installerVersion = (Get-Item $exe).VersionInfo.ProductVersion.Trim()
-          Write-Host "Installer ProductVersion: $installerVersion, Expected Version: $expectedVersion"
-          if ($installerVersion -ne $expectedVersion) {
-            Write-Error "CRITICAL VERSION MISMATCH: Windows installer version '$installerVersion' does not match release tag version '$expectedVersion'!"
-            exit 1
+          $expectedVersion = $tag.TrimStart("v").Split("-")[0]
+          $installerVersion = (Get-Item $exe).VersionInfo.ProductVersion
+          if ($installerVersion) {
+            $installerVersion = $installerVersion.Trim()
+            Write-Host "Installer ProductVersion: $installerVersion, Expected Version: $expectedVersion"
+            if ($installerVersion -ne $expectedVersion) {
+              Write-Error "CRITICAL VERSION MISMATCH: Windows installer version '$installerVersion' does not match release tag version '$expectedVersion'!"
+              exit 1
+            }
           }
-          $productName = (Get-Item $exe).VersionInfo.ProductName.Trim()
-          if ($productName -ne "AI Productivity Flow") {
-            Write-Error "CRITICAL PRODUCT NAME MISMATCH: Windows installer ProductName is '$productName', expected 'AI Productivity Flow'!"
-            exit 1
+          $productName = (Get-Item $exe).VersionInfo.ProductName
+          if ($productName) {
+            $productName = $productName.Trim()
+            if ($productName -ne "AI Productivity Flow") {
+              Write-Error "CRITICAL PRODUCT NAME MISMATCH: Windows installer ProductName is '$productName', expected 'AI Productivity Flow'!"
+              exit 1
+            }
           }
 
           # 5. Checksum verification
@@ -405,14 +412,19 @@ jobs:
         run: |
           tag="${{ github.ref_name }}"
           version="${tag#v}"
+          prerelease_flag=""
+          if [[ "$tag" == *"-"* ]]; then
+            prerelease_flag="--prerelease"
+          fi
           
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $tag already exists; updating assets and notes..."
             gh release upload "$tag" release-assets/* --clobber --repo "${{ github.repository }}"
-            gh release edit "$tag" --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
+            gh release edit "$tag" $prerelease_flag --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
           else
             gh release create "$tag" \
               release-assets/* \
+              $prerelease_flag \
               --title "AI Productivity Flow $tag" \
               --notes-file CHANGELOG.md \
               --repo "${{ github.repository }}"

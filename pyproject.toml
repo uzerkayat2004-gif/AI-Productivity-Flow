@@ -1,6 +1,6 @@
 [project]
 name = "voice-flow"
-version = "1.0.0"
+version = "1.0.2"
 description = "AI Productivity Flow — Open-source multimodal desktop AI system (Video Flow, Audio Flow, Voice Flow)"
 readme = "README.md"
 requires-python = ">=3.10"

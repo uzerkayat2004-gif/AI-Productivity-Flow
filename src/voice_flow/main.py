@@ -3459,11 +3459,12 @@ _ENGINE_MUTEX_HANDLE = None
 
 def main() -> None:
     if "--test-crash-reporting" in sys.argv:
+        from voice_flow._version import VERSION
         from voice_flow.crash_reporting import is_crash_reporting_enabled, capture_test_crash_report
         if is_crash_reporting_enabled():
             success = capture_test_crash_report()
             if success:
-                print("Test crash report from AI Productivity Flow v1.0.0 sent successfully.")
+                print(f"Test crash report from AI Productivity Flow v{VERSION} sent successfully.")
             else:
                 print("Failed to send test crash report.")
             sys.exit(0)

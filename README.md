@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.0-orange.svg" alt="Release: v1.0.0"></a>
+  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.2-orange.svg" alt="Release: v1.0.2"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20macOS%2012%2B-0078D4.svg" alt="Platforms">
   <img src="https://img.shields.io/badge/Architecture-Local--first%20%2F%20BYOK-success.svg" alt="Local-first / BYOK">
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0">

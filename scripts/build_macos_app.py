@@ -242,11 +242,6 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
                 "cryptography", "sentry-sdk>=2.0.0"
             ]
             subprocess.run([str(python_bin), "-m", "pip", "install", *packages], check=True)
-        # Also install package itself in editable or standard mode if pyproject is present
-        try:
-            subprocess.run([str(python_bin), "-m", "pip", "install", "-e", str(REPO_ROOT)], check=False)
-        except Exception:
-            pass
     else:
         print(f"Host platform is '{sys.platform}'. Skipping pip package installation in Darwin binary on non-Darwin host.")
 

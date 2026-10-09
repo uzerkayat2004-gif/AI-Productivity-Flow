@@ -3,7 +3,7 @@
 ; release/build_windows_release.py (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://ai-productivity-flow.vercel.app/"
 #define MyAppExeName "pythonw.exe"
@@ -47,11 +47,13 @@ UninstallDisplayIcon={app}\runtime\python\Lib\site-packages\voice_flow\gui\asset
 Uninstallable=not IsPortableMode
 
 ; --- Windows File Properties ---
-VersionInfoVersion=1.0.0.0
-VersionInfoCompany=Uzer Kayat
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoTextVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=AI Productivity Flow Setup
-VersionInfoProductName=AI Productivity Flow
-VersionInfoProductVersion=1.0.0
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}.0
+VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoCopyright=Copyright (C) 2026 Uzer Kayat
 
 [Files]
