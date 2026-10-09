@@ -4,6 +4,10 @@
 - Suppresses native middle-click drag autoscroll icon while keeping normal wheel scrolling working 100%.
 - Triggers dictation on Ctrl+Win / Win+Ctrl shortcut while suppressing Start menu popup.
 - Auto-rehooks and recovers if Windows drops low-level hooks or after workstation lock/sleep.
+
+On macOS, the default push-to-talk chord is Command+Option. Middle-click
+dictation is Windows-only; missing Accessibility or Input Monitoring consent
+causes one permission prompt and never retries the Win32 hook.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
 import os
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -25,6 +30,25 @@ from voice_flow.injector import VF_SYNTHETIC_EXTRA_INFO, is_synthetic_input_acti
 from voice_flow.mouse_hook import Win32MouseHook
 
 log = logging.getLogger(__name__)
+
+_MACOS_PERMISSION_PROMPTED = False
+
+
+def platform_input_defaults() -> dict[str, Any]:
+    """Return platform-specific defaults without overriding saved user choices."""
+    if sys.platform == "darwin":
+        return {
+            "hotkey_trigger": "cmd_option",
+            "push_to_talk_shortcut": "Cmd+Option",
+            "middle_click_enabled": False,
+            "ready_line": "Hold Command+Option to speak",
+        }
+    return {
+        "hotkey_trigger": "ctrl_win",
+        "push_to_talk_shortcut": "Ctrl+Win",
+        "middle_click_enabled": True,
+        "ready_line": "Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak",
+    }
 
 # Win32 Virtual Key Codes
 VK_CONTROL = 0x11
@@ -434,6 +458,7 @@ class InputTriggerListener:
         self._hotkey_triggered = False
         self._alt_space_triggered = False
         self._alt_tab_triggered = False
+        self._cmd_option_triggered = False
         self._custom_hotkey_triggered = False
         self._hotkey_press_time: float = 0.0
         self._stop_event = threading.Event()
@@ -452,19 +477,20 @@ class InputTriggerListener:
         # Native Win32 keyboard hook
         self._keyboard_hook: Win32KeyboardHook | None = None
         try:
-            if user32 is not None and kernel32 is not None:
+            if IS_WINDOWS and user32 is not None and kernel32 is not None:
                 self._keyboard_hook = Win32KeyboardHook(self._on_native_key)
         except Exception:
             self._keyboard_hook = None
 
         # User-configurable hotkey settings
-        self._hotkey_trigger: str = "ctrl_win"
+        defaults = platform_input_defaults()
+        self._hotkey_trigger: str = defaults["hotkey_trigger"]
         self._custom_hotkey_str: str = "Alt+Space"
         self._parsed_custom_keys: dict[str, Any] = parse_hotkey_string("Alt+Space")
         self._custom_trigger_type: str = "hold"
         self._last_custom_release_time: float = 0.0
         self._trigger_mode: str = "hybrid"
-        self._middle_click_enabled: bool = True
+        self._middle_click_enabled: bool = defaults["middle_click_enabled"]
         self._ctrl_key_dictation_enabled: bool = False
 
         try:
@@ -474,6 +500,19 @@ class InputTriggerListener:
 
     def start(self) -> None:
         """Start listening for global mouse and keyboard events."""
+        if not IS_WINDOWS:
+            self._stop_event.clear()
+            self._request_macos_hotkey_permissions_once()
+            if not self._start_key_listener():
+                return
+            active_label = (
+                platform_input_defaults()["push_to_talk_shortcut"]
+                if self._hotkey_trigger == platform_input_defaults()["hotkey_trigger"]
+                else self._hotkey_trigger
+            )
+            log.info("[INPUT] Global input listeners started (%s active).", active_label)
+            return
+
         log.info("[INPUT] Initializing global mouse hook & keyboard shortcuts...")
         self._stop_event.clear()
 
@@ -510,10 +549,45 @@ class InputTriggerListener:
 
         log.info("[INPUT] Global input listeners started (Middle-click dictation & Ctrl+Win active).")
 
-    def _start_key_listener(self) -> None:
+    def _request_macos_hotkey_permissions_once(self) -> None:
+        """Prompt once for the macOS permissions required by pynput hotkeys."""
+        global _MACOS_PERMISSION_PROMPTED
+        if sys.platform != "darwin" or _MACOS_PERMISSION_PROMPTED:
+            return
+        # One attempt per process. A failing probe must not be retried in a loop.
+        _MACOS_PERMISSION_PROMPTED = True
+        warned = False
+        try:
+            from voice_flow.platform import macos_native
+
+            accessibility_granted = bool(macos_native.accessibility_trusted(prompt=False))
+            input_granted = (
+                macos_native.input_monitoring_status()
+                == macos_native.IOHID_ACCESS_GRANTED
+            )
+            if accessibility_granted and input_granted:
+                return
+            warned = True
+            log.warning(
+                "[INPUT] Accessibility and Input Monitoring are required for global hotkeys. "
+                "Enable AI Productivity Flow under System Settings → Privacy & Security → "
+                "Accessibility and Input Monitoring."
+            )
+            macos_native.accessibility_trusted(prompt=True)
+            macos_native.request_input_monitoring()
+        except Exception:
+            if not warned:
+                log.warning(
+                    "[INPUT] Accessibility and Input Monitoring are required for global hotkeys. "
+                    "Enable AI Productivity Flow under System Settings → Privacy & Security → "
+                    "Accessibility and Input Monitoring."
+                )
+            return
+
+    def _start_key_listener(self) -> bool:
         if keyboard is None:
             log.info("[INPUT] pynput keyboard listener is unavailable on this platform.")
-            return
+            return False
         try:
             if self._key_listener is not None:
                 try:
@@ -527,8 +601,10 @@ class InputTriggerListener:
                 on_release=self._on_key_release,
             )
             self._key_listener.start()
+            return True
         except Exception as e:
             log.error("[INPUT] Failed to start keyboard listener: %s", e)
+            return False
 
     def stop(self) -> None:
         """Stop listening for global events."""
@@ -537,7 +613,7 @@ class InputTriggerListener:
             self._mouse_hook.stop()
         except Exception:
             pass
-        if self._keyboard_hook is not None:
+        if IS_WINDOWS and self._keyboard_hook is not None:
             try:
                 self._keyboard_hook.stop()
             except Exception:
@@ -559,6 +635,7 @@ class InputTriggerListener:
                 self._win_suppress_needed = False
                 self._alt_space_triggered = False
                 self._alt_tab_triggered = False
+                self._cmd_option_triggered = False
                 self._custom_hotkey_triggered = False
                 self._ctrl_hold_triggered = False
                 self._ctrl_toggle_mode_active = False
@@ -572,6 +649,7 @@ class InputTriggerListener:
     def reload_config(self, settings: dict[str, Any] | None = None) -> None:
         """Live reload trigger and hotkey settings from storage without restarting listener."""
         with self._lock:
+            defaults = platform_input_defaults()
             from voice_flow.storage import storage as _storage
             if settings is None:
                 try:
@@ -585,6 +663,8 @@ class InputTriggerListener:
                 "double ctrl": "double_ctrl",
                 "alt+space": "alt_space",
                 "alt+tab": "alt_tab",
+                "cmd+option": "cmd_option",
+                "command+option": "cmd_option",
                 "middle mouse button": "middle_click",
                 "middle_click": "middle_click",
             }
@@ -605,7 +685,13 @@ class InputTriggerListener:
                     raw_trigger = "custom"
                     self._custom_hotkey_str = ptt
                 else:
-                    saved_shortcut = str(_storage.get_setting("push_to_talk_shortcut", "ctrl+win") or "ctrl+win").strip()
+                    saved_shortcut = str(
+                        _storage.get_setting(
+                            "push_to_talk_shortcut",
+                            defaults["push_to_talk_shortcut"],
+                        )
+                        or defaults["push_to_talk_shortcut"]
+                    ).strip()
                     storage_ptt = saved_shortcut.lower()
                     if storage_ptt in ptt_map:
                         raw_trigger = ptt_map[storage_ptt]
@@ -613,9 +699,9 @@ class InputTriggerListener:
                         raw_trigger = "custom"
                         self._custom_hotkey_str = saved_shortcut
                     else:
-                        raw_trigger = "ctrl_win"
+                        raw_trigger = defaults["hotkey_trigger"]
 
-            self._hotkey_trigger = raw_trigger or "ctrl_win"
+            self._hotkey_trigger = raw_trigger or defaults["hotkey_trigger"]
             custom_from_cfg = settings.get("custom_hotkey")
             if not custom_from_cfg:
                 if self._hotkey_trigger == "custom" and getattr(self, "_custom_hotkey_str", None):
@@ -631,7 +717,15 @@ class InputTriggerListener:
                 or default_trig_type
             ).lower().strip()
             self._trigger_mode = str(settings.get("dictation_trigger_mode") or _storage.get_setting("dictation_trigger_mode", "hybrid") or "hybrid").lower().strip()
-            self._middle_click_enabled = bool(settings.get("middle_click_enabled", _storage.get_setting("middle_click_enabled", True)))
+            self._middle_click_enabled = bool(
+                settings.get(
+                    "middle_click_enabled",
+                    _storage.get_setting(
+                        "middle_click_enabled",
+                        defaults["middle_click_enabled"],
+                    ),
+                )
+            )
             if "ctrl_key_dictation_enabled" in settings and settings["ctrl_key_dictation_enabled"] is not None:
                 self._ctrl_key_dictation_enabled = bool(settings["ctrl_key_dictation_enabled"])
             elif self._hotkey_trigger in ("single_ctrl", "double_ctrl"):
@@ -697,7 +791,11 @@ class InputTriggerListener:
             is_c = vk == 0x43
 
             with self._lock:
-                active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
+                active_trigger = getattr(
+                    self,
+                    "_hotkey_trigger",
+                    platform_input_defaults()["hotkey_trigger"],
+                ).lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
 
                 ctrl_down = _is_ctrl_down() or (is_ctrl and is_down)
@@ -731,7 +829,7 @@ class InputTriggerListener:
                             return True
 
                     # 1. Ctrl+Win chord down
-                    is_ctrl_win_active = active_trigger in ("ctrl_win", "") or (active_trigger not in ("single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"))
+                    is_ctrl_win_active = active_trigger in ("ctrl_win", "") or (active_trigger not in ("single_ctrl", "double_ctrl", "alt_space", "alt_tab", "cmd_option", "middle_click", "custom"))
                     if is_ctrl_win_active and (is_ctrl or is_win) and ctrl_down and win_down:
                         _suppress_win_start_menu()
                         self._win_suppress_needed = True
@@ -1065,13 +1163,17 @@ class InputTriggerListener:
                 alt_down = _is_alt_down() or any(k in self._pressed_keys for k in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr))
                 shift_down = _is_shift_down() or any(k in self._pressed_keys for k in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r))
 
-                active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
+                active_trigger = getattr(
+                    self,
+                    "_hotkey_trigger",
+                    platform_input_defaults()["hotkey_trigger"],
+                ).lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
                 now = time.time()
 
                 # 1. BOTH Ctrl and Win must be held simultaneously to trigger dictation
                 # Active when trigger is ctrl_win, or as safe fallback
-                is_ctrl_win_active = active_trigger in ("ctrl_win", "") or (active_trigger not in ("single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"))
+                is_ctrl_win_active = active_trigger in ("ctrl_win", "") or (active_trigger not in ("single_ctrl", "double_ctrl", "alt_space", "alt_tab", "cmd_option", "middle_click", "custom"))
                 if is_ctrl_win_active and ctrl_down and win_down:
                     _suppress_win_start_menu()
                     self._win_suppress_needed = True
@@ -1087,7 +1189,21 @@ class InputTriggerListener:
                         self._mouse_hook.set_recording_state(False)
                         threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
-                # 2. Alt+Space trigger
+                # 2. Command+Option trigger (macOS default).
+                if active_trigger == "cmd_option" and win_down and alt_down:
+                    if not self._cmd_option_triggered:
+                        self._cmd_option_triggered = True
+                        self._hotkey_press_time = now
+                        if not self._is_recording:
+                            self._is_recording = True
+                            self._mouse_hook.set_recording_state(True)
+                            threading.Thread(target=self._safe_on_start, daemon=True).start()
+                        elif active_mode in ("toggle_only", "hybrid"):
+                            self._is_recording = False
+                            self._mouse_hook.set_recording_state(False)
+                            threading.Thread(target=self._safe_on_finish, daemon=True).start()
+
+                # 3. Alt+Space trigger
                 space_down = key == keyboard.Key.space or _is_key_down(0x20)
                 if active_trigger == "alt_space" and alt_down and space_down:
                     if not self._alt_space_triggered:
@@ -1270,6 +1386,7 @@ class InputTriggerListener:
                     if (
                         self._is_recording
                         or self._hotkey_triggered
+                        or self._cmd_option_triggered
                         or self._alt_space_triggered
                         or self._alt_tab_triggered
                         or self._custom_hotkey_triggered
@@ -1278,6 +1395,7 @@ class InputTriggerListener:
                     ):
                         self._is_recording = False
                         self._hotkey_triggered = False
+                        self._cmd_option_triggered = False
                         self._alt_space_triggered = False
                         self._alt_tab_triggered = False
                         self._custom_hotkey_triggered = False
@@ -1300,7 +1418,11 @@ class InputTriggerListener:
 
             with self._lock:
                 self._pressed_keys.discard(key)
-                active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
+                active_trigger = getattr(
+                    self,
+                    "_hotkey_trigger",
+                    platform_input_defaults()["hotkey_trigger"],
+                ).lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
                 now = time.time()
 
@@ -1325,6 +1447,20 @@ class InputTriggerListener:
                             self._win_suppress_needed = False
                         else:
                             self._win_suppress_needed = False
+
+                # Command+Option release handling.
+                if key in (
+                    keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r,
+                    keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r,
+                    keyboard.Key.alt_gr,
+                ) and self._cmd_option_triggered:
+                    self._cmd_option_triggered = False
+                    press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
+                    if active_mode == "ptt_only" or press_dur >= 0.25:
+                        if self._is_recording:
+                            self._is_recording = False
+                            self._mouse_hook.set_recording_state(False)
+                            threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
                 # Alt+Space release handling
                 if key in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr, keyboard.Key.space):

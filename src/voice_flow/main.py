@@ -3402,7 +3402,8 @@ class VoiceFlowApp:
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
         log.info(" - System-wide floating bar active on your screen")
-        log.info(" - Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak")
+        from voice_flow.hotkeys import platform_input_defaults
+        log.info(" - %s", platform_input_defaults()["ready_line"])
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 

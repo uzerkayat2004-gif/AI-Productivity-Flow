@@ -17,6 +17,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
+      - name: Checkout smoke checks
+        uses: actions/checkout@v4
+
       - name: System info
         run: |
           mkdir -p out
@@ -68,6 +71,11 @@ jobs:
           osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' > out/windows.txt 2>&1 || true
           ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
           kill $PID 2>/dev/null || true
+
+      - name: Validate macOS smoke artifacts
+        run: |
+          python3 -m pip install --user pillow
+          python3 scripts/check_mac_smoke_artifacts.py out
 
       - name: Collect crash logs
         if: always()

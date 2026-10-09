@@ -237,7 +237,8 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         else:
             packages = [
                 "faster-whisper", "sounddevice", "numpy", "scipy", "pynput",
-                "pyperclip", "pyautogui", "pywebview", "pystray", "pillow",
+                "pyperclip", "pyautogui", "pywebview", "pyobjc-core",
+                "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pystray", "pillow",
                 "psutil", "edge-tts", "pypdf", "websockets", "requests",
                 "cryptography", "sentry-sdk>=2.0.0"
             ]

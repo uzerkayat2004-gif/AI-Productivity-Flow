@@ -1140,6 +1140,7 @@ function stopShortcutRecorder(restore = true) {
 
 
 function renderHotkeySettings(res) {
+    window._vfHotkeySettingsLoaded = true;
     const trigger = res.hotkey_trigger || "ctrl_win";
     const customKey = res.custom_hotkey || "Alt+Space";
     const customType = res.custom_trigger_type || "hold";
@@ -11594,15 +11595,31 @@ async function initPlatformAdaptation() {
     // 6. Hotkey select options and pill
     if (isMac) {
       const pttKbd = document.getElementById("ptt-current-kbd");
-      if (pttKbd && pttKbd.textContent.includes("Ctrl+Win")) {
-        pttKbd.textContent = "Cmd+Opt";
+      if (pttKbd && pttKbd.textContent.trim() === "Ctrl+Win") {
+        pttKbd.textContent = "Cmd+Option";
       }
 
-      const hotkeySelects = document.querySelectorAll("#hotkey-trigger-select, #settings-hotkey-select");
+      document.querySelectorAll('option[value="middle_click"]').forEach((option) => option.remove());
+      const middleClickSetting = document.getElementById("middle-click-setting");
+      if (middleClickSetting) middleClickSetting.style.display = "none";
+      const mouseCategory = document.getElementById("cat-tab-mouse");
+      if (mouseCategory) mouseCategory.style.display = "none";
+
+      const hotkeySelects = document.querySelectorAll("#setting-hotkey-trigger-select, #modal-hotkey-trigger-select");
       hotkeySelects.forEach((sel) => {
         const opt = sel.querySelector('option[value="ctrl_win"]');
         if (opt) {
-          opt.textContent = "Cmd + Option (Default)";
+          opt.textContent = "Ctrl + Win";
+        }
+        let cmdOption = sel.querySelector('option[value="cmd_option"]');
+        if (!cmdOption) {
+          cmdOption = document.createElement("option");
+          cmdOption.value = "cmd_option";
+          sel.insertBefore(cmdOption, sel.firstChild);
+        }
+        cmdOption.textContent = "Cmd + Option (Default)";
+        if (!window._vfHotkeySettingsLoaded && sel.value === "ctrl_win") {
+          sel.value = "cmd_option";
         }
       });
 
