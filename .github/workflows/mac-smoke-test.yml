@@ -6,7 +6,7 @@ on:
       tag:
         description: "Release tag to test"
         required: false
-        default: "v1.0.0"
+        default: "v1.0.2-rc2"
 
 jobs:
   mac-smoke:
@@ -72,10 +72,17 @@ jobs:
           ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
           kill $PID 2>/dev/null || true
 
+      - name: Set up Python for artifact checks
+        if: always()
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Validate macOS smoke artifacts
+        if: always()
         run: |
-          python3 -m pip install --user pillow
-          python3 scripts/check_mac_smoke_artifacts.py out
+          python -m pip install pillow
+          python scripts/check_mac_smoke_artifacts.py out
 
       - name: Collect crash logs
         if: always()
