@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -63,13 +64,35 @@ def listener_pids(host: str, port: int) -> list[int]:
 
     accepted_hosts = {host, "0.0.0.0", "::", "::1"}
     found: set[int] = set()
-    for connection in psutil.net_connections(kind="tcp"):
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except (psutil.AccessDenied, PermissionError) as exc:
+        raise PermissionError("Socket owner inspection is unavailable") from exc
+    for connection in connections:
         address = connection.laddr
         if not address or int(address.port) != int(port) or str(address.ip) not in accepted_hosts:
             continue
-        if connection.status == psutil.CONN_LISTEN and connection.pid:
+        if connection.status == psutil.CONN_LISTEN:
+            if not connection.pid:
+                raise PermissionError("Socket owner is not visible")
             found.add(int(connection.pid))
     return sorted(found)
+
+
+def _unprivileged_port_result(host: str, port: int) -> RuntimePortResult:
+    """Check bindability without guessing an owner or terminating processes.
+
+    A bind failure (including permission/unsupported-address errors) is
+    conservatively occupied. Do not enable address reuse: it can hide owners.
+    The actual server bind still handles races after this temporary probe.
+    """
+    try:
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            probe.bind((host, port))
+    except OSError:
+        return RuntimePortResult("occupied")
+    return RuntimePortResult("available")
 
 
 def _is_voice_flow_process(process: object) -> bool:
@@ -127,6 +150,18 @@ def prepare_runtime_port(
     require_engine: bool = False,
 ) -> RuntimePortResult:
     """Keep a compatible runtime, reclaim a stale Voice Flow runtime, or report a foreign owner."""
+    try:
+        return _prepare_runtime_port_with_pids(host=host, port=port, require_engine=require_engine)
+    except PermissionError:
+        # macOS can deny system-wide psutil socket inspection to normal users.
+        # Recheck readiness before a bind probe; unknown owners are never killed.
+        readiness_probe = runtime_is_engine_ready if require_engine else runtime_is_compatible
+        if readiness_probe(host=host, port=port):
+            return RuntimePortResult("compatible")
+        return _unprivileged_port_result(host, port)
+
+
+def _prepare_runtime_port_with_pids(*, host: str, port: int, require_engine: bool) -> RuntimePortResult:
     readiness_probe = runtime_is_engine_ready if require_engine else runtime_is_compatible
     if readiness_probe(host=host, port=port):
         return RuntimePortResult("compatible")
