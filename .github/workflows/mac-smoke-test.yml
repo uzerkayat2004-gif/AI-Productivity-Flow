@@ -1,0 +1,84 @@
+name: macOS smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test"
+        required: false
+        default: "v1.0.0"
+
+jobs:
+  mac-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: System info
+        run: |
+          mkdir -p out
+          sw_vers | tee out/system.txt
+          uname -m | tee -a out/system.txt
+          system_profiler SPDisplaysDataType | tee -a out/system.txt || true
+
+      - name: Download DMG like a user would
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          curl -fL -o app.dmg "$BASE/AI-Productivity-Flow-macOS.dmg"
+          curl -fL -o app.dmg.sha256 "$BASE/AI-Productivity-Flow-macOS.dmg.sha256" || true
+          ls -la app.dmg | tee out/download.txt
+          shasum -a 256 app.dmg | tee -a out/download.txt
+          cat app.dmg.sha256 | tee -a out/download.txt || true
+
+      - name: Mount and install
+        run: |
+          hdiutil attach app.dmg -nobrowse -mountpoint /Volumes/APF | tee out/mount.txt
+          ls -la /Volumes/APF | tee -a out/mount.txt
+          APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
+          echo "Found app: $APP" | tee -a out/mount.txt
+          cp -R "$APP" /Applications/
+          echo "APP_PATH=/Applications/$(basename "$APP")" >> $GITHUB_ENV
+
+      - name: Gatekeeper and signing check (what a real user hits)
+        run: |
+          xattr -l "$APP_PATH" | tee out/gatekeeper.txt || true
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | tee -a out/gatekeeper.txt || true
+          spctl -a -vv "$APP_PATH" 2>&1 | tee -a out/gatekeeper.txt || true
+          file "$APP_PATH"/Contents/MacOS/* | tee -a out/gatekeeper.txt || true
+          lipo -archs "$APP_PATH"/Contents/MacOS/* 2>&1 | tee -a out/gatekeeper.txt || true
+          /usr/libexec/PlistBuddy -c Print "$APP_PATH/Contents/Info.plist" | tee out/info-plist.txt || true
+
+      - name: Launch app and take screenshots
+        run: |
+          xattr -dr com.apple.quarantine "$APP_PATH" || true
+          EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
+          "$APP_PATH/Contents/MacOS/$EXE" > out/app-stdout.txt 2> out/app-stderr.txt &
+          PID=$!
+          echo "PID $PID"
+          for t in 5 15 30 60; do
+            sleep $(( t - ${LAST:-0} )); LAST=$t
+            screencapture -x out/screen-${t}s.png || true
+            if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a out/alive.txt; else echo "${t}s: EXITED" | tee -a out/alive.txt; fi
+          done
+          osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' > out/windows.txt 2>&1 || true
+          ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
+          kill $PID 2>/dev/null || true
+
+      - name: Collect crash logs
+        if: always()
+        run: |
+          mkdir -p out/crash
+          cp ~/Library/Logs/DiagnosticReports/* out/crash/ 2>/dev/null || true
+          ls out/crash | tee out/crash-list.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-smoke-${{ matrix.os }}
+          path: out/
