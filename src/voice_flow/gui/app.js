@@ -1236,6 +1236,7 @@ async function saveHotkeySettings(newSettings, showToast = true) {
       if (showToast && typeof vfToast === "function") {
         const triggerNames = {
           ctrl_win: "Ctrl + Win",
+          cmd_option: "Cmd + Option",
           single_ctrl: "Single Ctrl",
           double_ctrl: "Double Ctrl",
           alt_space: "Alt + Space",
@@ -1673,7 +1674,7 @@ function renderHistoryFeed(records) {
       <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
         <div style="font-size: 42px; margin-bottom: 12px;">🎙️</div>
         <div style="font-weight: 800; font-size: 17px; color: var(--text-main);">No dictations recorded yet</div>
-        <div style="font-size: 13px; margin-top: 6px;">Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!</div>
+        <div style="font-size: 13px; margin-top: 6px;">${(window.vfPlatformInfo && window.vfPlatformInfo.is_macos) ? "Hold <strong>Cmd + Option</strong> to dictate anywhere. Every word will appear here automatically!" : "Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!"}</div>
       </div>
     `;
     return;
@@ -11592,7 +11593,10 @@ async function initPlatformAdaptation() {
         : "Speak your thoughts & dictate across any Windows application";
     }
 
-    // 6. Hotkey select options and pill
+    // 6. Hotkey select options and pill.
+    // Windows keeps Ctrl+Win (Default) and hides Cmd+Option.
+    // macOS keeps Cmd+Option (Default) and hides Ctrl+Win.
+    // Middle-click stays available on Windows and is removed on macOS.
     if (isMac) {
       const pttKbd = document.getElementById("ptt-current-kbd");
       if (pttKbd && pttKbd.textContent.trim() === "Ctrl+Win") {
@@ -11604,25 +11608,29 @@ async function initPlatformAdaptation() {
       if (middleClickSetting) middleClickSetting.style.display = "none";
       const mouseCategory = document.getElementById("cat-tab-mouse");
       if (mouseCategory) mouseCategory.style.display = "none";
+    }
 
-      const hotkeySelects = document.querySelectorAll("#setting-hotkey-trigger-select, #modal-hotkey-trigger-select");
-      hotkeySelects.forEach((sel) => {
-        const opt = sel.querySelector('option[value="ctrl_win"]');
-        if (opt) {
-          opt.textContent = "Ctrl + Win";
-        }
-        let cmdOption = sel.querySelector('option[value="cmd_option"]');
-        if (!cmdOption) {
-          cmdOption = document.createElement("option");
-          cmdOption.value = "cmd_option";
-          sel.insertBefore(cmdOption, sel.firstChild);
-        }
-        cmdOption.textContent = "Cmd + Option (Default)";
+    document.querySelectorAll("#setting-hotkey-trigger-select, #modal-hotkey-trigger-select").forEach((sel) => {
+      sel.querySelectorAll("option[data-platform]").forEach((option) => {
+        const platform = option.getAttribute("data-platform");
+        const visible = isMac ? platform === "macos" : platform === "windows";
+        if (!visible) option.remove();
+      });
+      if (isMac) {
+        const cmdOption = sel.querySelector('option[value="cmd_option"]');
+        if (cmdOption) cmdOption.textContent = "Cmd + Option (Default)";
         if (!window._vfHotkeySettingsLoaded && sel.value === "ctrl_win") {
           sel.value = "cmd_option";
         }
-      });
+      } else {
+        const winOption = sel.querySelector('option[value="ctrl_win"]');
+        if (winOption && sel.id === "setting-hotkey-trigger-select") {
+          winOption.textContent = "Ctrl + Win (Default)";
+        }
+      }
+    });
 
+    if (isMac) {
       const hotkeyHint = document.getElementById("record-hotkey-hint");
       if (hotkeyHint) {
         hotkeyHint.innerHTML = "Click <b>Record Any Key</b>, then press any single key (e.g. F8, Space) or combination (Cmd+Opt, Option+Space, Cmd+Shift+D).";

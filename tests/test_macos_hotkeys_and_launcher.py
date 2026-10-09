@@ -168,6 +168,26 @@ def test_webview_import_guard_supports_darwin_ci(monkeypatch):
     assert desktop_launcher._should_import_webview() is True
 
 
+def test_hotkey_default_labels_are_platform_specific():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "src" / "voice_flow" / "gui" / "index.html").read_text(encoding="utf-8")
+    app_js = (root / "src" / "voice_flow" / "gui" / "app.js").read_text(encoding="utf-8")
+
+    assert 'value="ctrl_win" data-platform="windows">Ctrl + Win (Default)' in html
+    assert 'value="cmd_option" data-platform="macos">Cmd + Option (Default)' in html
+    assert 'value="middle_click"' in html
+
+    section = app_js.split("// 6. Hotkey select options and pill.", 1)[1]
+    section = section.split("// Full App UI Auto-Refresh", 1)[0]
+    mac_gate, windows_gate = section.split("} else {", 1)
+    assert 'option[value="middle_click"]' in mac_gate
+    assert 'option[value="middle_click"]' not in windows_gate
+    assert 'platform === "macos"' in section
+    assert 'platform === "windows"' in section
+    assert 'Cmd + Option (Default)' in mac_gate
+    assert 'Ctrl + Win (Default)' in windows_gate
+
+
 def test_macos_pyobjc_dependencies_are_marked_for_darwin():
     root = Path(__file__).resolve().parents[1]
     required = (
