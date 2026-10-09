@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import os
 import re
 import threading
 
 from voice_flow.storage import storage
-from voice_flow.vocabulary_learning import is_noise_variant
+from voice_flow.vocabulary_learning import is_ambiguous_spaced_alias, is_noise_variant
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,12 @@ def generated_spaced_aliases(value: str) -> tuple[str, ...]:
     # The user can still add an explicit Heard-as correction for it.
     if any(len(part) < 2 for part in alias.split()):
         return ()
+    # Camel-cased brands can still split into an ordinary sentence fragment.
+    # For example, LinkedIn -> "Linked In" would rewrite "details are linked
+    # in this document" despite the brand never being spoken. Explicit
+    # Heard-as corrections remain available when a user wants such an alias.
+    if is_ambiguous_spaced_alias(term, alias):
+        return ()
     return (alias,)
 
 
@@ -165,17 +172,58 @@ class DictionaryEngine:
         with self._lock:
             self._dirty = True
 
+    @staticmethod
+    def _revision_identity(revision: object) -> str | None:
+        """Extract the database namespace from a scoped cache token."""
+        if isinstance(revision, tuple) and revision and isinstance(revision[0], str):
+            return revision[0]
+        return None
+
+    def _clear_cached_rules(self, revision: object) -> None:
+        """Drop rules that belong to a confirmed different database."""
+        self.words = []
+        self.corrections = []
+        self._rules = ()
+        self._correction_rules = ()
+        self._revision = revision
+
     def _get_revision(self) -> object:
+        # The dictation process can outlive a login/account switch. Repoint the
+        # app-wide store before consulting its cache token so the first
+        # dictation after a switch cannot use the previous account's rules.
+        if getattr(self.store, "is_global_singleton", False):
+            repoint = getattr(self.store, "repoint_if_needed", None)
+            if repoint is not None:
+                try:
+                    repoint()
+                except Exception:
+                    log.exception("Could not synchronize dictionary storage account")
+
+        token_getter = getattr(self.store, "get_dictionary_cache_token", None)
+        if token_getter is not None:
+            try:
+                return token_getter()
+            except Exception:
+                pass
+
         getter = getattr(self.store, "get_lexicon_revision", None)
         if getter is not None:
             try:
-                return getter()
+                revision = getter()
+                database = getattr(self.store, "db_path", None)
+                if database:
+                    return os.path.normcase(os.path.realpath(os.path.abspath(str(database)))), revision
+                return revision
             except Exception:
                 pass
         legacy = getattr(self.store, "get_dictionary_revision", None)
         if legacy is not None:
             try:
-                return legacy()
+                revision = legacy()
+                database = getattr(self.store, "db_path", None)
+                if database:
+                    return os.path.normcase(os.path.realpath(os.path.abspath(str(database)))), revision
+                return revision
             except Exception:
                 return None
         return None
@@ -209,7 +257,7 @@ class DictionaryEngine:
                 except Exception as exc:
                     last_error = exc
                     log.exception("Could not load dictionary snapshot")
-        if not words:
+        if not loaded:
             fallback = getattr(self.store, "get_dictionary_words", None)
             if fallback is not None:
                 try:
@@ -272,11 +320,24 @@ class DictionaryEngine:
                 words = self._load_source_words()
                 corrections = self._load_corrections()
             except Exception as exc:
-                log.warning("Dictionary storage unavailable; retaining cached rules: %s", exc)
+                current_identity = self._revision_identity(revision)
+                cached_identity = self._revision_identity(self._revision)
+                switched_database = bool(
+                    current_identity and cached_identity and current_identity != cached_identity
+                )
+                if switched_database:
+                    self._clear_cached_rules(revision)
+                    log.warning(
+                        "New account dictionary unavailable; cleared previous account rules: %s",
+                        exc,
+                    )
+                else:
+                    log.warning("Dictionary storage unavailable; retaining cached rules: %s", exc)
                 # Keep the last good snapshot. On first startup the empty
-                # snapshot is still a safe no-op. Leave the reload pending so
-                # the next dictation retries even if storage's revision did
-                # not change while it was unavailable.
+                # snapshot is still a safe no-op. A confirmed account switch
+                # clears the prior account's snapshot instead. Leave the reload
+                # pending so the next dictation retries even if storage's
+                # revision did not change while it was unavailable.
                 self._dirty = True
                 return
 
@@ -404,6 +465,62 @@ class DictionaryEngine:
         result = "".join(output)
         if result != text:
             log.info("Applied explicit dictionary rules to dictated text")
+        return result
+
+    def mask_rule_inputs_for_cleanup(self, text: str) -> tuple[str, dict[str, str]]:
+        """Protect exact rule inputs from deterministic filler cleanup.
+
+        This does not apply a dictionary replacement. It temporarily masks
+        only spans that the final literal dictionary pass would match, so a
+        Heard-as phrase such as ``cube er netties`` keeps the middle word until
+        that final pass. URLs, code, links, and email addresses remain outside
+        dictionary matching exactly as they are during final application.
+        """
+        if not text:
+            return text, {}
+        self._ensure_loaded()
+        rules = self._correction_rules + self._rules
+        if not rules:
+            return text, {}
+        combined, usable_rules = _combined_pattern(rules)
+        token_map: dict[str, str] = {}
+        token_index = 0
+
+        def mask_segment(segment: str) -> str:
+            nonlocal token_index
+            if not segment:
+                return segment
+
+            def replace(match: re.Match[str]) -> str:
+                nonlocal token_index
+                for index, rule in enumerate(usable_rules, start=1):
+                    if match.group(index) is not None and _rule_matches(match, rule):
+                        token_index += 1
+                        token = f"⟦VF_DICT_INPUT_{token_index}⟧"
+                        while token in text or token in token_map:
+                            token_index += 1
+                            token = f"⟦VF_DICT_INPUT_{token_index}⟧"
+                        token_map[token] = match.group(0)
+                        return token
+                return match.group(0)
+
+            return combined.sub(replace, segment)
+
+        output: list[str] = []
+        cursor = 0
+        for protected in _PROTECTED_RE.finditer(text):
+            output.append(mask_segment(text[cursor:protected.start()]))
+            output.append(protected.group(0))
+            cursor = protected.end()
+        output.append(mask_segment(text[cursor:]))
+        return "".join(output), token_map
+
+    @staticmethod
+    def unmask_rule_inputs_after_cleanup(text: str, token_map: dict[str, str]) -> str:
+        """Restore original rule inputs without performing substitutions."""
+        result = text
+        for token in sorted(token_map, key=len, reverse=True):
+            result = result.replace(token, token_map[token])
         return result
 
     # -- protected terminology (spec §38) + contextual vocab (spec §33) ----

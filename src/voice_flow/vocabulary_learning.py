@@ -76,6 +76,11 @@ numpy pandas pytorch tensorflow scikit-learn redis rabbitmq graphql grpc javascr
 golang rustlang langchain chromadb qdrant weaviate whisper whisperx faster-whisper deepseek notebooklm
 gpt-5.6 qwen3.5
 """.split())
+_GRAMMATICAL_FUNCTION_WORDS = frozenset("""
+the a an and or but if so to for of with in on at by from as into onto upon
+this that these those it its he she they we you i my your our their his her
+is are was were be been being has have had do does did
+""".split())
 _CANONICAL_ACRONYMS = frozenset("""
 ai api aws cli cpu css cuda gcp gpu gpt grpc gui html http https json llm mcp
 ml nlp rag sdk sql ssh stt tts ui url ux yaml
@@ -177,6 +182,20 @@ def _letters(value: str) -> str:
     return "".join(ch for ch in normalized if ch.isalpha() and not unicodedata.combining(ch))
 
 
+def is_ambiguous_spaced_alias(term: str, variant: str) -> bool:
+    """Return whether a joined spelling would consume ordinary grammar.
+
+    ``LinkedIn`` and ``linked in`` have the same letters, but the latter is a
+    common verb/preposition sequence. Such aliases are safe only when a user
+    explicitly creates a Heard-as rule. Technical forms such as ``Open AI``
+    and ``Hyper Kube`` remain eligible for conservative automatic handling.
+    """
+    parts = re.findall(r"[^\W_]+", str(variant or ""), flags=re.UNICODE)
+    if len(parts) < 2 or _letters(str(term or "")) != _letters("".join(parts)):
+        return False
+    return any(part.casefold() in _GRAMMATICAL_FUNCTION_WORDS for part in parts)
+
+
 def is_plausible_spelling_correction(term: str, variant: str) -> bool:
     """Cheap lexical check that separates spelling fixes from rewrites.
 
@@ -186,6 +205,8 @@ def is_plausible_spelling_correction(term: str, variant: str) -> bool:
     desired = _letters(term)
     heard = _letters(variant)
     if len(desired) < 3 or len(heard) < 3:
+        return False
+    if is_ambiguous_spaced_alias(term, variant):
         return False
     if desired == heard:
         return term.strip().casefold() != variant.strip().casefold()
