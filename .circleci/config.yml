@@ -1,69 +1,61 @@
 version: 2.1
-# macOS test job on CircleCI's free plan: installs the app from a GitHub release,
-# takes screenshots, and enables VNC so the app can be tested live via
-# "Rerun job with SSH". Only runs on the mac-test branch to save credits.
-# Requires project env var MAC_ORB_VNC_PASSWORD (8 chars max).
+# macOS launch test on CircleCI's free plan (M4 Pro). Installs the app from a
+# GitHub release and checks the bundled launcher starts and stays running.
+# CI Macs are headless, so screenshots are not used.
 jobs:
   mac-smoke:
     macos:
       xcode: 27.0.0
     resource_class: m4pro.medium
     environment:
-      HOMEBREW_NO_AUTO_UPDATE: 1
       GH_REPO: uzerkayat2004-gif/AI-Productivity-Flow
-      TAG: v1.0.1            # release tag to test (.dmg preferred, falls back to .zip)
-      KEEP_QUARANTINE: "1"   # 1 = make the "unsigned app / Open Anyway" warning appear
+      TAG: v1.0.2-rc1
     steps:
-      - run:
-          name: Enable VNC (vncuser + legacy VNC password)
-          background: true
-          command: |
-            sudo /usr/sbin/sysadminctl -addUser vncuser -fullName "VNC User" -password "$MAC_ORB_VNC_PASSWORD" -admin
-            sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-              -activate -configure -access -on -clientopts -setvnclegacy -vnclegacy yes \
-              -setvncpw -vncpw "$MAC_ORB_VNC_PASSWORD" -restart -agent -privs -all
       - run:
           name: System info
           command: |
             mkdir -p ~/out
             sw_vers | tee ~/out/system.txt
             uname -m | tee -a ~/out/system.txt
+            which python3 && python3 --version | tee -a ~/out/system.txt || true
       - run:
-          name: Download and install
+          name: Download, verify and install
           command: |
             BASE="https://github.com/$GH_REPO/releases/download/$TAG"
-            mkdir -p ~/stage
-            if curl -fL -o ~/app.dmg "$BASE/AI-Productivity-Flow-macOS.dmg"; then
-              hdiutil attach ~/app.dmg -nobrowse -mountpoint /Volumes/APF
-              APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
-              cp -R "$APP" /Applications/
-              hdiutil detach /Volumes/APF || true
-            else
-              echo "No .dmg for $TAG, using .zip"
-              curl -fL -o ~/app.zip "$BASE/AI-Productivity-Flow-macOS.zip"
-              ditto -x -k ~/app.zip ~/stage
-              APP=$(find ~/stage -maxdepth 3 -name "*.app" | head -1)
-              cp -R "$APP" /Applications/
-            fi
-            A="/Applications/$(basename "$APP")"
-            echo "$A" > ~/apppath
-            echo "Installed: $A" | tee ~/out/install.txt
-            spctl --status 2>&1 | tee -a ~/out/install.txt || true
-            if [ "$KEEP_QUARANTINE" = "1" ]; then
-              xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" "$A"
-            else
-              xattr -dr com.apple.quarantine "$A"
-            fi
-            codesign -dv --verbose=2 "$A" 2>&1 | tee ~/out/gatekeeper.txt || true
-            spctl -a -vv "$A" 2>&1 | tee -a ~/out/gatekeeper.txt || true
+            curl -fL -o ~/app.dmg "$BASE/AI-Productivity-Flow-macOS.dmg"
+            curl -fL -o ~/app.dmg.sha256 "$BASE/AI-Productivity-Flow-macOS.dmg.sha256"
+            EXP=$(awk '{print $1}' ~/app.dmg.sha256); GOT=$(shasum -a 256 ~/app.dmg | awk '{print $1}')
+            echo "expected $EXP got $GOT" | tee ~/out/checksum.txt
+            [ "$EXP" = "$GOT" ]
+            hdiutil attach ~/app.dmg -nobrowse -mountpoint /Volumes/APF
+            APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
+            cp -R "$APP" /Applications/
+            hdiutil detach /Volumes/APF || true
+            A="/Applications/$(basename "$APP")"; echo "$A" > ~/apppath
+            ls -la "$A/Contents/Resources/runtime/python/bin/" | head -5 | tee ~/out/runtime.txt
+            "$A/Contents/Resources/runtime/python/bin/python3" --version | tee -a ~/out/runtime.txt
+            cat "$A/Contents/Resources/runtime/build-manifest.json" | tee -a ~/out/runtime.txt
+            codesign -dv "$A" 2>&1 | tee ~/out/codesign.txt || true
+            codesign --verify --deep --strict "$A" 2>&1 | tee -a ~/out/codesign.txt && echo "codesign verify OK" | tee -a ~/out/codesign.txt || true
       - run:
-          name: Launch and screenshot
+          name: Launch check (60s)
           command: |
             A=$(cat ~/apppath)
-            open "$A" 2>&1 | tee ~/out/open.txt || true
-            sleep 10; screencapture -x ~/out/01-launch.png || true
-            sleep 20; screencapture -x ~/out/02-after-30s.png || true
-            ps aux | grep -i -E "flow|python" | grep -v grep > ~/out/processes.txt || true
+            xattr -dr com.apple.quarantine "$A" || true
+            export PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
+            "$A/Contents/MacOS/ai-productivity-flow-launcher" > ~/out/app-stdout.txt 2> ~/out/app-stderr.txt &
+            PID=$!
+            STATUS=ok
+            for t in 5 15 30 60; do
+              sleep $(( t - ${LAST:-0} )); LAST=$t
+              if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a ~/out/alive.txt
+              else wait $PID; echo "${t}s: EXITED code $?" | tee -a ~/out/alive.txt; STATUS=fail; break; fi
+            done
+            ps aux | grep -i -E "voice_flow|productivity" | grep -v grep > ~/out/processes.txt || true
+            cp "$A/Contents/Resources/crash_log.txt" ~/out/ 2>/dev/null || true
+            echo "--- stderr tail"; tail -40 ~/out/app-stderr.txt || true
+            kill $PID 2>/dev/null || true
+            [ "$STATUS" = ok ]
       - run:
           name: Collect crash logs
           when: always
