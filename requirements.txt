@@ -19,3 +19,4 @@ requests>=2.31.0
 cryptography>=41.0.0
 notebooklm-py[browser,mcp]==0.8.2
 sentry-sdk>=2.0.0
+openai>=1.40.0,<3

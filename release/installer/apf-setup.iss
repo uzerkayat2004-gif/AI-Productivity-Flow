@@ -57,6 +57,9 @@ VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoCopyright=Copyright (C) 2026 Uzer Kayat
 
 [Files]
+; runtime\* is the whole private runtime. That includes runtime\code2video
+; (vendored prompts and gpt_request.py) and runtime\python\Lib\site-packages,
+; which is where the openai package Code2Video imports is installed.
 Source: "{#STAGING_ROOT}\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
 Source: "{#STAGING_ROOT}\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#STAGING_ROOT}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

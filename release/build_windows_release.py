@@ -75,6 +75,61 @@ def ensure_notebooklm_runtime(staging: Path) -> bool:
     return True
 
 
+def refresh_code2video_vendor(staging: Path) -> None:
+    """Re-sync vendored Code2Video into staging without secrets or bytecode."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from scripts.bundle_code2video import copy_code2video
+
+    source = REPO / "third_party" / "code2video"
+    if not source.is_dir():
+        sys.exit(f"CODE2VIDEO VENDOR MISSING — expected {source}")
+    destination = staging / "runtime" / "code2video"
+    copy_code2video(source, destination)
+    prompt = destination / "prompts" / "stage1.py"
+    if not prompt.is_file():
+        sys.exit(f"CODE2VIDEO VENDOR COPY FAILED — missing {prompt}")
+    print(f"Code2Video vendor synced to {destination}")
+
+
+def ensure_openai_runtime(staging: Path) -> None:
+    """Install openai into the staging private Python when it is missing.
+
+    Code2Video's vendored gpt_request.py imports the official client. Shipping
+    that dependency in the private interpreter keeps the Windows installer on
+    the same contract as the macOS bundle, which installs requirements.txt.
+    """
+    python = staging / "runtime" / "python" / "python.exe"
+    if not python.is_file():
+        sys.exit(
+            "OPENAI RUNTIME PROVISION FAILED — staging private Python is missing: "
+            f"{python}"
+        )
+    probe = subprocess.run(
+        [str(python), "-c", "import openai"],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        print("openai already importable in staging private Python")
+        return
+
+    package = "openai>=1.40.0,<3"
+    uv = shutil.which("uv")
+    if uv:
+        command = [uv, "pip", "install", "--python", str(python), package]
+    else:
+        command = [str(python), "-m", "pip", "install", package]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout or "")[-2000:]
+        sys.exit(
+            "OPENAI RUNTIME PROVISION FAILED — could not install "
+            f"{package} into {python}.\n{output}"
+        )
+    print("openai provisioned in staging private Python")
+
+
 def refresh_app_package(staging: Path) -> None:
     """Re-sync the app package from the repo so the installer always carries
     the current source (the python runtime snapshot may predate edits)."""
@@ -132,7 +187,7 @@ def preflight(staging: Path) -> None:
     # Preflight runtime Python dependencies are present and importable.
     python = str(runtime / "python" / "python.exe")
     check_deps = subprocess.run(
-        [python, "-c", "import requests, webview, sounddevice, faster_whisper, edge_tts, cryptography, websockets, notebooklm; print('runtime dependencies OK')"],
+        [python, "-c", "import requests, webview, sounddevice, faster_whisper, edge_tts, cryptography, websockets, notebooklm, openai; print('runtime dependencies OK')"],
         capture_output=True, text=True,
     )
     if check_deps.returncode != 0:
@@ -163,7 +218,9 @@ def sha256_file(path: Path) -> str:
 
 def main() -> None:
     refresh_app_package(STAGING)
+    refresh_code2video_vendor(STAGING)
     ensure_notebooklm_runtime(STAGING)
+    ensure_openai_runtime(STAGING)
     preflight(STAGING)
     installer = build_installer()
     size_mb = installer.stat().st_size / (1024 * 1024)

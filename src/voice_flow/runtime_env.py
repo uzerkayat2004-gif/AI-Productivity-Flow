@@ -132,14 +132,49 @@ def narova_tool_root() -> Path | None:
     return dev if (dev / "tool" / "bin" / "narova.js").is_file() else None
 
 
+def _prompts_ready(root: Path) -> bool:
+    return (root / "prompts").is_dir()
+
+
 def code2video_root() -> Path | None:
-    """Vendored Code2Video root (contains prompts/)."""
+    """Vendored Code2Video root (contains prompts/).
+
+    Windows installs keep the vendor at ``runtime/code2video`` next to
+    ``runtime-manifest.json``. The macOS ``.app`` writes
+    ``runtime/build-manifest.json`` and copies the vendor to
+    ``Resources/third_party/code2video``. That Mac manifest is accepted here
+    only. ``install_root()`` still requires ``runtime-manifest.json`` so a
+    Mac bundle is not treated as a Windows install (it does not ship the
+    private ffmpeg, Node, or HyperFrames tree).
+    """
     runtime = runtime_root()
     if runtime is not None:
-        root = runtime / "code2video"
-        return root if (root / "prompts").is_dir() else None
+        bundled = runtime / "code2video"
+        if _prompts_ready(bundled):
+            return bundled
+        beside = runtime.parent / "third_party" / "code2video"
+        if _prompts_ready(beside):
+            return beside
+
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    override = os.environ.get("AI_PRODUCTIVITY_FLOW_ROOT", "").strip()
+    if override:
+        candidates.append(Path(override).expanduser().resolve())
+    package_root = Path(__file__).resolve().parents[2]
+    candidates.append(package_root)
+    candidates.extend(package_root.parents)
+    for root in candidates:
+        if root in seen:
+            continue
+        seen.add(root)
+        if (root / "runtime" / "build-manifest.json").is_file():
+            vendor = root / "third_party" / "code2video"
+            if _prompts_ready(vendor):
+                return vendor
+
     dev = Path(__file__).resolve().parents[2] / "third_party" / "code2video"
-    return dev if (dev / "prompts").is_dir() else None
+    return dev if _prompts_ready(dev) else None
 
 
 def render_browser_cache() -> Path | None:

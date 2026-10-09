@@ -110,6 +110,14 @@ def copy_resources() -> None:
         dst_src,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.pyd"),
     )
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.bundle_code2video import copy_code2video
+
+    vendor_src = REPO_ROOT / "third_party" / "code2video"
+    if vendor_src.is_dir():
+        copy_code2video(vendor_src, RESOURCES_DIR / "third_party" / "code2video")
+        print(f"Bundled Code2Video into {RESOURCES_DIR / 'third_party' / 'code2video'}")
 
 
 def sanitize_runtime_libraries(runtime_dir: Path) -> None:
@@ -240,7 +248,7 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
                 "pyperclip", "pyautogui", "pywebview", "pyobjc-core",
                 "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pystray", "pillow",
                 "psutil", "edge-tts", "pypdf", "websockets", "requests",
-                "cryptography", "sentry-sdk>=2.0.0"
+                "cryptography", "sentry-sdk>=2.0.0", "openai>=1.40.0,<3"
             ]
             subprocess.run([str(python_bin), "-m", "pip", "install", *packages], check=True)
     else:
