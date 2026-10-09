@@ -315,6 +315,9 @@ jobs:
           "
 
       - name: 20-Second App Launch Check
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONFAULTHANDLER: "1"
         run: |
           LAUNCHER="dist/AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher"
           chmod +x "$LAUNCHER"
@@ -325,11 +328,18 @@ jobs:
           
           for i in $(seq 1 20); do
             if ! kill -0 "$APP_PID" 2>/dev/null; then
-              wait "$APP_PID" || true
-              EXIT_CODE=$?
+              EXIT_CODE=0
+              wait "$APP_PID" || EXIT_CODE=$?
               echo "App process crashed or exited prematurely after ${i}s (exit code ${EXIT_CODE})!"
-              echo "=== App Output Log ==="
-              cat "$LOG_FILE" || true
+              RESOURCES="dist/AI Productivity Flow.app/Contents/Resources"
+              python scripts/report_macos_launch_failure.py \
+                --output "$RUNNER_TEMP/macos_launch_failure_safe.log" \
+                "$LOG_FILE" \
+                "$RESOURCES/crash_log.txt" \
+                "$RESOURCES/voice_flow_debug.log" \
+                "$HOME/.voice_flow/logs/voice_flow_debug.log" \
+                "$HOME/.voice_flow/gui_crash.log" \
+                "$HOME/.voice_flow/gui_launcher.log"
               exit 1
             fi
             sleep 1
@@ -340,6 +350,15 @@ jobs:
           sleep 2
           kill -KILL "$APP_PID" 2>/dev/null || true
           echo "Launch check cleanly verified." 
+
+      - name: Upload Redacted macOS Launch Failure Diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-launch-failure-diagnostics
+          path: ${{ runner.temp }}/macos_launch_failure_safe.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
