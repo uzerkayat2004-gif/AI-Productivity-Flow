@@ -68,7 +68,14 @@ jobs:
             screencapture -x out/screen-${t}s.png || true
             if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a out/alive.txt; else echo "${t}s: EXITED" | tee -a out/alive.txt; fi
           done
-          osascript -e 'tell application "System Events" to get name of every window of every process whose background only is false' > out/windows.txt 2>&1 || true
+          osascript -e 'tell application "System Events"
+            set outText to ""
+            repeat with p in (every process whose background only is false)
+              set outText to outText & (name of p) & ": " & (name of every window of p as text) & linefeed
+            end repeat
+            return outText
+          end tell' > out/windows.txt 2>&1 || true
+          cp "$HOME/.voice_flow/gui_launcher.log" out/gui_launcher.log 2>/dev/null || true
           ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
           kill $PID 2>/dev/null || true
 
@@ -82,6 +89,7 @@ jobs:
         if: always()
         run: |
           python -m pip install pillow
+          cp "$HOME/.voice_flow/gui_launcher.log" out/gui_launcher.log 2>/dev/null || true
           python scripts/check_mac_smoke_artifacts.py out
 
       - name: Collect crash logs
