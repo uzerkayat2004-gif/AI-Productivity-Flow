@@ -32,7 +32,11 @@ if "accessory" in variant:
 root.withdraw()
 
 wins = []
-for (w, h, x, y) in ((48, 10, 488, 600), (240, 50, 392, 450)):
+RECTS = ((48, 10, 488, 600), (240, 50, 392, 450), (48, 28, 100, 150), (144, 28, 100, 250),
+         (248, 28, 100, 350), (100, 10, 600, 150), (48, 20, 600, 250), (60, 40, 600, 350))
+if "threaded" in variant:
+    RECTS = ((48, 10, 488, 600),)
+for (w, h, x, y) in RECTS:
     win = tk.Toplevel(root)
     win.withdraw()
     win.overrideredirect(True)
@@ -92,5 +96,19 @@ def shoot():
     root.destroy()
 
 
-root.after(3000, shoot)
+if "threaded" in variant:
+    import threading
+    info["after_from_thread_ran"] = False
+    def grow():
+        win, w, h, x, y = wins[0]
+        info["after_from_thread_ran"] = True
+        c = win.winfo_children()[0]
+        c.delete("all")
+        c.config(width=248, height=28)
+        win.geometry("248x28+388+600")
+        c.create_rectangle(0, 0, 248, 28, fill="#17171C", outline="")
+        wins[0] = (win, 248, 28, 388, 600)
+    threading.Timer(1.0, lambda: root.after(0, grow)).start()
+
+root.after(3500, shoot)
 root.mainloop()

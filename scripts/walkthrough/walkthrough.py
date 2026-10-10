@@ -242,6 +242,39 @@ def page_check(page_id):
     return _c
 
 
+def lock_click(page, label: str, selector: str, wait: float = 2.0, win: dict | None = None, check=None):
+    """Click the same element natively (real WKWebView window) and in WebKit, screenshot both."""
+    loc = page.locator(selector).first
+    try:
+        loc.wait_for(state="visible", timeout=4000)
+        box = loc.bounding_box()
+    except Exception as exc:
+        record(label, "fail", f"element not visible in WebKit: {selector} ({type(exc).__name__})", shot(page, label + "-missing"))
+        return None
+    nshot = None
+    if win and box:
+        helper("click", str(win["x"] + box["x"] + box["width"] / 2), str(win["y"] + 28 + box["y"] + box["height"] / 2))
+        time.sleep(wait)
+        nshot = native_shot(label)
+        helper("move", "1010", "300")
+    mark, herr = len(console), len(http_errors)
+    blocked = ""
+    try:
+        loc.click(timeout=5000)
+    except Exception as exc:
+        blocked = "real click blocked: " + str(exc).splitlines()[0][:200]
+    page.wait_for_timeout(int(wait * 1000))
+    name = shot(page, label)
+    st = ui_state(page)
+    errs = errors_since(mark)
+    ok, note = (True, "")
+    if check:
+        ok, note = check(page, st)
+    status = "fail" if (blocked or not ok) else ("js-error" if errs else "ok")
+    record(label, status, f"{blocked} {note} native_shot={nshot} state={st} console_errors={errs[:3]} http_errors={http_errors[herr:][:3]}", name, native=nshot)
+    return st
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright
 
@@ -307,25 +340,57 @@ def main() -> int:
                 break
         tour_done = st and not st["onboardingVisible"]
         record("tour reaches the end and closes", "ok" if tour_done else "fail", f"last state={st}")
-        # crash-report consent dialog right after the tour, if any
-        step(page, "after tour (consent dialog?)", wait=1.5)
-        page.evaluate("() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
+        # Right after the tour the app auto-starts the Audio Flow feature guide.
+        page.wait_for_timeout(1500)
+        guide = page.evaluate("""() => { const o=document.getElementById('audioflow-guide-overlay');
+          const c=document.getElementById('af-guide-card'); if (!o) return 'missing';
+          const s=getComputedStyle(o); const cs=c?getComputedStyle(c):null;
+          return {hiddenClass:o.classList.contains('hidden'), display:s.display, position:s.position, zIndex:s.zIndex,
+                  cardPosition: cs&&cs.position, cardBackground: cs&&cs.backgroundColor,
+                  bodyLocked: document.body.classList.contains('af-guide-active'),
+                  guideCssRules: [...document.styleSheets].reduce((n,sh)=>{ try { return n+[...sh.cssRules].filter(r=>(r.selectorText||'').includes('af-guide')).length; } catch(e){ return n; } },0)}; }""")
+        record("Audio Flow feature guide after tour", "info", f"{guide}", native_shot("after-tour-guide"))
+        shot(page, "after-tour-guide-webkit")
+        lock_click(page, "after tour: click 'Video Flow' in sidebar (is app usable?)", ".sidebar .nav-item[data-page=videoflow]",
+                   win=win, check=lambda p, s: (s["page"] == "videoflow", f"page={s['page']}"))
+        lock_click(page, "close the Audio Flow guide (its X button)", ".af-guide-close-btn", win=win,
+                   check=lambda p, s: (p.evaluate("!document.body.classList.contains('af-guide-active')"), "guide closed"))
+        page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         page.wait_for_timeout(800)
         step(page, "main app after onboarding", wait=1.5)
 
-        # Replay + Skip Tour
-        step(page, "replay tour", js="replayOnboarding()", wait=2.0,
-             check=lambda p, s: (s["onboardingVisible"], "tour visible again"))
-        step(page, "Skip Tour", js="(() => { const b=[...document.querySelectorAll('.scene1-skip-badge')].find(b=>b.getBoundingClientRect().width>0); b ? b.click() : finishOnboarding(); })()",
-             wait=1.5, check=lambda p, s: (not s["onboardingVisible"], "tour closed by Skip"))
-        page.evaluate("() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
+        # Replay from the sidebar + Skip Tour, as a user would (native + WebKit)
+        lock_click(page, "replay tour (sidebar 'Welcome Tour')", ".sidebar .nav-item[onclick*=replayOnboarding]", win=win,
+                   check=lambda p, s: (s["onboardingVisible"], "tour visible again"))
+        lock_click(page, "Skip Tour", "#onboarding-overlay .scene1-skip-badge:visible", win=win,
+                   check=lambda p, s: (not s["onboardingVisible"], "tour closed by Skip"))
+        page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         # Also visit each scene directly (covers scenes the Next path may skip)
         page.evaluate("replayOnboarding()")
         for i in range(5):
             step(page, f"tour scene {i+1} (direct)", js=f"gotoOnboardingSlide({i})", wait=2.0,
                  check=lambda p, s, i=i: (s["slide"] == i, f"slide={s['slide']}"))
         page.evaluate("finishOnboarding()")
-        page.evaluate("() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
+        page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
+        page.wait_for_timeout(800)
+
+        # ---- real sidebar clicks, native + WebKit side by side
+        for pid in ["audioflow", "videoflow", "home", "insights", "dictionary", "style", "providers"]:
+            lock_click(page, f"sidebar click {pid}", f".sidebar .nav-item[data-page={pid}]", win=win,
+                       check=lambda p, s, pid=pid: (s["page"] == pid, f"page={s['page']}"))
+        lock_click(page, "sidebar click Settings", ".sidebar .nav-item[onclick*=openSettings]", win=win,
+                   check=lambda p, s: ("settings-modal" in s["openModals"], f"modals={s['openModals']}"))
+        for tab in ("system", "account", "general"):
+            lock_click(page, f"settings tab {tab}", f"#settings-nav-{tab}", win=win)
+        page.keyboard.press("Escape")
+        page.evaluate("try { closeSettings(); } catch(e){}")
+        page.wait_for_timeout(800)
+        if win:
+            helper("click", "1000", "200")  # click empty area; Escape may not reach the native window
+        lock_click(page, "sidebar dark-mode toggle", "#theme-toggle-nav", win=win,
+                   check=lambda p, s: (s["theme"] == "dark", f"theme={s['theme']}"))
+        lock_click(page, "sidebar light-mode toggle", "#theme-toggle-nav", win=win,
+                   check=lambda p, s: (s["theme"] == "light", f"theme={s['theme']}"))
 
         # ---- every page, light then dark
         pages = ["audioflow", "videoflow", "home", "insights", "dictionary", "style", "providers"]
@@ -370,7 +435,12 @@ def main() -> int:
                   "It happens in the chloroplasts. Light reactions make ATP; the Calvin cycle builds glucose.")
         step(page, "Video Flow: paste sample text", js=f"""switchPage('videoflow'); const t=document.getElementById('vf-source-input');
              if (t) {{ t.value={json.dumps(sample)}; t.dispatchEvent(new Event('input', {{bubbles:true}})); }}""", wait=1.5, full=True)
-        step(page, "Video Flow: generate", js="generateVideoFlow()", wait=8.0, full=True)
+        step(page, "Video Flow: generate (as shipped)", js="generateVideoFlow()", wait=4.0, full=True)
+        btn = page.evaluate("() => { const b=document.getElementById('vf-generate-button'); return b ? {disabled: b.disabled, text: b.textContent.trim().slice(0,40)} : null; }")
+        record("Video Flow: Generate button after the click", "info", f"{btn}")
+        step(page, "Video Flow: generate (test workaround: define vfSelectedStyle)",
+             js="window.vfSelectedStyle = window.vfSelectedStyle || 'auto'; const b=document.getElementById('vf-generate-button'); if (b) b.disabled=false; generateVideoFlow()",
+             wait=10.0, full=True)
         code, body = api("/api/video-flow/jobs/status")
         record("Video Flow job status after generate", "info", f"HTTP {code}: {json.dumps(body, default=str)[:500]}")
 
@@ -399,6 +469,19 @@ def main() -> int:
             time.sleep(1.5)
             record(f"API POST {ep}", "ok" if code == 200 else "fail", f"HTTP {code}: {body}")
             floating_bar(ep.rsplit('/', 1)[-1])
+
+        # ---- click the floating bar itself ("Click to speak")
+        bars = bar_windows()
+        if bars:
+            b = bars[0]
+            helper("move", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
+            time.sleep(1.0)
+            helper("click", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
+            time.sleep(2.0)
+            code, st = api("/api/overlay/status")
+            record("native click on the floating bar", "info", f"overlay status after click={st}")
+            floating_bar("after-bar-click")
+            api("/api/record/toggle", {"recording": False})
 
         # ---- native window at the end (did the real app window survive all this?)
         record("native window at end", "info", json.dumps(main_window()), native_shot("end"))
