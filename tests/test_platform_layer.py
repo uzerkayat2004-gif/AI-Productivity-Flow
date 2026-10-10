@@ -335,14 +335,26 @@ def test_injector_cross_platform_safe_imports():
     assert hasattr(injector, "is_same_window_hierarchy")
 
 
-def test_api_server_permissions_http_endpoints():
+@pytest.fixture
+def dns_free_loopback_server(monkeypatch):
+    """Exercise local API endpoints without reverse hostname discovery."""
+    import socket
+    from voice_flow.local_server import LoopbackHTTPServer
+
+    def reject_hostname_discovery(*args, **kwargs):
+        pytest.fail("Local API fixtures must not discover hostnames")
+
+    monkeypatch.setattr(socket, "getfqdn", reject_hostname_discovery)
+    return LoopbackHTTPServer
+
+
+def test_api_server_permissions_http_endpoints(dns_free_loopback_server):
     import json
     import threading
     import urllib.request
-    from http.server import ThreadingHTTPServer
     from voice_flow.gui.api_server import VoiceFlowApiHandler
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
+    server = dns_free_loopback_server(("127.0.0.1", 0), VoiceFlowApiHandler)
     server.daemon_threads = True
     server.block_on_close = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -400,14 +412,13 @@ def test_wincompat_monkeypatches_ctypes():
     assert hasattr(ctypes, "wintypes")
 
 
-def test_api_server_platform_info_endpoint():
-    from http.server import ThreadingHTTPServer
+def test_api_server_platform_info_endpoint(dns_free_loopback_server):
     import json
     import threading
     import urllib.request
     from voice_flow.gui.api_server import VoiceFlowApiHandler
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFlowApiHandler)
+    server = dns_free_loopback_server(("127.0.0.1", 0), VoiceFlowApiHandler)
     server.daemon_threads = True
     server.block_on_close = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
