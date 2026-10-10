@@ -544,6 +544,21 @@ def _candidate_preserves_content(
         if any(candidate_anchors[t] < count for t, count in src_anchors.items()):
             return False
 
+    # A small model turns "every time I restart" into "every time you
+    # restart". Losing first-person words while gaining second-person ones is
+    # that flip, not grammar cleanup ("you know" is a filler, not a reader).
+    if task in {"cleanup", "rewrite"} and command_format is None:
+        first_person = {"i", "me", "my", "mine", "myself", "we", "us", "our", "ours"}
+        second_person = {"you", "your", "yours", "yourself"}
+        spoken_you_know = len(re.findall(r"\byou know\b", source, re.IGNORECASE))
+        source_first = sum(t in first_person for t in src_tokens)
+        source_second = sum(t in second_person for t in src_tokens) - spoken_you_know
+        candidate_first = sum(t in first_person for t in cand_tokens)
+        candidate_second = sum(t in second_person for t in cand_tokens)
+        if candidate_first < source_first and candidate_second > source_second:
+            log.info("[POLISH SAFETY] Candidate changed the speaker's perspective; rejected.")
+            return False
+
     # Filler words that may be dropped by the LLM
     fillers = {"um", "uh", "er", "ah", "ahhh", "umm", "uhh", "err", "hmm", "like", "you", "know", "basically"}
 
@@ -692,7 +707,10 @@ def _candidate_preserves_content(
             return False
 
     if command_format == "bullet_list":
-        weak = {"need", "needs", "send", "sends", "review", "reviews", "schedule", "schedules"}
+        weak = {
+            "need", "needs", "send", "sends", "review", "reviews", "schedule", "schedules",
+            "have", "must", "should", "will", "also", "with", "that", "this", "then", "just", "gotta",
+        }
         anchors = [token for token in non_filler_src if len(token) >= 4 and token not in weak]
         candidate_stems = {token[:4] for token in cand_tokens}
         if anchors and sum(token[:4] in candidate_stems for token in anchors) / len(anchors) < 0.8:
@@ -1610,6 +1628,14 @@ class TextPolisher:
                 bridge_runnable = can_execute_model(selected_video_model_ref)
                 remaining = remaining_provider_budget()
                 bridge_timeout = min(preferred_timeout, remaining)
+                try:
+                    from voice_flow.lfm_engine import is_lfm_model_ref, local_polish_allowance
+                    if is_lfm_model_ref(selected_video_model_ref):
+                        # A per-request network timeout does not apply to an
+                        # on-device model; its own allowance bounds it.
+                        bridge_timeout = min(remaining, max(bridge_timeout, local_polish_allowance(word_count)))
+                except Exception:
+                    pass
                 if bridge_runnable and remaining >= AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS:
                     try:
                         from voice_flow.lfm_engine import is_lfm_model_ref

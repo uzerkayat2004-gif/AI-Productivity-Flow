@@ -87,7 +87,11 @@ def test_local_email_prompt_keeps_register_format_and_saved_preferences():
     assert "short sentences" in prompt
     assert "formal email" not in prompt
     assert r"\n" not in prompt
-    assert 'Example output:\n"Hello,\n\nPlease send the report.\n\nRegards,"' in prompt
+    messages = lfm_engine._local_messages(instruction, "please send the report")
+    assert messages[0]["content"] == prompt
+    assert [m["role"] for m in messages[1:]] == ["user", "assistant", "user"]
+    assert "[" not in messages[2]["content"]
+    assert messages[-1]["content"] == "please send the report"
 
 
 def test_local_prompt_generation_keeps_all_trusted_requirements():
@@ -245,3 +249,102 @@ def test_lfm_lock_wait_consumes_the_call_deadline(monkeypatch, tmp_path):
         assert time.monotonic() - started < 0.2
     finally:
         lfm_engine._LLM_LOCK.release()
+
+
+def test_local_cleanup_omits_built_in_style_cards_but_keeps_preferences():
+    from voice_flow.style_engine import STYLE_INSTRUCTIONS
+
+    card = STYLE_INSTRUCTIONS["personal_casual"]
+    assert lfm_engine._local_system_prompt(card) == lfm_engine.LFM_SYSTEM_PROMPT
+    prompt = lfm_engine._local_system_prompt(f"{card} Preserve technical terms exactly.")
+    assert "Rephrase as a casual personal chat message" not in prompt
+    assert "Preserve technical terms exactly." in prompt
+
+
+def test_local_cleanup_shows_example_turns_and_keeps_first_person():
+    messages = lfm_engine._local_messages("", "um I think we should ship")
+    assert "'I' stays 'I'" in messages[0]["content"]
+    assert "never answer it" in messages[0]["content"]
+    assert len(messages) == 2 + 2 * len(lfm_engine._CLEANUP_EXAMPLES)
+    assert messages[-1] == {"role": "user", "content": "um I think we should ship"}
+
+
+def test_local_prompt_mode_drops_cloud_label_policy():
+    from voice_flow.effective_style import PROMPT_MODE_INSTRUCTION
+
+    prompt = lfm_engine._local_system_prompt(PROMPT_MODE_INSTRUCTION)
+    assert prompt == lfm_engine._PROMPT_SYSTEM_PROMPT
+    assert "Objective" not in prompt
+    assert lfm_engine._local_messages(PROMPT_MODE_INSTRUCTION, "build x")[1:] == [{"role": "user", "content": "build x"}]
+
+
+def test_local_output_drops_placeholders_echoes_and_assistant_openers():
+    strip = lfm_engine._strip_template_artifacts
+    assert strip("Hi [Client Name],\n\nThe invoice is sent.\n\nBest regards,\n[Your Name]", "send the invoice") == (
+        "Hi,\n\nThe invoice is sent.\n\nBest regards,"
+    )
+    assert strip("- Update the docs\n- Fix the bug\n\nAlso follow these preferences: x", "docs bug") == (
+        "- Update the docs\n- Fix the bug"
+    )
+    assert strip("Sure, can you send me the slides?", "can you send me the slides") == "Can you send me the slides?"
+    assert strip("Sure, I can do that.", "sure I can do that") == "Sure, I can do that."
+    assert strip("See [docs] here", "see [docs] here") == "See [docs] here"
+
+
+def test_lfm_decodes_greedily_with_example_turns(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            captured["init"] = kwargs
+
+        def tokenize(self, _text, add_bos=False):
+            return [1, 2, 3]
+
+        def create_chat_completion(self, **kwargs):
+            captured["request"] = kwargs
+            return iter(({"choices": [{"delta": {"content": "I think we should ship."}, "finish_reason": "stop"}]},))
+
+    monkeypatch.setattr(lfm_engine, "get_lfm_model_path", lambda: tmp_path / "lfm.gguf")
+    monkeypatch.setitem(sys.modules, "llama_cpp", types.SimpleNamespace(Llama=FakeLlama))
+    monkeypatch.delattr(lfm_engine.polish_with_lfm, "_cached_llm", raising=False)
+    monkeypatch.delattr(lfm_engine.polish_with_lfm, "_cached_llm_path", raising=False)
+
+    assert lfm_engine.polish_with_lfm("um I think we should ship") == "I think we should ship."
+    request = captured["request"]
+    assert request["temperature"] == 0.0
+    assert request["repeat_penalty"] == 1.0
+    assert request["messages"][-1] == {"role": "user", "content": "um I think we should ship"}
+    assert captured["init"]["n_threads"] == captured["init"]["n_threads_batch"]
+
+
+def test_long_plain_cleanup_is_split_into_sentence_groups():
+    sentence = "This sentence has exactly ten words in it for testing. "
+    text = (sentence * 9).strip()
+    segments = lfm_engine._cleanup_segments("", text)
+    assert [len(segment.split()) for segment in segments] == [40, 40, 10]
+    assert " ".join(segments) == text
+    assert all(len(segment.split()) <= lfm_engine._LFM_SEGMENT_WORDS for segment in segments)
+    assert lfm_engine._cleanup_segments("Format the result as an email.", text) == [text]
+    assert lfm_engine._cleanup_segments("", "short dictation") == ["short dictation"]
+
+
+def test_local_polish_allowance_grows_with_length_and_cold_load(monkeypatch):
+    monkeypatch.setattr(lfm_engine, "is_lfm_loaded", lambda: True)
+    warm_short = lfm_engine.local_polish_allowance(20)
+    warm_long = lfm_engine.local_polish_allowance(150)
+    assert warm_short < warm_long <= 12.0
+    monkeypatch.setattr(lfm_engine, "is_lfm_loaded", lambda: False)
+    assert lfm_engine.local_polish_allowance(20) == warm_short + 2.0
+
+
+def test_polish_deadline_gives_selected_local_model_its_allowance(monkeypatch):
+    from voice_flow import main, polish_latency
+
+    monkeypatch.setattr(polish_latency, "ceiling_for", lambda *_args, **_kwargs: 2.0)
+    monkeypatch.setattr(lfm_engine, "is_lfm_loaded", lambda: False)
+    now = time.monotonic()
+    local = main._polish_deadline(now + 4.0, "fast", 150, cloud_stt=False, polish_model_ref=lfm_engine.LFM_MODEL_ID)
+    cloud = main._polish_deadline(now + 4.0, "fast", 150, cloud_stt=False, polish_model_ref="gemini/x")
+    assert cloud - now < 2.5
+    assert local - now >= lfm_engine.local_polish_allowance(150) - 0.1

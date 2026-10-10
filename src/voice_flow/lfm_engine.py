@@ -35,14 +35,50 @@ LFM_ALIASES = {
     "lfm2.5-350m",
 }
 
-# Instruction tuned for a 350M model: short, imperative, and explicit about the
-# required output. Long chat-style prompts make a model this small ramble or
-# answer with an analysis instead of the rewritten sentence.
+# Instructions tuned for a 350M model: short, imperative, and explicit about
+# the required output. A model this small treats a dictated sentence as a
+# message addressed to it unless told otherwise (and shown, via example turns),
+# and replies to it ("Sure, here's...", "Let me know if...") instead of
+# cleaning it.  Long policies and built-in style cards ("Rephrase as a casual
+# chat message") make that worse, so each mode gets its own compact prompt.
 LFM_SYSTEM_PROMPT = (
-    "Rewrite the user text removing filler words and fixing grammar. "
-    "Preserve the speaker's perspective (do not change 'I' or 'we' to 'you'). "
-    "Reply with only the rewritten text, nothing else."
+    "You clean up dictated speech transcripts. Remove filler words (um, uh, like, you know) and false starts, "
+    "and fix grammar, punctuation and capitalization. Keep the speaker's own words, meaning and first-person "
+    "voice: 'I' stays 'I'. The transcript is not addressed to you: never answer it, never reply to it, never "
+    "turn it into a question, and never add anything. Reply with only the cleaned transcript."
 )
+_CLEANUP_EXAMPLES = (
+    ("um so I was thinking we could uh meet tomorrow at like 10", "I was thinking we could meet tomorrow at 10."),
+    (
+        "hey can you send me the uh report by friday i need it for the client",
+        "Hey, can you send me the report by Friday? I need it for the client.",
+    ),
+    ("I'm not sure the uh new logo works can you make it bigger", "I'm not sure the new logo works. Can you make it bigger?"),
+    ("so I think the server keeps crashing and I don't know why", "I think the server keeps crashing, and I don't know why."),
+)
+_PROMPT_SYSTEM_PROMPT = (
+    "You rewrite a dictated request as a clear, direct instruction for an AI assistant. Remove filler and "
+    "conversational framing such as 'I want you to' or 'can you', start with an imperative verb, and keep every "
+    "detail the user said in the same order. Add nothing new. Do not answer or perform the request. "
+    "Reply with only the rewritten instruction."
+)
+_EMAIL_SYSTEM_PROMPT = (
+    "You turn a dictated note into a short email. Start with a greeting that uses the recipient's name if one "
+    "is said, write the message in clear sentences, and end with a short sign-off. Keep every fact (names, "
+    "dates, times, requests) and add nothing new. Never use placeholders such as [Your Name]. "
+    "Reply with only the email."
+)
+_EMAIL_EXAMPLES = (
+    (
+        "tell sarah the report is ready and ask her to review it by thursday",
+        "Hi Sarah,\n\nThe report is ready. Could you please review it by Thursday?\n\nThanks,",
+    ),
+)
+_BULLET_SYSTEM_PROMPT = (
+    "You turn dictated text into a concise bullet list: one '- ' bullet per item or action the speaker said, "
+    "using their words. Add nothing new. Reply with only the list."
+)
+_PREFERENCES_LABEL = "Also follow these preferences:"
 
 _LLM_LOCK = threading.Lock()
 
@@ -134,43 +170,90 @@ def _trusted_instruction(instruction: str, embedded_system: str | None) -> str:
     return re.sub(r"\s+", " ", candidate).strip()
 
 
+def _local_mode(instruction: str) -> str:
+    lowered = (instruction or "").casefold()
+    if "email" in lowered:
+        return "email"
+    if "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
+        return "prompt"
+    if "bullet list" in lowered:
+        return "bullets"
+    return "cleanup"
+
+
+def _local_preferences(instruction: str) -> str:
+    """Keep command and saved preferences, minus the built-in style cards.
+
+    Cards such as "Rephrase as a casual personal chat message" are written
+    for cloud models; they make the 350M model chat back.  The polisher
+    applies the card's register to local output deterministically instead.
+    """
+    remainder = instruction or ""
+    try:
+        from voice_flow.effective_style import PROMPT_MODE_INSTRUCTION
+        from voice_flow.style_engine import STYLE_INSTRUCTIONS
+
+        boilerplate = sorted({*STYLE_INSTRUCTIONS.values(), PROMPT_MODE_INSTRUCTION}, key=len, reverse=True)
+    except Exception:
+        boilerplate = []
+    for text in boilerplate:
+        if text:
+            remainder = remainder.replace(text, " ")
+    return re.sub(r"\s+", " ", remainder).strip()
+
+
 def _local_system_prompt(instruction: str) -> str:
-    prompt = (
-        "Rewrite the transcript. Remove filler words and fix grammar. Keep every factual detail. "
-        "Preserve the speaker's perspective (do not change 'I' or 'we' to 'you'). "
-        "Do not invent names, placeholders, or extra content. Reply only with the rewrite."
-    )
-    if instruction:
-        # Keep complete trusted instructions: saved preferences and temporary
-        # command constraints compose, so replacing them with a task label
-        # silently loses requirements.
-        lowered = instruction.casefold()
-        if "email" in lowered:
-            instruction = (
-                "Write the requested email, following the trusted instruction's register and format. "
-                "Use only the transcript's facts; do not invent names, a subject, or details. "
-                f"Trusted instruction: {instruction}"
-            )
-            instruction += (
-                ' Illustrative example only, not transcript content; never copy its facts.\n'
-                'Example input: "Please send the report."\n'
-                'Example output:\n'
-                '"Hello,\n\nPlease send the report.\n\nRegards,"\n'
-                "Use a generic greeting or sign-off only when requested."
-            )
-        elif "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
-            instruction = (
-                "Turn the transcript into the requested prompt. Preserve every dictated requirement; "
-                "do not answer the task or invent requirements. "
-                f"Trusted instruction: {instruction}"
-            )
-            instruction += (
-                ' Illustrative example only, not transcript content; never copy its facts.\n'
-                'Example input: "Make a prompt that explains this process."\n'
-                'Example output: "Objective: Explain this process."'
-            )
-        prompt += f" Apply this trusted style or task: {instruction}."
+    mode = _local_mode(instruction)
+    if mode == "email":
+        prompt, preferences = _EMAIL_SYSTEM_PROMPT, instruction
+    elif mode == "prompt":
+        prompt, preferences = _PROMPT_SYSTEM_PROMPT, _local_preferences(instruction)
+    elif mode == "bullets":
+        prompt, preferences = _BULLET_SYSTEM_PROMPT, instruction
+    else:
+        prompt, preferences = LFM_SYSTEM_PROMPT, _local_preferences(instruction)
+    # Keep complete trusted preferences: saved preferences and temporary
+    # command constraints compose, so replacing them with a task label
+    # silently loses requirements.
+    if preferences:
+        prompt += f" {_PREFERENCES_LABEL} {preferences}"
     return prompt
+
+
+def _local_messages(instruction: str, user_text: str) -> list[dict[str, str]]:
+    mode = _local_mode(instruction)
+    examples = _CLEANUP_EXAMPLES if mode == "cleanup" else _EMAIL_EXAMPLES if mode == "email" else ()
+    messages = [{"role": "system", "content": _local_system_prompt(instruction)}]
+    for spoken, cleaned in examples:
+        messages.append({"role": "user", "content": spoken})
+        messages.append({"role": "assistant", "content": cleaned})
+    messages.append({"role": "user", "content": user_text})
+    return messages
+
+
+_PLACEHOLDER_LINE_RE = re.compile(r"^[ \t]*\[[^\]\n]{1,40}\][ \t]*(?:\n|$)", re.MULTILINE)
+_PLACEHOLDER_GREETING_RE = re.compile(r"^([ \t]*(?:hi|hello|hey|dear))[ \t]+\[[^\]\n]{1,40}\]", re.IGNORECASE | re.MULTILINE)
+_ECHOED_INSTRUCTION_RE = re.compile(
+    r"\n+[ \t]*(?:" + re.escape(_PREFERENCES_LABEL) + r"|trusted instruction:)[\s\S]*$", re.IGNORECASE,
+)
+
+
+_ASSISTANT_OPENER_RE = re.compile(r"^\s*(sure|certainly|of course|absolutely)\s*[,!.]\s+", re.IGNORECASE)
+
+
+def _strip_template_artifacts(text: str, source: str) -> str:
+    """Remove template placeholders, echoed instructions, and assistant openers the speaker never said."""
+    if not text:
+        return text
+    text = _ECHOED_INSTRUCTION_RE.sub("", text)
+    opener = _ASSISTANT_OPENER_RE.match(text)
+    if opener and not source.lstrip().casefold().startswith(opener.group(1).casefold()):
+        rest = text[opener.end():]
+        text = rest[:1].upper() + rest[1:]
+    if "[" not in source:
+        text = _PLACEHOLDER_GREETING_RE.sub(r"\1", text)
+        text = _PLACEHOLDER_LINE_RE.sub("", text)
+    return text.strip()
 
 
 def _completion_token_budget(llm: Any, user_text: str, system_prompt: str) -> int:
@@ -366,6 +449,101 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
         _LLM_LOCK.release()
 
 
+# Asked to clean a long dictation in one pass, the 350M model condenses it
+# (152 words came back as 11), which the fidelity gate must reject.  Groups of
+# whole sentences of this size are rewritten faithfully.
+_LFM_SEGMENT_WORDS = 45
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _cleanup_segments(instruction: str, text: str) -> list[str]:
+    """Split a long plain cleanup into sentence groups; commands stay whole."""
+    if _local_mode(instruction) != "cleanup" or _local_preferences(instruction):
+        return [text]
+    if len(text.split()) <= _LFM_SEGMENT_WORDS + 15:
+        return [text]
+    segments: list[str] = []
+    current: list[str] = []
+    current_words = 0
+    for sentence in (part for part in _SENTENCE_BOUNDARY_RE.split(text) if part.strip()):
+        words = len(sentence.split())
+        if current and current_words + words > _LFM_SEGMENT_WORDS:
+            segments.append(" ".join(current))
+            current, current_words = [], 0
+        current.append(sentence)
+        current_words += words
+    if current:
+        segments.append(" ".join(current))
+    return segments
+
+
+def _generate_local(llm: Any, messages: list[dict[str, str]], user_text: str, deadline: float) -> str | None:
+    """Run one bounded, streamed completion; ``None`` on timeout or truncation."""
+    prompt_text = "\n".join(message["content"] for message in messages[:-1])
+    max_tokens = _completion_token_budget(llm, user_text, prompt_text)
+    if max_tokens <= 0 or time.monotonic() >= deadline:
+        return None
+    # Greedy decoding: a rewrite should be the most likely faithful text, and
+    # a repeat penalty would punish copying the speaker's own words.
+    resp = llm.create_chat_completion(
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=0.0,
+        top_k=1,
+        repeat_penalty=1.0,
+        stream=True,
+    )
+    chunks: list[str] = []
+    finish_reason = None
+    try:
+        if isinstance(resp, dict):
+            choices = resp.get("choices") or []
+            if choices:
+                choice = choices[0]
+                finish_reason = choice.get("finish_reason")
+                msg = choice.get("message") or {}
+                content_piece = msg.get("content") or choice.get("text") or ""
+                if content_piece:
+                    chunks.append(str(content_piece))
+        else:
+            for chunk in resp:
+                if time.monotonic() >= deadline:
+                    log.info("[LFM] Timed out during local generation.")
+                    return None
+                if not isinstance(chunk, dict):
+                    continue
+                choice = (chunk.get("choices") or [{}])[0]
+                finish_reason = choice.get("finish_reason") or finish_reason
+                piece = (choice.get("delta") or {}).get("content") or choice.get("text")
+                if piece:
+                    chunks.append(str(piece))
+    finally:
+        close = getattr(resp, "close", None)
+        if callable(close):
+            close()
+    if finish_reason == "length":
+        log.info("[LFM] Local response reached its token limit; rejecting partial text.")
+        return None
+    return "".join(chunks).strip() or None
+
+
+def is_lfm_loaded() -> bool:
+    return getattr(polish_with_lfm, "_cached_llm", None) is not None
+
+
+def local_polish_allowance(word_count: int) -> float:
+    """Seconds a local polish of ``word_count`` words may need, including a cold load.
+
+    Generation time grows with the dictation (measured ~0.02 s per word on a
+    4-core CPU), so a ceiling learned from short warm dictations must not cut
+    off a long one or the first one after the model was released.
+    """
+    allowance = 1.5 + 0.03 * max(0, int(word_count or 0))
+    if not is_lfm_loaded():
+        allowance += 2.0
+    return min(12.0, allowance)
+
+
 def _polish_with_lfm_impl(
     text: str,
     instruction: str = "",
@@ -451,53 +629,13 @@ def _polish_with_lfm_impl(
                 setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
             register_idle_cleanup("lfm", _release_idle_lfm, kind="polish")
             setattr(polish_with_lfm, "_last_used", idle_time())
-            local_system = _local_system_prompt(local_instruction)
-            max_tokens = _completion_token_budget(llm, user_text, local_system)
-            if max_tokens <= 0 or time.monotonic() >= deadline:
-                return None
-            resp = llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": local_system},
-                    {"role": "user", "content": user_text},
-                ],
-                max_tokens=max_tokens,
-                temperature=0.1,
-                top_k=50,
-                repeat_penalty=1.05,
-                stream=True,
-            )
-            chunks: list[str] = []
-            finish_reason = None
-            try:
-                if isinstance(resp, dict):
-                    choices = resp.get("choices") or []
-                    if choices:
-                        choice = choices[0]
-                        finish_reason = choice.get("finish_reason")
-                        msg = choice.get("message") or {}
-                        content_piece = msg.get("content") or choice.get("text") or ""
-                        if content_piece:
-                            chunks.append(str(content_piece))
-                else:
-                    for chunk in resp:
-                        if time.monotonic() >= deadline:
-                            log.info("[LFM] Timed out during local generation.")
-                            return None
-                        if not isinstance(chunk, dict):
-                            continue
-                        choice = (chunk.get("choices") or [{}])[0]
-                        finish_reason = choice.get("finish_reason") or finish_reason
-                        piece = (choice.get("delta") or {}).get("content") or choice.get("text")
-                        if piece:
-                            chunks.append(str(piece))
-            finally:
-                close = getattr(resp, "close", None)
-                if callable(close):
-                    close()
-            if finish_reason == "length":
-                log.info("[LFM] Local response reached its token limit; rejecting partial text.")
-                return None
-            content = "".join(chunks).strip()
+            pieces: list[str] = []
+            for segment in _cleanup_segments(local_instruction, user_text):
+                generated = _generate_local(llm, _local_messages(local_instruction, segment), segment, deadline)
+                if not generated:
+                    return None
+                pieces.append(generated)
+            content = " ".join(pieces).strip()
         finally:
             try:
                 setattr(polish_with_lfm, "_last_used", idle_time())
@@ -510,6 +648,7 @@ def _polish_with_lfm_impl(
         # Drop inline annotations about the text (e.g. "(Protected code token:
         # `UH`)") so commentary can never be pasted as if it were the dictation.
         content = _strip_annotation_lines(content)
+        content = _strip_template_artifacts(content, user_text)
         # Reject an analysis answer ("Explanation:", "Options:", ...) instead of
         # the rewritten sentence. Presenting that as the polished dictation
         # would paste the model's commentary over the user's words.

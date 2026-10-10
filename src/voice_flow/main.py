@@ -213,6 +213,13 @@ def _polish_deadline(
         )
     except Exception:
         budget = _polish_budget_seconds(speed_mode, word_count)
+    try:
+        from voice_flow import lfm_engine
+
+        if lfm_engine.is_lfm_model_ref(str(polish_model_ref or "")):
+            budget = max(budget, lfm_engine.local_polish_allowance(word_count))
+    except Exception:
+        pass
     if requires_ai:
         budget = max(budget, 6.0)
     return time.monotonic() + budget

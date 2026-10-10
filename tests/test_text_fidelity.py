@@ -164,3 +164,23 @@ def test_email_with_generic_sign_off_is_fulfilled_but_placeholders_are_not() -> 
     assert _fulfills_command(source, signed, task="rewrite", overrides={}, command_format="email")
     placeholder = signed + "\n[Your Name]"
     assert not _fulfills_command(source, placeholder, task="rewrite", overrides={}, command_format="email")
+
+
+def test_bullet_list_may_drop_modal_scaffolding() -> None:
+    source = "for the release we have to update the docs fix the login bug and bump the version number"
+    candidate = "- Update the docs\n- Fix the login bug\n- Bump the version number"
+    assert _candidate_preserves_content(source, candidate, task="rewrite", command_format="bullet_list")
+    assert not _candidate_preserves_content(
+        source, "- Update the docs\n- Bump the version number", task="rewrite", command_format="bullet_list",
+    )
+
+
+def test_cleanup_that_flips_first_person_to_you_is_rejected() -> None:
+    source = "I was like you know trying to fix the bug but uh it keeps coming back every time I restart the server"
+    flipped = "I was trying to fix the bug, but it keeps coming back every time you restart the server."
+    kept = "I was trying to fix the bug, but it keeps coming back every time I restart the server."
+    assert not _candidate_preserves_content(source, flipped, task="cleanup")
+    assert _candidate_preserves_content(source, kept, task="cleanup")
+    assert _candidate_preserves_content(
+        "can you send me the slides", "Can you send me the slides?", task="cleanup",
+    )

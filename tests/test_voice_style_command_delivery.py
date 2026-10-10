@@ -121,7 +121,7 @@ def test_selected_local_lfm_receives_full_command_style_through_bridge(monkeypat
     assert "formal email" in system
     assert "keep the result short" in system
     assert "preserve the user's original wording" in system
-    assert messages[1]["content"] == "NimbusSDK ships Monday with the complete release notes."
+    assert messages[-1]["content"] == "NimbusSDK ships Monday with the complete release notes."
     # The fake model echoes the original sentence. It receives the complete
     # command policy, but does not produce the requested short email, so the
     # delivery must report the command as unfulfilled instead of claiming AI
