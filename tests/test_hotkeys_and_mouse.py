@@ -618,6 +618,10 @@ def test_double_ctrl_tap_starts_dictation(monkeypatch) -> None:
     assert listener._started is True
     assert listener._ctrl_toggle_mode_active is True
 
+    # Release the second physical tap before pressing a third time.
+    monkeypatch.setattr("voice_flow.hotkeys._is_ctrl_down", lambda: False)
+    listener._on_key_release(keyboard.Key.ctrl)
+    monkeypatch.setattr("voice_flow.hotkeys._is_ctrl_down", lambda: True)
     # 3. Third tap finishes
     listener._on_key_press(keyboard.Key.ctrl)
     time.sleep(0.05)
@@ -1128,6 +1132,7 @@ def test_reload_config_falls_back_to_custom_shortcut_in_storage(monkeypatch) -> 
     listener.reload_config({"hotkey_trigger": ""})
     assert listener._hotkey_trigger == "custom"
     assert listener._custom_hotkey_str == "Ctrl+Shift+U"
+
 
 def test_capture_middle_pair_passes_through_after_expiry(monkeypatch):
     from voice_flow import mouse_hook, hotkey_config
