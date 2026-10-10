@@ -35,7 +35,9 @@ wins = []
 RECTS = ((48, 10, 488, 600), (240, 50, 392, 450), (48, 28, 100, 150), (144, 28, 100, 250),
          (248, 28, 100, 350), (100, 10, 600, 150), (48, 20, 600, 250), (60, 40, 600, 350))
 if "threaded" in variant:
-    RECTS = ((48, 10, 488, 600),)
+    RECTS = ((48, 10, 488, 600), (240, 50, 392, 450))
+if variant == "reverse":
+    RECTS = tuple(reversed(RECTS))
 for (w, h, x, y) in RECTS:
     win = tk.Toplevel(root)
     win.withdraw()
@@ -109,6 +111,25 @@ if "threaded" in variant:
         c.create_rectangle(0, 0, 248, 28, fill="#17171C", outline="")
         wins[0] = (win, 248, 28, 388, 600)
     threading.Timer(1.0, lambda: root.after(0, grow)).start()
+    # Candidate fix: worker threads only enqueue; the Tk thread polls the queue.
+    import queue
+    q: "queue.Queue" = queue.Queue()
+    info["queue_poll_ran"] = False
+    def recolor():
+        info["queue_poll_ran"] = True
+        win, w, h, x, y = wins[1]
+        c = win.winfo_children()[0]
+        c.delete("all")
+        c.create_rectangle(0, 0, w, h, fill="#FF6A00", outline="")
+    def pump():
+        try:
+            while True:
+                q.get_nowait()()
+        except queue.Empty:
+            pass
+        root.after(30, pump)
+    root.after(30, pump)
+    threading.Timer(1.0, lambda: q.put(recolor)).start()
 
 root.after(3500, shoot)
 root.mainloop()

@@ -66,7 +66,7 @@ jobs:
           PY="$RES/runtime/python/bin/python3"
           export PYTHONPATH="$RES/src:$RES/runtime/site-packages:$RES/runtime/python/lib/python3.11/site-packages"
           mkdir -p out/tkprobe
-          for v in plain accessory transparent accessory_transparent threaded accessory_threaded; do
+          for v in plain reverse accessory_transparent threaded accessory_threaded; do
             perl -e "alarm 30; exec @ARGV" "$PY" scripts/walkthrough/tk_bar_probe.py "$v" out/tkprobe > "out/tkprobe/$v.log" 2>&1 || echo "$v exit $?" | tee -a out/tkprobe/exit.txt
           done
           python - <<'PY'
@@ -109,12 +109,12 @@ jobs:
             ps -o pid,ppid,command -p "$pid" | cut -c1-200 >> out/processes.txt
             sample "$pid" 2 -file "out/sample-$pid.txt" >/dev/null 2>&1 || true
           done
-          kill -0 "$APP_PID" 2>/dev/null && echo "app alive at end" | tee out/alive.txt || echo "app EXITED" | tee out/alive.txt
+          pgrep -fl "AI Productivity Flow.app" | tee out/alive.txt || echo "app EXITED" | tee out/alive.txt
           mkdir -p out/logs out/crash
           find "$HOME/.voice_flow" -maxdepth 3 \( -name "*.log" -o -name "*.txt" \) -size -5M -exec cp {} out/logs/ \; 2>/dev/null || true
           ls -la "$HOME/.voice_flow" > out/logs/data-dir-listing.txt 2>&1 || true
           cp ~/Library/Logs/DiagnosticReports/* out/crash/ 2>/dev/null || true
-          kill "$APP_PID" 2>/dev/null || true
+          pkill -f "AI Productivity Flow.app/Contents" || true
 
       - name: Upload results
         if: always()

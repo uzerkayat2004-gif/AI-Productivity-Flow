@@ -13,6 +13,7 @@ usage: walkthrough.py OUT_DIR NATIVE_HELPER
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -374,6 +375,28 @@ def main() -> int:
         page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         page.wait_for_timeout(800)
 
+        # ---- The native window is now stuck behind the unstyled guide. Restart the app
+        # (what a stuck user would do) so the native sidebar can be exercised.
+        app_path = os.environ.get("APP_PATH")
+        if app_path and win:
+            subprocess.run(["pkill", "-f", "AI Productivity Flow.app/Contents"], check=False)
+            time.sleep(4)
+            exe = subprocess.run(["/usr/libexec/PlistBuddy", "-c", "Print CFBundleExecutable", f"{app_path}/Contents/Info.plist"],
+                                 capture_output=True, text=True).stdout.strip()
+            subprocess.Popen([f"{app_path}/Contents/MacOS/{exe}"], stdout=open(OUT / "app-stdout-relaunch.txt", "w"),
+                             stderr=subprocess.STDOUT, start_new_session=True)
+            ok = wait_api(120)
+            time.sleep(12)
+            win2 = main_window()
+            record("restart app (stuck-user path)", "ok" if ok and win2 else "fail", f"api={ok} window={win2}", native_shot("after-restart"))
+            if win2:
+                win = win2
+            floating_bar("rest-after-restart")
+            page.reload(wait_until="load")
+            page.wait_for_timeout(5000)
+            page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} try { switchPage('audioflow'); } catch(e){} }")
+            page.wait_for_timeout(800)
+
         # ---- real sidebar clicks, native + WebKit side by side
         for pid in ["audioflow", "videoflow", "home", "insights", "dictionary", "style", "providers"]:
             lock_click(page, f"sidebar click {pid}", f".sidebar .nav-item[data-page={pid}]", win=win,
@@ -423,11 +446,12 @@ def main() -> int:
         for label, js in dialogs:
             st = step(page, label, js=js, wait=2.0)
             page.keyboard.press("Escape")
-            page.evaluate("""() => { ['closeSubModal'].forEach(()=>{});
-              ['shortcuts-sub-modal','mic-sub-modal','account-switch-sub-modal'].forEach(id => { try { closeSubModal(id); } catch(e){} });
-              try { hideMacOSPermissionsModal(); } catch(e){}
-              document.querySelectorAll('[id$=modal]').forEach(m => { if (getComputedStyle(m).display !== 'none' && m.id !== 'settings-modal') m.style.display='none'; });
-              try { closeSettings(); } catch(e){} }""")
+            page.evaluate("""() => {
+              const vis = m => { const s = getComputedStyle(m); return s.display !== 'none' && s.visibility !== 'hidden' && m.getBoundingClientRect().height > 0; };
+              document.querySelectorAll('[id$=modal]').forEach(m => { if (!vis(m) || m.id === 'settings-modal') return;
+                for (const f of ['closeSubModal', 'closeVideoModal']) { try { window[f](m.id); } catch(e){} } });
+              for (const f of ['closeSharedModelPicker', 'closeAccountModal', 'hideMacOSPermissionsModal', 'closeOAuthModal', 'closeSettings']) { try { window[f](); } catch(e){} }
+              document.querySelectorAll('[id$=modal]').forEach(m => { if (vis(m) && m.id !== 'settings-modal') m.style.display='none'; }); }""")
             page.wait_for_timeout(400)
 
         # ---- Video Flow: paste text and press generate (needs provider/NotebookLM)
