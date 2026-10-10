@@ -20,6 +20,9 @@ from typing import Any
 from pathlib import Path
 import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
+from voice_flow.platform.macos_app import configure_macos_app
+
+configure_macos_app("engine", apply_policy=False)
 
 if sys.stdout is None:
     class DummyWriter:
