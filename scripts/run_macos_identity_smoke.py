@@ -191,29 +191,39 @@ def _crash_excerpt(report: Path) -> str:
 
 
 def _collect_privacy_evidence(out: Path) -> None:
-    """Read only relevant public privacy logs; never enable private/debug data."""
-    predicate = (
-        '(process == "nehelper" OR process == "tccd") AND '
-        '(eventMessage CONTAINS[c] "local network" OR '
-        'eventMessage CONTAINS[c] "LocalNetwork" OR '
-        'eventMessage CONTAINS[c] "org.python" OR '
-        'eventMessage CONTAINS[c] "com.uzerkayat.aiproductivityflow")'
+    """Prioritize public network-privacy events regardless of OS process name."""
+    queries = (
+        ("local-network", '(eventMessage CONTAINS[c] "LocalNetwork" OR '
+         'eventMessage CONTAINS[c] "local network")', 80),
+        ("app-attribution", '(process == "nehelper" OR process == "tccd") AND '
+         '(eventMessage CONTAINS[c] "org.python" OR '
+         'eventMessage CONTAINS[c] "com.uzerkayat.aiproductivityflow")', 40),
     )
-    result = subprocess.run(
-        ["/usr/bin/log", "show", "--style", "json", "--last", "15m", "--predicate", predicate],
-        capture_output=True, text=True, check=True, timeout=8,
-    )
-    if len(result.stdout.encode("utf-8")) > 8 * 1024 * 1024:
-        raise ValueError("privacy log input exceeds 8 MiB")
-    entries = json.loads(result.stdout)
-    if not isinstance(entries, list):
-        raise ValueError("privacy log inventory is not a list")
+    deadline = time.monotonic() + 8
     fields = ("timestamp", "processID", "processImagePath", "subsystem", "category", "eventMessage")
-    lines = [json.dumps({field: entry[field] for field in fields if field in entry}, ensure_ascii=False)
-             for entry in entries[-120:] if isinstance(entry, dict)]
-    (out / "local-network-privacy.redacted.txt").write_text(
-        _redact_excerpt(lines) if lines else "[no matching public privacy records]\n", encoding="utf-8",
-    )
+    lines = []
+    for label, predicate, limit in queries:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("public privacy collection exceeded 8 seconds")
+        result = subprocess.run(
+            ["/usr/bin/log", "show", "--style", "json", "--info", "--last", "15m", "--predicate", predicate],
+            capture_output=True, text=True, check=True, timeout=remaining,
+        )
+        if len(result.stdout.encode("utf-8")) > 8 * 1024 * 1024:
+            raise ValueError("privacy log input exceeds 8 MiB")
+        entries = json.loads(result.stdout)
+        if not isinstance(entries, list):
+            raise ValueError("privacy log inventory is not a list")
+        if not entries:
+            lines.append(json.dumps({"captureQuery": label, "matchingEntries": 0}))
+        for entry in entries[-limit:]:
+            if isinstance(entry, dict):
+                record = {field: entry[field] for field in fields if field in entry}
+                record["captureQuery"] = label
+                lines.append(json.dumps(record, ensure_ascii=False))
+    excerpt = _redact_excerpt(lines).encode("utf-8")[:65536].decode("utf-8", errors="ignore")
+    (out / "local-network-privacy.redacted.txt").write_text(excerpt, encoding="utf-8")
 
 
 def _collect_diagnostics(app_path: Path, out: Path, launched_at: float) -> None:
@@ -332,6 +342,8 @@ def main(argv: list[str]) -> int:
         return 1
     capture_embedded_runtime(app_path, out)
     identity_capture = _compile_identity_capture(root, out)
+    subprocess.run(["screencapture", "-x", str(out / "screen-before-app-launch.png")],
+                   check=True, timeout=10)
     launcher = None
     launched_at = time.time()
     try:

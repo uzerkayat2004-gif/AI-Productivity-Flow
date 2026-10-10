@@ -604,14 +604,18 @@ def test_public_privacy_evidence_is_scoped_bounded_and_redacted(tmp_path, monkey
     entries += [{"processID": 100, "eventMessage": "org.python local network api_key=fixture-do-not-upload"},
                 {"eventMessage": "https://example.test/path?credential=fixture", "privateData": "do-not-copy"}]
     entries += [{"timestamp": str(index), "eventMessage": "LocalNetwork responsible com.uzerkayat.aiproductivityflow " + "x" * 2000}
-                for index in range(118)]
+                for index in range(78)]
     def log(command, **kwargs):
-        assert command[:6] == ["/usr/bin/log", "show", "--style", "json", "--last", "15m"]
+        assert command[:7] == ["/usr/bin/log", "show", "--style", "json", "--info", "--last", "15m"]
+        assert "--debug" not in command
+        assert kwargs["capture_output"] and kwargs["text"] and kwargs["check"]
+        assert 0 < kwargs["timeout"] <= 8
+        if "LocalNetwork" in command[-1]:
+            assert "process ==" not in command[-1]
+            return SimpleNamespace(stdout=json.dumps(entries))
         assert 'process == "nehelper"' in command[-1] and 'process == "tccd"' in command[-1]
-        assert "org.python" in command[-1] and "LocalNetwork" in command[-1]
-        assert "--debug" not in command and "--info" not in command
-        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 8}
-        return SimpleNamespace(stdout=json.dumps(entries))
+        assert "org.python" in command[-1]
+        return SimpleNamespace(stdout="[]")
     monkeypatch.setattr(runner.subprocess, "run", log)
     runner._collect_privacy_evidence(tmp_path)
     text = (tmp_path / "local-network-privacy.redacted.txt").read_text(encoding="utf-8")
@@ -631,3 +635,48 @@ def test_public_privacy_evidence_failure_is_best_effort(tmp_path, monkeypatch):
     runner._collect_diagnostics(tmp_path / "Never Launched.app", tmp_path, runner.time.time())
     assert "public privacy logs: ValueError: fixture unavailable" in (tmp_path / "diagnostic-errors.txt").read_text(encoding="utf-8")
     assert (tmp_path / "environment.json").is_file()
+
+
+def test_privacy_phase_screenshots_locate_prompt_before_real_app_launch():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8").split("  macos-build:", 1)[1]
+    phases = ["screen-before-api-import.png", "screen-after-api-import.png",
+              "screen-after-platform-tests.png", "screen-after-regression-tests.png",
+              "screen-after-bundle-build.png", "Verify built macOS native application identity"]
+    assert [workflow.index(phase) for phase in phases] == sorted(workflow.index(phase) for phase in phases)
+    runner = (root / "scripts/run_macos_identity_smoke.py").read_text(encoding="utf-8")
+    assert runner.index("screen-before-app-launch.png") < runner.index("launcher = subprocess.Popen")
+
+
+def test_network_privacy_query_covers_any_os_process_and_reserves_attribution_budget(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    calls = []
+    def log(command, **kwargs):
+        calls.append(command)
+        if "LocalNetwork" in command[-1]:
+            records = [{"processImagePath": "/usr/libexec/UserEventAgent", "subsystem": "com.apple.networkextension",
+                        "eventMessage": "LocalNetwork: found bundle id org.python.python"}]
+        else:
+            records = [{"eventMessage": "old attribution " + str(index)} for index in range(100)]
+        return SimpleNamespace(stdout=json.dumps(records))
+    monkeypatch.setattr(runner.subprocess, "run", log)
+    runner._collect_privacy_evidence(tmp_path)
+    records = [json.loads(line) for line in (tmp_path / "local-network-privacy.redacted.txt").read_text(encoding="utf-8").splitlines()]
+    assert len(calls) == 2 and len(records) == 41
+    assert records[0]["processImagePath"] == "/usr/libexec/UserEventAgent"
+    assert records[0]["captureQuery"] == "local-network"
+    assert all(record["captureQuery"] == "app-attribution" for record in records[1:])
+    assert "old attribution 60" in records[1]["eventMessage"]
+
+
+def test_public_privacy_queries_share_one_eight_second_deadline(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    times = iter([0, 1, 9])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(times))
+    calls = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: calls.append(kwargs) or SimpleNamespace(stdout="[]"))
+    with pytest.raises(TimeoutError, match="8 seconds"):
+        runner._collect_privacy_evidence(tmp_path)
+    assert len(calls) == 1 and calls[0]["timeout"] == 7
