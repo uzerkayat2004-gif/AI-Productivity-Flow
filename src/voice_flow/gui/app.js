@@ -9712,6 +9712,9 @@ function formatDmLanguageCapsule(langStr) {
 function getDmUserFriendlyDescription(m) {
   const isPolish = m.category === "voice_polishing" || String(m.tag || "").toLowerCase().includes("polish");
   if (isPolish) {
+    if (String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) {
+      return "S1-mini by Superwhisper is a specialized speech transcript normalizer fine-tuned from Qwen3-0.6B. It removes fillers and stutters, seamlessly resolves self-corrections (e.g. 'Friday, no wait, Thursday' -> 'Thursday'), fixes punctuation and capitalization, and normalizes spoken numbers, dates, currency, and emails. English only. Never rewrites or changes your meaning.";
+    }
     return "Ultra-fast voice cleanup assistant. It automatically removes speech fillers like 'um', 'uh', repeated words, and pauses from your voice dictation before pasting clean text into your apps.";
   }
   if (m.is_multilingual) {
@@ -9966,7 +9969,7 @@ function renderDownloadableModelDetail(modelId) {
           <div class="dm-feature-icon-row">
             <span>⚡</span> <span>Instant Speed</span>
           </div>
-          <div class="dm-feature-desc">Real-time local streaming with zero internet lag or API rate limits.</div>
+          <div class="dm-feature-desc">${isPolish ? 'Cleans text in about a second, no API limits.' : 'Real-time local streaming with zero internet lag or API rate limits.'}</div>
         </div>
         <div class="dm-feature-card">
           <div class="dm-feature-icon-row">
@@ -9981,6 +9984,13 @@ function renderDownloadableModelDetail(modelId) {
           <div class="dm-feature-desc">Works anywhere, including offline, airplane mode, or spotty networks.</div>
         </div>
       </div>
+
+      ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `
+        <div class="dm-credit-line" style="margin-top: 14px; padding: 10px 14px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: var(--polish-ink);">Attribution: <strong style="color: #c084fc;">S1-mini by Superwhisper · Apache 2.0</strong></span>
+          <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline; font-weight: 600;">Hugging Face ↗</a>
+        </div>
+      ` : ""}
 
       <div class="dm-lang-section">
         <div class="dm-lang-header">
@@ -10058,6 +10068,7 @@ function renderDownloadableModelDetail(modelId) {
             <div class="dm-advanced-content">
               <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
               <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+              ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `<div><strong>Credit:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">S1-mini by Superwhisper · Apache 2.0</a></div>` : ""}
               ${m.local_path ? `<div><strong>Local Path:</strong> <code style="word-break: break-all; font-size: 10.5px;">${escapeHtml(m.local_path)}</code></div>` : ""}
             </div>
           </details>
@@ -10095,6 +10106,7 @@ function renderDownloadableModelDetail(modelId) {
             <div class="dm-advanced-content">
               <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
               <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+              ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `<div><strong>Credit:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">S1-mini by Superwhisper · Apache 2.0</a></div>` : ""}
             </div>
           </details>
         </div>

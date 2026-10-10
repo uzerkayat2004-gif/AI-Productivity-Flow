@@ -150,11 +150,13 @@ class TestDownloadableModelsIntegration:
         assert all("stt" in (m.get("category") or m.get("task") or "").lower() for m in stt_only)
 
         polish_only = downloadable_models.get_all_models_status(category="voice_polishing")
-        assert len(polish_only) == 1
-        assert polish_only[0]["id"] == "liquid/lfm2.5-350m-qad-q4_0"
+        assert len(polish_only) == 2
+        polish_ids = [m["id"] for m in polish_only]
+        assert "liquid/lfm2.5-350m-qad-q4_0" in polish_ids
+        assert "superwhisper/s1-mini-q4_k_m" in polish_ids
 
         all_models = downloadable_models.get_all_models_status(include_polish=True)
-        assert len(all_models) == 3
+        assert len(all_models) == 4
 
     def test_downloaded_polish_models(self, monkeypatch, tmp_path):
         monkeypatch.setattr(downloadable_models, "get_models_dir", lambda: tmp_path)

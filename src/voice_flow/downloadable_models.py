@@ -131,6 +131,27 @@ DOWNLOADABLE_POLISH_MODELS_REGISTRY: list[dict[str, Any]] = [
         "full_id": "local/lfm2.5-350m-qad-q4_0",
         "description": "Voice Polishing model: Universal fallback tiny 350M local model for ultra-fast local disfluency cleanup (removing 'um', 'uh', hesitations) and grammatical polishing (219 MB). Specifically designed for text polishing after transcription, not for speech-to-text.",
     },
+    {
+        "id": "superwhisper/s1-mini-q4_k_m",
+        "name": "S1-mini by Superwhisper",
+        "tag": "Voice Polishing",
+        "task": "voice_polishing",
+        "category": "voice_polishing",
+        "format": "Local GGUF (Q4_K_M)",
+        "size_mb": 462,
+        "size_bytes": 484219808,
+        "size_display": "484 MB",
+        "repo_url": "https://huggingface.co/superwhisper/s1-mini-GGUF",
+        "download_url": "https://huggingface.co/superwhisper/s1-mini-GGUF/resolve/main/s1-mini-q4_k_m.gguf",
+        "filename": "s1-mini-q4_k_m.gguf",
+        "sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634",
+        "languages": ["English (en)"],
+        "is_multilingual": False,
+        "default_language": "en",
+        "full_id": "local/s1-mini-q4_k_m",
+        "license": "Apache-2.0 + naming term (S1-mini by Superwhisper)",
+        "description": "Voice Polishing model: S1-mini by Superwhisper, a transcript normalizer fine-tuned from Qwen3-0.6B. Removes fillers and stutters, resolves self-corrections (\"Friday, no wait, Thursday\"), fixes punctuation and capitalization, and writes spoken numbers, dates, money and emails in written form. English only. Never answers or rewrites content.",
+    },
 ]
 
 ALL_DOWNLOADABLE_MODELS_REGISTRY: list[dict[str, Any]] = [
@@ -155,13 +176,42 @@ def get_models_dir() -> Path:
 def get_model_spec(model_id: str) -> dict[str, Any] | None:
     """Find model specification by model_id or full_id or filename."""
     norm = str(model_id or "").strip().lower()
+    if not norm:
+        return None
+
+    # Known short aliases for exact disambiguation
+    short_aliases: dict[str, str] = {
+        "s1-mini": "superwhisper/s1-mini-q4_k_m",
+        "s1_mini": "superwhisper/s1-mini-q4_k_m",
+        "s1": "superwhisper/s1-mini-q4_k_m",
+        "lfm2.5-350m": "liquid/lfm2.5-350m-qad-q4_0",
+        "lfm2.5": "liquid/lfm2.5-350m-qad-q4_0",
+        "lfm": "liquid/lfm2.5-350m-qad-q4_0",
+    }
+    target_id = short_aliases.get(norm)
+    if target_id:
+        for m in ALL_DOWNLOADABLE_MODELS_REGISTRY:
+            if m["id"].lower() == target_id:
+                return dict(m)
+
+    # 1. Exact match against id, full_id, filename, or short id
     for m in ALL_DOWNLOADABLE_MODELS_REGISTRY:
+        m_id = m["id"].lower()
+        m_full_id = str(m.get("full_id") or "").lower()
+        m_filename = str(m.get("filename") or "").lower()
+        m_short_id = m_id.split("/")[-1]
+        if norm in (m_id, m_full_id, m_filename, m_short_id):
+            return dict(m)
+
+    # 2. Path or URL suffix matching with boundary separator
+    for m in ALL_DOWNLOADABLE_MODELS_REGISTRY:
+        m_filename = str(m.get("filename") or "").lower()
+        m_short_id = m["id"].split("/")[-1].lower()
         if (
-            m["id"].lower() == norm
-            or m["full_id"].lower() == norm
-            or m["filename"].lower() == norm
-            or norm.endswith(m["filename"].lower())
-            or norm.endswith(m["id"].split("/")[-1].lower())
+            norm.endswith("/" + m_filename)
+            or norm.endswith("\\" + m_filename)
+            or norm.endswith("/" + m_short_id)
+            or norm.endswith("\\" + m_short_id)
         ):
             return dict(m)
     return None
@@ -544,6 +594,24 @@ def _download_worker(
         # English Nemotron download, never during model loading or dictation.
         _maybe_repair_nemotron_tokenizer(part_file, model_id)
 
+        # Optional SHA-256 integrity verification: only when a spec specifies "sha256"
+        expected_sha256 = spec.get("sha256")
+        if expected_sha256:
+            import hashlib
+            hasher = hashlib.sha256()
+            with open(part_file, "rb") as pf_check:
+                for chunk in iter(lambda: pf_check.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            calculated_sha256 = hasher.hexdigest().lower()
+            if calculated_sha256 != str(expected_sha256).strip().lower():
+                try:
+                    part_file.unlink()
+                except OSError:
+                    pass
+                raise IOError(
+                    f"SHA-256 verification failed for {model_id}: expected {expected_sha256}, got {calculated_sha256}"
+                )
+
         # Atomic replacement: replace temporary .part with final destination file
         if target_file.exists():
             try:
@@ -753,6 +821,24 @@ def delete_downloaded_model(model_id: str) -> tuple[bool, str]:
     try:
         from voice_flow import nemotron_engine
         nemotron_engine.clear_engine_cache(spec["id"])
+    except Exception:
+        pass
+
+    try:
+        from voice_flow import s1_engine
+        if s1_engine.is_s1_model_ref(spec["id"]):
+            s1_engine.unload_s1_model()
+    except Exception:
+        pass
+
+    try:
+        from voice_flow import lfm_engine
+        if lfm_engine.is_lfm_model_ref(spec["id"]):
+            llm = getattr(lfm_engine.polish_with_lfm, "_cached_llm", None)
+            if llm is not None:
+                lfm_engine._release_cached_lfm(llm)
+                setattr(lfm_engine.polish_with_lfm, "_cached_llm", None)
+                setattr(lfm_engine.polish_with_lfm, "_cached_llm_path", None)
     except Exception:
         pass
 

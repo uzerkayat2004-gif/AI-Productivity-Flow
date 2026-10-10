@@ -84,6 +84,11 @@ def can_execute_model(model_ref: str) -> bool:
         from voice_flow import lfm_engine
         return lfm_engine.is_lfm_downloaded()
 
+    # S1-mini by Superwhisper local model integration check
+    if model_ref in ("local/s1-mini-q4_k_m", "superwhisper/s1-mini-q4_k_m") or model in ("s1-mini-q4_k_m", "s1-mini"):
+        from voice_flow import s1_engine
+        return s1_engine.is_s1_downloaded()
+
     if provider == "local":
         return False
     try:
@@ -187,6 +192,16 @@ def _request_polish(
             return lfm_engine.polish_with_lfm(
                 prompt,
                 instruction=lfm_engine._trusted_instruction("", prompt),
+                timeout_seconds=timeout_seconds,
+            )
+        return None
+
+    # S1-mini by Superwhisper local execution
+    if model_ref in ("local/s1-mini-q4_k_m", "superwhisper/s1-mini-q4_k_m") or model in ("s1-mini-q4_k_m", "s1-mini"):
+        from voice_flow import s1_engine
+        if s1_engine.is_s1_downloaded():
+            return s1_engine.polish_with_s1(
+                prompt,
                 timeout_seconds=timeout_seconds,
             )
         return None

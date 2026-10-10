@@ -1669,12 +1669,15 @@ class VoiceFlowApp:
         selected_model = getattr(session, "polish_model_ref", None) or (
             session.get("polish_model_ref") if isinstance(session, dict) else None
         )
-        selected_lfm = False
-        try:
-            from voice_flow.lfm_engine import is_lfm_model_ref
-            selected_lfm = is_lfm_model_ref(selected_model)
-        except Exception:
-            pass
+        def is_local_polish_model_ref(model_ref: str | None) -> bool:
+            try:
+                from voice_flow.lfm_engine import is_lfm_model_ref
+                from voice_flow.s1_engine import is_s1_model_ref
+                return is_lfm_model_ref(model_ref) or is_s1_model_ref(model_ref)
+            except Exception:
+                return False
+
+        selected_lfm = is_local_polish_model_ref(selected_model)
         command_format = getattr(command, "format", None) if command is not None else None
         command_context = getattr(command, "context_reference", None) if command is not None else None
         command_operation = getattr(command, "operation", "rewrite") if command is not None else ""

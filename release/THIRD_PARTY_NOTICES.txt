@@ -101,3 +101,7 @@ next to these notices.
     redistributed in this installer. When needed, it is downloaded through
     HyperFrames' official provisioning command from Google's Chrome for
     Testing endpoints and governed by Google's terms.
+
+18. S1-mini-GGUF, Copyright 2026 Superwhisper. Derivative of Qwen3-0.6B, Copyright 2024 Alibaba Cloud, Apache License 2.0. Must be identified as "S1-mini" by "Superwhisper".
+    https://huggingface.co/superwhisper/s1-mini-GGUF
+
