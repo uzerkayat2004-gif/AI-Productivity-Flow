@@ -675,9 +675,9 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
 
         # Start pywebview loop with custom icon
         if ico_path:
-            webview.start(icon=ico_path)
+            webview.start(icon=ico_path, http_server=False)
         else:
-            webview.start()
+            webview.start(http_server=False)
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
         _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
