@@ -509,6 +509,48 @@ class TestWakeVariants(unittest.TestCase):
         self.assertIsNotNone(r.command)
         self.assertEqual(r.command.format, "email")
 
+    def test_reported_wake_mishearings_trigger_commands(self):
+        from voice_flow.dictionary import dictionary_engine
+
+        cases = {
+            "Voicelow, make this as a good prompt?": "prompt",
+            "Voicelow make this as a good prompt": "prompt",
+            "hey vice flow make this as a prom": "prompt",
+            "Hey vice flow, make this an email.": "email",
+            "Hey wise flow, make this an email.": "email",
+            "Hey boys flow, make this an email.": "email",
+            "Hey choice flow make this a prompt": "prompt",
+            "Hey Voice Flo make this a prompt": "prompt",
+            "Hey Voicelow make this an email": "email",
+            "Voice Flow, can you make this a prompt": "prompt",
+        }
+        for spoken, expected in cases.items():
+            with self.subTest(spoken=spoken):
+                r = detect_voice_command(dictionary_engine.repair_wake_term(spoken))
+                self.assertIsNotNone(r.command)
+                self.assertEqual(r.command.format, expected)
+                self.assertEqual(r.content, "")
+
+        r = detect_voice_command(dictionary_engine.repair_wake_term(
+            "I need a login page with OAuth. Voicelow, make this as a good prompt."
+        ))
+        self.assertEqual(r.command.format, "prompt")
+        self.assertEqual(r.content, "I need a login page with OAuth.")
+
+    def test_loose_sound_alikes_stay_plain_dictation(self):
+        from voice_flow.dictionary import dictionary_engine
+
+        for spoken in (
+            "The voices flow through the hall.",
+            "I like the wise flow of this essay.",
+            "My voice low today, sorry.",
+            "Choice flow diagrams are useful.",
+            "the boys flow into the room and make noise",
+        ):
+            with self.subTest(spoken=spoken):
+                self.assertEqual(dictionary_engine.repair_wake_term(spoken), spoken)
+                self.assertIsNone(detect_voice_command(dictionary_engine.repair_wake_term(spoken)).command)
+
 
 class TestLearnedVocabularyStorage(unittest.TestCase):
     def _db(self):

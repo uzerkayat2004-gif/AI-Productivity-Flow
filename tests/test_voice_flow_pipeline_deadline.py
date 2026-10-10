@@ -811,7 +811,7 @@ def test_history_failure_after_valid_text_does_not_brick_state(monkeypatch) -> N
     pasted: list[str] = []
     app.injector = SimpleNamespace(paste_text=lambda text, *_args, **_kwargs: pasted.append(text) or True)
 
-    monkeypatch.setattr(main_module, "detect_voice_command", lambda _text: SimpleNamespace(command=None, content="hello world"))
+    monkeypatch.setattr(main_module, "detect_voice_command", lambda text: SimpleNamespace(command=None, content=text))
     monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
     monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
     monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
@@ -825,9 +825,38 @@ def test_history_failure_after_valid_text_does_not_brick_state(monkeypatch) -> N
 
     app._process_dictation_pipeline(session, object(), 1.0, record_id=1, use_streaming=False)
 
-    assert pasted == ["hello world"]
+    assert pasted == ["whole buffer"]
     assert app.state == DictationState.IDLE
     assert app.session is None
+
+
+def test_wake_repair_never_rewrites_ordinary_pasted_dictation(monkeypatch) -> None:
+    session = DictationSession(
+        target_hwnd=123,
+        app_title="Editor",
+        app_category="smart_clean",
+        style_id="smart_clean",
+        started_at=0.0,
+        resolved_style=SimpleNamespace(
+            app_name="Editor", category="smart_clean", style_id="smart_clean", instruction="",
+        ),
+    )
+    app = _app(session)
+    spoken = "hey vice flow how are you doing today"
+    app.transcriber = SimpleNamespace(transcribe=lambda _audio, **_kwargs: spoken)
+    pasted: list[str] = []
+    polished_inputs: list[str] = []
+    app.injector = SimpleNamespace(paste_text=lambda text, *_args, **_kwargs: pasted.append(text) or True)
+    monkeypatch.setattr(main_module, "apply_spoken_punctuation", lambda text: text)
+    monkeypatch.setattr(main_module, "split_press_enter", lambda text, _enabled: SimpleNamespace(text=text, press_enter=False))
+    monkeypatch.setattr(main_module, "smart_format", lambda text, _style, _context=None: text)
+    monkeypatch.setattr(main_module.polisher, "polish", lambda text, **_kwargs: polished_inputs.append(text) or text)
+    monkeypatch.setattr(main_module.storage, "get_setting", lambda key, default=None: True if key == "polishing_enabled" else default)
+
+    app._process_dictation_pipeline(session, object(), 1.0, use_streaming=False)
+
+    assert polished_inputs == [spoken]
+    assert pasted == [spoken]
 
 
 def test_failed_injection_restores_the_original_clipboard(monkeypatch) -> None:

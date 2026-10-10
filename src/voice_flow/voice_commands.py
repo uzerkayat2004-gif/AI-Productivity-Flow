@@ -101,12 +101,12 @@ _WAKE_RE = re.compile(
 # A bare "voice flow" (no hey/ok) is only a wake phrase when a command-style
 # continuation follows immediately: a comma or an imperative verb.
 _BARE_WAKE_CONTINUATION_RE = re.compile(
-    r"^voice[\s\-]{0,3}flows?\s*(?:,|!|\.)?\s*(?:please\s+)?"
+    r"^voice[\s\-]{0,3}flows?\s*(?:,|!|\.)?\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
     r"(?:make|turn|use|write|create|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
     re.IGNORECASE,
 )
 _PREFIX_ONLY_WAKE_CONTINUATION_RE = re.compile(
-    r"^\s*[,.:!\-—]?\s*(?:please\s+)?"
+    r"^\s*[,.:!\-—]?\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
     r"(?:make|turn|use|write|create|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
     re.IGNORECASE,
 )

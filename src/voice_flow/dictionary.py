@@ -35,15 +35,37 @@ _WAKE_REPAIR_RE = re.compile(
     r"|(?<![\w])voice\s+with\s+flow(?![\w])"
     r"|(?<![\w])voice\s+of\s+flow(?![\w])"
     r"|(?<![\w])whisflow(?![\w])"
-    # Common STT renderings of the wake term observed in real dictation.
-    # These are repaired only in the command-detection string, never in the
-    # text that gets pasted, so ordinary dictation is unaffected.
-    r"|(?<![\w])voice\s+(?:low|bake|load|lowe)(?![\w])"
     r"|(?<![\w])voicefloor(?![\w])"
     r"|(?<![\w])voiceflow(?![\w])(?!\.\w)",
     re.IGNORECASE,
 )
 _WAKE_REPAIR_REPLACEMENT = "Voice Flow"
+# Looser sound-alikes ("Voicelow", "vice flow", "wise flow", "boys flow",
+# "choice flow", "Voice Flo") are only treated as the wake term after a
+# hey/ok prefix or directly before a command verb, so ordinary prose that
+# happens to contain these words is never read as a command.
+_FUZZY_WAKE_RE = re.compile(
+    r"(?<![\w'])(?P<lead>(?:hey|hay|ok|okay)\s*[,.:!\-—]?\s*)?"
+    r"(?P<term>"
+    r"(?:voice|vice|wise|boys|boy's|choice|voices|voyce|voise|vois)[\s\-]{0,3}(?:flows?|flo|floe)"
+    r"|voice[\s\-]{0,3}(?:lo|low|lowe|bake|load)"
+    r")(?![\w'])",
+    re.IGNORECASE,
+)
+_FUZZY_WAKE_CONTINUATION_RE = re.compile(
+    r"^\s*[,.:!?\-—]?\s*(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+    r"(?:make|turn|use|write|create|rewrite|summarize|summarise|fix|shorten|clean|polish|"
+    r"convert|send|generate|draft)\b",
+    re.IGNORECASE,
+)
+
+
+def _repair_fuzzy_wake(match: re.Match) -> str:
+    if match.group("lead") or _FUZZY_WAKE_CONTINUATION_RE.match(match.string[match.end():]):
+        return (match.group("lead") or "") + _WAKE_REPAIR_REPLACEMENT
+    return match.group(0)
+
+
 _STOPWORDS = {
     "the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and",
     "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i",
@@ -554,7 +576,8 @@ class DictionaryEngine:
         """
         if not text:
             return text
-        return _WAKE_REPAIR_RE.sub(_WAKE_REPAIR_REPLACEMENT, text)
+        repaired = _WAKE_REPAIR_RE.sub(_WAKE_REPAIR_REPLACEMENT, text)
+        return _FUZZY_WAKE_RE.sub(_repair_fuzzy_wake, repaired)
 
     def get_protected_terms(self, limit: int = 60) -> list[str]:
         """Canonical user terms that an AI polish must never re-spell."""

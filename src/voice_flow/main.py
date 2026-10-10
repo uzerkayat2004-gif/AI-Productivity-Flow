@@ -2058,8 +2058,10 @@ class VoiceFlowApp:
                     # transcript is first repaired for known mis-hearings.
                     try:
                         detection = detect_voice_command(dictionary_engine.repair_wake_term(raw_transcript))
-                        command_content = detection.content or ""
                         command = detection.command
+                        # Wake repair only exists to find commands; ordinary
+                        # dictation keeps the words exactly as transcribed.
+                        command_content = (detection.content or "") if command is not None else raw_transcript
                     except Exception:
                         log.exception("[COMMAND] detection failed; using plain dictation")
                 else:
