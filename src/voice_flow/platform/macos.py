@@ -24,6 +24,10 @@ macOS cannot grant these programmatically. The backend can only *detect* state
 and *open* the right Settings pane; the user must flip the switch themselves.
 That is why :meth:`MacOSBackend.permission_report` exists and why the first-run
 onboarding screen is mandatory on this platform.
+
+Voice Flow defaults push-to-talk to Command+Option on macOS. Middle-click is a
+Windows-only trigger; when Accessibility or Input Monitoring is missing, the
+hotkey listener prompts once and never retries the Win32 hook.
 """
 
 from __future__ import annotations

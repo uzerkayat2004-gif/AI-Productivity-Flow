@@ -41,8 +41,9 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
   ```powershell
   irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex
   ```
+* **SmartScreen**: Windows may say it protected your PC. Choose **More info**, then **Run anyway**.
 
-### macOS 12+ (Apple Silicon & Intel)
+### macOS 12+ (Apple Silicon only, M1 or newer)
 
 * **DMG Installer**: Download the drag-to-Applications installer **[`AI-Productivity-Flow-macOS.dmg`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg)**.
 * **Checksum**: [`AI-Productivity-Flow-macOS.dmg.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg.sha256)
@@ -51,6 +52,16 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.sh | bash
   ```
+
+#### Installing on Mac
+
+The Mac build is Apple Silicon only (M1 or newer). Download links above stay on the latest stable release.
+
+1. Open the DMG and drag the app to Applications.
+2. The first time you open it, macOS says it can't verify the developer. Go to System Settings → Privacy & Security, scroll down, click **Open Anyway**, then Open. You can also right-click the app and choose Open.
+3. Allow **Microphone** when asked.
+4. For hotkeys and auto-paste, turn on the app in System Settings → Privacy & Security → **Accessibility** and **Input Monitoring**, then reopen the app.
+5. The default dictation shortcut on Mac is **Cmd + Option**.
 
 ---
 

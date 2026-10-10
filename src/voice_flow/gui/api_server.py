@@ -1266,13 +1266,15 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc), "enabled": False}, 500)
         elif path == "/api/settings/hotkey":
+            from voice_flow.hotkeys import platform_input_defaults
+            hotkey_defaults = platform_input_defaults()
             settings = storage.get_hotkey_settings() if hasattr(storage, "get_hotkey_settings") else {
-                "hotkey_trigger": storage.get_setting("hotkey_trigger", "ctrl_win"),
+                "hotkey_trigger": storage.get_setting("hotkey_trigger", hotkey_defaults["hotkey_trigger"]),
                 "custom_hotkey": storage.get_setting("custom_hotkey", "Alt+Space"),
                 "dictation_trigger_mode": storage.get_setting("dictation_trigger_mode", "hybrid"),
-                "middle_click_enabled": bool(storage.get_setting("middle_click_enabled", True)),
+                "middle_click_enabled": bool(storage.get_setting("middle_click_enabled", hotkey_defaults["middle_click_enabled"])),
                 "ctrl_key_dictation_enabled": bool(storage.get_setting("ctrl_key_dictation_enabled", False)),
-                "push_to_talk_shortcut": storage.get_setting("push_to_talk_shortcut", "Ctrl+Win"),
+                "push_to_talk_shortcut": storage.get_setting("push_to_talk_shortcut", hotkey_defaults["push_to_talk_shortcut"]),
             }
             self.send_json_response({"success": True, **settings})
         elif path == "/api/settings/get":
@@ -1284,6 +1286,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if re.search(r"token|secret|password|api[_-]?key|credential", key, re.IGNORECASE):
                 self.send_json_response({"success": False, "error": "Protected setting key"}, 403)
                 return
+            from voice_flow.hotkeys import platform_input_defaults
+            hotkey_defaults = platform_input_defaults()
             defaults = {
                 "voice_flow_enabled": True,
                 "audio_flow_enabled": True,
@@ -1293,11 +1297,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "has_viewed_onboarding": False,
                 "has_celebrated_first_dictation": False,
                 "click_to_paste_enabled": False,
-                "push_to_talk_shortcut": "Ctrl+Win",
-                "hotkey_trigger": "ctrl_win",
+                "push_to_talk_shortcut": hotkey_defaults["push_to_talk_shortcut"],
+                "hotkey_trigger": hotkey_defaults["hotkey_trigger"],
                 "custom_hotkey": "Alt+Space",
                 "custom_trigger_type": "hold",
-                "middle_click_enabled": True,
+                "middle_click_enabled": hotkey_defaults["middle_click_enabled"],
                 "ctrl_key_dictation_enabled": False,
                 "dictation_trigger_mode": "hybrid",
                 "autostart_enabled": True,
@@ -4532,7 +4536,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             if "mode" in payload and "dictation_trigger_mode" not in payload:
                 payload["dictation_trigger_mode"] = payload["mode"]
 
-            valid_triggers = {"ctrl_win", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"}
+            valid_triggers = {"ctrl_win", "cmd_option", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"}
             if "hotkey_trigger" in payload and payload["hotkey_trigger"] is not None:
                 trig = str(payload["hotkey_trigger"]).lower().strip()
                 if trig not in valid_triggers:

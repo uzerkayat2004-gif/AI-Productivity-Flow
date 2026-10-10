@@ -3080,7 +3080,8 @@
 </div>
 <div class="vf-row-control">
 <select class="action-select" id="setting-hotkey-trigger-select" onchange="onHotkeyTriggerSelectChange(this.value)">
-<option value="ctrl_win">Ctrl + Win (Default)</option>
+<option value="ctrl_win" data-platform="windows">Ctrl + Win (Default)</option>
+<option value="cmd_option" data-platform="macos">Cmd + Option (Default)</option>
 <option value="single_ctrl">Single Ctrl (Hold/Tap)</option>
 <option value="double_ctrl">Double Ctrl (Double-tap)</option>
 <option value="alt_space">Alt + Space</option>
@@ -3351,7 +3352,8 @@
           <button type="button" class="action-btn" onclick="activateCustomKeyMode()" style="font-size: 11px; padding: 4px 10px; font-weight: 700;">+ Custom Key</button>
         </div>
         <select id="modal-hotkey-trigger-select" class="action-select" onchange="onModalHotkeyTriggerChange(this.value)" style="width: 100%; padding: 10px 12px; border-radius: var(--radius-md); border: 2px solid var(--border-color); background: var(--bg-sidebar); color: var(--text-color); font-size: 14px; font-weight: 600; cursor: pointer;">
-          <option value="ctrl_win">Ctrl + Win (Default - Start Menu Suppressed)</option>
+          <option value="ctrl_win" data-platform="windows">Ctrl + Win (Default - Start Menu Suppressed)</option>
+          <option value="cmd_option" data-platform="macos">Cmd + Option (Default)</option>
           <option value="single_ctrl">Single Ctrl (Hold to speak / Push-to-Talk)</option>
           <option value="double_ctrl">Double Ctrl (Double-tap to dictate)</option>
           <option value="alt_space">Alt + Space (Quick trigger)</option>
@@ -3405,7 +3407,7 @@
       </div>
 
       <!-- SECTION 2: MIDDLE MOUSE BUTTON TRIGGER -->
-      <div style="margin-top: 14px; padding: 14px; background: var(--bg-sidebar); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div id="middle-click-setting" style="margin-top: 14px; padding: 14px; background: var(--bg-sidebar); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div>
             <div style="font-weight: 700; font-size: 13px; color: var(--text-color);">Middle Mouse Button Click</div>

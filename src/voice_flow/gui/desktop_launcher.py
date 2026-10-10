@@ -50,11 +50,18 @@ if "--autoplay-policy=no-user-gesture-required" not in _wv2_args:
     )
 
 webview = None  # type: ignore[assignment]
+_WEBVIEW_IMPORT_FAILED = False
 
-if not os.environ.get("CI"):
+def _should_import_webview() -> bool:
+    """Keep headless CI imports light, except for the macOS native GUI smoke test."""
+    return sys.platform == "darwin" or not os.environ.get("CI")
+
+
+if _should_import_webview():
     try:
         import webview
     except Exception:  # missing desktop dependency falls back to browser launcher
+        _WEBVIEW_IMPORT_FAILED = True
         import traceback
         try:
             crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
@@ -105,6 +112,13 @@ def _launcher_log(message: str) -> None:
             f.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
     except Exception:
         pass
+
+
+if _WEBVIEW_IMPORT_FAILED and sys.platform == "darwin":
+    _launcher_log(
+        "pywebview import failed; ensure pyobjc-core, pyobjc-framework-Cocoa, "
+        "and pyobjc-framework-WebKit are installed."
+    )
 
 
 try:
@@ -592,6 +606,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             pass
 
     if webview is None:
+        _launcher_log("Native window backend unavailable; using the system browser.")
         _fallback_to_browser(url, on_quit_callback, keep_alive=True)
         return
 
