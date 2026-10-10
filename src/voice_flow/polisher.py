@@ -912,6 +912,10 @@ def _preserves_source_content(
     if task == "cleanup" and not allow_compression and not allow_rewording:
         if not _cleanup_keeps_spoken_words(source, candidate):
             return False
+        # Nemotron already emits punctuation and capitalization. A cleanup
+        # that keeps the words but throws that polish away is not accepted.
+        if not _cleanup_keeps_existing_punctuation(source, candidate):
+            return False
 
     return True
 
@@ -978,6 +982,33 @@ def _required_spoken_tokens(tokens: list[str]) -> list[str]:
             continue
         collapsed.append(token)
     return collapsed
+
+
+_SENTENCE_PUNCTUATION = ".,;:!?…"
+
+
+def _cleanup_keeps_existing_punctuation(source: str, candidate: str) -> bool:
+    """Reject a cleanup that deletes punctuation the transcript already had.
+
+    Adding a comma or changing a final period into a question mark is still
+    polish. Dropping marks Nemotron or the speaker already produced is not.
+    """
+    def marks(text: str) -> str:
+        return "".join(char for char in text or "" if char in _SENTENCE_PUNCTUATION)
+
+    # Compare after filler cleanup so a comma that only set off "Um," can
+    # leave with the filler. Punctuation on the remaining words must stay.
+    source_marks = marks(cleanup_text(source or "", "cleanup_light"))
+    if not source_marks:
+        return True
+    candidate_marks = marks(candidate)
+    if len(candidate_marks) < len(source_marks):
+        log.info("[POLISH SAFETY] Cleanup removed punctuation the transcript already had; rejected.")
+        return False
+    if source_marks[-1] in ".!?" and (not candidate_marks or candidate_marks[-1] not in ".!?"):
+        log.info("[POLISH SAFETY] Cleanup removed the transcript's ending punctuation; rejected.")
+        return False
+    return True
 
 
 def _cleanup_keeps_spoken_words(source: str, candidate: str) -> bool:

@@ -80,6 +80,12 @@ _STOPWORDS = {
     "ok", "okay", "yes", "yeah", "no",
     "is", "are", "was", "were", "be", "been",
 }
+# Ordinary words are not vocabulary. A saved "Hey" or a learned "hey" -> "here"
+# correction must not override Nemotron's capitalization or a Voice Flow
+# cleanup. "hear" is included because it is the usual mis-hearing of "here".
+_ORDINARY_DICTATION_WORDS = _STOPWORDS | {"hear"}
+_CONTRACTION_TAIL_RE = re.compile(r"['’](?:re|ve|ll|d|m|t)\b", re.IGNORECASE)
+_POSSESSIVE_TAIL_RE = re.compile(r"['’]s\b", re.IGNORECASE)
 
 # Keep vocabulary prompts short enough to be useful to both Whisper and cloud
 # providers. A single malformed/very long correction target must not crowd out
@@ -146,6 +152,37 @@ def _split_entry(value: str) -> tuple[str, str | None]:
     return value.strip(), None
 
 
+def _letters_only(value: str) -> str:
+    return re.sub(r"[^a-z]", "", value.casefold())
+
+
+def _dictionary_rule_would_rewrite_ordinary_speech(rule: _Rule) -> bool:
+    """Whether this rule would fight built-in or Voice Flow polish.
+
+    Snippets stay, and so do real names and heard-as phrases. A single
+    ordinary word must not be recased, and one ordinary word must not be
+    swapped for another.
+    """
+    if rule.snippet:
+        return False
+    trigger = rule.trigger.strip()
+    replacement = rule.replacement.strip()
+    if any(char.isspace() for char in trigger) or any(char.isspace() for char in replacement):
+        return False
+    trigger_key = re.sub(r"[^\w']+", "", trigger).casefold()
+    replacement_key = re.sub(r"[^\w']+", "", replacement).casefold()
+    if not trigger_key:
+        return False
+    same_letters = _letters_only(trigger_key) == _letters_only(replacement_key)
+    if same_letters and trigger_key in _ORDINARY_DICTATION_WORDS:
+        return True
+    return (
+        trigger_key in _ORDINARY_DICTATION_WORDS
+        and replacement_key in _ORDINARY_DICTATION_WORDS
+        and not same_letters
+    )
+
+
 def _rule_pattern(trigger: str) -> re.Pattern[str]:
     escaped = re.escape(trigger)
     # A dictionary trigger is a complete lexical phrase even when it ends in
@@ -158,12 +195,52 @@ def _is_symbolic_trigger(trigger: str) -> bool:
     return any(not char.isalnum() and char != "_" and not char.isspace() for char in trigger)
 
 
-def _rule_matches(match: re.Match[str], rule: _Rule) -> bool:
-    """Keep symbolic triggers from matching a larger identifier."""
-    if not _is_symbolic_trigger(rule.trigger):
+def _splits_contraction(match: re.Match[str], rule: _Rule) -> bool:
+    """Keep dictionary terms out of I'm / don't / you're / it's."""
+    text = match.string
+    start, end = match.start(), match.end()
+    if start > 0 and text[start - 1] in {"'", "’"}:
         return True
-    end = match.end()
-    return end >= len(match.string) or not (match.string[end].isalnum() or match.string[end] == "_")
+    tail = text[end:end + 4]
+    if _CONTRACTION_TAIL_RE.match(tail):
+        return True
+    if _POSSESSIVE_TAIL_RE.match(tail):
+        # "Ada's notes" may take the saved name casing. An ordinary word
+        # such as "it" must not turn "it's" into a different word plus "'s".
+        same_letters = _letters_only(rule.trigger) == _letters_only(rule.replacement)
+        trigger_key = re.sub(r"[^\w']+", "", rule.trigger).casefold()
+        return not (same_letters and trigger_key not in _ORDINARY_DICTATION_WORDS and not rule.snippet)
+    return False
+
+
+def _preserve_edge_punctuation(original: str, replacement: str) -> str:
+    """Keep punctuation the match already had when the replacement drops it."""
+    if not original:
+        return replacement
+    leading = ""
+    index = 0
+    while index < len(original) and not original[index].isalnum() and original[index] not in {"'", "’"}:
+        leading += original[index]
+        index += 1
+    end = len(original)
+    trailing = ""
+    while end > index and not original[end - 1].isalnum() and original[end - 1] not in {"'", "’"}:
+        trailing = original[end - 1] + trailing
+        end -= 1
+    if leading and replacement.startswith(leading):
+        leading = ""
+    if trailing and replacement.endswith(trailing):
+        trailing = ""
+    return f"{leading}{replacement}{trailing}"
+
+
+def _rule_matches(match: re.Match[str], rule: _Rule) -> bool:
+    """Keep symbolic triggers from matching a larger identifier or a contraction."""
+    if _is_symbolic_trigger(rule.trigger):
+        end = match.end()
+        if end < len(match.string) and (match.string[end].isalnum() or match.string[end] == "_"):
+            return False
+    return not _splits_contraction(match, rule)
 
 
 def _combined_pattern(rules: tuple[_Rule, ...]) -> tuple[re.Pattern[str], tuple[_Rule, ...]]:
@@ -375,8 +452,11 @@ class DictionaryEngine:
                 key = trigger.casefold()
                 if key in seen:
                     continue
+                rule = _Rule(trigger, expansion if expansion is not None else trigger, expansion is not None)
+                if _dictionary_rule_would_rewrite_ordinary_speech(rule):
+                    continue
                 seen.add(key)
-                rules.append(_Rule(trigger, expansion if expansion is not None else trigger, expansion is not None))
+                rules.append(rule)
 
             # Explicit casing terms may safely recognize their normal spoken
             # spaced form (HyperKube -> Hyper Kube).  Do not generate aliases
@@ -404,7 +484,10 @@ class DictionaryEngine:
                 correct = str(item.get("correct_text") or "").strip()
                 if not wrong or not correct:
                     continue
-                correction_rules.append(_Rule(wrong, correct))
+                rule = _Rule(wrong, correct)
+                if _dictionary_rule_would_rewrite_ordinary_speech(rule):
+                    continue
+                correction_rules.append(rule)
 
             self.words = words
             self.corrections = corrections
@@ -449,9 +532,10 @@ class DictionaryEngine:
             for index, rule in enumerate(usable_rules, start=1):
                 if match.group(index) is not None and _rule_matches(match, rule):
                     original = match.group(0)
-                    if trace is not None and original != rule.replacement:
-                        trace.append({"from": original, "to": rule.replacement})
-                    return rule.replacement
+                    replacement = _preserve_edge_punctuation(original, rule.replacement)
+                    if trace is not None and original != replacement:
+                        trace.append({"from": original, "to": replacement})
+                    return replacement
             return match.group(0)
 
         return combined.sub(replace, segment)

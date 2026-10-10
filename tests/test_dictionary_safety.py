@@ -184,6 +184,32 @@ def test_failed_dictionary_refresh_retries_after_storage_recovers() -> None:
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
 
 
+def test_ordinary_dictionary_words_do_not_override_polished_speech(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saved greetings and hey/here swaps must not rewrite a polished transcript."""
+    source = _DictionarySource(["Hey", "Here", "Don", "You", "Kubernetes", "Ada"])
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_entries", source.entries)
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_revision", lambda: source.revision)
+    corrections = [{"wrong_text": "hey", "correct_text": "here"}, {"wrong_text": "kubernetes.", "correct_text": "Kubernetes"}]
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_snapshot",
+        lambda: (source.revision, list(source.words), corrections),
+    )
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_corrections",
+        lambda *args, **kwargs: corrections,
+    )
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_snippets", lambda *args, **kwargs: [])
+    engine = DictionaryEngine()
+
+    polished = "Hey, I'm here and don't wait for Kubernetes."
+    assert engine.apply_dictionary_post_processing(polished) == polished
+    assert engine.apply_dictionary_post_processing("you're late and it's fine") == "you're late and it's fine"
+    assert engine.apply_dictionary_post_processing("ada's notes are ready") == "Ada's notes are ready"
+    assert engine.apply_dictionary_post_processing("hello.") == "hello."
+    assert engine.apply_dictionary_post_processing("kubernetes.") == "Kubernetes."
+    assert engine.apply_dictionary_post_processing("kubernetes is ready") == "Kubernetes is ready"
+
+
 def test_filler_noise_never_reaches_stt_prompt_or_hints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Greeting/filler/deictic terms carry no vocabulary value and make STT
     overproduce them; they must be excluded from bias prompts and hints."""

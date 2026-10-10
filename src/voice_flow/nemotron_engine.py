@@ -141,6 +141,34 @@ class _RecognitionOptions(ctypes.Structure):
     ]
 
 
+# Single ordinary words must never be phrase-boosted. The native decoder
+# re-ranks every non-blank token, so a boosted "hey" or "here" can beat the
+# punctuation token Nemotron was about to emit.
+_ORDINARY_BOOST_WORDS = {
+    "a", "an", "ah", "er", "hello", "hey", "hi", "hear", "here", "hmm",
+    "no", "oh", "ok", "okay", "the", "there", "uh", "um", "umm", "yes", "yeah",
+}
+
+
+def _phrase_fights_native_polish(term: str) -> bool:
+    words = [part.strip(".,!?;:'\"").casefold() for part in term.split() if part.strip()]
+    return bool(words) and all(word in _ORDINARY_BOOST_WORDS for word in words)
+
+
+def _enable_native_polish(opts: _RecognitionOptions) -> _RecognitionOptions:
+    """Ask Nemotron to keep the punctuation and capitalization it already emits.
+
+    The library default leaves ``enable_automatic_punctuation`` false. That
+    path lowercases the transcript and deletes sentence punctuation even
+    when the acoustic model produced them. ``verbatim_transcripts`` false
+    leaves inverse text normalization available when a grammar is loaded.
+    """
+    opts.enable_automatic_punctuation = True
+    opts.verbatim_transcripts = False
+    opts.profanity_filter = False
+    return opts
+
+
 def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
     """Build a per-request native phrase boost and retain all backing memory.
 
@@ -154,7 +182,7 @@ def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
     for raw in vocabulary or ():
         term = str(raw).strip()
         key = term.casefold()
-        if not term or len(term) > 96 or key in seen:
+        if not term or len(term) > 96 or key in seen or _phrase_fights_native_polish(term):
             continue
         extra = len(term) + (2 if terms else 0)
         if used_chars + extra > 499:
@@ -609,8 +637,7 @@ class NemotronGGUFEngine:
             return
         stream = ctypes.c_void_p()
         with self.lock:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
+            opts = _enable_native_polish(dll.nemo_speech_asr_recognition_options_default())
             opts.interim_results = False
             st = dll.nemo_speech_asr_streaming_recognize(
                 self.rec_handle, ctypes.byref(opts), ctypes.byref(stream)
@@ -814,8 +841,7 @@ class NemotronGGUFEngine:
         if dll is None or not getattr(self, "rec_handle", None) or not self.rec_handle.value:
             return ""
         try:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
+            opts = _enable_native_polish(dll.nemo_speech_asr_recognition_options_default())
             lang = language or self.spec.get("default_language")
             if not lang or lang == "multilingual":
                 try:
@@ -1116,8 +1142,7 @@ class NemotronStreamTranscriber:
         """Create the native streaming recognizer for this session."""
         eng = self._engine
         try:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
+            opts = _enable_native_polish(dll.nemo_speech_asr_recognition_options_default())
             opts.interim_results = False
             # Streaming decode outlives this setup call; retain the ctypes
             # arrays and UTF-8 phrase storage on this session until the native

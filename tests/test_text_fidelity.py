@@ -201,6 +201,29 @@ def test_dropping_words_without_a_correction_marker_is_still_rejected() -> None:
     )
 
 
+def test_cleanup_keeps_punctuation_the_transcript_already_has() -> None:
+    source = "Hey, can you send the report to Alex tomorrow."
+    assert _candidate_preserves_content(source, source, task="cleanup")
+    assert not _candidate_preserves_content(
+        source, "Hey can you send the report to Alex tomorrow", task="cleanup",
+    )
+    assert not _candidate_preserves_content(
+        source, "Hey can you send the report to Alex tomorrow.", task="cleanup",
+    )
+    assert _candidate_preserves_content("Um, I'm turning it on.", "I am turning it on.", task="cleanup")
+
+
+def test_cleanup_fallback_keeps_nemotron_punctuation(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _polisher(monkeypatch, "Hey can you send the report to Alex tomorrow")
+    monkeypatch.setattr("voice_flow.local_polish.safety_net_engine", lambda *args, **kwargs: None)
+    result = engine.polish(
+        "Hey, can you send the report to Alex tomorrow.",
+        "Rephrase as a formal note.",
+        force_ai=True,
+    )
+    assert result == "Hey, can you send the report to Alex tomorrow."
+
+
 def test_cleanup_keeps_hey_and_rejects_here() -> None:
     source = "hey can you send the report to alex tomorrow"
     assert _candidate_preserves_content(source, "Hey, can you send the report to Alex tomorrow?", task="cleanup")

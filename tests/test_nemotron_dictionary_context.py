@@ -32,6 +32,8 @@ class _RecordingDll:
             options_pointer,
             ctypes.POINTER(nemotron_engine._RecognitionOptions),
         ).contents
+        self.punctuation = bool(options.enable_automatic_punctuation)
+        self.verbatim = bool(options.verbatim_transcripts)
         self.context_count = options.speech_context_count
         if options.speech_context_count:
             context = options.speech_contexts[0]
@@ -83,6 +85,8 @@ def test_offline_request_uses_pinned_native_context_abi_and_boost(monkeypatch):
     )
 
     assert text == "decoded"
+    assert dll.punctuation is True
+    assert dll.verbatim is False
     assert dll.context_count == 1
     assert dll.phrases == ["OpenAI", "Kubernetes"]
     assert dll.boost == 3.0
@@ -98,6 +102,8 @@ def test_stream_request_keeps_utf8_buffers_alive_for_native_stream(monkeypatch):
     assert session._open_stream(dll)
     gc.collect()
 
+    assert dll.punctuation is True
+    assert dll.verbatim is False
     assert dll.context_count == 1
     assert dll.phrases == ["Ada Lovelace", "Éclair"]
     assert dll.boost == 3.0
@@ -131,6 +137,15 @@ def test_missing_embedded_sentencepiece_model_skips_native_boost(monkeypatch):
     assert session._open_stream(dll)
     assert dll.context_count == 0
     assert session._speech_context_refs == ()
+
+
+def test_ordinary_words_are_not_boosted_over_native_punctuation():
+    contexts, _references = nemotron_engine._make_speech_context(
+        ["Hey", "here", "hey there", "Kubernetes", "Ada Lovelace"]
+    )
+    assert contexts is not None
+    phrases = [contexts[0].phrases[index].decode("utf-8") for index in range(contexts[0].phrase_count)]
+    assert phrases == ["Kubernetes", "Ada Lovelace"]
 
 
 def test_older_options_size_and_empty_vocabulary_leave_contexts_unset():
