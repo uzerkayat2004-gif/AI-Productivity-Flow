@@ -3,6 +3,15 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Voice Flow Fixes
+- **Instant Release Again**: Local speech and polish models stay warm between dictations instead of being unloaded after every use; they are released after 15 idle minutes, or after 60 seconds when available memory is low.
+- **Misheard Wake Phrases**: Commands such as "Voicelow, make this a good prompt" and "hey vice flow make this a prompt" are recognised, while ordinary sentences like "the voices flow through the hall" stay plain dictation.
+- **No More Lost Last Word**: Capture continues for up to 350 ms after hotkey release while the speaker is still mid-word; releasing after a pause stays instant.
+- **Fast, Faithful Local Polishing**: The local LFM 2.5 model uses a dedicated cleanup prompt with examples, greedy decoding, and a word-count-based time allowance, so it cleans dictation instead of answering it. Output that drops content or flips "I" to "you" is rejected in favour of deterministic cleanup.
+- **Command Output Accepted**: Polish safety checks no longer reject valid structured prompts, emails with sign-offs, or text that drops a leading "so"/"okay".
+
 ## 1.0.2 - 2026-10-09
 
 ### Standalone Runtime & macOS App Enhancements
