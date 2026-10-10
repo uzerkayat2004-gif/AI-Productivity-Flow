@@ -1,0 +1,118 @@
+name: macOS full walkthrough
+
+# Drives the installed release app end to end (tour, every page, settings,
+# dialogs, floating bar, simulated dictation) and uploads screenshots + logs.
+# Runs on push to its own branch because workflow_dispatch only works for
+# workflows that already exist on the default branch.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test"
+        required: false
+        default: "v1.0.2-rc3"
+  push:
+    branches: [grokbot/mac-full-walkthrough]
+    paths:
+      - ".github/workflows/mac-walkthrough.yml"
+      - "scripts/walkthrough/**"
+
+jobs:
+  walkthrough:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      TAG: ${{ inputs.tag || 'v1.0.2-rc3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          mkdir -p out
+          sw_vers | tee out/system.txt
+          system_profiler SPDisplaysDataType | tee -a out/system.txt || true
+
+      - name: Download and install the release DMG
+        run: |
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          curl -fL -o app.dmg "$BASE/AI-Productivity-Flow-macOS.dmg"
+          hdiutil attach app.dmg -nobrowse -mountpoint /Volumes/APF
+          APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
+          cp -R "$APP" /Applications/
+          APP_PATH="/Applications/$(basename "$APP")"
+          xattr -dr com.apple.quarantine "$APP_PATH" || true
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          echo "$TAG $APP_PATH" | tee out/install.txt
+
+      - name: Set up driver Python (separate from the app's bundled runtime)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright WebKit and helpers
+        run: |
+          python -m pip install playwright pillow
+          python -m playwright install webkit
+          swiftc scripts/walkthrough/apf_native.swift -o out/apf-native
+
+      - name: Floating-bar Tk probe (bundled Python, before app launch)
+        continue-on-error: true
+        run: |
+          RES="$APP_PATH/Contents/Resources"
+          PY="$RES/runtime/python/bin/python3"
+          export PYTHONPATH="$RES/src:$RES/runtime/site-packages:$RES/runtime/python/lib/python3.11/site-packages"
+          mkdir -p out/tkprobe
+          for v in plain accessory transparent accessory_transparent; do
+            perl -e "alarm 30; exec @ARGV" "$PY" scripts/walkthrough/tk_bar_probe.py "$v" out/tkprobe > "out/tkprobe/$v.log" 2>&1 || echo "$v exit $?" | tee -a out/tkprobe/exit.txt
+          done
+          python - <<'PY'
+          import json, glob
+          from PIL import Image
+          for f in sorted(glob.glob("out/tkprobe/tkprobe-*.json")):
+              info = json.load(open(f))
+              png = f[:-5] + ".png"
+              try:
+                  im = Image.open(png).convert("RGB")
+                  sx = im.size[0] / info["screen_points"][0]
+                  info["pixels"] = {f"{w}x{h}": {"center": im.getpixel((int((x+w/2)*sx), int((y+h/2)*sx))),
+                                                "corner": im.getpixel((int((x+1)*sx), int((y+1)*sx)))}
+                                    for (w, h, x, y) in info["rects"]}
+                  for (w, h, x, y) in info["rects"]:
+                      im.crop((int((x-20)*sx), int((y-20)*sx), int((x+w+20)*sx), int((y+h+20)*sx))).save(f[:-5] + f"-{w}x{h}-crop.png")
+              except Exception as e:
+                  info["pixel_error"] = repr(e)
+              json.dump(info, open(f, "w"), indent=2)
+              print(json.dumps(info))
+          PY
+
+      - name: Launch app
+        run: |
+          EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
+          "$APP_PATH/Contents/MacOS/$EXE" > out/app-stdout.txt 2> out/app-stderr.txt &
+          echo "APP_PID=$!" >> $GITHUB_ENV
+          sleep 20
+          screencapture -x out/launch-20s.png || true
+
+      - name: Walk through the app
+        run: python scripts/walkthrough/walkthrough.py out out/apf-native
+
+      - name: Collect logs and crash reports
+        if: always()
+        run: |
+          kill -0 "$APP_PID" 2>/dev/null && echo "app alive at end" | tee out/alive.txt || echo "app EXITED" | tee out/alive.txt
+          mkdir -p out/logs out/crash
+          find "$HOME/.voice_flow" -maxdepth 3 \( -name "*.log" -o -name "*.txt" \) -size -5M -exec cp {} out/logs/ \; 2>/dev/null || true
+          ls -la "$HOME/.voice_flow" > out/logs/data-dir-listing.txt 2>&1 || true
+          cp ~/Library/Logs/DiagnosticReports/* out/crash/ 2>/dev/null || true
+          kill "$APP_PID" 2>/dev/null || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-walkthrough-${{ matrix.os }}
+          path: out/
