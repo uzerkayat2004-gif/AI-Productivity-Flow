@@ -184,3 +184,28 @@ def test_cleanup_that_flips_first_person_to_you_is_rejected() -> None:
     assert _candidate_preserves_content(
         "can you send me the slides", "Can you send me the slides?", task="cleanup",
     )
+
+
+def test_resolved_self_correction_is_accepted() -> None:
+    source = "so um i need to like send the the report by uh friday no wait make that thursday"
+    assert _candidate_preserves_content(source, "So I need to send the report by Thursday.", task="cleanup")
+    assert _candidate_preserves_content(
+        "send it to john I mean mike please", "Send it to Mike, please.", task="cleanup",
+    )
+    assert not _candidate_preserves_content(source, "So I need to send the report by Friday.", task="cleanup")
+
+
+def test_dropping_words_without_a_correction_marker_is_still_rejected() -> None:
+    assert not _candidate_preserves_content(
+        "please send the report by friday or thursday", "Please send the report by Thursday.", task="cleanup",
+    )
+
+
+def test_spoken_numbers_and_times_match_their_written_form() -> None:
+    source = "the meeting is at three thirty pm and it costs twenty five dollars per person"
+    assert _candidate_preserves_content(source, "The meeting is at 3:30pm, and it costs $25 per person.", task="cleanup")
+    assert _candidate_preserves_content(
+        "hey john the meeting got moved to friday at 3 pm", "Hey John, the meeting got moved to Friday at 3pm.",
+        task="cleanup",
+    )
+    assert not _candidate_preserves_content(source, "The meeting is at 3:30pm, and it costs $35 per person.", task="cleanup")

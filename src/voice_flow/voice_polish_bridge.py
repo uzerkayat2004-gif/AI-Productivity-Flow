@@ -79,10 +79,11 @@ def can_execute_model(model_ref: str) -> bool:
         from voice_flow import windows_ai_rewriter
         return windows_ai_rewriter.is_windows_ai_available()
 
-    # Liquid LFM 2.5 350M local model integration check
-    if model_ref in ("local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0") or model == "lfm2.5-350m-qad-q4_0":
-        from voice_flow import lfm_engine
-        return lfm_engine.is_lfm_downloaded()
+    # On-device polish models (S1-mini, Liquid LFM 2.5)
+    from voice_flow.local_polish import engine_for
+    local_engine = engine_for(model_ref) or engine_for(model)
+    if local_engine is not None:
+        return local_engine.is_downloaded()
 
     if provider == "local":
         return False
@@ -178,15 +179,18 @@ def _request_polish(
             return windows_ai_rewriter.rewrite_text(prompt, timeout_seconds=timeout_seconds)
         return None
 
-    # Liquid LFM 2.5 350M local execution
-    if model_ref in ("local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0") or model == "lfm2.5-350m-qad-q4_0":
-        from voice_flow import lfm_engine
-        if lfm_engine.is_lfm_downloaded():
-            # The bridge receives the cloud-shaped request.  LFM gets its own
-            # compact policy plus this trusted style/task directive.
-            return lfm_engine.polish_with_lfm(
+    # On-device polish models (S1-mini, Liquid LFM 2.5)
+    from voice_flow.local_polish import engine_for
+    local_engine = engine_for(model_ref) or engine_for(model)
+    if local_engine is not None:
+        if local_engine.is_downloaded():
+            from voice_flow.lfm_engine import _trusted_instruction
+
+            # The bridge receives the cloud-shaped request.  A local model
+            # gets its own input format plus this trusted style/task directive.
+            return local_engine.polish(
                 prompt,
-                instruction=lfm_engine._trusted_instruction("", prompt),
+                instruction=_trusted_instruction("", prompt),
                 timeout_seconds=timeout_seconds,
             )
         return None

@@ -113,6 +113,25 @@ DOWNLOADABLE_STT_MODELS_REGISTRY: list[dict[str, Any]] = [
 
 DOWNLOADABLE_POLISH_MODELS_REGISTRY: list[dict[str, Any]] = [
     {
+        "id": "superwhisper/s1-mini-q4_k_m",
+        "name": "S1-mini by Superwhisper",
+        "tag": "Voice Polishing",
+        "task": "voice_polishing",
+        "category": "voice_polishing",
+        "format": "Local GGUF (Q4_K_M)",
+        "size_mb": 462,
+        "size_bytes": 484219808,
+        "size_display": "484 MB",
+        "repo_url": "https://huggingface.co/superwhisper/s1-mini-GGUF",
+        "download_url": "https://huggingface.co/superwhisper/s1-mini-GGUF/resolve/main/s1-mini-q4_k_m.gguf",
+        "filename": "s1-mini-q4_k_m.gguf",
+        "languages": ["English (en)"],
+        "is_multilingual": False,
+        "default_language": "en",
+        "full_id": "local/s1-mini-q4_k_m",
+        "description": "Voice Polishing model: speech transcript normalizer fine-tuned from Qwen3-0.6B. Removes fillers and stutters, resolves self-corrections, fixes punctuation and capitalization, and formats spoken numbers, dates, currency and emails. English only. Apache 2.0.",
+    },
+    {
         "id": "liquid/lfm2.5-350m-qad-q4_0",
         "name": "Liquid LFM 2.5 350M QAD",
         "tag": "Voice Polishing",

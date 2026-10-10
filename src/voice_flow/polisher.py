@@ -365,10 +365,118 @@ def _expand_unambiguous_contractions(text: str) -> str:
     return text
 
 
+_NUMBER_WORDS: dict[str, tuple[str, int]] = {
+    **{word: ("unit", value) for value, word in enumerate(
+        "zero one two three four five six seven eight nine".split())},
+    **{word: ("teen", value) for value, word in enumerate(
+        "ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(), start=10)},
+    **{word: ("tens", value) for value, word in zip(
+        range(20, 100, 10), "twenty thirty forty fifty sixty seventy eighty ninety".split())},
+    "hundred": ("hundred", 100),
+    "thousand": ("scale", 1_000),
+    "million": ("scale", 1_000_000),
+    "billion": ("scale", 1_000_000_000),
+}
+_ATTACHED_TIME_RE = re.compile(r"^(\d+)([ap]m)$")
+
+
+def _collapse_number_words(tokens: list[str]) -> list[str]:
+    """Spell spoken numbers as digits ("twenty five" -> "25", "three thirty" -> "3", "30").
+
+    A normalizer writes "$25" and "3:30 PM" for spoken amounts and times;
+    comparing both sides in digits keeps that from looking like lost words
+    while a changed quantity still differs.
+    """
+    out: list[str] = []
+    total = current = 0
+    last: str | None = None
+
+    def flush() -> None:
+        nonlocal total, current, last
+        if last is not None:
+            out.append(str(total + current))
+        total = current = 0
+        last = None
+
+    for index, token in enumerate(tokens):
+        entry = _NUMBER_WORDS.get(token)
+        if entry is None:
+            following = tokens[index + 1] if index + 1 < len(tokens) else ""
+            if token == "and" and last in {"hundred", "scale"} and following in _NUMBER_WORDS:
+                continue
+            flush()
+            out.append(token)
+            continue
+        kind, value = entry
+        if kind == "unit":
+            if last not in {None, "hundred", "scale", "tens"}:
+                flush()
+            current += value
+        elif kind in {"teen", "tens"}:
+            if last not in {None, "hundred", "scale"}:
+                flush()
+            current += value
+        elif kind == "hundred":
+            if last in {"hundred", "scale"}:
+                flush()
+            current = (current or 1) * 100
+        else:
+            total += (current or 1) * value
+            current = 0
+        last = kind
+    flush()
+    return out
+
+
 def _tokenize_for_fidelity(text: str) -> list[str]:
-    """Tokenize preserving words, unicode characters, and programming symbols (C++, C#)."""
+    """Tokenize preserving words, unicode characters, and programming symbols (C++, C#).
+
+    An attached time suffix is split off ("3pm" -> "3", "pm") and spoken
+    numbers are written as digits, so both spellings of a time or amount compare equal.
+    """
     text = _expand_unambiguous_contractions(text)
-    return [t.lower() for t in re.findall(r"[^\W_]+(?:\+\+|#)?", text, flags=re.UNICODE)]
+    tokens: list[str] = []
+    for token in re.findall(r"[^\W_]+(?:\+\+|#)?", text, flags=re.UNICODE):
+        token = token.lower()
+        time_match = _ATTACHED_TIME_RE.match(token)
+        tokens.extend(time_match.groups() if time_match else (token,))
+    return _collapse_number_words(tokens)
+
+
+_SELF_CORRECTION_RE = re.compile(
+    r"\b(?:no,?\s+wait|wait,?\s+no|no,?\s+sorry|actually,?\s+no|no,?\s+actually|scratch\s+that|or\s+rather|i\s+mean)"
+    r"(?:,?\s+(?:make\s+(?:that|it)|it'?s|it\s+is))?\b"
+    r"|\bno,?\s+make\s+that\b",
+    re.IGNORECASE,
+)
+_CORRECTION_STOP_RE = re.compile(r"[.,;!?]|\b(?:and|but|so|then|because|or)\b", re.IGNORECASE)
+_SPOKEN_FILLERS = {"um", "uh", "er", "ah", "umm", "uhh", "hmm", "like"}
+
+
+def _resolve_spoken_self_corrections(source: str) -> str:
+    """Drop words a speaker explicitly retracted ("friday no wait make that thursday").
+
+    Only the few words right before an explicit correction marker are
+    removed, never more than the replacement that follows it (at most three).
+    """
+    resolved = source
+    for _ in range(4):
+        match = _SELF_CORRECTION_RE.search(resolved)
+        if match is None:
+            break
+        after = resolved[match.end():]
+        stop = _CORRECTION_STOP_RE.search(after)
+        replacement = (after[:stop.start()] if stop else after).split()
+        if not replacement:
+            break
+        retract = min(3, len(replacement))
+        before_words = resolved[:match.start()].split()
+        while before_words and retract:
+            word = before_words.pop()
+            if word.strip(",.").casefold() not in _SPOKEN_FILLERS:
+                retract -= 1
+        resolved = " ".join([*before_words, after.strip()]).strip()
+    return resolved
 
 
 _CLAUSE_SPLIT_RE = re.compile(r"[.;:!?,\n]+|\b(?:and|but|so|then|also|because|plus)\b", re.IGNORECASE)
@@ -524,7 +632,25 @@ def _candidate_preserves_content(
     ``lenient=True`` remains a compatibility alias for command formatting.
     Formatting and rewriting still retain the dictated content; only an
     explicit summary or shorten instruction may relax the retention floor.
+    Words the speaker explicitly retracted ("friday, no wait, thursday") may
+    be dropped.
     """
+    options = dict(task=task, allow_compression=allow_compression, command_format=command_format)
+    if _preserves_source_content(source, candidate, lenient, **options):
+        return True
+    resolved = _resolve_spoken_self_corrections(source or "")
+    return resolved != source and _preserves_source_content(resolved, candidate, lenient, **options)
+
+
+def _preserves_source_content(
+    source: str,
+    candidate: str,
+    lenient: bool = False,
+    *,
+    task: str = "cleanup",
+    allow_compression: bool = False,
+    command_format: str | None = None,
+) -> bool:
     if not candidate or not candidate.strip():
         return False
     src_tokens = _tokenize_for_fidelity(source)
@@ -1167,25 +1293,22 @@ class TextPolisher:
         else:
             attempt_outcome = "timeout" if self._last_attempt_status == "timeout" else "provider_failure"
 
-        # Local safety net: the downloaded LFM model, when present. It runs on
-        # the raw transcript, never on the assembled prompt, so the model only
-        # ever sees the user's own words. It is skipped when the caller's
+        # Local safety net: a downloaded on-device model, when present. It runs
+        # on the raw transcript, never on the assembled prompt, so the model
+        # only ever sees the user's own words. It is skipped when the caller's
         # deadline leaves no room for it, so it can never overrun the
         # interactive budget.
         local_model_budget = self._remaining_budget(deadline)
         try:
-            from voice_flow import lfm_engine
-            if (
-                local_model_budget > LOCAL_MODEL_MIN_BUDGET_SECONDS
-                and lfm_engine.is_lfm_downloaded()
-                and explicit_model != "local/deterministic"
-                and not (
-                    self._last_lfm_bridge_attempted
-                    and lfm_engine.is_lfm_model_ref(explicit_model)
+            from voice_flow.local_polish import safety_net_engine
+            local_engine = None
+            if local_model_budget > LOCAL_MODEL_MIN_BUDGET_SECONDS and explicit_model != "local/deterministic":
+                local_engine = safety_net_engine(
+                    explicit_model, selected_attempted=self._last_lfm_bridge_attempted,
                 )
-            ):
+            if local_engine is not None:
                 lfm_started = time.perf_counter()
-                lfm_result = lfm_engine.polish_with_lfm(
+                lfm_result = local_engine.polish(
                     raw_text, instruction, timeout_seconds=local_model_budget,
                 )
                 if lfm_result:
@@ -1209,7 +1332,7 @@ class TextPolisher:
                         sanitized = self._apply_style_register(sanitized, instruction)
                         log.info("[POLISH] Local model cleaned successfully: '%s' -> '%s'", raw_text, sanitized)
                         self._record_polish_latency(
-                            lfm_engine.LFM_MODEL_ID, lfm_started, is_local=True,
+                            local_engine.MODEL_ID, lfm_started, is_local=True,
                         )
                         self._notify_outcome(outcome_callback, "local_model")
                         return _apply_dictionary_with_trace(sanitized, dictionary_trace)
@@ -1628,21 +1751,20 @@ class TextPolisher:
                 bridge_runnable = can_execute_model(selected_video_model_ref)
                 remaining = remaining_provider_budget()
                 bridge_timeout = min(preferred_timeout, remaining)
+                selected_local = False
                 try:
-                    from voice_flow.lfm_engine import is_lfm_model_ref, local_polish_allowance
-                    if is_lfm_model_ref(selected_video_model_ref):
+                    from voice_flow.local_polish import polish_allowance
+                    local_allowance = polish_allowance(selected_video_model_ref, word_count)
+                    if local_allowance is not None:
+                        selected_local = True
                         # A per-request network timeout does not apply to an
                         # on-device model; its own allowance bounds it.
-                        bridge_timeout = min(remaining, max(bridge_timeout, local_polish_allowance(word_count)))
+                        bridge_timeout = min(remaining, max(bridge_timeout, local_allowance))
                 except Exception:
                     pass
                 if bridge_runnable and remaining >= AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS:
-                    try:
-                        from voice_flow.lfm_engine import is_lfm_model_ref
-                        if is_lfm_model_ref(selected_video_model_ref):
-                            self._last_lfm_bridge_attempted = True
-                    except Exception:
-                        pass
+                    if selected_local:
+                        self._last_lfm_bridge_attempted = True
                     bridge_result = self._run_bridge_with_timeout(
                         call_bridge,
                         bridge_timeout,

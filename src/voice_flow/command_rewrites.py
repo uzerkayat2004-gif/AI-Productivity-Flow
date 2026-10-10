@@ -87,6 +87,57 @@ def _prompt(text: str) -> str | None:
     return source if source.endswith((".", "!", "?")) else source + "."
 
 
+_TASK_VERBS = (
+    r"(?:build|create|write|make|design|develop|implement|check|report|use|keep|send|review|fix|show|list|"
+    r"validate|read|generate|add|update|remove|change|explain|find|look|turn|convert|summarize|translate|"
+    r"test|debug|refactor|improve|rewrite|draft|plan|set|move|delete|rename|optimize|analyze|compare|tell)"
+)
+_REQUEST_LEAD_RE = re.compile(
+    r"^(?:(?:so|okay|ok|and|also|now|then|basically)\b[,\s]+)*"
+    r"(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+|I\s+(?:want|need)\s+you\s+to\s+)?"
+    rf"(?={_TASK_VERBS}\b)",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def restructure_prompt(cleaned: str) -> str | None:
+    """Arrange cleaned dictation as an AI prompt using only the speaker's own sentences.
+
+    Requests become imperative sentences.  Statements before the first request
+    become context; everything from the first request on stays in dictated
+    order as the task.  Returns ``None`` when no request is found.
+    """
+    source, spans = _mask(" ".join((cleaned or "").split()))
+    if not source or any(ord(ch) > 127 and ch.isalpha() for ch in source):
+        return None
+    tasks: list[str] = []
+    context: list[str] = []
+    for sentence in (part.strip() for part in _SENTENCE_SPLIT_RE.split(source) if part.strip()):
+        lead = _REQUEST_LEAD_RE.match(sentence)
+        if lead is None:
+            (tasks if tasks else context).append(sentence)
+            continue
+        task = sentence[lead.end():]
+        task = re.sub(r"\s+please([.!?]?)$", r"\1", task, flags=re.I)
+        task = re.sub(r"\?$", ".", task)
+        if not task.endswith((".", "!")):
+            task += "."
+        tasks.append(task[:1].upper() + task[1:])
+    if not tasks:
+        return None
+    task_text = " ".join(tasks)
+    if context:
+        result = f"Context: {' '.join(context)}\n\nTask: {task_text}"
+    else:
+        from voice_flow.polisher import _fulfills_command
+
+        result = task_text
+        if not _fulfills_command(cleaned, result, task="prompt", command_format="prompt", overrides={}):
+            result = "Task: " + result
+    return _restore(result, spans)
+
+
 def _email(text: str) -> str | None:
     from voice_flow.text_processing import format_dictated_email
     layout = format_dictated_email(text)

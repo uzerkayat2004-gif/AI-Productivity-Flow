@@ -214,10 +214,11 @@ def _polish_deadline(
     except Exception:
         budget = _polish_budget_seconds(speed_mode, word_count)
     try:
-        from voice_flow import lfm_engine
+        from voice_flow.local_polish import polish_allowance
 
-        if lfm_engine.is_lfm_model_ref(str(polish_model_ref or "")):
-            budget = max(budget, lfm_engine.local_polish_allowance(word_count))
+        local_allowance = polish_allowance(polish_model_ref, word_count)
+        if local_allowance is not None:
+            budget = max(budget, local_allowance)
     except Exception:
         pass
     if requires_ai:
@@ -1677,17 +1678,17 @@ class VoiceFlowApp:
                 outcome_callback(observed_outcome["value"])
 
         # "Keep my wording" with no companion transformation is a request to
-        # preserve content, not to re-author it. For an LFM selection, take
-        # the deterministic lane immediately: it performs the normal local
-        # cleanup and dictionary pass without paying model latency or risking
-        # a rewrite. The privacy switch remains authoritative.
+        # preserve content, not to re-author it. For an on-device model
+        # selection, take the deterministic lane immediately: it performs the
+        # normal local cleanup and dictionary pass without paying model
+        # latency or risking a rewrite. The privacy switch remains authoritative.
         selected_model = getattr(session, "polish_model_ref", None) or (
             session.get("polish_model_ref") if isinstance(session, dict) else None
         )
         selected_lfm = False
         try:
-            from voice_flow.lfm_engine import is_lfm_model_ref
-            selected_lfm = is_lfm_model_ref(selected_model)
+            from voice_flow.local_polish import is_local_polish_model_ref
+            selected_lfm = is_local_polish_model_ref(selected_model)
         except Exception:
             pass
         command_format = getattr(command, "format", None) if command is not None else None

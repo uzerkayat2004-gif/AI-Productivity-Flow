@@ -2192,11 +2192,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "providers": _public_custom_providers(storage.get_video_flow_custom_providers())})
 
         elif path == "/api/voice-flow-polish/get":
-            from voice_flow import windows_ai_rewriter, lfm_engine
+            from voice_flow import windows_ai_rewriter, lfm_engine, s1_engine
             win_entry = windows_ai_rewriter.get_catalog_entry()
             lfm_entry = lfm_engine.get_catalog_entry()
             models = [
                 win_entry,
+                s1_engine.get_catalog_entry(),
                 lfm_entry,
                 {
                     "full_id": "local/deterministic",
@@ -4738,7 +4739,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 # A connected catalog entry without a Voice polish adapter is
                 # intentionally visible-but-disabled.  Do not report a
                 # successful save for a model the runtime cannot execute.
-                if model_id not in ("local/deterministic", "microsoft/windows-ai-text-rewriter", "windows/text-rewriter", "local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0"):
+                if model_id not in ("local/deterministic", "microsoft/windows-ai-text-rewriter", "windows/text-rewriter", "local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0", "local/s1-mini-q4_k_m", "superwhisper/s1-mini-q4_k_m"):
                     try:
                         from voice_flow.voice_polish_bridge import can_execute_model
                         is_video_catalog_model = any(

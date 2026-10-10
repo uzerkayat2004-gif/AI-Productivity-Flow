@@ -700,3 +700,18 @@ def get_catalog_entry() -> dict[str, Any]:
         "is_fallback": True,
         "description": "Universal fallback tiny 350M local model. Fast local instruction-following for voice polishing.",
     }
+
+
+MODEL_ID = LFM_MODEL_ID
+
+
+def is_model_ref(model_ref: str) -> bool:
+    return is_lfm_model_ref(model_ref)
+
+
+def is_downloaded() -> bool:
+    return is_lfm_downloaded()
+
+
+def polish(text: str, instruction: str = "", *, timeout_seconds: float = 5.0) -> str | None:
+    return polish_with_lfm(text, instruction, timeout_seconds=timeout_seconds)
