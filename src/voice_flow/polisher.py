@@ -371,6 +371,36 @@ def _tokenize_for_fidelity(text: str) -> list[str]:
     return [t.lower() for t in re.findall(r"[^\W_]+(?:\+\+|#)?", text, flags=re.UNICODE)]
 
 
+_CLAUSE_SPLIT_RE = re.compile(r"[.;:!?,\n]+|\b(?:and|but|so|then|also|because|plus)\b", re.IGNORECASE)
+_GENERIC_CLAUSE_WORDS = {
+    "basically", "actually", "really", "just", "like", "maybe", "something", "anything", "stuff",
+    "thing", "things", "kind", "sort", "want", "need", "think", "please", "check", "look", "tell",
+    "know", "help", "make", "sure", "going", "doing", "happening", "happen", "able", "should",
+    "would", "could", "will", "must", "have", "been", "being", "were", "that", "this", "there",
+    "these", "those", "with", "what", "when", "where", "which", "while", "your", "from", "into",
+    "about", "very", "some", "them", "they", "their", "then", "than", "here", "okay", "right",
+}
+
+
+def _prompt_covers_dictated_clauses(source: str, candidate: str) -> bool:
+    """Every dictated clause that carries content must leave a trace in the prompt.
+
+    Prompt generation may reword freely, so whole-text overlap cannot tell a
+    concise restatement from a prompt that silently dropped "and it should
+    remember the user".  One surviving content stem per clause can.
+    """
+    candidate_stems = {token[:4] for token in _tokenize_for_fidelity(candidate)}
+    for clause in _CLAUSE_SPLIT_RE.split(source):
+        salient = [
+            token for token in _tokenize_for_fidelity(clause or "")
+            if len(token) >= 4 and token not in _GENERIC_CLAUSE_WORDS
+        ]
+        if salient and not any(token[:4] in candidate_stems for token in salient):
+            log.info("[POLISH SAFETY] Prompt output dropped a dictated clause; rejected.")
+            return False
+    return True
+
+
 def _prompt_restructure_preserves_anchors(source: str, candidate: str) -> bool:
     """Allow concise prompt structure only when facts that cannot be inferred survive.
 
@@ -525,9 +555,18 @@ def _candidate_preserves_content(
     # A model may remove fillers, but it must not silently lop off the first
     # or last dictated content word.  This catches short semantic tails such
     # as a final "on"/"off" that percentage retention alone can miss.
-    if not allow_compression and task == "cleanup" and non_filler_src:
+    # Spoken discourse markers ("so", "okay", "well") at either end are
+    # framing a polish is expected to drop; the boundary check starts at the
+    # first and last word that carries content.
+    discourse = {"so", "okay", "ok", "well", "and", "but", "right", "alright", "actually", "anyway", "yeah", "yes", "now", "then", "just"}
+    boundary_src = list(non_filler_src)
+    while len(boundary_src) > 1 and boundary_src[0] in discourse:
+        boundary_src.pop(0)
+    while len(boundary_src) > 1 and boundary_src[-1] in discourse:
+        boundary_src.pop()
+    if not allow_compression and task == "cleanup" and boundary_src:
         candidate_set = set(cand_tokens)
-        boundary_tokens = (non_filler_src[0], non_filler_src[-1])
+        boundary_tokens = (boundary_src[0], boundary_src[-1])
         def preserves_boundary(token: str) -> bool:
             if token in candidate_set:
                 return True
@@ -607,7 +646,17 @@ def _candidate_preserves_content(
         # to") while retaining each action, object, and date.  Its separate
         # content-anchor check below protects those facts before this modest
         # structural allowance applies.
-        stem_floor = 0.35 if allow_compression else (0.45 if command_format == "bullet_list" else 0.70)
+        if allow_compression:
+            stem_floor = 0.35
+        elif command_format == "bullet_list":
+            stem_floor = 0.45
+        elif task == "prompt" and _prompt_restructure_preserves_anchors(source, candidate):
+            # A structured prompt replaces spoken framing ("so can you check
+            # what is happening") with labels and imperative phrasing.  The
+            # factual anchors and the novel-requirement check still apply.
+            stem_floor = 0.45
+        else:
+            stem_floor = 0.70
         if stem_ratio < stem_floor:
             log.info("[POLISH SAFETY] Stemmed word overlap too low (%.2f < %.2f); candidate rejected.", stem_ratio, stem_floor)
             return False
@@ -662,8 +711,15 @@ def _candidate_preserves_content(
             token for token in cand_tokens
             if len(token) >= 6 and token[:5] not in source_stems and token not in framing
         }
-        if len(novel) > max(2, len(src_tokens) // 12) or any(len(token) >= 10 for token in novel):
+        # Short dictations get the strictest limit: there, one invented
+        # modifier is a large share of the request.  Longer dictations are
+        # legitimately restated with a few new words ("authentication").
+        short_source = len(src_tokens) < 16
+        allowed_novel = 2 if short_source else max(3, len(src_tokens) // 8)
+        if len(novel) > allowed_novel or (short_source and any(len(token) >= 10 for token in novel)):
             log.info("[POLISH SAFETY] Prompt output introduced unsupported requirements; rejected.")
+            return False
+        if not _prompt_covers_dictated_clauses(source, candidate):
             return False
 
     return True
@@ -672,7 +728,7 @@ def _candidate_preserves_content(
 _EMAIL_TEMPLATE_RE = re.compile(
     r"\[\s*(?:your|sender|name|position|contact)[^\]]*\]|"
     r"\bi hope this (?:message|email) finds you well\b|"
-    r"\b(?:best|kind) regards\b|\bsign-?off\b",
+    r"\bsign-?off\b",
     re.IGNORECASE,
 )
 _BULLET_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+\S", re.MULTILINE)

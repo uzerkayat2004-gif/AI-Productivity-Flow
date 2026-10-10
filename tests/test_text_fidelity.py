@@ -93,3 +93,74 @@ def test_prompt_cannot_invent_customizable_reminders() -> None:
     candidate = "Create a calendar that supports offline access and includes customizable reminders for each event."
 
     assert not _candidate_preserves_content(source, candidate, task="prompt", command_format="prompt")
+
+
+_LOGIN_SOURCE = (
+    "I want you to build a login page with email and password. The page should show an error "
+    "if the password is wrong and it should remember the user."
+)
+_VOICE_FLOW_SOURCE = (
+    "so basically I was testing the voice flow feature and the polishing is slow and the commands "
+    "are not working so can you check what is happening and fix it and make the polishing fast"
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "candidate"),
+    [
+        (
+            _LOGIN_SOURCE,
+            "Objective: Build a login page with email and password authentication.\n\nRequirements:\n"
+            "- Show an error message when the password is incorrect.\n- Remember the user after they log in.",
+        ),
+        (
+            _VOICE_FLOW_SOURCE,
+            "Context: I was testing the Voice Flow feature. Polishing is slow and voice commands are not working.\n\n"
+            "Task: Investigate what is happening, fix the voice commands, and make polishing fast.",
+        ),
+        (
+            _VOICE_FLOW_SOURCE,
+            "Task: Investigate why Voice Flow polishing is slow and why voice commands are not working, "
+            "then fix both issues and improve polishing performance.",
+        ),
+    ],
+)
+def test_structured_prompt_restatement_is_accepted(source: str, candidate: str) -> None:
+    from voice_flow.polisher import _fulfills_command
+
+    assert _candidate_preserves_content(source, candidate, task="prompt", command_format="prompt")
+    assert _fulfills_command(source, candidate, task="prompt", overrides={}, command_format="prompt")
+
+
+def test_prompt_that_drops_a_dictated_requirement_is_rejected() -> None:
+    candidate = (
+        "Objective: Build a login page with email and password.\n\nRequirements:\n"
+        "- Show an error message when the password is incorrect."
+    )
+    assert not _candidate_preserves_content(_LOGIN_SOURCE, candidate, task="prompt", command_format="prompt")
+
+
+def test_prompt_that_invents_many_requirements_is_rejected() -> None:
+    candidate = (
+        "Objective: Build a login page with email and password authentication.\n\nRequirements:\n"
+        "- Show an error when the password is incorrect.\n- Remember the user.\n"
+        "- Add two-factor verification, password recovery, social providers, captcha challenges and throttling."
+    )
+    assert not _candidate_preserves_content(_LOGIN_SOURCE, candidate, task="prompt", command_format="prompt")
+
+
+def test_cleanup_may_drop_leading_and_trailing_discourse_markers() -> None:
+    source = "um so I think we should uh move the launch to next week because the tests are failing okay"
+    candidate = "I think we should move the launch to next week because the tests are failing."
+    assert _candidate_preserves_content(source, candidate, task="cleanup")
+    assert not _candidate_preserves_content("um so can you turn the lights on", "Can you turn the lights?", task="cleanup")
+
+
+def test_email_with_generic_sign_off_is_fulfilled_but_placeholders_are_not() -> None:
+    from voice_flow.polisher import _fulfills_command
+
+    source = "tell john the meeting moved to friday at 3 pm"
+    signed = "Hi John,\n\nThe meeting has moved to Friday at 3 PM.\n\nBest regards,"
+    assert _fulfills_command(source, signed, task="rewrite", overrides={}, command_format="email")
+    placeholder = signed + "\n[Your Name]"
+    assert not _fulfills_command(source, placeholder, task="rewrite", overrides={}, command_format="email")
