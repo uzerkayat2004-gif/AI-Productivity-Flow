@@ -64,6 +64,29 @@ def test_email_command_uses_transform_prompt_and_reports_accepted_ai():
     assert 'Example output:\n"Hello,\n\nPlease send the report.\n\nRegards,"' in seen["system_prompt"]
 
 
+def test_cloud_register_rewrite_is_accepted_and_an_unrelated_one_is_not():
+    source = "hey so we finally shipped the new onboarding and people are actually finishing it lol can you believe it"
+    professional = "We have shipped the new onboarding flow, and users are now completing it."
+    polisher = TextPolisher()
+    outcomes = []
+    with (
+        patch("voice_flow.polisher.storage.get_setting", side_effect=_settings),
+        patch("voice_flow.polisher.storage.get_all_api_keys", return_value={"gemini": "test"}),
+        patch.object(polisher, "_polish_with_api_pool", return_value=professional),
+        patch("voice_flow.local_polish.safety_net_engine", return_value=None),
+    ):
+        result = polisher.polish(
+            source,
+            "Keep the register professional.",
+            force_ai=True,
+            task="rewrite",
+            overrides={"formality": "professional"},
+            outcome_callback=outcomes.append,
+        )
+    assert result == professional
+    assert outcomes == ["ai_accepted"]
+
+
 def test_plain_dictation_rejects_compression_but_explicit_summary_may_shorten():
     source = "We need to ship the installer before Friday and run the complete regression suite before release."
     compressed = "Ship installer before Friday; test before release."

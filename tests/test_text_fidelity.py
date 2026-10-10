@@ -201,6 +201,51 @@ def test_dropping_words_without_a_correction_marker_is_still_rejected() -> None:
     )
 
 
+def test_register_rewrite_may_rephrase_without_changing_the_facts() -> None:
+    source = "hey so we finally shipped the new onboarding and people are actually finishing it lol can you believe it"
+    professional = "We have shipped the new onboarding flow, and users are now completing it."
+    funny = "We shipped onboarding and, against all odds, people are actually finishing it."
+    assert _candidate_preserves_content(source, professional, task="rewrite", allow_rewording=True)
+    assert _candidate_preserves_content(source, funny, task="rewrite", allow_rewording=True)
+    assert not _candidate_preserves_content(source, professional, task="cleanup")
+    assert not _candidate_preserves_content(
+        source,
+        "Cancel the project immediately without any further discussion today.",
+        task="rewrite",
+        allow_rewording=True,
+    )
+    assert not _candidate_preserves_content(
+        source,
+        "We shipped onboarding for 5000 users and revenue doubled overnight.",
+        task="rewrite",
+        allow_rewording=True,
+    )
+
+
+def test_tweet_rewrite_keeps_a_negation_and_a_time() -> None:
+    source = "the launch party is friday at 7 and it is not open to the public"
+    tweet = "Launch party Friday at 7. Not open to the public."
+    assert _candidate_preserves_content(
+        source, tweet, task="rewrite", command_format="tweet", allow_rewording=True,
+    )
+    assert not _candidate_preserves_content(
+        source,
+        "Launch party Friday at 7. Open to the public.",
+        task="rewrite",
+        command_format="tweet",
+        allow_rewording=True,
+    )
+
+
+def test_prompt_role_opening_counts_as_a_prompt_and_a_question_does_not() -> None:
+    from voice_flow.polisher import _fulfills_command
+
+    source = "check why polishing with cloud models is still bad and fix it"
+    role = "You are reviewing Voice Flow. Polishing with cloud models is still bad. Check why and fix it."
+    assert _fulfills_command(source, role, task="prompt", overrides={}, command_format="prompt")
+    assert not _fulfills_command(source, "What should I fix?", task="prompt", overrides={}, command_format="prompt")
+
+
 def test_spoken_numbers_and_times_match_their_written_form() -> None:
     source = "the meeting is at three thirty pm and it costs twenty five dollars per person"
     assert _candidate_preserves_content(source, "The meeting is at 3:30pm, and it costs $25 per person.", task="cleanup")

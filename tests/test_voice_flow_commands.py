@@ -537,6 +537,64 @@ class TestWakeVariants(unittest.TestCase):
         self.assertEqual(r.command.format, "prompt")
         self.assertEqual(r.content, "I need a login page with OAuth.")
 
+    def test_voice_cloud_mishearing_keeps_the_dictation_and_runs_the_command(self):
+        from voice_flow.dictionary import dictionary_engine
+
+        spoken = (
+            "Hey, now I'm using the Voice Flow feature with voice polishing on using cloud models, "
+            "but it is still so bad it's not working properly as it supposed to work. "
+            "Can you check what's happening and fix it? Voice Cloud, make this as a prompt?"
+        )
+        result = detect_voice_command(dictionary_engine.repair_wake_term(spoken))
+        self.assertIsNotNone(result.command)
+        self.assertEqual(result.command.operation, "prompt_generation")
+        self.assertEqual(result.command.format, "prompt")
+        self.assertIn("cloud models", result.content)
+        self.assertIn("fix it?", result.content)
+        self.assertNotIn("make this as a prompt", result.content)
+        self.assertNotIn("Voice Cloud", result.content)
+
+    def test_voice_cloud_without_a_command_stays_dictation(self):
+        from voice_flow.dictionary import dictionary_engine
+
+        for spoken in (
+            "I store everything in voice cloud storage.",
+            "The voice cloud platform keeps the files.",
+        ):
+            with self.subTest(spoken=spoken):
+                self.assertEqual(dictionary_engine.repair_wake_term(spoken), spoken)
+                self.assertIsNone(detect_voice_command(spoken).command)
+        greeted = "Hey voice cloud, are you there?"
+        self.assertIsNone(detect_voice_command(dictionary_engine.repair_wake_term(greeted)).command)
+
+    def test_prompt_question_mark_is_not_treated_as_content(self):
+        result = detect_voice_command("Voice Flow make this as a prompt?")
+        self.assertEqual(result.command.format, "prompt")
+        self.assertEqual(result.command.operation, "prompt_generation")
+        self.assertEqual(result.content, "")
+
+    def test_funny_and_tweet_commands_keep_the_dictation(self):
+        funny = detect_voice_command("We shipped onboarding. Voice Flow, make this funny.")
+        self.assertEqual(funny.content, "We shipped onboarding.")
+        self.assertEqual(funny.command.overrides.get("tone"), "funny")
+
+        tweet = detect_voice_command("We shipped onboarding. Voice Flow, make this a good tweet.")
+        self.assertEqual(tweet.content, "We shipped onboarding.")
+        self.assertEqual(tweet.command.format, "tweet")
+
+        both = detect_voice_command(
+            "Hey Voice Flow make this a funny tweet People are finishing onboarding"
+        )
+        self.assertEqual(both.content, "People are finishing onboarding")
+        self.assertEqual(both.command.format, "tweet")
+        self.assertEqual(both.command.overrides.get("tone"), "funny")
+
+        good_prompt = detect_voice_command(
+            "Hey Voice Flow make this a good prompt Build a bakery website with orange and cream"
+        )
+        self.assertEqual(good_prompt.content, "Build a bakery website with orange and cream")
+        self.assertEqual(good_prompt.command.format, "prompt")
+
     def test_loose_sound_alikes_stay_plain_dictation(self):
         from voice_flow.dictionary import dictionary_engine
 

@@ -41,14 +41,15 @@ _WAKE_REPAIR_RE = re.compile(
 )
 _WAKE_REPAIR_REPLACEMENT = "Voice Flow"
 # Looser sound-alikes ("Voicelow", "vice flow", "wise flow", "boys flow",
-# "choice flow", "Voice Flo") are only treated as the wake term after a
-# hey/ok prefix or directly before a command verb, so ordinary prose that
-# happens to contain these words is never read as a command.
+# "choice flow", "Voice Flo", "Voice Cloud") are only treated as the wake
+# term after a hey/ok prefix or directly before a command verb, so ordinary
+# prose that happens to contain these words is never read as a command.
 _FUZZY_WAKE_RE = re.compile(
     r"(?<![\w'])(?P<lead>(?:hey|hay|ok|okay)\s*[,.:!\-—]?\s*)?"
     r"(?P<term>"
-    r"(?:voice|vice|wise|boys|boy's|choice|voices|voyce|voise|vois)[\s\-]{0,3}(?:flows?|flo|floe)"
-    r"|voice[\s\-]{0,3}(?:lo|low|lowe|bake|load)"
+    r"(?:voice|vice|wise|boys|boy's|choice|voices|voyce|voise|vois)[\s\-]{0,3}"
+    r"(?:flows?|flo|floe|clouds?|clowd|kloud|claude)"
+    r"|voice[\s\-]{0,3}(?:lo|low|lowe|bake|load|glow|floor)"
     r")(?![\w'])",
     re.IGNORECASE,
 )

@@ -39,7 +39,7 @@ class VoiceCommand:
     raw_phrase: str = ""
     scope: str = "current"            # "current" | "next"
     operation: str = "rewrite"        # "rewrite" | "summarize" | "prompt_generation"
-    format: str | None = None         # email|work_message|personal_message|note|linkedin_post|bullet_list|prompt
+    format: str | None = None         # email|work_message|personal_message|note|linkedin_post|tweet|bullet_list|prompt
     context_reference: str | None = None  # email|work|personal|other
     overrides: dict = field(default_factory=dict)  # tone/formality/length/clarity/grammar/dedupe
     persistent_change: bool = False
@@ -126,14 +126,14 @@ _REPORTED_WAKE_PREFIX_RE = re.compile(
 # an unknown following word stays in the user's content.
 _UNPUNCTUATED_INTENT_END_RE = re.compile(
     r"\b(?:"
-    r"e-?mail|bullets?|bullet(?:ed)?\s+list|linkedin\s+post|"
+    r"e-?mail|bullets?|bullet(?:ed)?\s+list|linkedin\s+post|tweets?|"
     r"work\s+(?:message|chat|msg)|personal\s+(?:message|msg|text)|"
     r"(?:normal|casual)\s+(?:message|msg|text)|"
     r"(?:proper\s+|coding\s+|well[-\s]?structured\s+)?prompts?|"
     r"(?:make|create|turn|write)\s+(?:this\s+)?(?:into\s+)?(?:a\s+)?notes?|"
     r"summari[sz]e|short(?:er)?|concise|brief|tighten|detailed|longer|expand|"
     r"clearer|simpler|professional|formal|casual|friendly|conversational|"
-    r"confident|persuasive|playful|excited|"
+    r"confident|persuasive|playful|excited|funny|hilarious|joke|"
     r"keep\s+my\s+(?:wording|words|phrasing)|don'?t\s+rewrite|"
     r"fix\s+(?:the\s+)?grammar|remove\s+(?:the\s+)?repetit(?:ion|ive)"
     r")\b",
@@ -150,20 +150,27 @@ _COMMAND_SYNTAX_WORDS = {
     "this", "it", "as", "into", "a", "an", "the", "my", "usual", "normal", "regular",
     "proper", "coding", "well", "structured", "work", "personal", "linkedin", "post", "message",
     "chat", "msg", "text", "bullet", "bullets", "bulleted", "list", "email", "mail", "note", "notes",
-    "prompt", "short", "shorter", "concise", "brief", "tighten", "detailed", "longer", "more",
+    "prompt", "good", "tweet", "tweets", "short", "shorter", "concise", "brief", "tighten", "detailed", "longer", "more",
     "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly", "conversational",
-    "confident", "persuasive", "playful", "excited", "grammar", "repetition", "repetitive",
+    "confident", "persuasive", "playful", "excited", "funny", "hilarious", "joke", "grammar", "repetition", "repetitive",
 }
 _COMMAND_INTENT_WORDS = {
     "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
     "message", "chat", "msg", "text", "short", "shorter", "concise", "brief", "tighten", "detailed",
     "longer", "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly",
-    "conversational", "confident", "persuasive", "playful", "excited", "summarize", "summarise",
+    "conversational", "confident", "persuasive", "playful", "excited", "funny", "hilarious", "joke",
+    "tweet", "tweets", "summarize", "summarise",
     "grammar", "repetition", "repetitive", "don't",
 }
 _COMMAND_FORMAT_WORDS = {
     "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
-    "message", "chat", "msg", "text",
+    "message", "chat", "msg", "text", "tweet", "tweets",
+}
+# Words that may follow a finished format ("a tweet, but funny") without
+# becoming dictated content.
+_REGISTER_CONTINUATION_WORDS = {
+    "keep", "make", "turn", "use", "formal", "professional", "casual", "friendly",
+    "conversational", "excited", "funny", "hilarious", "joke",
 }
 
 
@@ -217,6 +224,7 @@ _FORMAT_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         re.I,
     )),
     ("linkedin_post", re.compile(r"\blinkedin\s+post\b", re.I)),
+    ("tweet", re.compile(r"\btweets?\b", re.I)),
     ("bullet_list", re.compile(r"\bbullets?\b|\bbullet(?:ed)?\s+list\b", re.I)),
     ("email", re.compile(r"\be-?mail\b", re.I)),
     # "note(s)" only counts as a format command in an explicit make/turn/as
@@ -245,6 +253,7 @@ _TONE_WORDS = {
     "excited": "excited", "casual": "casual", "friendly": "friendly",
     "conversational": "conversational", "confident": "confident",
     "persuasive": "persuasive", "playful": "playful",
+    "funny": "funny", "hilarious": "funny", "joke": "funny",
 }
 _FORMALITY_WORDS = {"professional": "professional", "formal": "formal"}
 _LENGTH_SHORT_RE = re.compile(r"\b(?:short(?:er)?|concise|brief|tighten(?:\s+it\s+up)?)\b", re.I)
@@ -432,10 +441,13 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
             # Once a format is complete, only an explicit continuation such
             # as "but keep my wording" may extend it.  This is what prevents
             # "email Alex the short report" from swallowing user content.
-            if saw_format and token not in {"list", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+            if saw_format and token not in {
+                "list", "formal", "professional", "casual", "friendly", "conversational", "excited",
+                "funny", "hilarious", "joke",
+            }:
                 if token in {"but", "and", "actually", "instead", "rather"}:
                     next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
-                    if next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+                    if next_word not in _REGISTER_CONTINUATION_WORDS:
                         break
                 else:
                     break
@@ -446,7 +458,7 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
             continue
         if token in {"but", "and", "actually", "instead", "rather"}:
             next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
-            if not saw_intent or next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+            if not saw_intent or next_word not in _REGISTER_CONTINUATION_WORDS:
                 break
             consumed_end = tokens[index].end()
             index += 1
@@ -465,7 +477,12 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
     parsed = _parse_command(head)
     if not _has_any_intent(parsed):
         return after_wake.strip(), ""
-    return head, after_wake[consumed_end:].lstrip(" ,:;.-")
+    # A trailing "?" or "." is the command's punctuation, not dictated content.
+    # Leaving it behind made "make this as a prompt?" polish a single question mark.
+    tail = re.sub(r"^[\s,.:;!\-—?]+", "", after_wake[consumed_end:])
+    if tail and not re.search(r"\w", tail):
+        tail = ""
+    return head, tail
 
 
 # --------------------------------------------------------------------------

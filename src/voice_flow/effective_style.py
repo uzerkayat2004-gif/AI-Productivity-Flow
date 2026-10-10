@@ -37,6 +37,7 @@ FORMAT_TO_CATEGORY: dict[str, str | None] = {
     "linkedin_post": "other",
     "bullet_list": "other",
     "prompt": None,
+    "tweet": None,
 }
 
 OVERRIDE_INSTRUCTIONS: dict[str, str] = {
@@ -47,6 +48,7 @@ OVERRIDE_INSTRUCTIONS: dict[str, str] = {
     "tone:confident": "Use a confident tone.",
     "tone:persuasive": "Use a persuasive tone.",
     "tone:playful": "Use a playful tone.",
+    "tone:funny": "Make the wording funny. Keep every fact, name, number, and request, and do not invent events.",
     "formality:professional": "Keep the register professional.",
     "formality:formal": "Keep the register formal.",
     "length:short": "Be concise; keep the result short.",
@@ -60,6 +62,7 @@ FORMAT_INSTRUCTIONS: dict[str, str] = {
     "note": "Format the result as a short note with a clear first line.",
     "bullet_list": "Format the result as a concise bullet list.",
     "linkedin_post": "Format the result as a LinkedIn post: hook, short paragraphs, no subject line.",
+    "tweet": "Rewrite as one tweet: one or two short sentences, no hashtags unless the speaker used them, and no explanation around it.",
     "email": "Format the result as an email: greeting, body, sign-off.",
     "work_message": "Format the result as a workplace chat message: no subject line, no sign-off.",
     "personal_message": "Format the result as a personal message: natural, no formal structure.",
