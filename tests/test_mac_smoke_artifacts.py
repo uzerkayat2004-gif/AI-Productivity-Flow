@@ -239,7 +239,7 @@ def test_built_bundle_ci_identity_smoke_contract():
     assert workflow.count("tests/test_macos_app_identity.py") == 2
     assert "run_macos_identity_smoke.py" in workflow
     assert "if: always()" in workflow
-    assert "for seconds in (30, 60)" in runner
+    assert "if seconds not in (30, 60):" in runner
     assert '"open", "-n", "-W"' in runner
     assert "check_mac_smoke_artifacts.py" in runner
     assert "_bundle_pids(app_path) - before" in runner
@@ -256,6 +256,8 @@ def test_ci_runner_requires_engine_wrapper_and_bundle_alive(tmp_path, monkeypatc
     out = tmp_path / "out"
     calls = iter([set(), bundle_pids, bundle_pids, set()])
     monkeypatch.setattr(runner.sys, "platform", "darwin")
+    monkeypatch.setattr(runner, "_record_state", lambda *args: None)
+    monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner, "_bundle_pids", lambda path: next(calls))
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
     wrapper = SimpleNamespace(poll=lambda: wrapper_exit, terminate=lambda: None, wait=lambda **kwargs: None)
@@ -281,6 +283,8 @@ def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_f
     bundle = tmp_path / "AI Productivity Flow.app"
     bundle.mkdir()
     monkeypatch.setattr(runner.sys, "platform", "darwin")
+    monkeypatch.setattr(runner, "_record_state", lambda *args: None)
+    monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
     inventories = iter([set(), RuntimeError("inventory unavailable")])
 
@@ -301,3 +305,113 @@ def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_f
         runner.main(["smoke", str(bundle), str(tmp_path / "out")])
     assert terminated == [True]
     assert "inventory unavailable" in (tmp_path / "out/cleanup-errors.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["universalaccessd", "AppSSODaemon", "GamePolicyAgent"])
+def test_unrelated_app_with_omitted_bundle_identifier_is_allowed(name):
+    report = _identity()
+    report["applications"].append({
+        "pid": 342, "localizedName": name, "executablePath": f"/usr/libexec/{name}",
+        "activationPolicy": 2, "windows": [],
+    })
+    assert identity_report_problem(json.dumps(report)) is None
+
+
+@pytest.mark.parametrize("field,value", [("pid", "342"), ("activationPolicy", None), ("executablePath", "relative")])
+def test_unrelated_app_still_requires_valid_scope_fields(field, value):
+    report = _identity()
+    unrelated = {"pid": 342, "activationPolicy": 2, "executablePath": "/usr/sbin/universalaccessd"}
+    unrelated[field] = value
+    report["applications"].append(unrelated)
+    assert "malformed" in identity_report_problem(json.dumps(report))
+
+
+def test_capture_optional_string_nil_serialization_contract():
+    root = Path(__file__).resolve().parents[1]
+    capture = (root / "scripts/capture_macos_app_identity.js").read_text(encoding="utf-8")
+    assert "typeof unwrapped === 'string' ? unwrapped : ''" in capture
+    assert "bundleIdentifier: optionalString(app.bundleIdentifier)" in capture
+
+
+def test_argv_free_os_inventory_finds_unregistered_bundle_process(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    bundle = tmp_path / "AI Productivity Flow.app"
+    def inventory(command, **kwargs):
+        assert command == ["ps", "-axo", "pid=,ppid=,comm="]
+        return SimpleNamespace(stdout=f"100 1 {bundle}/Contents/Resources/runtime/python/bin/python3\n101 1 /usr/bin/python3\n")
+    monkeypatch.setattr(runner.subprocess, "run", inventory)
+    monkeypatch.setattr(runner, "_process_path", lambda pid: f"{bundle}/Contents/Resources/runtime/python/bin/python3" if pid == 100 else "/usr/bin/python3")
+    assert runner._owned_processes(bundle) == [{"pid": 100, "ppid": 1, "executablePath": f"{bundle}/Contents/Resources/runtime/python/bin/python3", "comm": f"{bundle}/Contents/Resources/runtime/python/bin/python3"}]
+
+
+def test_diagnostic_state_distinguishes_missing_native_registration_from_os_liveness(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="[]"))
+    monkeypatch.setattr(runner, "_owned_processes", lambda path, errors=None: [{"pid": 100, "ppid": 1, "executablePath": str(path / "Contents/MacOS/python3")}])
+    wrapper = SimpleNamespace(pid=99, poll=lambda: None)
+    runner._record_state(tmp_path / "APF.app", tmp_path, wrapper, 5, runner.time.monotonic())
+    state = json.loads((tmp_path / "launcher-status-5s.json").read_text(encoding="utf-8"))
+    assert state["wrapperReturncode"] is None
+    assert state["nativeBundlePids"] == []
+    assert state["ownedProcesses"][0]["pid"] == 100
+
+
+def test_kernel_path_finds_owned_process_when_comm_is_renamed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    bundle = tmp_path / "APF.app"
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="100 1 AI Productivity Flow\n101 1 python3\n"))
+    monkeypatch.setattr(runner, "_process_path", lambda pid: str(bundle) + "/Contents/Resources/runtime/python/bin/python3" if pid == 100 else "/usr/bin/python3")
+    result = runner._owned_processes(bundle)
+    assert [process["pid"] for process in result] == [100]
+    assert result[0]["comm"] == "AI Productivity Flow"
+
+
+def test_unresolved_kernel_path_is_recorded_as_uncertainty(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="100 1 Python\n"))
+    def unresolved(pid):
+        raise OSError("path access denied")
+    monkeypatch.setattr(runner, "_process_path", unresolved)
+    errors = []
+    assert runner._owned_processes(tmp_path / "APF.app", errors) == []
+    assert errors[0]["pid"] == "100"
+    assert "path access denied" in errors[0]["error"]
+
+
+def test_structured_ips_keeps_exception_and_faulting_stack_with_bounds_and_redaction(tmp_path):
+    from scripts import run_macos_identity_smoke as runner
+    report = tmp_path / "Python.ips"
+    header = {"app_name": "Python", "os_version": "macOS 26.6.2", "timestamp": "2026-10-10"}
+    body = {
+        "procName": "AI Productivity Flow", "pid": 100, "procPath": "/Applications/APF.app/python3",
+        "osVersion": {"train": "macOS 26.6.2"}, "exception": {"type": "EXC_BAD_ACCESS"},
+        "termination": {"namespace": "SIGNAL", "code": 11}, "faultingThread": 1,
+        "threads": [{"frames": [{"symbol": "not_crashed"}]}, {"triggered": True, "frames":
+            [{"symbol": "api_key=fixture-do-not-upload"}, {"symbol": "https://example.test/path?credential=fixture"}]
+            + [{"symbol": f"crashed_frame_{index}", "symbolLocation": "x" * 2000} for index in range(80)]}],
+    }
+    report.write_text(json.dumps(header) + "\n" + json.dumps(body), encoding="utf-8")
+    excerpt = runner._crash_excerpt(report)
+    assert "EXC_BAD_ACCESS" in excerpt and "SIGNAL" in excerpt and "macOS 26.6.2" in excerpt
+    assert "crashed_frame_0" in excerpt and "frame 29:" in excerpt
+    assert "frame 30:" not in excerpt and "not_crashed" not in excerpt
+    assert "fixture-do-not-upload" not in excerpt and "credential=fixture" not in excerpt
+    assert "[query redacted]" in excerpt and "credential-bearing line redacted" in excerpt
+    assert len(excerpt) <= 65536 and len(excerpt.splitlines()) <= 120
+
+
+def test_traditional_crash_keeps_header_and_crashed_thread_after_long_other_stack(tmp_path):
+    from scripts import run_macos_identity_smoke as runner
+    report = tmp_path / "Python.crash"
+    report.write_text("Process: Python [100]\nException Type: EXC_BAD_ACCESS\nTermination Reason: SIGNAL 11\nsecret=fixture-do-not-upload\n"
+        + "\n".join(f"other thread line {index}" for index in range(200))
+        + "\nThread 3 Crashed:\n" + "\n".join(f"{index} frame_{index}" for index in range(80)), encoding="utf-8")
+    excerpt = runner._crash_excerpt(report)
+    assert "Exception Type: EXC_BAD_ACCESS" in excerpt and "Termination Reason: SIGNAL 11" in excerpt
+    assert "Thread 3 Crashed:" in excerpt and "29 frame_29" in excerpt
+    assert "30 frame_30" not in excerpt and "fixture-do-not-upload" not in excerpt
+    assert len(excerpt) <= 65536

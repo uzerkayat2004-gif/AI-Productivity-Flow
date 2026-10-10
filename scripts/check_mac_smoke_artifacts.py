@@ -120,14 +120,20 @@ def identity_report_problem(text: str) -> str | None:
             policy = app["activationPolicy"]
             if type(pid) is not int or pid <= 0 or type(policy) is not int or policy not in (0, 1, 2):
                 raise ValueError("invalid PID or activation policy")
-            for field in ("localizedName", "bundleIdentifier", "executablePath"):
-                if not isinstance(app[field], str):
-                    raise ValueError(f"invalid {field}")
-            if not app["localizedName"] or not app["executablePath"].startswith("/"):
-                raise ValueError("missing native application identity")
-            windows = app["windows"]
-            if not isinstance(windows, list) or any(not isinstance(w, str) for w in windows):
-                raise ValueError("invalid windows")
+            executable = app["executablePath"]
+            if not isinstance(executable, str) or not executable.startswith("/"):
+                raise ValueError("invalid executablePath")
+            # PID, policy and executable are mandatory even for unrelated apps.
+            # Native identity/window fields are strict only inside the APF bundle.
+            if executable.startswith(app_path.rstrip("/") + "/"):
+                for field in ("localizedName", "bundleIdentifier"):
+                    if not isinstance(app[field], str):
+                        raise ValueError(f"invalid {field}")
+                if not app["localizedName"]:
+                    raise ValueError("missing native application identity")
+                windows = app["windows"]
+                if not isinstance(windows, list) or any(not isinstance(w, str) for w in windows):
+                    raise ValueError("invalid windows")
             if pid in by_pid and by_pid[pid] != app:
                 raise ValueError("conflicting duplicate PID")
             by_pid[pid] = app
