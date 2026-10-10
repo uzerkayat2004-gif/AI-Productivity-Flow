@@ -7,7 +7,14 @@ import threading
 import weakref
 from types import SimpleNamespace
 
+import pytest
+
 from voice_flow import lfm_engine, local_model_resources, nemotron_engine
+
+
+@pytest.fixture(autouse=True)
+def _ample_memory(monkeypatch):
+    monkeypatch.setattr(local_model_resources, "memory_pressure", lambda: False)
 
 
 def _native_engine():
@@ -191,3 +198,27 @@ def test_cleanup_uses_one_worker_and_weakly_registers_instance_callbacks(monkeyp
     assert reference() is None
     local_model_resources.cleanup_idle_models(100.0)
     assert "one" not in local_model_resources._callbacks
+
+
+def test_memory_pressure_releases_idle_models_sooner(monkeypatch):
+    destroyed = []
+    engine = _native_engine()
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: SimpleNamespace(
+        nemo_speech_asr_destroy=lambda handle: destroyed.append(handle.value)))
+    monkeypatch.setattr(nemotron_engine, "_NEMOTRON_CACHE", {"offline": engine})
+    pressure_idle = local_model_resources.LOCAL_MODEL_PRESSURE_IDLE_SECONDS
+    nemotron_engine._evict_idle_engines(10.0 + pressure_idle)
+    assert engine.is_warm
+    monkeypatch.setattr(local_model_resources, "memory_pressure", lambda: True)
+    nemotron_engine._evict_idle_engines(10.0 + pressure_idle)
+    assert destroyed == [99]
+    assert not engine.is_warm
+
+
+def test_lfm_uses_physical_cores_for_inference(monkeypatch):
+    import psutil
+
+    monkeypatch.setattr(psutil, "cpu_count", lambda logical=True: 16 if logical else 6)
+    assert lfm_engine._inference_threads() == 6
+    monkeypatch.setattr(psutil, "cpu_count", lambda logical=True: 32 if logical else 16)
+    assert lfm_engine._inference_threads() == 8

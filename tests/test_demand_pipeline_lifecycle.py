@@ -129,8 +129,15 @@ def test_replaced_session_during_audio_start_aborts_without_touching_new_capture
     monkeypatch.setattr("voice_flow.local_model_resources.acquire_model_use", lambda kind: lease)
     monkeypatch.setattr(main.threading, "Timer", lambda *_args, **_kwargs: timers.append(object()))
 
+    acquired = []
+    monkeypatch.setattr(
+        "voice_flow.local_model_resources.acquire_model_use",
+        lambda kind: acquired.append(kind) or lease,
+    )
+
     assert app._on_dictation_start() is False
-    assert lease.released
+    # The stale start must not leave speech demand behind.
+    assert lease.released or not acquired
     assert not any(event.startswith("prepare:") for event in events)
     assert "stream" not in events
     assert "stop" not in events

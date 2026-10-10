@@ -16,10 +16,10 @@ from voice_flow.config import config
 from voice_flow import nemotron_engine
 from voice_flow import stt_engines
 from voice_flow.local_model_resources import (
-    LOCAL_MODEL_IDLE_SECONDS,
     ModelUseLease,
     acquire_model_use,
     cleanup_is_forced,
+    idle_limit_seconds,
     idle_time,
     notify_models_available,
     register_idle_cleanup,
@@ -145,7 +145,7 @@ class Transcriber:
                 native = getattr(self, "nemotron_engine", None)
                 if self._loading or (warming is not None and warming.is_alive()) or getattr(native, "_active_streams", 0):
                     return False
-                if not cleanup_is_forced("speech") and now - getattr(self, "_last_whisper_use", now) < LOCAL_MODEL_IDLE_SECONDS:
+                if not cleanup_is_forced("speech") and now - getattr(self, "_last_whisper_use", now) < idle_limit_seconds():
                     return True
                 if self.model is None and not self._whisper_models:
                     return True

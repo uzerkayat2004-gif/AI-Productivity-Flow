@@ -16,9 +16,9 @@ from typing import Any
 
 from voice_flow import downloadable_models
 from voice_flow.local_model_resources import (
-    LOCAL_MODEL_IDLE_SECONDS,
     acquire_model_use,
     cleanup_is_forced,
+    idle_limit_seconds,
     idle_time,
     notify_models_available,
     register_idle_cleanup,
@@ -66,7 +66,7 @@ def _release_idle_lfm(now: float) -> bool:
         last_used = getattr(polish_with_lfm, "_last_used", now)
         llm = getattr(polish_with_lfm, "_cached_llm", None)
         if llm is not None and (
-            cleanup_is_forced("polish") or now - last_used >= LOCAL_MODEL_IDLE_SECONDS
+            cleanup_is_forced("polish") or now - last_used >= idle_limit_seconds()
         ):
             _release_cached_lfm(llm)
             setattr(polish_with_lfm, "_cached_llm", None)
@@ -263,6 +263,27 @@ def _patch_chat_template_parser() -> None:
         log.debug("[LFM] Could not patch chat template parser: %s", exc)
 
 
+def _inference_threads() -> int:
+    """Physical cores, capped: hyper-threads slow llama.cpp token generation."""
+    physical = None
+    try:
+        import psutil
+
+        physical = psutil.cpu_count(logical=False)
+    except Exception:
+        pass
+    cores = physical or max(1, (os.cpu_count() or 4) // 2)
+    return max(1, min(8, int(cores)))
+
+
+def _new_llama(llama_cls: Any, model_path: Path) -> Any:
+    threads = _inference_threads()
+    return llama_cls(
+        model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
+        n_threads=threads, n_threads_batch=threads, n_batch=512, verbose=False,
+    )
+
+
 def get_lfm_model_path() -> Path | None:
     """Return local path to downloaded LFM 2.5 350M model file if present."""
     target = downloadable_models.get_models_dir() / LFM_FILENAME
@@ -330,10 +351,7 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
             return True
         from llama_cpp import Llama  # type: ignore
 
-        llm = Llama(
-            model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
-            n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
-        )
+        llm = _new_llama(Llama, model_path)
         old_llm = getattr(polish_with_lfm, "_cached_llm", None)
         if old_llm is not None:
             _release_cached_lfm(old_llm)
@@ -425,10 +443,7 @@ def _polish_with_lfm_impl(
             llm = getattr(polish_with_lfm, "_cached_llm", None)
             cached_path = getattr(polish_with_lfm, "_cached_llm_path", None)
             if llm is None or cached_path != str(model_path):
-                replacement = Llama(
-                    model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
-                    n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
-                )
+                replacement = _new_llama(Llama, model_path)
                 if llm is not None:
                     _release_cached_lfm(llm)
                 llm = replacement
@@ -514,7 +529,7 @@ def polish_with_lfm(
     timeout_seconds: float = 5.0,
     system_prompt: str | None = None,
 ) -> str | None:
-    """Run one demand-scoped local polish and promptly release its model."""
+    """Run one demand-scoped local polish; the model stays warm for the next one."""
     if not text or not text.strip():
         return text
     lease = acquire_model_use("polish")

@@ -26,10 +26,12 @@ def _isolated_registry(monkeypatch):
     monkeypatch.setattr(local_model_resources, "_cleanup_requested", set())
 
 
-def test_last_speech_lease_requests_prompt_cleanup(monkeypatch):
+def test_last_speech_lease_keeps_model_warm_for_next_dictation(monkeypatch):
     calls = []
     local_model_resources.register_idle_cleanup(
-        "speech-test", lambda now: calls.append(now) or True, kind="speech"
+        "speech-test",
+        lambda now: calls.append((now, local_model_resources.cleanup_is_forced("speech"))) or True,
+        kind="speech",
     )
 
     first = local_model_resources.acquire_model_use("speech")
@@ -40,8 +42,43 @@ def test_last_speech_lease_requests_prompt_cleanup(monkeypatch):
 
     second.release()
     second.release()  # A lease can safely be released by two teardown paths.
+    assert not local_model_resources.cleanup_requested("speech")
     local_model_resources.cleanup_idle_models(11.0)
-    assert calls == [11.0]
+    # Engines only see an idle check; nothing forces an immediate unload.
+    assert calls == [(11.0, False)]
+
+
+def test_explicit_cleanup_after_last_lease_forces_release(monkeypatch):
+    calls = []
+    local_model_resources.register_idle_cleanup(
+        "speech-test",
+        lambda now: calls.append(local_model_resources.cleanup_is_forced("speech")) or True,
+        kind="speech",
+    )
+    lease = local_model_resources.acquire_model_use("speech")
+    local_model_resources.request_model_cleanup("speech")
+    local_model_resources.cleanup_idle_models(10.0)
+    assert calls == []
+    lease.release()
+    assert local_model_resources.cleanup_requested("speech")
+    local_model_resources.cleanup_idle_models(11.0)
+    assert calls == [True]
+    assert not local_model_resources.cleanup_requested("speech")
+
+
+def test_idle_limit_shortens_only_under_memory_pressure(monkeypatch):
+    monkeypatch.setattr(local_model_resources, "_memory_probe", None)
+    monkeypatch.setattr(local_model_resources, "_available_memory_bytes", lambda: 8 * 1024**3)
+    assert local_model_resources.idle_limit_seconds() == local_model_resources.LOCAL_MODEL_IDLE_SECONDS
+    assert local_model_resources.LOCAL_MODEL_IDLE_SECONDS >= 600
+
+    monkeypatch.setattr(local_model_resources, "_memory_probe", None)
+    monkeypatch.setattr(local_model_resources, "_available_memory_bytes", lambda: 256 * 1024**2)
+    assert local_model_resources.idle_limit_seconds() == local_model_resources.LOCAL_MODEL_PRESSURE_IDLE_SECONDS
+
+    monkeypatch.setattr(local_model_resources, "_memory_probe", None)
+    monkeypatch.setattr(local_model_resources, "_available_memory_bytes", lambda: None)
+    assert local_model_resources.idle_limit_seconds() == local_model_resources.LOCAL_MODEL_IDLE_SECONDS
 
 
 def test_busy_cleanup_request_persists_until_engine_notifies(monkeypatch):
@@ -55,8 +92,7 @@ def test_busy_cleanup_request_persists_until_engine_notifies(monkeypatch):
         "polish-test", cleanup, kind="polish"
     )
 
-    lease = local_model_resources.acquire_model_use("polish")
-    lease.release()
+    local_model_resources.request_model_cleanup("polish")
     local_model_resources.cleanup_idle_models(20.0)
     assert len(attempts) == 1
     assert "polish" in local_model_resources._cleanup_requested
@@ -79,8 +115,7 @@ def test_cleanup_request_reaches_every_callback_in_model_family():
         return True
 
     local_model_resources.register_idle_cleanup("native", release_native, kind="speech")
-    lease = local_model_resources.acquire_model_use("speech")
-    lease.release()
+    local_model_resources.request_model_cleanup("speech")
     local_model_resources.cleanup_idle_models(30.0)
     assert calls == ["whisper", "native"]
     assert "speech" not in local_model_resources._cleanup_requested
@@ -151,7 +186,7 @@ def test_prepare_worker_keeps_own_lease_after_session_cancels(monkeypatch):
     while local_model_resources.has_active_model_use("speech") and time.monotonic() < deadline:
         time.sleep(0.005)
     assert not local_model_resources.has_active_model_use("speech")
-    assert local_model_resources.cleanup_requested("speech")
+    assert not local_model_resources.cleanup_requested("speech")
 
 
 def test_lfm_releases_polish_lease_when_inference_fails(monkeypatch):

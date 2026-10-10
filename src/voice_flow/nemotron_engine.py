@@ -35,10 +35,10 @@ import numpy as np
 
 from voice_flow import paths
 from voice_flow.local_model_resources import (
-    LOCAL_MODEL_IDLE_SECONDS,
     acquire_model_use,
     cleanup_is_forced,
     cleanup_requested,
+    idle_limit_seconds,
     notify_models_available,
     register_idle_cleanup,
 )
@@ -675,7 +675,7 @@ class NemotronGGUFEngine:
         try:
             if self._active_streams:
                 return False
-            if not force and now - getattr(self, "_last_used", now) < LOCAL_MODEL_IDLE_SECONDS:
+            if not force and now - getattr(self, "_last_used", now) < idle_limit_seconds():
                 return False
             self.close()
             return True

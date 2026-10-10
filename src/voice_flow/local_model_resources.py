@@ -7,7 +7,13 @@ import time
 import weakref
 from typing import Callable, Literal
 
-LOCAL_MODEL_IDLE_SECONDS = 120.0
+# Reloading a speech or polish model costs ~1-2 s on every dictation, so the
+# active model stays resident between dictations and is released only after a
+# long idle period, or after a short one when the machine is low on memory.
+LOCAL_MODEL_IDLE_SECONDS = 15 * 60.0
+LOCAL_MODEL_PRESSURE_IDLE_SECONDS = 60.0
+LOW_MEMORY_AVAILABLE_BYTES = 1024 * 1024 * 1024
+_MEMORY_PROBE_TTL_SECONDS = 5.0
 ModelKind = Literal["speech", "polish"]
 _Callback = Callable[[float], bool | None]
 _callbacks: dict[str, tuple[_Callback | weakref.WeakMethod, ModelKind | None] | _Callback | weakref.WeakMethod] = {}
@@ -27,6 +33,36 @@ def idle_time() -> float:
     return _idle_clock()
 
 
+_memory_probe: tuple[float, bool] | None = None
+
+
+def _available_memory_bytes() -> int | None:
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        return None
+
+
+def memory_pressure() -> bool:
+    """Return whether available system memory is low enough to evict sooner."""
+    global _memory_probe
+    now = time.monotonic()
+    probe = _memory_probe
+    if probe is not None and now - probe[0] < _MEMORY_PROBE_TTL_SECONDS:
+        return probe[1]
+    available = _available_memory_bytes()
+    low = available is not None and available < LOW_MEMORY_AVAILABLE_BYTES
+    _memory_probe = (now, low)
+    return low
+
+
+def idle_limit_seconds() -> float:
+    """Seconds an unused local model may stay resident before release."""
+    return LOCAL_MODEL_PRESSURE_IDLE_SECONDS if memory_pressure() else LOCAL_MODEL_IDLE_SECONDS
+
+
 class ModelUseLease:
     """Idempotent token keeping one local model family available."""
 
@@ -36,6 +72,7 @@ class ModelUseLease:
         self._release_lock = threading.Lock()
 
     def release(self) -> None:
+        """End this demand; the model stays warm until the idle limit passes."""
         with self._release_lock:
             if self._released:
                 return
@@ -43,9 +80,9 @@ class ModelUseLease:
         with _lock:
             remaining = max(0, _active_uses[self.kind] - 1)
             _active_uses[self.kind] = remaining
-            if remaining == 0:
-                _cleanup_requested.add(self.kind)
-        _wake.set()
+            pending = remaining == 0 and self.kind in _cleanup_requested
+        if pending:
+            _wake.set()
 
     def __enter__(self) -> "ModelUseLease":
         return self
@@ -73,13 +110,13 @@ def has_active_model_use(kind: ModelKind) -> bool:
 
 
 def cleanup_requested(kind: ModelKind) -> bool:
-    """Return whether demand ended and prompt cleanup is still outstanding."""
+    """Return whether an explicit cleanup request is still outstanding."""
     with _lock:
         return kind in _cleanup_requested and _active_uses.get(kind, 0) == 0
 
 
 def cleanup_is_forced(kind: ModelKind) -> bool:
-    """Return whether the current callback is servicing a demand-end request."""
+    """Return whether the current callback is servicing an explicit cleanup request."""
     return getattr(_cleanup_context, "kind", None) == kind
 
 
