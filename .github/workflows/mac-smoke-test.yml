@@ -61,6 +61,9 @@ jobs:
           xattr -dr com.apple.quarantine "$APP_PATH" || true
           python3 scripts/probe_macos_embedded_runtime.py "$APP_PATH" out
 
+      - name: Compile native identity capture
+        run: swiftc scripts/capture_macos_app_identity.swift -o out/identity-capture
+
       - name: Launch app and take screenshots
         run: |
           EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
@@ -71,17 +74,11 @@ jobs:
             sleep $(( t - ${LAST:-0} )); LAST=$t
             screencapture -x out/screen-${t}s.png || true
             if [ "$t" = 30 ] || [ "$t" = 60 ]; then
-              osascript -l JavaScript scripts/capture_macos_app_identity.js "$APP_PATH" > "out/identity-${t}s.json"
+              out/identity-capture "$APP_PATH" > "out/identity-${t}s.json"
             fi
             if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a out/alive.txt; else echo "${t}s: EXITED" | tee -a out/alive.txt; fi
           done
-          osascript -e 'tell application "System Events"
-            set outText to ""
-            repeat with p in (every process whose background only is false)
-              set outText to outText & (name of p) & ": " & (name of every window of p as text) & linefeed
-            end repeat
-            return outText
-          end tell' > out/windows.txt 2>&1 || true
+          cp out/identity-60s.json out/windows.txt
           cp "$HOME/.voice_flow/gui_launcher.log" out/gui_launcher.log 2>/dev/null || true
           # Identity snapshots contain process metadata without command lines.
           cp out/identity-60s.json out/processes.txt

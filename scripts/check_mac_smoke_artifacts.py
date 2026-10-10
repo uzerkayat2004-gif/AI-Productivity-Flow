@@ -62,6 +62,8 @@ def window_report_problem(text: str) -> str | None:
     stripped = (text or "").strip()
     if not stripped:
         return "no app window"
+    if stripped.startswith("{"):
+        return identity_report_problem(stripped)
 
     app_seen = False
     browser_hit: str | None = None
@@ -102,10 +104,40 @@ def window_report_problem(text: str) -> str | None:
     return None
 
 
+def _visible_native_window(gui: dict) -> bool:
+    windows = gui.get("windowMetadata")
+    if not isinstance(windows, list):
+        raise ValueError("missing native window metadata")
+    seen = set()
+    visible = False
+    for window in windows:
+        if not isinstance(window, dict):
+            raise ValueError("invalid native window")
+        number, owner, layer = window["windowNumber"], window["ownerPid"], window["layer"]
+        if type(number) is not int or number <= 0 or number in seen:
+            raise ValueError("invalid or duplicate native window ID")
+        seen.add(number)
+        if type(owner) is not int or owner != gui["pid"] or type(layer) is not int:
+            raise ValueError("invalid native window owner/layer")
+        if type(window["onScreen"]) is not bool or not isinstance(window["title"], str):
+            raise ValueError("invalid native window visibility/title")
+        for field in ("alpha", "width", "height"):
+            value = window[field]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError("invalid native window geometry/alpha")
+        if not 0 <= window["alpha"] <= 1 or window["width"] < 0 or window["height"] < 0:
+            raise ValueError("invalid native window geometry/alpha")
+        visible |= (layer == 0 and window["onScreen"] and window["alpha"] > 0
+                    and window["width"] >= 200 and window["height"] >= 100)
+    return visible
+
+
 def identity_report_problem(text: str) -> str | None:
     """Validate one snapshot; count distinct bundle-owned regular application PIDs."""
     try:
         report = json.loads(text)
+        if not isinstance(report, dict) or report.get("captureSource") != "CGWindowList":
+            raise ValueError("missing native Window Server capture source")
         app_path = report["appPath"]
         applications = report["applications"]
         frontmost = report["frontmost"]
@@ -146,6 +178,8 @@ def identity_report_problem(text: str) -> str | None:
         expected_executable = app_path + "/Contents/MacOS/ai-productivity-flow-launcher"
         if any(app["executablePath"] != expected_executable for app in owned):
             return "registered APF process uses Python runtime instead of outer native launcher"
+        if any(app["localizedName"] != "AI Productivity Flow" for app in owned):
+            return "APF native application/menu name is not AI Productivity Flow"
         regular = [a for a in owned if a["activationPolicy"] == 0]
         if len(regular) != 1:
             return f"expected exactly one APF Dock-visible PID, found {len(regular)}"
@@ -154,10 +188,12 @@ def identity_report_problem(text: str) -> str | None:
             return "APF native application/menu name is not AI Productivity Flow"
         if frontmost["pid"] == gui["pid"] and frontmost["localizedName"] != gui["localizedName"]:
             return "frontmost APF menu name disagrees with native application identity"
-        if not any(_mentions_app_window(w) for w in gui["windows"]):
+        if not _visible_native_window(gui):
             return "branded APF desktop GUI does not own an app window"
+        if gui["windows"] and not any(_mentions_app_window(w) for w in gui["windows"]):
+            return "APF desktop window title does not identify the app"
         return None
-    except (ValueError, KeyError, TypeError) as exc:
+    except (ValueError, KeyError, TypeError, OverflowError) as exc:
         return f"missing or malformed application identity evidence: {exc}"
 
 

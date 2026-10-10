@@ -190,6 +190,32 @@ def _crash_excerpt(report: Path) -> str:
     return _redact_excerpt(excerpt)
 
 
+def _collect_privacy_evidence(out: Path) -> None:
+    """Read only relevant public privacy logs; never enable private/debug data."""
+    predicate = (
+        '(process == "nehelper" OR process == "tccd") AND '
+        '(eventMessage CONTAINS[c] "local network" OR '
+        'eventMessage CONTAINS[c] "LocalNetwork" OR '
+        'eventMessage CONTAINS[c] "org.python" OR '
+        'eventMessage CONTAINS[c] "com.uzerkayat.aiproductivityflow")'
+    )
+    result = subprocess.run(
+        ["/usr/bin/log", "show", "--style", "json", "--last", "15m", "--predicate", predicate],
+        capture_output=True, text=True, check=True, timeout=8,
+    )
+    if len(result.stdout.encode("utf-8")) > 8 * 1024 * 1024:
+        raise ValueError("privacy log input exceeds 8 MiB")
+    entries = json.loads(result.stdout)
+    if not isinstance(entries, list):
+        raise ValueError("privacy log inventory is not a list")
+    fields = ("timestamp", "processID", "processImagePath", "subsystem", "category", "eventMessage")
+    lines = [json.dumps({field: entry[field] for field in fields if field in entry}, ensure_ascii=False)
+             for entry in entries[-120:] if isinstance(entry, dict)]
+    (out / "local-network-privacy.redacted.txt").write_text(
+        _redact_excerpt(lines) if lines else "[no matching public privacy records]\n", encoding="utf-8",
+    )
+
+
 def _collect_diagnostics(app_path: Path, out: Path, launched_at: float) -> None:
     """Bounded, best-effort collection; errors cannot replace the smoke result."""
     try:
@@ -197,6 +223,11 @@ def _collect_diagnostics(app_path: Path, out: Path, launched_at: float) -> None:
     except ModuleNotFoundError:
         from report_macos_launch_failure import log_tail
     errors = []
+    if not (out / "local-network-privacy.redacted.txt").is_file():
+        try:
+            _collect_privacy_evidence(out)
+        except Exception as exc:
+            errors.append(f"public privacy logs: {type(exc).__name__}: {exc}")
     resources = app_path / "Contents/Resources"
     environment = {"os": platform.system(), "architecture": platform.machine(),
                    "macosVersion": platform.mac_ver()[0], "ciPythonVersion": platform.python_version(),
@@ -267,6 +298,18 @@ def _collect_diagnostics(app_path: Path, out: Path, launched_at: float) -> None:
             pass
 
 
+def _compile_identity_capture(root: Path, out: Path) -> Path:
+    compiler = shutil.which("swiftc")
+    if not compiler:
+        raise RuntimeError("Native macOS identity capture requires swiftc")
+    executable = out / "identity-capture"
+    subprocess.run([compiler, str(root / "scripts/capture_macos_app_identity.swift"),
+                    "-o", str(executable)], check=True, timeout=60)
+    if not executable.is_file():
+        raise RuntimeError("Native identity capture executable was not created")
+    return executable
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3 or sys.platform != "darwin":
         print("usage (macOS): python scripts/run_macos_identity_smoke.py APP_PATH OUT_DIR", file=sys.stderr)
@@ -288,6 +331,7 @@ def main(argv: list[str]) -> int:
         print("Bundle already running before CI smoke; refusing to reuse it", file=sys.stderr)
         return 1
     capture_embedded_runtime(app_path, out)
+    identity_capture = _compile_identity_capture(root, out)
     launcher = None
     launched_at = time.time()
     try:
@@ -303,21 +347,14 @@ def main(argv: list[str]) -> int:
                 continue
             with (out / f"identity-{seconds}s.json").open("w", encoding="utf-8") as evidence, (out / f"capture-{seconds}s-stderr.txt").open("w", encoding="utf-8") as capture_errors:
                 subprocess.run([
-                    "osascript", "-l", "JavaScript",
-                    str(root / "scripts/capture_macos_app_identity.js"), str(app_path),
+                    str(identity_capture), str(app_path),
                 ], stdout=evidence, stderr=capture_errors, check=False, timeout=20)
             subprocess.run(["screencapture", "-x", str(out / f"screen-{seconds}s.png")], check=True, timeout=10)
             with (out / "alive.txt").open("a", encoding="utf-8") as alive:
                 bundle_running = bool(_bundle_pids(app_path))
                 engine_running = launcher.poll() is None
                 alive.write(f"{seconds}s: {'running' if engine_running and bundle_running else 'EXITED'}\n")
-        try:
-            report = json.loads((out / "identity-60s.json").read_text(encoding="utf-8"))
-        except ValueError:
-            report = {"applications": []}
-        with (out / "windows.txt").open("w", encoding="utf-8") as windows:
-            for app in report["applications"]:
-                windows.write(f"{app['localizedName']}: {', '.join(app['windows'])}\n")
+        shutil.copyfile(out / "identity-60s.json", out / "windows.txt")
         shutil.copyfile(out / "identity-60s.json", out / "processes.txt")
         _collect_diagnostics(app_path, out, launched_at)
         return subprocess.run([

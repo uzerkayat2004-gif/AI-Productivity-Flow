@@ -4,6 +4,7 @@ from PIL import Image, ImageDraw
 
 import copy
 import json
+import sys
 
 import pytest
 
@@ -113,6 +114,7 @@ def test_system_browser_fallback_log_fails_smoke_check(tmp_path: Path):
 
 def _identity():
     return {
+        "captureSource": "CGWindowList",
         "appPath": "/Applications/AI Productivity Flow.app",
         "frontmost": {"pid": 100, "localizedName": "AI Productivity Flow"},
         "applications": [{
@@ -120,6 +122,8 @@ def _identity():
             "bundleIdentifier": "com.uzerkayat.aiproductivityflow",
             "executablePath": "/Applications/AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher",
             "activationPolicy": 0, "windows": ["AI Productivity Flow"],
+            "windowMetadata": [{"windowNumber": 42, "ownerPid": 100, "layer": 0, "onScreen": True,
+                                "alpha": 1.0, "width": 1100, "height": 800, "title": "AI Productivity Flow"}],
         }],
     }
 
@@ -145,9 +149,9 @@ def test_two_dock_visible_pids_are_rejected():
 def test_accessory_helper_and_unrelated_python_are_allowed():
     report = _identity()
     helper = copy.deepcopy(report["applications"][0])
-    helper.update(pid=101, localizedName="python3", activationPolicy=1, windows=["tk"])
+    helper.update(pid=101, localizedName="AI Productivity Flow", activationPolicy=1, windows=["tk"])
     unrelated = copy.deepcopy(helper)
-    unrelated.update(pid=102, activationPolicy=0, executablePath="/usr/local/bin/python3")
+    unrelated.update(pid=102, localizedName="python3", activationPolicy=0, executablePath="/usr/local/bin/python3")
     report["applications"].extend([helper, unrelated])
     assert identity_report_problem(json.dumps(report)) is None
 
@@ -189,6 +193,7 @@ def test_missing_or_malformed_identity_is_rejected(text):
 def test_branded_gui_must_own_native_window():
     report = _identity()
     report["applications"][0]["windows"] = []
+    report["applications"][0]["windowMetadata"] = []
     assert "own an app window" in identity_report_problem(json.dumps(report))
 
 
@@ -209,15 +214,17 @@ def test_invalid_first_snapshot_cannot_be_hidden_by_valid_second(tmp_path):
 
 def test_capture_contract_uses_native_identity_without_command_lines():
     root = Path(__file__).resolve().parents[1]
-    capture = (root / "scripts/capture_macos_app_identity.js").read_text(encoding="utf-8")
+    capture = (root / "scripts/capture_macos_app_identity.swift").read_text(encoding="utf-8")
     workflow = (root / ".github/workflows/mac-smoke-test.yml").read_text(encoding="utf-8")
     for field in ("pid", "localizedName", "bundleIdentifier", "executablePath", "activationPolicy", "windows", "frontmost"):
         assert field in capture
     assert "NSWorkspace" in capture
-    assert "unixId: pid" in capture
+    assert "CGWindowListCopyWindowInfo" in capture
+    assert "kCGWindowOwnerPID" in capture
+    assert "System Events" not in capture and "AXUIElement" not in capture
     assert '"$t" = 30' in workflow and '"$t" = 60' in workflow
     assert "ps aux" not in workflow
-    assert "capture_macos_app_identity.js" in workflow
+    assert "capture_macos_app_identity.swift" in workflow
 
 
 def test_frontmost_gui_menu_identity_is_cross_checked():
@@ -260,6 +267,7 @@ def test_ci_runner_requires_engine_wrapper_and_bundle_alive(tmp_path, monkeypatc
     from scripts import probe_macos_embedded_runtime
     monkeypatch.setattr(probe_macos_embedded_runtime, "capture_embedded_runtime", lambda *args: None)
     monkeypatch.setattr(runner, "_record_state", lambda *args: None)
+    monkeypatch.setattr(runner, "_compile_identity_capture", lambda root, out: out / "identity-capture")
     monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner, "_bundle_pids", lambda path: next(calls))
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
@@ -267,7 +275,7 @@ def test_ci_runner_requires_engine_wrapper_and_bundle_alive(tmp_path, monkeypatc
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: wrapper)
 
     def run(command, **kwargs):
-        if command[0] == "osascript":
+        if str(command[0]).endswith("identity-capture"):
             kwargs["stdout"].write(json.dumps(_identity()))
         if "check_mac_smoke_artifacts.py" in str(command[1]):
             exited = "EXITED" in (out / "alive.txt").read_text(encoding="utf-8")
@@ -289,6 +297,7 @@ def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_f
     from scripts import probe_macos_embedded_runtime
     monkeypatch.setattr(probe_macos_embedded_runtime, "capture_embedded_runtime", lambda *args: None)
     monkeypatch.setattr(runner, "_record_state", lambda *args: None)
+    monkeypatch.setattr(runner, "_compile_identity_capture", lambda root, out: out / "identity-capture")
     monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
     inventories = iter([set(), RuntimeError("inventory unavailable")])
@@ -303,8 +312,10 @@ def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_f
     wrapper = SimpleNamespace(poll=lambda: None, terminate=lambda: terminated.append(True), wait=lambda **kwargs: None)
     monkeypatch.setattr(runner, "_bundle_pids", inventory)
     monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: wrapper)
-    def capture_failure(*args, **kwargs):
-        raise RuntimeError("original capture failure")
+    def capture_failure(command, **kwargs):
+        if str(command[0]).endswith("identity-capture"):
+            raise RuntimeError("original capture failure")
+        return SimpleNamespace(returncode=0)
     monkeypatch.setattr(runner.subprocess, "run", capture_failure)
     with pytest.raises(RuntimeError, match="original capture failure"):
         runner.main(["smoke", str(bundle), str(tmp_path / "out")])
@@ -333,9 +344,11 @@ def test_unrelated_app_still_requires_valid_scope_fields(field, value):
 
 def test_capture_optional_string_nil_serialization_contract():
     root = Path(__file__).resolve().parents[1]
-    capture = (root / "scripts/capture_macos_app_identity.js").read_text(encoding="utf-8")
-    assert "typeof unwrapped === 'string' ? unwrapped : ''" in capture
-    assert "bundleIdentifier: optionalString(app.bundleIdentifier)" in capture
+    capture = (root / "scripts/capture_macos_app_identity.swift").read_text(encoding="utf-8")
+    assert '"bundleIdentifier": app.bundleIdentifier ?? ""' in capture
+    assert '"localizedName": app.localizedName ?? ""' in capture
+    assert 'window[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true' in capture
+    assert ".optionOnScreenOnly" in capture
 
 
 def test_argv_free_os_inventory_finds_unregistered_bundle_process(tmp_path, monkeypatch):
@@ -512,3 +525,109 @@ def test_release_runtime_probe_preserves_quarantine_diagnostic_order():
     assert workflow.index("Gatekeeper and signing check") < workflow.index("xattr -dr com.apple.quarantine")
     assert workflow.index("xattr -dr com.apple.quarantine") < workflow.index("python3 scripts/probe_macos_embedded_runtime.py")
     assert workflow.index("python3 scripts/probe_macos_embedded_runtime.py") < workflow.index("Launch app and take screenshots")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("ownerPid", 999), ("windowNumber", 0), ("windowNumber", True),
+    ("layer", 1), ("onScreen", False), ("alpha", 0), ("width", 1),
+    ("height", 1), ("width", "1100"), ("width", float("nan")),
+])
+def test_native_window_must_be_visible_sized_and_owned_by_gui(field, value):
+    report = _identity()
+    report["applications"][0]["windowMetadata"][0][field] = value
+    assert identity_report_problem(json.dumps(report))
+
+
+def test_native_window_ownership_survives_privacy_redacted_titles():
+    report = _identity()
+    report["applications"][0]["windows"] = []
+    report["applications"][0]["windowMetadata"][0]["title"] = ""
+    assert identity_report_problem(json.dumps(report)) is None
+    assert window_report_problem(json.dumps(report)) is None
+
+
+def test_titles_alone_cannot_satisfy_native_window_gate():
+    report = _identity()
+    del report["applications"][0]["windowMetadata"]
+    assert identity_report_problem(json.dumps(report))
+
+
+def test_accessory_python_name_is_also_rejected():
+    report = _identity()
+    helper = copy.deepcopy(report["applications"][0])
+    helper.update(pid=101, activationPolicy=1, localizedName="Python")
+    report["applications"].append(helper)
+    assert "menu name" in identity_report_problem(json.dumps(report))
+
+
+def test_runner_permission_evidence_is_captured_around_api_import():
+    workflow = (Path(__file__).resolve().parents[1]/".github/workflows/ci.yml").read_text(encoding="utf-8")
+    before = workflow.index("screen-before-api-import.png")
+    imported = workflow.index("from voice_flow.gui.api_server import start_api_server")
+    after = workflow.index("screen-after-api-import.png")
+    assert before < imported < after < workflow.index("Build macOS Application Bundle")
+
+
+def test_native_capture_compile_is_bounded_and_uses_workspace_source(tmp_path, monkeypatch):
+    from scripts import run_macos_identity_smoke as runner
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/swiftc")
+    calls = []
+    def compile(command, **kwargs):
+        calls.append((command, kwargs))
+        Path(command[-1]).write_bytes(b"native fixture")
+    monkeypatch.setattr(runner.subprocess, "run", compile)
+    assert runner._compile_identity_capture(tmp_path, tmp_path) == tmp_path/"identity-capture"
+    assert calls[0][0][1] == str(tmp_path/"scripts/capture_macos_app_identity.swift")
+    assert calls[0][1] == {"check": True, "timeout": 60}
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="compiles and queries native metadata on macOS")
+def test_real_swift_capture_reports_schema_without_launching_app(tmp_path):
+    import subprocess
+    from scripts import run_macos_identity_smoke as runner
+    root=Path(__file__).resolve().parents[1]
+    capture=runner._compile_identity_capture(root,tmp_path)
+    expected=tmp_path/"Never Launched.app"
+    result=subprocess.run([str(capture),str(expected)],capture_output=True,text=True,timeout=15)
+    assert result.returncode == 0, result.stderr
+    report=json.loads(result.stdout)
+    assert report["captureSource"] == "CGWindowList"
+    assert report["appPath"] == str(expected.resolve())
+    assert isinstance(report["applications"],list)
+    assert all(type(app["pid"]) is int and type(app["activationPolicy"]) is int for app in report["applications"])
+    assert not any(app["executablePath"].startswith(str(expected) + "/") for app in report["applications"])
+
+
+def test_public_privacy_evidence_is_scoped_bounded_and_redacted(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    entries = [{"eventMessage": "old ignored record"} for _ in range(40)]
+    entries += [{"processID": 100, "eventMessage": "org.python local network api_key=fixture-do-not-upload"},
+                {"eventMessage": "https://example.test/path?credential=fixture", "privateData": "do-not-copy"}]
+    entries += [{"timestamp": str(index), "eventMessage": "LocalNetwork responsible com.uzerkayat.aiproductivityflow " + "x" * 2000}
+                for index in range(118)]
+    def log(command, **kwargs):
+        assert command[:6] == ["/usr/bin/log", "show", "--style", "json", "--last", "15m"]
+        assert 'process == "nehelper"' in command[-1] and 'process == "tccd"' in command[-1]
+        assert "org.python" in command[-1] and "LocalNetwork" in command[-1]
+        assert "--debug" not in command and "--info" not in command
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 8}
+        return SimpleNamespace(stdout=json.dumps(entries))
+    monkeypatch.setattr(runner.subprocess, "run", log)
+    runner._collect_privacy_evidence(tmp_path)
+    text = (tmp_path / "local-network-privacy.redacted.txt").read_text(encoding="utf-8")
+    assert "old ignored record" not in text and "fixture-do-not-upload" not in text
+    assert "credential=fixture" not in text and "do-not-copy" not in text
+    assert "credential-bearing line redacted" in text and "[query redacted]" in text
+    assert "LocalNetwork responsible" in text
+    assert len(text) <= 65536 and len(text.splitlines()) <= 120
+
+
+def test_public_privacy_evidence_failure_is_best_effort(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    monkeypatch.setattr(runner, "_collect_privacy_evidence", lambda out: (_ for _ in ()).throw(ValueError("fixture unavailable")))
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="fixture version"))
+    monkeypatch.setattr(runner.Path, "home", lambda: tmp_path / "home")
+    runner._collect_diagnostics(tmp_path / "Never Launched.app", tmp_path, runner.time.time())
+    assert "public privacy logs: ValueError: fixture unavailable" in (tmp_path / "diagnostic-errors.txt").read_text(encoding="utf-8")
+    assert (tmp_path / "environment.json").is_file()
