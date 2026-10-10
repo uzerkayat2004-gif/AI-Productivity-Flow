@@ -278,11 +278,16 @@ def main(argv: list[str]) -> int:
         print("Missing built .app bundle", file=sys.stderr)
         return 2
     root = Path(__file__).resolve().parents[1]
+    try:
+        from scripts.probe_macos_embedded_runtime import capture_embedded_runtime
+    except ModuleNotFoundError:
+        from probe_macos_embedded_runtime import capture_embedded_runtime
     before = _bundle_pids(app_path)
     # A clean runner is required so an existing instance cannot satisfy this run.
     if before:
         print("Bundle already running before CI smoke; refusing to reuse it", file=sys.stderr)
         return 1
+    capture_embedded_runtime(app_path, out)
     launcher = None
     launched_at = time.time()
     try:

@@ -43,9 +43,14 @@ jobs:
         run: |
           pytest tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v --timeout=60
 
+      - name: Set up Node for headless listener policy fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
   macos-build:
     name: macOS Validation & App Packaging
@@ -79,9 +84,14 @@ jobs:
         run: |
           pytest tests/test_platform_layer.py -v --timeout=60
 
+      - name: Set up Node for headless listener policy fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
       - name: Build macOS Application Bundle (.app, .dmg & .zip)
         run: |

@@ -10,6 +10,11 @@ from pathlib import Path
 
 from PIL import Image
 
+try:
+    from scripts.probe_macos_embedded_runtime import embedded_runtime_problem
+except ModuleNotFoundError:
+    from probe_macos_embedded_runtime import embedded_runtime_problem
+
 
 _APP_WINDOW_MARKERS = ("ai productivity flow", "voice flow")
 _BROWSER_PROCESS_NAMES = (
@@ -138,6 +143,9 @@ def identity_report_problem(text: str) -> str | None:
                 raise ValueError("conflicting duplicate PID")
             by_pid[pid] = app
         owned = [a for a in by_pid.values() if a["executablePath"].startswith(app_path.rstrip("/") + "/")]
+        expected_executable = app_path + "/Contents/MacOS/ai-productivity-flow-launcher"
+        if any(app["executablePath"] != expected_executable for app in owned):
+            return "registered APF process uses Python runtime instead of outer native launcher"
         regular = [a for a in owned if a["activationPolicy"] == 0]
         if len(regular) != 1:
             return f"expected exactly one APF Dock-visible PID, found {len(regular)}"
@@ -221,6 +229,13 @@ def main(argv: list[str]) -> int:
         identity_problem = identity_report_problem(_read(f"identity-{seconds}s.json"))
         if identity_problem:
             print(f"macOS smoke failure at {seconds}s: {identity_problem}.", file=sys.stderr)
+            return 1
+
+    for seconds in (30, 60):
+        app_path = json.loads(_read(f"identity-{seconds}s.json"))["appPath"]
+        runtime_problem = embedded_runtime_problem(_read("embedded-runtime.json"), app_path)
+        if runtime_problem:
+            print(f"macOS smoke failure: {runtime_problem}.", file=sys.stderr)
             return 1
 
     launcher_log = "\n".join((

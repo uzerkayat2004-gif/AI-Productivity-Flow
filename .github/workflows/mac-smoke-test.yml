@@ -56,9 +56,13 @@ jobs:
           lipo -archs "$APP_PATH"/Contents/MacOS/* 2>&1 | tee -a out/gatekeeper.txt || true
           /usr/libexec/PlistBuddy -c Print "$APP_PATH/Contents/Info.plist" | tee out/info-plist.txt || true
 
-      - name: Launch app and take screenshots
+      - name: Probe actual outer embedded runtime identity
         run: |
           xattr -dr com.apple.quarantine "$APP_PATH" || true
+          python3 scripts/probe_macos_embedded_runtime.py "$APP_PATH" out
+
+      - name: Launch app and take screenshots
+        run: |
           EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
           "$APP_PATH/Contents/MacOS/$EXE" > out/app-stdout.txt 2> out/app-stderr.txt &
           PID=$!

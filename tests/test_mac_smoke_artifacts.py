@@ -65,6 +65,7 @@ def _healthy_out(tmp_path: Path) -> Path:
     (out / "app-stderr.txt").write_text("", encoding="utf-8")
     for seconds in (30, 60):
         (out / f"identity-{seconds}s.json").write_text(json.dumps(_identity()), encoding="utf-8")
+    (out / "embedded-runtime.json").write_text(json.dumps(_embedded_runtime()), encoding="utf-8")
     return out
 
 
@@ -116,8 +117,8 @@ def _identity():
         "frontmost": {"pid": 100, "localizedName": "AI Productivity Flow"},
         "applications": [{
             "pid": 100, "localizedName": "AI Productivity Flow",
-            "bundleIdentifier": "com.aiproductivityflow.desktop",
-            "executablePath": "/Applications/AI Productivity Flow.app/Contents/MacOS/python3",
+            "bundleIdentifier": "com.uzerkayat.aiproductivityflow",
+            "executablePath": "/Applications/AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher",
             "activationPolicy": 0, "windows": ["AI Productivity Flow"],
         }],
     }
@@ -256,6 +257,8 @@ def test_ci_runner_requires_engine_wrapper_and_bundle_alive(tmp_path, monkeypatc
     out = tmp_path / "out"
     calls = iter([set(), bundle_pids, bundle_pids, set()])
     monkeypatch.setattr(runner.sys, "platform", "darwin")
+    from scripts import probe_macos_embedded_runtime
+    monkeypatch.setattr(probe_macos_embedded_runtime, "capture_embedded_runtime", lambda *args: None)
     monkeypatch.setattr(runner, "_record_state", lambda *args: None)
     monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner, "_bundle_pids", lambda path: next(calls))
@@ -283,6 +286,8 @@ def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_f
     bundle = tmp_path / "AI Productivity Flow.app"
     bundle.mkdir()
     monkeypatch.setattr(runner.sys, "platform", "darwin")
+    from scripts import probe_macos_embedded_runtime
+    monkeypatch.setattr(probe_macos_embedded_runtime, "capture_embedded_runtime", lambda *args: None)
     monkeypatch.setattr(runner, "_record_state", lambda *args: None)
     monkeypatch.setattr(runner, "_collect_diagnostics", lambda *args: None)
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
@@ -415,3 +420,95 @@ def test_traditional_crash_keeps_header_and_crashed_thread_after_long_other_stac
     assert "Thread 3 Crashed:" in excerpt and "29 frame_29" in excerpt
     assert "30 frame_30" not in excerpt and "fixture-do-not-upload" not in excerpt
     assert len(excerpt) <= 65536
+
+
+
+def _embedded_runtime():
+    app = "/Applications/AI Productivity Flow.app"
+    return {"executable": app + "/Contents/MacOS/ai-productivity-flow-launcher",
+            "prefix": app + "/Contents/Resources/runtime/python", "bundlePath": app,
+            "bundleIdentifier": "com.uzerkayat.aiproductivityflow", "CFBundleName": "AI Productivity Flow",
+            "CFBundleDisplayName": "AI Productivity Flow", "CFBundleExecutable": "ai-productivity-flow-launcher"}
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("executable", "/Applications/AI Productivity Flow.app/Contents/Resources/runtime/python/bin/python3"),
+    ("prefix", "/usr/local"), ("bundlePath", "/Applications/Python.app"),
+    ("bundleIdentifier", "org.python.python"), ("CFBundleName", "Python"),
+    ("CFBundleDisplayName", "Python"), ("CFBundleExecutable", "python3"),
+])
+def test_real_embedded_metadata_rejects_wrong_runtime_identity(field, bad):
+    from scripts.probe_macos_embedded_runtime import embedded_runtime_problem
+    report = _embedded_runtime()
+    report[field] = bad
+    assert embedded_runtime_problem(json.dumps(report), "/Applications/AI Productivity Flow.app")
+
+
+def test_branded_in_memory_python_executable_still_fails_native_identity():
+    report = _identity()
+    report["applications"][0]["executablePath"] = report["appPath"] + "/Contents/Resources/runtime/python/bin/python3"
+    assert "outer native launcher" in identity_report_problem(json.dumps(report))
+
+
+def test_accessory_child_must_also_use_outer_native_launcher():
+    report = _identity()
+    helper = copy.deepcopy(report["applications"][0])
+    helper.update(pid=101, activationPolicy=1, executablePath=report["appPath"] + "/Contents/Resources/runtime/python/bin/python3")
+    report["applications"].append(helper)
+    assert identity_report_problem(json.dumps(report))
+
+
+def test_embedded_runtime_evidence_required_by_smoke_checker(tmp_path):
+    out = _healthy_out(tmp_path)
+    (out / "embedded-runtime.json").unlink()
+    assert main(["check", str(out)]) == 1
+
+
+def test_embedded_runtime_probe_invokes_actual_outer_launcher_without_app_imports(tmp_path, monkeypatch):
+    from pathlib import PurePosixPath
+    from types import SimpleNamespace
+    from scripts import probe_macos_embedded_runtime as probe
+    app = PurePosixPath("/Applications/AI Productivity Flow.app")
+    commands = []
+    def run(command, **kwargs):
+        commands.append(command)
+        assert kwargs["timeout"] == 15
+        return SimpleNamespace(returncode=0, stdout=json.dumps(_embedded_runtime()),
+                               stderr="api_key=fixture-do-not-upload\nhttps://example.test/path?credential=fixture\n")
+    monkeypatch.setattr(probe.subprocess, "run", run)
+    # Resolve a POSIX app path while output stays in the platform's temp fixture;
+    # the real metadata validator remains active, including on Windows.
+    probe.capture_embedded_runtime(SimpleNamespace(resolve=lambda: app), tmp_path / "out")
+    assert commands[0][0] == str(app / "Contents/MacOS/ai-productivity-flow-launcher")
+    assert commands[0][1] == "-c"
+    assert "from Foundation import NSBundle" in commands[0][2]
+    assert "AppKit" not in commands[0][2] and "voice_flow" not in commands[0][2]
+    errors = (tmp_path / "out/embedded-runtime-stderr.txt").read_text(encoding="utf-8")
+    assert "fixture-do-not-upload" not in errors and "credential=fixture" not in errors
+    assert "redacted" in errors
+
+
+@pytest.mark.parametrize("text", ["", "{}", "[]", "null", "not JSON"])
+def test_missing_or_malformed_embedded_runtime_is_rejected(text):
+    from scripts.probe_macos_embedded_runtime import embedded_runtime_problem
+    assert embedded_runtime_problem(text, "/Applications/AI Productivity Flow.app")
+
+
+
+def test_ci_refuses_existing_app_before_embedded_runtime_probe(tmp_path, monkeypatch):
+    from scripts import run_macos_identity_smoke as runner
+    from scripts import probe_macos_embedded_runtime as probe
+    bundle = tmp_path / "AI Productivity Flow.app"
+    bundle.mkdir()
+    monkeypatch.setattr(runner.sys, "platform", "darwin")
+    monkeypatch.setattr(runner, "_bundle_pids", lambda path: {100})
+    monkeypatch.setattr(probe, "capture_embedded_runtime", lambda *args: pytest.fail("probe must not execute for a preexisting app"))
+    assert runner.main(["smoke", str(bundle), str(tmp_path / "out")]) == 1
+
+
+def test_release_runtime_probe_preserves_quarantine_diagnostic_order():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/mac-smoke-test.yml").read_text(encoding="utf-8")
+    assert workflow.index("Gatekeeper and signing check") < workflow.index("xattr -dr com.apple.quarantine")
+    assert workflow.index("xattr -dr com.apple.quarantine") < workflow.index("python3 scripts/probe_macos_embedded_runtime.py")
+    assert workflow.index("python3 scripts/probe_macos_embedded_runtime.py") < workflow.index("Launch app and take screenshots")
