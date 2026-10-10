@@ -41,6 +41,12 @@ MIN_CHUNK_SECONDS = 0.30
 MAX_CHUNK_SECONDS = float(getattr(config, "max_chunk_seconds", 8.0) or 8.0)
 FORCED_CHUNK_OVERLAP_SECONDS = 0.40
 MAX_STARTUP_STREAM_BUFFER_SECONDS = 5.0
+# Speakers often release the hotkey while still finishing their last word.
+# Capture continues after release only while speech is still arriving, and
+# stops as soon as this much real (non-hangover) silence follows it.
+RELEASE_TAIL_QUIET_SECONDS = 0.12
+RELEASE_TAIL_MAX_SECONDS = 0.35
+_RELEASE_TAIL_POLL_SECONDS = 0.01
 
 
 class AudioRecorder:
@@ -66,6 +72,9 @@ class AudioRecorder:
         self._chunk: list[NDArray[np.float32]] = []
         self._chunk_start_mono: float | None = None
         self._last_voice_mono: float | None = None
+        # Last block with active speech (no VAD hangover), kept across chunk
+        # splits so the release tail can tell whether the speaker is mid-word.
+        self._last_speech_mono: float | None = None
         self._chunk_voice_samples = 0
         # Duration at the front of the open chunk that was copied from the
         # preceding forced chunk.  It is carried with the *next* dispatch,
@@ -134,6 +143,7 @@ class AudioRecorder:
                 chunk_list.clear()
                 self._chunk_start_mono = None
                 self._last_voice_mono = None
+                self._last_speech_mono = None
                 self._chunk_voice_samples = 0
                 self._level = 0.0
                 self._input_overflow_count = 0
@@ -253,6 +263,31 @@ class AudioRecorder:
             log.info("[AUDIO] Started hardware input stream (%d Hz, %d ch)", self._native_sr, self._native_ch)
             return True
 
+    def capture_release_tail(
+        self,
+        *,
+        quiet_seconds: float = RELEASE_TAIL_QUIET_SECONDS,
+        max_seconds: float = RELEASE_TAIL_MAX_SECONDS,
+    ) -> float:
+        """Keep the microphone open briefly after release while speech continues.
+
+        Returns immediately when the speaker had already paused, so releasing
+        after a natural pause stays instant.  Otherwise waits until
+        ``quiet_seconds`` of silence follow the last speech block, never
+        longer than ``max_seconds``.  Returns the seconds spent waiting.
+        """
+        started = time.monotonic()
+        deadline = started + max(0.0, float(max_seconds))
+        quiet = max(0.0, float(quiet_seconds))
+        while True:
+            with self._lock:
+                live = self._recording and getattr(self, "_stream", None) is not None
+                last_speech = getattr(self, "_last_speech_mono", None)
+            now = time.monotonic()
+            if not live or last_speech is None or now - last_speech >= quiet or now >= deadline:
+                return now - started
+            time.sleep(min(_RELEASE_TAIL_POLL_SECONDS, max(0.0, deadline - now)))
+
     def stop(self) -> NDArray[np.float32]:
         """Stop recording and return the resampled 16kHz 1-D float32 audio array."""
         audio, _tail, _overlap = self._stop_capture(take_open_chunk=False)
@@ -308,6 +343,7 @@ class AudioRecorder:
                 chunk_list.clear()
                 self._chunk_start_mono = None
                 self._last_voice_mono = None
+                self._last_speech_mono = None
                 self._chunk_voice_samples = 0
                 self._chunk_overlap_prefix_seconds = 0.0
                 input_overflows = int(getattr(self, "_input_overflow_count", 0))
@@ -600,6 +636,7 @@ class AudioRecorder:
 
             if is_active:
                 self._last_voice_mono = now_mono
+                self._last_speech_mono = now_mono
                 self._chunk_voice_samples += frames
             elif is_hangover:
                 self._last_voice_mono = now_mono

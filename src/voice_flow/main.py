@@ -1302,6 +1302,14 @@ class VoiceFlowApp:
                         session["app_title"] = new_style.app_name
                         session["app_category"] = new_style.category
                         session["style_id"] = new_style.style_id
+            release_tail = getattr(self.audio, "capture_release_tail", None)
+            if callable(release_tail):
+                try:
+                    tail_wait = release_tail()
+                    if isinstance(tail_wait, (int, float)) and tail_wait > 0.005:
+                        log.debug("[AUDIO] Captured %.0f ms of speech after release", tail_wait * 1000)
+                except Exception as exc:
+                    log.debug("[AUDIO] Release tail capture failed: %s", exc)
             # Capture this once at release so the tail worker, stream harvest,
             # whole-buffer fallback, and polish all share one absolute clock.
             post_release_deadline = time.monotonic() + POST_RELEASE_WORK_BUDGET_SECONDS

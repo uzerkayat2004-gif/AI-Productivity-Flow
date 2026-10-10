@@ -793,6 +793,46 @@ def test_release_uses_quiescent_tail_snapshot_and_forwards_its_overlap(monkeypat
     assert submitted[0][1]["overlap_prefix_seconds"] == 0.75
 
 
+def test_release_captures_the_spoken_tail_before_stopping_the_microphone(monkeypatch) -> None:
+    session = DictationSession(target_hwnd=123, app_title="Editor", app_category="smart_clean", style_id="smart_clean", started_at=0.0)
+    calls: list[str] = []
+    stream = SimpleNamespace(
+        accepted_count=lambda: 1,
+        submit_native=lambda *_args, **_kwargs: calls.append("submit"),
+        end_session=lambda **_kwargs: calls.append("end"),
+    )
+    audio = SimpleNamespace(
+        _native_sr=16000,
+        capture_release_tail=lambda: calls.append("tail") or 0.2,
+        stop_and_take_open_chunk=lambda: (calls.append("stop") or np.ones(16000, dtype=np.float32), np.ones(1600, dtype=np.float32), 0.0),
+    )
+
+    class FakeThread:
+        def __init__(self, *, target, args, kwargs, daemon):
+            pass
+
+        def start(self) -> None:
+            return None
+
+    app = object.__new__(VoiceFlowApp)
+    app._state_lock = threading.RLock()
+    app.state = DictationState.RECORDING
+    app.session = session
+    app._record_watchdog = None
+    app._stream_stt = stream
+    app.audio = audio
+    app.archive = SimpleNamespace(save=lambda _audio: None)
+    app._set_hotkeys_recording_state = lambda _active: None
+    app._streaming_stt_enabled = lambda: True
+    app._overlay_call = lambda *_args, **_kwargs: None
+
+    monkeypatch.setattr(main_module.storage, "add_dictation", lambda *_args, **_kwargs: SimpleNamespace(id=1))
+    monkeypatch.setattr(main_module.threading, "Thread", FakeThread)
+
+    assert app._on_dictation_finish() is True
+    assert calls == ["tail", "stop", "submit", "end"]
+
+
 def test_history_failure_after_valid_text_does_not_brick_state(monkeypatch) -> None:
     session = DictationSession(
         target_hwnd=123,
