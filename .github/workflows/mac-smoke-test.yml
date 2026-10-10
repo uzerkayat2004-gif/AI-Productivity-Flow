@@ -66,6 +66,9 @@ jobs:
           for t in 5 15 30 60; do
             sleep $(( t - ${LAST:-0} )); LAST=$t
             screencapture -x out/screen-${t}s.png || true
+            if [ "$t" = 30 ] || [ "$t" = 60 ]; then
+              osascript -l JavaScript scripts/capture_macos_app_identity.js "$APP_PATH" > "out/identity-${t}s.json"
+            fi
             if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a out/alive.txt; else echo "${t}s: EXITED" | tee -a out/alive.txt; fi
           done
           osascript -e 'tell application "System Events"
@@ -76,7 +79,8 @@ jobs:
             return outText
           end tell' > out/windows.txt 2>&1 || true
           cp "$HOME/.voice_flow/gui_launcher.log" out/gui_launcher.log 2>/dev/null || true
-          ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
+          # Identity snapshots contain process metadata without command lines.
+          cp out/identity-60s.json out/processes.txt
           kill $PID 2>/dev/null || true
 
       - name: Set up Python for artifact checks

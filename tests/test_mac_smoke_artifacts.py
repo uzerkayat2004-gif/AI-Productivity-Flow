@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
+import copy
+import json
+
+import pytest
+
 from pathlib import Path
 
 from scripts.check_mac_smoke_artifacts import (
     app_exited,
     is_mostly_blank,
+    identity_report_problem,
     logs_mention_system_browser_fallback,
     logs_mention_win32_keyboard_hook,
     main,
@@ -57,6 +63,8 @@ def _healthy_out(tmp_path: Path) -> Path:
     )
     (out / "app-stdout.txt").write_text("ready\n", encoding="utf-8")
     (out / "app-stderr.txt").write_text("", encoding="utf-8")
+    for seconds in (30, 60):
+        (out / f"identity-{seconds}s.json").write_text(json.dumps(_identity()), encoding="utf-8")
     return out
 
 
@@ -100,3 +108,196 @@ def test_system_browser_fallback_log_fails_smoke_check(tmp_path: Path):
     )
     assert logs_mention_system_browser_fallback((out / "gui_launcher.log").read_text(encoding="utf-8"))
     assert main(["check_mac_smoke_artifacts.py", str(out)]) == 1
+
+
+def _identity():
+    return {
+        "appPath": "/Applications/AI Productivity Flow.app",
+        "frontmost": {"pid": 100, "localizedName": "AI Productivity Flow"},
+        "applications": [{
+            "pid": 100, "localizedName": "AI Productivity Flow",
+            "bundleIdentifier": "com.aiproductivityflow.desktop",
+            "executablePath": "/Applications/AI Productivity Flow.app/Contents/MacOS/python3",
+            "activationPolicy": 0, "windows": ["AI Productivity Flow"],
+        }],
+    }
+
+
+def test_python_named_legacy_apf_window_is_rejected():
+    assert window_report_problem("Finder:\npython3: tk\npython3: AI Productivity Flow")
+
+
+def test_old_rc2_python_native_identity_is_rejected():
+    report = _identity()
+    report["applications"][0]["localizedName"] = "python3"
+    assert "menu name" in identity_report_problem(json.dumps(report))
+
+
+def test_two_dock_visible_pids_are_rejected():
+    report = _identity()
+    helper = copy.deepcopy(report["applications"][0])
+    helper.update(pid=101, windows=["tk"])
+    report["applications"].append(helper)
+    assert "found 2" in identity_report_problem(json.dumps(report))
+
+
+def test_accessory_helper_and_unrelated_python_are_allowed():
+    report = _identity()
+    helper = copy.deepcopy(report["applications"][0])
+    helper.update(pid=101, localizedName="python3", activationPolicy=1, windows=["tk"])
+    unrelated = copy.deepcopy(helper)
+    unrelated.update(pid=102, activationPolicy=0, executablePath="/usr/local/bin/python3")
+    report["applications"].extend([helper, unrelated])
+    assert identity_report_problem(json.dumps(report)) is None
+
+
+def test_multiple_windows_and_identical_duplicate_pid_count_once():
+    report = _identity()
+    report["applications"][0]["windows"].append("Preferences")
+    report["applications"].append(copy.deepcopy(report["applications"][0]))
+    assert identity_report_problem(json.dumps(report)) is None
+
+
+def test_conflicting_duplicate_pid_is_rejected():
+    report = _identity()
+    duplicate = copy.deepcopy(report["applications"][0])
+    duplicate["activationPolicy"] = 1
+    report["applications"].append(duplicate)
+    assert "duplicate PID" in identity_report_problem(json.dumps(report))
+
+
+@pytest.mark.parametrize("field", ["pid", "localizedName", "bundleIdentifier", "executablePath", "activationPolicy", "windows"])
+def test_missing_application_identity_field_is_rejected(field):
+    report = _identity()
+    del report["applications"][0][field]
+    assert "malformed" in identity_report_problem(json.dumps(report))
+
+
+@pytest.mark.parametrize("field,value", [("pid", True), ("activationPolicy", "0"), ("activationPolicy", 3), ("windows", "AI Productivity Flow"), ("executablePath", ""), ("localizedName", None)])
+def test_malformed_application_identity_field_is_rejected(field, value):
+    report = _identity()
+    report["applications"][0][field] = value
+    assert "malformed" in identity_report_problem(json.dumps(report))
+
+
+@pytest.mark.parametrize("text", ["", "{}", "[]", "null", "not JSON"])
+def test_missing_or_malformed_identity_is_rejected(text):
+    assert identity_report_problem(text)
+
+
+def test_branded_gui_must_own_native_window():
+    report = _identity()
+    report["applications"][0]["windows"] = []
+    assert "own an app window" in identity_report_problem(json.dumps(report))
+
+
+@pytest.mark.parametrize("seconds", [30, 60])
+def test_each_identity_snapshot_is_required(tmp_path, seconds):
+    out = _healthy_out(tmp_path)
+    (out / f"identity-{seconds}s.json").unlink()
+    assert main(["check", str(out)]) == 1
+
+
+def test_invalid_first_snapshot_cannot_be_hidden_by_valid_second(tmp_path):
+    out = _healthy_out(tmp_path)
+    report = _identity()
+    report["applications"][0]["localizedName"] = "python3"
+    (out / "identity-30s.json").write_text(json.dumps(report), encoding="utf-8")
+    assert main(["check", str(out)]) == 1
+
+
+def test_capture_contract_uses_native_identity_without_command_lines():
+    root = Path(__file__).resolve().parents[1]
+    capture = (root / "scripts/capture_macos_app_identity.js").read_text(encoding="utf-8")
+    workflow = (root / ".github/workflows/mac-smoke-test.yml").read_text(encoding="utf-8")
+    for field in ("pid", "localizedName", "bundleIdentifier", "executablePath", "activationPolicy", "windows", "frontmost"):
+        assert field in capture
+    assert "NSWorkspace" in capture
+    assert "unixId: pid" in capture
+    assert '"$t" = 30' in workflow and '"$t" = 60' in workflow
+    assert "ps aux" not in workflow
+    assert "capture_macos_app_identity.js" in workflow
+
+
+def test_frontmost_gui_menu_identity_is_cross_checked():
+    report = _identity()
+    report["frontmost"]["localizedName"] = "python3"
+    assert "menu name" in identity_report_problem(json.dumps(report))
+
+
+@pytest.mark.parametrize("frontmost", [{}, {"pid": "100", "localizedName": "AI Productivity Flow"}, {"pid": 100, "localizedName": ""}])
+def test_malformed_frontmost_identity_is_rejected(frontmost):
+    report = _identity()
+    report["frontmost"] = frontmost
+    assert "malformed" in identity_report_problem(json.dumps(report))
+
+
+def test_built_bundle_ci_identity_smoke_contract():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    runner = (root / "scripts/run_macos_identity_smoke.py").read_text(encoding="utf-8")
+    assert workflow.count("tests/test_macos_app_identity.py") == 2
+    assert "run_macos_identity_smoke.py" in workflow
+    assert "if: always()" in workflow
+    assert "for seconds in (30, 60)" in runner
+    assert '"open", "-n", "-W"' in runner
+    assert "check_mac_smoke_artifacts.py" in runner
+    assert "_bundle_pids(app_path) - before" in runner
+    assert "pkill" not in runner
+
+
+@pytest.mark.parametrize("wrapper_exit, bundle_pids, expected", [(0, {101}, 1), (None, set(), 1), (None, {100, 101}, 0)])
+def test_ci_runner_requires_engine_wrapper_and_bundle_alive(tmp_path, monkeypatch, wrapper_exit, bundle_pids, expected):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+
+    bundle = tmp_path / "AI Productivity Flow.app"
+    bundle.mkdir()
+    out = tmp_path / "out"
+    calls = iter([set(), bundle_pids, bundle_pids, set()])
+    monkeypatch.setattr(runner.sys, "platform", "darwin")
+    monkeypatch.setattr(runner, "_bundle_pids", lambda path: next(calls))
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    wrapper = SimpleNamespace(poll=lambda: wrapper_exit, terminate=lambda: None, wait=lambda **kwargs: None)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: wrapper)
+
+    def run(command, **kwargs):
+        if command[0] == "osascript":
+            kwargs["stdout"].write(json.dumps(_identity()))
+        if "check_mac_smoke_artifacts.py" in str(command[1]):
+            exited = "EXITED" in (out / "alive.txt").read_text(encoding="utf-8")
+            return SimpleNamespace(returncode=int(exited))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    assert runner.main(["smoke", str(bundle), str(out)]) == expected
+    assert ("EXITED" in (out / "alive.txt").read_text(encoding="utf-8")) == bool(expected)
+
+
+def test_ci_runner_preserves_capture_failure_and_cleans_wrapper_when_inventory_fails(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+
+    bundle = tmp_path / "AI Productivity Flow.app"
+    bundle.mkdir()
+    monkeypatch.setattr(runner.sys, "platform", "darwin")
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    inventories = iter([set(), RuntimeError("inventory unavailable")])
+
+    def inventory(path):
+        result = next(inventories)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    terminated = []
+    wrapper = SimpleNamespace(poll=lambda: None, terminate=lambda: terminated.append(True), wait=lambda **kwargs: None)
+    monkeypatch.setattr(runner, "_bundle_pids", inventory)
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *args, **kwargs: wrapper)
+    def capture_failure(*args, **kwargs):
+        raise RuntimeError("original capture failure")
+    monkeypatch.setattr(runner.subprocess, "run", capture_failure)
+    with pytest.raises(RuntimeError, match="original capture failure"):
+        runner.main(["smoke", str(bundle), str(tmp_path / "out")])
+    assert terminated == [True]
+    assert "inventory unavailable" in (tmp_path / "out/cleanup-errors.txt").read_text(encoding="utf-8")

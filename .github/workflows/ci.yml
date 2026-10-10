@@ -45,7 +45,7 @@ jobs:
 
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
   macos-build:
     name: macOS Validation & App Packaging
@@ -81,11 +81,25 @@ jobs:
 
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_app_identity.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
       - name: Build macOS Application Bundle (.app, .dmg & .zip)
         run: |
           python scripts/build_macos_app.py --bundle-runtime --dmg
+
+      - name: Verify built macOS native application identity
+        timeout-minutes: 3
+        run: |
+          mkdir -p out/mac-native-identity
+          python scripts/run_macos_identity_smoke.py "dist/AI Productivity Flow.app" out/mac-native-identity
+
+      - name: Upload macOS native identity diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-native-identity-${{ github.run_id }}
+          path: out/mac-native-identity/
+          if-no-files-found: warn
 
       - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4

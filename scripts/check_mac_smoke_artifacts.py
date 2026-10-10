@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import sys
@@ -71,6 +72,8 @@ def window_report_problem(text: str) -> str | None:
             continue
         structured = True
         has_app = _mentions_app_window(process) or _mentions_app_window(windows)
+        if has_app and re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", process, re.IGNORECASE):
+            return "APF window belongs to Python-named application"
         if _is_browser_process(process) and has_app:
             browser_hit = process
         elif not _is_browser_process(process) and has_app:
@@ -92,6 +95,56 @@ def window_report_problem(text: str) -> str | None:
     if not _mentions_app_window(stripped):
         return "no app window"
     return None
+
+
+def identity_report_problem(text: str) -> str | None:
+    """Validate one snapshot; count distinct bundle-owned regular application PIDs."""
+    try:
+        report = json.loads(text)
+        app_path = report["appPath"]
+        applications = report["applications"]
+        frontmost = report["frontmost"]
+        if not isinstance(app_path, str) or not app_path.startswith("/") or not app_path.endswith(".app"):
+            raise ValueError("invalid appPath")
+        if not isinstance(frontmost, dict) or not isinstance(frontmost.get("localizedName"), str) or not frontmost["localizedName"]:
+            raise ValueError("invalid frontmost identity")
+        if type(frontmost.get("pid")) is not int or frontmost["pid"] <= 0:
+            raise ValueError("invalid frontmost PID")
+        if not isinstance(applications, list):
+            raise ValueError("invalid applications")
+        by_pid = {}
+        for app in applications:
+            if not isinstance(app, dict):
+                raise ValueError("invalid application")
+            pid = app["pid"]
+            policy = app["activationPolicy"]
+            if type(pid) is not int or pid <= 0 or type(policy) is not int or policy not in (0, 1, 2):
+                raise ValueError("invalid PID or activation policy")
+            for field in ("localizedName", "bundleIdentifier", "executablePath"):
+                if not isinstance(app[field], str):
+                    raise ValueError(f"invalid {field}")
+            if not app["localizedName"] or not app["executablePath"].startswith("/"):
+                raise ValueError("missing native application identity")
+            windows = app["windows"]
+            if not isinstance(windows, list) or any(not isinstance(w, str) for w in windows):
+                raise ValueError("invalid windows")
+            if pid in by_pid and by_pid[pid] != app:
+                raise ValueError("conflicting duplicate PID")
+            by_pid[pid] = app
+        owned = [a for a in by_pid.values() if a["executablePath"].startswith(app_path.rstrip("/") + "/")]
+        regular = [a for a in owned if a["activationPolicy"] == 0]
+        if len(regular) != 1:
+            return f"expected exactly one APF Dock-visible PID, found {len(regular)}"
+        gui = regular[0]
+        if gui["localizedName"] != "AI Productivity Flow":
+            return "APF native application/menu name is not AI Productivity Flow"
+        if frontmost["pid"] == gui["pid"] and frontmost["localizedName"] != gui["localizedName"]:
+            return "frontmost APF menu name disagrees with native application identity"
+        if not any(_mentions_app_window(w) for w in gui["windows"]):
+            return "branded APF desktop GUI does not own an app window"
+        return None
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"missing or malformed application identity evidence: {exc}"
 
 
 def is_mostly_blank(image: Image.Image) -> bool:
@@ -157,6 +210,12 @@ def main(argv: list[str]) -> int:
     if window_problem:
         print(f"macOS smoke failure: {window_problem}.", file=sys.stderr)
         return 1
+
+    for seconds in (30, 60):
+        identity_problem = identity_report_problem(_read(f"identity-{seconds}s.json"))
+        if identity_problem:
+            print(f"macOS smoke failure at {seconds}s: {identity_problem}.", file=sys.stderr)
+            return 1
 
     launcher_log = "\n".join((
         _read("gui_launcher.log"),
