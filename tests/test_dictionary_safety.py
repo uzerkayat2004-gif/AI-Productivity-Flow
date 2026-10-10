@@ -210,6 +210,41 @@ def test_ordinary_dictionary_words_do_not_override_polished_speech(monkeypatch: 
     assert engine.apply_dictionary_post_processing("kubernetes is ready") == "Kubernetes is ready"
 
 
+def test_ordinary_saved_words_do_not_replace_words_the_speaker_said(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A saved ordinary word must not rewrite the word the speaker actually said."""
+    source = _DictionarySource([
+        "Hey", "Here", "Meeting", "Report", "Model", "Feature", "Cloud", "Voice", "Flow",
+        "Kubernetes", "Ada", "VoiceFlow", "HyperKube",
+    ])
+    corrections = [
+        {"wrong_text": "hey", "correct_text": "here"},
+        {"wrong_text": "send the report", "correct_text": "Kubernetes"},
+        {"wrong_text": "hyper cube", "correct_text": "HyperKube"},
+    ]
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_entries", source.entries)
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_revision", lambda: source.revision)
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_snapshot",
+        lambda: (source.revision, list(source.words), corrections),
+    )
+    monkeypatch.setattr(
+        "voice_flow.dictionary.storage.get_dictionary_corrections",
+        lambda *args, **kwargs: corrections,
+    )
+    monkeypatch.setattr("voice_flow.dictionary.storage.get_snippets", lambda *args, **kwargs: [])
+    engine = DictionaryEngine()
+
+    meeting = "The meeting report used that model feature in the cloud."
+    greeting = "Hey, I'm here and the voice flow is ready."
+    assert engine.apply_dictionary_post_processing(meeting) == meeting
+    assert engine.apply_dictionary_post_processing(greeting) == greeting
+    assert engine.apply_dictionary_post_processing("kubernetes.") == "Kubernetes."
+    assert engine.apply_dictionary_post_processing("ada's notes") == "Ada's notes"
+    assert engine.apply_dictionary_post_processing("voiceflow is ready") == "VoiceFlow is ready"
+    assert engine.apply_dictionary_post_processing("Send the Hyper Kube update.") == "Send the HyperKube update."
+    assert engine.apply_dictionary_post_processing("hyper cube") == "HyperKube"
+
+
 def test_filler_noise_never_reaches_stt_prompt_or_hints(monkeypatch: pytest.MonkeyPatch) -> None:
     """Greeting/filler/deictic terms carry no vocabulary value and make STT
     overproduce them; they must be excluded from bias prompts and hints."""

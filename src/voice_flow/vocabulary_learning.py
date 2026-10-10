@@ -42,6 +42,9 @@ settings setting menu menus panel panels mode modes search profile profiles acco
 input output response result results prompt prompts summary summaries history recording
 recordings transcription transcript document documents file files folder folders desktop
 window windows screen screenshot application website service services option options content
+report reports word words sentence sentences note notes issue issues problem problems
+idea ideas point points test tests error errors bug bugs data saved actual dictionary
+phrase phrases spell spelling grammar article articles comma period question answer
 context format formatting font fonts theme themes language languages microphone
 January February March April May June July August September October November December
 Monday Tuesday Wednesday Thursday Friday Saturday Sunday spring summer autumn winter
@@ -298,6 +301,20 @@ def extract_vocabulary_candidates(text: str, *, limit: int = 24) -> list[str]:
             if len(result) >= max(1, limit):
                 break
     return result
+
+
+def is_ordinary_spoken_phrase(value: str) -> bool:
+    """Whether every word is normal speech the speaker already said.
+
+    Dictionary replacement must not fire on these phrases. A mishearing such
+    as "hyper cube" or a name such as "Ada" is not ordinary.
+    """
+    if not isinstance(value, str):
+        return False
+    words = [word.casefold() for word in re.findall(r"[^\W_]+", value, re.UNICODE)]
+    if not words:
+        return False
+    return all(word in _NOISE or word in _COMMON for word in words)
 
 
 def is_noise_variant(variant: str) -> bool:

@@ -696,6 +696,7 @@ def test_history_migration_uses_raw_repeats_and_preserves_legacy_row(store):
                 ("Use GitHub every day", "Use InventedCloud every day"),
             )
         conn.execute("DELETE FROM settings WHERE key = 'history_vocab_seeded_v5'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
 
     store.migrate_learned_vocabulary()
     assert "GitHub" in store.get_dictionary_words()
@@ -775,6 +776,7 @@ def test_history_migration_bounds_each_raw_record_before_extracting(store):
                 ("a " * 6_000 + " HyperKube", "HyperKube"),
             )
         conn.execute("DELETE FROM settings WHERE key = 'history_vocab_seeded_v5'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
 
     store.auto_seed_history_vocabulary()
     assert "HyperKube" not in store.get_dictionary_words()
@@ -788,6 +790,7 @@ def test_v5_migration_discards_unvalidated_legacy_correction_counts(store):
             "VALUES ('Kubernetes', 'cuber netties', 3, 'suggested', 'correction', 'now', 'now')"
         )
         conn.execute("DELETE FROM settings WHERE key = 'history_vocab_seeded_v5'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
 
     store.auto_seed_history_vocabulary()
     assert "Kubernetes" not in store.get_dictionary_words()
@@ -818,6 +821,7 @@ def test_v5_migration_rebuilds_legacy_evidence_from_successful_raw_records(store
                 "VALUES (datetime('now'), 'HyperKube', 'HyperKube', 'success')"
             )
         conn.execute("DELETE FROM settings WHERE key = 'history_vocab_seeded_v5'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
 
     store.auto_seed_history_vocabulary()
     assert "HyperKube" in store.get_dictionary_words()
@@ -836,6 +840,7 @@ def test_disabled_setting_defers_v5_migration_until_enabled(store):
                 "VALUES (datetime('now'), 'HyperKube', 'HyperKube', 'success')"
             )
         conn.execute("DELETE FROM settings WHERE key = 'history_vocab_seeded_v5'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
     store.save_setting("dictionary_auto_learning_enabled", False)
     assert store.migrate_learned_vocabulary() == 0
     assert not store.get_setting("lexicon_migration_v2", False)

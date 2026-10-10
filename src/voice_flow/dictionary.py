@@ -14,7 +14,11 @@ import re
 import threading
 
 from voice_flow.storage import storage
-from voice_flow.vocabulary_learning import is_ambiguous_spaced_alias, is_noise_variant
+from voice_flow.vocabulary_learning import (
+    is_ambiguous_spaced_alias,
+    is_noise_variant,
+    is_ordinary_spoken_phrase,
+)
 
 log = logging.getLogger(__name__)
 
@@ -80,10 +84,6 @@ _STOPWORDS = {
     "ok", "okay", "yes", "yeah", "no",
     "is", "are", "was", "were", "be", "been",
 }
-# Ordinary words are not vocabulary. A saved "Hey" or a learned "hey" -> "here"
-# correction must not override Nemotron's capitalization or a Voice Flow
-# cleanup. "hear" is included because it is the usual mis-hearing of "here".
-_ORDINARY_DICTATION_WORDS = _STOPWORDS | {"hear"}
 _CONTRACTION_TAIL_RE = re.compile(r"['’](?:re|ve|ll|d|m|t)\b", re.IGNORECASE)
 _POSSESSIVE_TAIL_RE = re.compile(r"['’]s\b", re.IGNORECASE)
 
@@ -157,30 +157,16 @@ def _letters_only(value: str) -> str:
 
 
 def _dictionary_rule_would_rewrite_ordinary_speech(rule: _Rule) -> bool:
-    """Whether this rule would fight built-in or Voice Flow polish.
+    """Whether this rule would replace words the speaker actually said.
 
-    Snippets stay, and so do real names and heard-as phrases. A single
-    ordinary word must not be recased, and one ordinary word must not be
-    swapped for another.
+    Snippets stay. A heard-as phrase stays when it is not normal speech
+    ("hyper cube"). Same-letter names and technical spellings stay
+    ("Kubernetes", "Ada", "OpenAI"). Ordinary words and ordinary phrases
+    ("meeting", "report", "hey there", "send the report") do not.
     """
     if rule.snippet:
         return False
-    trigger = rule.trigger.strip()
-    replacement = rule.replacement.strip()
-    if any(char.isspace() for char in trigger) or any(char.isspace() for char in replacement):
-        return False
-    trigger_key = re.sub(r"[^\w']+", "", trigger).casefold()
-    replacement_key = re.sub(r"[^\w']+", "", replacement).casefold()
-    if not trigger_key:
-        return False
-    same_letters = _letters_only(trigger_key) == _letters_only(replacement_key)
-    if same_letters and trigger_key in _ORDINARY_DICTATION_WORDS:
-        return True
-    return (
-        trigger_key in _ORDINARY_DICTATION_WORDS
-        and replacement_key in _ORDINARY_DICTATION_WORDS
-        and not same_letters
-    )
+    return is_ordinary_spoken_phrase(rule.trigger)
 
 
 def _rule_pattern(trigger: str) -> re.Pattern[str]:
@@ -206,10 +192,13 @@ def _splits_contraction(match: re.Match[str], rule: _Rule) -> bool:
         return True
     if _POSSESSIVE_TAIL_RE.match(tail):
         # "Ada's notes" may take the saved name casing. An ordinary word
-        # such as "it" must not turn "it's" into a different word plus "'s".
+        # such as "it" or "meeting" must not rewrite the possessive.
         same_letters = _letters_only(rule.trigger) == _letters_only(rule.replacement)
-        trigger_key = re.sub(r"[^\w']+", "", rule.trigger).casefold()
-        return not (same_letters and trigger_key not in _ORDINARY_DICTATION_WORDS and not rule.snippet)
+        return not (
+            same_letters
+            and not rule.snippet
+            and not is_ordinary_spoken_phrase(rule.trigger)
+        )
     return False
 
 
@@ -468,6 +457,10 @@ class DictionaryEngine:
                 if rule.snippet:
                     continue
                 for alias in generated_spaced_aliases(rule.trigger):
+                    # VoiceFlow splits into "Voice Flow", which is ordinary
+                    # speech. Do not rewrite that phrase. Hyper Kube stays.
+                    if is_ordinary_spoken_phrase(alias):
+                        continue
                     alias_key = alias.casefold()
                     if alias_key in seen:
                         continue

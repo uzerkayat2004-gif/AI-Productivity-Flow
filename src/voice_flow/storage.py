@@ -700,6 +700,7 @@ class StorageEngine:
         self._seed_tts_models()
         self.auto_seed_history_vocabulary()
         self.migrate_vocabulary_quality()
+        self.clear_saved_dictionary_text()
         try:
             self.sync_media_to_history()
         except Exception:
@@ -3874,9 +3875,52 @@ class StorageEngine:
             if changed:
                 self._touch_lexicon()
 
+    def clear_saved_dictionary_text(self) -> int:
+        """Delete saved dictionary rewrite data once.
+
+        Older rows replaced ordinary speech with dictionary words. History,
+        snippets, API keys, and unrelated settings stay. The reset flag stops
+        a later history import from putting those rows back.
+        """
+        removed = 0
+        now = datetime.datetime.now().isoformat(timespec="seconds")
+        try:
+            with self._lexicon_lock:
+                with self._get_conn_ctx() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    if self._read_setting(conn, "dictionary_user_reset_v1") is True:
+                        return 0
+                    tables = {
+                        row[0]
+                        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+                    }
+                    for table in (
+                        "dictionary_keys",
+                        "correction_keys",
+                        "lexicon_candidate_observations",
+                        "dictionary",
+                        "dictionary_corrections",
+                        "lexicon_candidates",
+                    ):
+                        if table not in tables:
+                            continue
+                        removed += int(conn.execute(f"DELETE FROM {table}").rowcount or 0)
+                    for key in ("dictionary_user_reset_v1", "history_vocab_seeded_v5"):
+                        conn.execute(
+                            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                            (key, "true", now),
+                        )
+                    self._bump_dictionary_revision(conn)
+        except Exception:
+            log.warning("Could not clear saved dictionary text", exc_info=True)
+            return 0
+        return removed
+
     def auto_seed_history_vocabulary(self) -> int:
         """Auto-activate qualified raw terms from a bounded successful-history scan."""
         try:
+            if self.get_setting("dictionary_user_reset_v1", False):
+                return 0
             if self.get_setting("history_vocab_seeded_v5", False):
                 return 0
         except Exception:
@@ -4539,6 +4583,8 @@ class StorageEngine:
         Personal rows are left alone.
         """
         try:
+            if self.get_setting("dictionary_user_reset_v1", False):
+                return 0
             if self.get_setting("lexicon_migration_v2", False):
                 return 0
         except Exception:
