@@ -1,0 +1,79 @@
+version: 2.1
+# macOS test job on CircleCI's free plan: installs the app from a GitHub release,
+# takes screenshots, and enables VNC so the app can be tested live via
+# "Rerun job with SSH". Only runs on the mac-test branch to save credits.
+# Requires project env var MAC_ORB_VNC_PASSWORD (8 chars max).
+jobs:
+  mac-smoke:
+    macos:
+      xcode: 27.0.0
+    resource_class: m4pro.medium
+    environment:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      GH_REPO: uzerkayat2004-gif/AI-Productivity-Flow
+      TAG: v1.0.1            # release tag to test (.dmg preferred, falls back to .zip)
+      KEEP_QUARANTINE: "1"   # 1 = make the "unsigned app / Open Anyway" warning appear
+    steps:
+      - run:
+          name: Enable VNC (vncuser + legacy VNC password)
+          background: true
+          command: |
+            sudo /usr/sbin/sysadminctl -addUser vncuser -fullName "VNC User" -password "$MAC_ORB_VNC_PASSWORD" -admin
+            sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+              -activate -configure -access -on -clientopts -setvnclegacy -vnclegacy yes \
+              -setvncpw -vncpw "$MAC_ORB_VNC_PASSWORD" -restart -agent -privs -all
+      - run:
+          name: System info
+          command: |
+            mkdir -p ~/out
+            sw_vers | tee ~/out/system.txt
+            uname -m | tee -a ~/out/system.txt
+      - run:
+          name: Download and install
+          command: |
+            BASE="https://github.com/$GH_REPO/releases/download/$TAG"
+            mkdir -p ~/stage
+            if curl -fL -o ~/app.dmg "$BASE/AI-Productivity-Flow-macOS.dmg"; then
+              hdiutil attach ~/app.dmg -nobrowse -mountpoint /Volumes/APF
+              APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
+              cp -R "$APP" /Applications/
+              hdiutil detach /Volumes/APF || true
+            else
+              echo "No .dmg for $TAG, using .zip"
+              curl -fL -o ~/app.zip "$BASE/AI-Productivity-Flow-macOS.zip"
+              ditto -x -k ~/app.zip ~/stage
+              APP=$(find ~/stage -maxdepth 3 -name "*.app" | head -1)
+              cp -R "$APP" /Applications/
+            fi
+            A="/Applications/$(basename "$APP")"
+            echo "$A" > ~/apppath
+            echo "Installed: $A" | tee ~/out/install.txt
+            spctl --status 2>&1 | tee -a ~/out/install.txt || true
+            if [ "$KEEP_QUARANTINE" = "1" ]; then
+              xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" "$A"
+            else
+              xattr -dr com.apple.quarantine "$A"
+            fi
+            codesign -dv --verbose=2 "$A" 2>&1 | tee ~/out/gatekeeper.txt || true
+            spctl -a -vv "$A" 2>&1 | tee -a ~/out/gatekeeper.txt || true
+      - run:
+          name: Launch and screenshot
+          command: |
+            A=$(cat ~/apppath)
+            open "$A" 2>&1 | tee ~/out/open.txt || true
+            sleep 10; screencapture -x ~/out/01-launch.png || true
+            sleep 20; screencapture -x ~/out/02-after-30s.png || true
+            ps aux | grep -i -E "flow|python" | grep -v grep > ~/out/processes.txt || true
+      - run:
+          name: Collect crash logs
+          when: always
+          command: |
+            mkdir -p ~/out/crash
+            cp ~/Library/Logs/DiagnosticReports/* ~/out/crash/ 2>/dev/null || true
+      - store_artifacts:
+          path: ~/out
+workflows:
+  mac:
+    jobs:
+      - mac-smoke:
+          filters: { branches: { only: mac-test } }

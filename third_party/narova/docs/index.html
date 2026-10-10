@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Narova — Open-source prompt-to-video skill and local CLI</title>
+<meta name="description" content="Create deterministic narrated or silent videos from prompts, scripts, sources, and product walkthroughs with Narova's agent skill and local CLI.">
+<link rel="canonical" href="https://ammar-hasan.github.io/narova/">
+<meta name="theme-color" content="#12061d">
+<meta property="og:title" content="Narova — Open-source prompt-to-video skill and local CLI">
+<meta property="og:description" content="Create interactively with Narova's agent skill, or let an agent run unattended. Local speech and deterministic 2D/3D rendering.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://ammar-hasan.github.io/narova/">
+<meta property="og:image" content="https://ammar-hasan.github.io/narova/assets/poster.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="720">
+<meta property="og:image:alt" content="Narova prompt-to-video workflow preview">
+<meta property="og:site_name" content="Narova">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Narova — Open-source prompt-to-video skill and local CLI">
+<meta name="twitter:description" content="Create interactively with Narova's agent skill, or let an agent run unattended. Local speech and deterministic 2D/3D rendering.">
+<meta name="twitter:image" content="https://ammar-hasan.github.io/narova/assets/poster.jpg">
+<meta name="twitter:image:alt" content="Narova prompt-to-video workflow preview">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://ammar-hasan.github.io/narova/#webpage",
+      "url": "https://ammar-hasan.github.io/narova/",
+      "name": "Narova — Open-source prompt-to-video skill and local CLI",
+      "description": "Create deterministic narrated or silent videos from prompts, scripts, sources, and product walkthroughs with Narova's agent skill and local CLI.",
+      "mainEntity": { "@id": "https://ammar-hasan.github.io/narova/#software" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://ammar-hasan.github.io/narova/#software",
+      "name": "Narova",
+      "url": "https://ammar-hasan.github.io/narova/",
+      "description": "Open-source prompt-to-video agent skill with a local CLI for deterministic 2D/3D video, TTS narration, word-synced captions, and product walkthroughs.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "macOS, Linux",
+      "softwareRequirements": "Node.js 18 or newer, Python 3.10 or newer, FFmpeg and FFprobe",
+      "downloadUrl": "https://www.npmjs.com/package/@narova/narova",
+      "codeRepository": "https://github.com/ammar-hasan/narova",
+      "license": "https://github.com/ammar-hasan/narova/blob/main/LICENSE",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+  ]
+}
+</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="cursor-dot" aria-hidden="true"></div>
+<div class="cursor-ring" aria-hidden="true"></div>
+<div class="progress" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav">
+  <a class="nav-logo" href="#main" data-hover>
+    <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><rect width="64" height="64" rx="14" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 18l22 14-22 14z" fill="#d6f94c"/></svg>
+    narova
+  </a>
+  <nav class="nav-links" aria-label="Primary navigation">
+    <a href="#demo" data-hover>Demo</a>
+    <a href="#features" data-hover>Features</a>
+    <a href="#renderers" data-hover>Renderers</a>
+    <a href="#providers" data-hover>Providers</a>
+    <a href="#how" data-hover>How it works</a>
+    <a href="#quickstart" data-hover>Quickstart</a>
+    <a href="changelog/" data-hover>Changelog</a>
+  </nav>
+  <a class="nav-gh magnetic" href="https://github.com/ammar-hasan/narova" data-hover>
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    GitHub
+  </a>
+</header>
+
+<main id="main">
+
+  <!-- HERO -->
+  <section class="hero">
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <div class="hero-fallback" aria-hidden="true"></div>
+    <div class="hero-inner">
+      <div class="hero-layout">
+        <div class="hero-text">
+          <p class="kicker reveal-line">Open-source prompt-to-video</p>
+          <a class="release-pill reveal-line" href="#features" data-hover>
+            <span class="release-version" data-narova-version>v0.31.14</span>
+            <span>Exact skill/CLI compatibility · trusted npm publishing · Node 18–24 gates</span>
+            <span aria-hidden="true">→</span>
+          </a>
+          <h1 class="hero-title" id="heroTitle">
+            <span class="ht-line">Prompt in.</span>
+            <span class="ht-line grad">Directed video out.</span>
+          </h1>
+          <p class="hero-sub reveal-line">Create with Narova through its agent skill—work interactively, or let an agent run unattended. Give it a prompt,
+            script, source, or real product flow; the skill directs the work while the local CLI handles speech, captions, and deterministic 2D HTML/CSS, 3D Three.js/WebGL, or SVG rendering.</p>
+          <div class="cta-row reveal-line">
+            <button class="install magnetic" id="copyInstall" data-hover aria-label="Copy install command">
+              <span class="prompt-sign">$</span> <code>npx skills add ammar-hasan/narova --skill narova -g</code>
+              <span class="copy-label" id="copyLabel" aria-live="polite">copy</span>
+            </button>
+            <a class="btn-ghost magnetic" href="https://www.npmjs.com/package/@narova/narova" data-hover>Install CLI on npm</a>
+            <a class="btn-ghost magnetic" href="https://github.com/ammar-hasan/narova" data-hover>★ Star on GitHub</a>
+          </div>
+        </div>
+        <div class="hero-mockup reveal-line" aria-hidden="true">
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-screen">
+              <div class="phone-scene">
+                <div class="phone-cap">
+                  <span class="phone-cap-w active" style="color:var(--cyan)">narova</span>
+                  <span class="phone-cap-w">turns</span>
+                  <span class="phone-cap-w">prompts</span>
+                  <span class="phone-cap-w">into</span>
+                  <span class="phone-cap-w">video</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="karaoke" id="karaoke" role="img" aria-label="Animated preview of word-synced captions for two speakers"></div>
+      <p class="trust reveal-line">MIT licensed&nbsp;&nbsp;·&nbsp;&nbsp;local-first by default&nbsp;&nbsp;·&nbsp;&nbsp;cloud only when you register it</p>
+    </div>
+    <div class="scroll-hint" aria-hidden="true"><span></span></div>
+  </section>
+
+  <!-- MARQUEE -->
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track" id="marqueeTrack">
+      <span>Claude Code</span><i>·</i><span>Codex</span><i>·</i><span>Cursor</span><i>·</i><span>Kimi Code</span><i>·</i><span>opencode</span><i>·</i><span>any agent that reads skills</span><i>·</i>
+    </div>
+  </div>
+
+  <!-- VIDEO -->
+  <section class="video-section" id="demo">
+    <div class="video-pin" id="videoPin">
+      <h2 class="sec-title sr-title">Don't read about it. <em>Watch it.</em></h2>
+      <div class="video-card" id="videoCard">
+        <video src="assets/narova-skill-reel.mp4" poster="assets/poster.jpg"
+               autoplay muted loop playsinline controls preload="metadata"
+               title="narova — prompt, voice, motion">
+          <track kind="captions" src="assets/narova-skill-reel.vtt" srclang="en" label="English" default>
+        </video>
+        <div class="video-glow" aria-hidden="true"></div>
+      </div>
+      <p class="video-cap">This 30-second reel was made by narova, about narova.</p>
+    </div>
+  </section>
+
+  <!-- FEATURES / BENTO -->
+  <section class="features" id="features">
+    <p class="kicker sr-title">Speech drives everything</p>
+    <h2 class="sec-title sr-title">The voice is the clock.<br><em>Every word is a trigger.</em></h2>
+    <div class="bento">
+
+      <article class="card card-big tilt" data-hover>
+        <div class="wave-bars" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <h3>Your voice, your way</h3>
+        <p>Start with local Piper, XTTS, Qwen, or cloned Chatterbox voices. Add an explicitly registered provider only when a project calls for it.
+           One narrator, a full panel, or no voice at all. Give each speaker a color; the captions follow.</p>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Karaoke captions</h3>
+        <p>Every word lights up exactly as it's spoken, in the speaker's color. No manual timing, ever.</p>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Cue-timed reveals</h3>
+        <p><code>data-cue="2"</code> keeps an element hidden until turn 2 is spoken. Visuals land on the beat.</p>
+      </article>
+
+      <article class="card card-wide tilt" id="renderers" data-hover>
+        <h3>Two renderers. Both local. Both free.</h3>
+        <p>Keep the full browser canvas and Studio in HyperFrames. Switch to Narova No-Browser when a machine cannot launch a browser: Skia draws the portable scene tree, FFmpeg plays local media and encodes the result, and unsupported HTML fails clearly instead of degrading silently.</p>
+        <div class="renderer-pair" aria-label="Local renderer comparison">
+           <div><strong>HyperFrames</strong><span>HTML · CSS · WebGL · 3D · Studio</span></div>
+          <div><strong>Narova No-Browser</strong><span>browserless · images · SVG · video · RTL</span></div>
+        </div>
+        <a class="renderer-read" href="https://github.com/ammar-hasan/narova/blob/main/skills/narova/references/renderers.md" data-hover>See the capability contract →</a>
+        <p>Authored 3D is complete in core. The optional <a href="https://github.com/ammar-hasan/narova/tree/main/skills/narova-3d-production" data-hover>3D-production companion</a> helps agents choose intentional subject and world representations, route only the production capabilities those choices need, and prove the visual premise without imposing a renderer, provider, or style. <code>npx skills add ammar-hasan/narova --skill narova-3d-production -g</code></p>
+      </article>
+
+      <article class="card card-wide tilt" data-hover>
+        <h3>Edit a scene. Re-render only that scene.</h3>
+        <p>Every scene carries a content hash. Both renderers now reuse untouched scenes from cache — changed scenes re-render, the rest are spliced via ffmpeg. "Try five versions of scene 4" costs five scene renders, not five full videos.</p>
+      </article>
+
+      <article class="card card-wide tilt" data-hover>
+        <h3>Prove the direction before full production.</h3>
+        <p>For ambitious work, <code>creative-brief.md</code> turns medium-neutral intent into 2–3 small proof branches with rationale. The agent renders decisive, project-bound evidence, rejects weak directions, restores one winner with its proof-time overrides, records exact expansion lineage, and expands only that branch. Camera, depth, and lighting stay conditional on the chosen medium.</p>
+      </article>
+
+      <article class="card card-wide tilt" data-hover>
+        <h3>A raw canvas means the whole frame.</h3>
+        <p>Zero-style scenes have no implicit centering, max-width, gutter, or caption reserve. Patterns, chrome, and <code>safeLayout</code> are independent opt-ins. Captions remain a default-on overlay and can be disabled with <code>captions: false</code>.</p>
+      </article>
+
+      <article class="card card-wide tilt" data-hover>
+        <h3>Creative assets, without pretending every source is an API.</h3>
+        <p>Twelve core adapters handle repeatable search, download, rights metadata, hashing, and credits; nine need no key and three are independently optional. When those results are creatively weak, the companion skill guides LLM-led exploration across 101 photo, video, audio, font, 2D, 3D, museum, map, and science sources using web search, HTTP, or a browser. The agent still inspects the exact item and license before Narova imports and verifies the bytes.</p>
+      </article>
+
+      <article class="card card-wide tilt" data-hover>
+        <h3>Provenance that distinguishes proof from declaration.</h3>
+        <p><code>narova provenance</code> composes claim grounding, tracked media, AI generation, and reproducibility into a read-only report. Artifact-backed facts are verified, authored statements are declared, and missing evidence stays unknown. Credits export as text, YouTube-ready lines, escaped web HTML, or JSON. Rights buckets remain display groupings—not legal clearance—and exact used-asset closure is never implied.</p>
+      </article>
+
+      <article class="card card-wide tilt" id="walkthroughs" data-hover>
+        <h3>Show the product doing the work</h3>
+        <p>Explore an app in an agent-readable browser, then record highlighted semantic clicks, typing, waits, and scrolling on the narration clock. Narova frames the real UI, adds voice and word-synced captions, and refuses stale takes.</p>
+        <div class="walkthrough-demo">
+          <video controls playsinline preload="metadata"
+            poster="assets/narova-product-walkthrough-poster.jpg"
+            aria-label="Narova complete product walkthrough showcase">
+            <source src="assets/narova-product-walkthrough-demo.mp4" type="video/mp4">
+            <track kind="captions" src="assets/narova-product-walkthrough-demo.vtt" srclang="en" label="English">
+            Your browser does not support embedded video.
+          </video>
+          <p class="walkthrough-demo-cap">
+            83 seconds · one continuous browser take · 24 narration-timed operations ·
+            <a href="assets/narova-click-highlight-proof.mp4">voiced click-ripple proof</a>
+          </p>
+        </div>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Plan before rebuilding</h3>
+        <p><code>narova plan</code> reads the canonical manifest and tells you whether a change needs TTS, alignment, mixing, composition, or rendering.</p>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Urdu-aware dialogue</h3>
+        <p>No-browser <code>۔</code> and <code>؟</code> punctuation now drive sentence timing correctly. For meaningful Urdu scripts, Narova can hand dialogue polishing to the optional <a href="https://github.com/ammar-hasan/urdu-voice-director">urdu-voice-director</a> skill.</p>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Bring your own narration</h3>
+        <p>Already have a recording? Set <code>narration.file</code> and drop in your own voice. TTS is skipped. Add <code>wordTimings</code> for automatic karaoke overlays — every word lights up without a single caption line in your HTML.</p>
+      </article>
+
+      <article class="card tilt" data-hover>
+        <h3>Preview locally. Ship deliberately.</h3>
+        <p>Use Studio or a no-browser draft plus <code>shots --beats</code> to inspect every promised visual beat, <code>--reuse</code> for revisions, and <code>build --release</code> for a preflight before synthesis plus a measured-timing recheck before rendering,
+           then export presets for TikTok, Reels, Shorts, LinkedIn, X, YouTube, and WhatsApp.</p>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- EXTERNAL PROVIDERS -->
+  <section class="providers" id="providers">
+    <div class="providers-grid">
+      <div class="providers-copy">
+        <p class="kicker sr-title">Optional by architecture</p>
+        <h2 class="sec-title sr-title">Local by default.<br><em>Extensible on purpose.</em></h2>
+        <p class="providers-lede">Narova ships with four local backends and keeps them as the default. Premium cloud TTS lives in separate companion skills, with no provider SDK, endpoint, model, authentication rule, or dependency inside Narova core.</p>
+        <div class="provider-options" role="group" aria-label="Optional cloud TTS companions">
+          <article class="provider-option">
+            <div class="provider-option-copy">
+              <div class="provider-option-heading">
+                <h3>ElevenLabs</h3>
+                <span>voice library</span>
+              </div>
+              <p>Account voices, voice IDs, and provider-native controls.</p>
+            </div>
+            <button class="provider-install magnetic" id="copyEleven" data-hover aria-label="Copy ElevenLabs companion install command">
+              <span>install</span>
+              <code id="copyElevenLabel" aria-live="polite">copy</code>
+            </button>
+            <a class="provider-link" href="https://github.com/ammar-hasan/narova/tree/main/skills/narova-elevenlabs" data-hover><span class="visually-hidden">ElevenLabs </span>setup →</a>
+          </article>
+          <article class="provider-option">
+            <div class="provider-option-copy">
+              <div class="provider-option-heading">
+                <h3>OpenAI</h3>
+                <span>steerable speech</span>
+              </div>
+              <p>Prompted delivery, built-in voices, and direct WAV output.</p>
+            </div>
+            <button class="provider-install magnetic" id="copyOpenAI" data-hover aria-label="Copy OpenAI companion install command">
+              <span>install</span>
+              <code id="copyOpenAILabel" aria-live="polite">copy</code>
+            </button>
+            <a class="provider-link" href="https://github.com/ammar-hasan/narova/tree/main/skills/narova-openai" data-hover><span class="visually-hidden">OpenAI </span>setup →</a>
+          </article>
+        </div>
+        <p class="provider-note">API keys stay in environment variables. Provider options remain opaque to Narova and still participate in deterministic cache invalidation.</p>
+      </div>
+
+      <div class="provider-flow" role="group" aria-label="External provider architecture">
+        <div class="flow-card">
+          <span class="flow-num">01</span>
+          <strong>Register explicitly</strong>
+          <code>narova providers add …</code>
+          <p>No directory scanning or automatic execution.</p>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">↓</div>
+        <div class="flow-card accent">
+          <span class="flow-num">02</span>
+          <strong>Speak one protocol</strong>
+          <code>narova-tts-provider/v1</code>
+          <p>Versioned JSON Lines over a persistent worker.</p>
+        </div>
+        <div class="flow-arrow" aria-hidden="true">↓</div>
+        <div class="flow-card">
+          <span class="flow-num">03</span>
+          <strong>Return raw WAV</strong>
+          <code>synthesize(voice, text)</code>
+          <p>Narova keeps caching, timing, captions, and rendering.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="backend-row" role="group" aria-label="Supported TTS choices">
+      <span><b>Piper</b> default</span>
+      <span><b>XTTS</b> studio voices</span>
+      <span><b>Qwen</b> instruct control</span>
+      <span><b>Chatterbox</b> voice cloning</span>
+      <span class="external"><b>ElevenLabs</b> optional companion</span>
+      <span class="external"><b>OpenAI</b> optional companion</span>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how" id="how">
+    <p class="kicker sr-title">From idea to mp4</p>
+    <h2 class="sec-title sr-title">Three moves. <em>That's it.</em></h2>
+    <div class="steps">
+      <svg class="steps-line" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true">
+        <path id="stepsPath" d="M0,30 C250,10 750,50 1000,30" fill="none"/>
+      </svg>
+      <div class="step" data-hover>
+        <span class="step-num">01</span>
+        <h3>Ask naturally</h3>
+        <p>Tell your agent what you want to make. Add a URL, repo, document, script, or just an idea.</p>
+      </div>
+      <div class="step" data-hover>
+        <span class="step-num">02</span>
+        <h3>Prove the creative intent</h3>
+        <p>For ambitious work, your agent saves 2–3 small, orthogonal proofs with rationale, compares the rendered evidence, and expands only one selected branch. For demos, it also explores the product and records declared actions after narration timing is known.</p>
+      </div>
+      <div class="step" data-hover>
+        <span class="step-num">03</span>
+        <h3>Preview, direct, ship</h3>
+        <p>Inspect narration and marker beats, watch Studio, ask for changes in your own words, then run the fail-before-render release gate and export final deliverables.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section class="quick" id="quickstart">
+    <h2 class="sec-title sr-title">Your first video starts<br>with <em>one prompt.</em></h2>
+    <p class="quick-intro">Install the provenance-backed CLI package, then install the agent skill. If the CLI is missing, the skill can install its exact matching npm release. After that, pick a starting point or tell your agent what you need.</p>
+    <div class="prompt-tabs" role="group" aria-label="Example Narova prompts">
+      <button class="prompt-tab active" type="button" aria-pressed="true" data-prompt="idea">Idea</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="product">Product page</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="walkthrough">Product demo</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="research">Research</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="repo">Repository</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="script">Script / dialogue</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="urdu">Urdu dialogue</button>
+      <button class="prompt-tab" type="button" aria-pressed="false" data-prompt="cloud">Premium voice</button>
+    </div>
+    <div class="terminal tilt" data-hover>
+      <div class="term-bar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="term-title">pick an example · ask your agent · render locally</span>
+        <button class="term-copy magnetic" id="copyQuick" data-hover>copy prompt</button>
+      </div>
+      <pre id="quickCode"><span class="c"># try it first — one command to a finished MP4 (Node 18+)</span>
+<span class="p">$</span> npx @narova/narova demo
+<span class="c"># install the CLI</span>
+<span class="p">$</span> npm install --global @narova/narova
+<span class="c"># install the agent skill</span>
+<span class="p">$</span> npx skills add ammar-hasan/narova --skill narova -g
+<span class="c"># update: npm i -g @narova/narova@latest · remove: npm uninstall -g @narova/narova</span>
+
+<span class="c" id="promptMode"># idea → video</span>
+<span class="you">you →</span> <span id="quickPromptText">Make a 45-second vertical explainer about why starting
+small makes habits easier to keep. Make it warm and practical,
+and show me a preview before rendering.</span>
+
+<span class="agent">agent →</span> <span id="quickReplyText">I’ll use one warm narrator, a calm visual rhythm, and
+simple step-by-step scenes. I’ll keep the language practical
+and show you the vertical preview first.</span></pre>
+    </div>
+    <p class="quick-note">Want direct control? The same open project works from the CLI. <a href="https://github.com/ammar-hasan/narova#direct-cli-control">See the manual workflow →</a></p>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="final-cta">
+    <h2 class="final-title sr-title">Your next video is<br><em>one prompt away.</em></h2>
+    <div class="cta-row">
+      <button class="install magnetic" id="copyInstall2" data-hover aria-label="Copy install command">
+        <span class="prompt-sign">$</span> <code>npx skills add ammar-hasan/narova --skill narova -g</code>
+        <span class="copy-label" aria-live="polite">copy</span>
+      </button>
+      <a class="btn-ghost magnetic" href="https://www.npmjs.com/package/@narova/narova" data-hover>Install CLI on npm</a>
+      <a class="btn-ghost magnetic" href="https://github.com/ammar-hasan/narova" data-hover>★ Star on GitHub</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>MIT · local-first · extensible by explicit registration</span>
+  <span><a href="https://www.npmjs.com/package/@narova/narova" data-hover>npm package</a> · <a href="https://skills.sh/ammar-hasan/narova" data-hover>agent skill</a> · <a href="https://github.com/ammar-hasan/narova" data-hover>GitHub</a></span>
+</footer>
+
+<script src="vendor/gsap.min.js"></script>
+<script src="vendor/ScrollTrigger.min.js"></script>
+<script src="vendor/lenis.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

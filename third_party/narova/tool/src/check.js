@@ -1,0 +1,1321 @@
+'use strict';
+/* Fast config check: summarize a resolved config and lint scene bodies.
+ * No TTS, no browser, no writes — resolveConfig has already thrown on hard
+ * errors, so everything here is a warning (exit stays 0).
+ *
+ * Modes (second argument to check()):
+ *   check(config)          — default: warnings only, exit 0
+ *   check(config, {strict:true})  — stricter validation, still exit 0
+ *   check(config, {release:true}) — all checks, errors fail the build (exit 1)
+ *
+ * Release mode elevates: remote assets, unresolved references, unsupported HTML,
+ * missing claims, black frames, remote dependencies, and missing non-trivial
+ * creative approval from warnings to errors. */
+const fs = require('fs');
+const path = require('path');
+const { PLATFORMS } = require('./util');
+const { captureStatus } = require('./walkthrough');
+const { timingsFingerprint } = require('./audio-fingerprint');
+const { hashFile } = require('./manifest');
+const { verifyProofBundle } = require('./proof-receipt');
+const { projectIdentity } = require('./releases');
+const { lockPath: assetLockPath, verifyAssets } = require('./asset-registry');
+const { isBuiltinBackend, MARKUP_FAMILIES, deliveryCapabilitiesFor } = require('./tts-backends');
+const { getProvider } = require('./providers');
+const creativeIdentity = require('./creative-identity');
+
+/* Factual-claim sniffing for the grounding rule (references/url-to-source.md
+ * §Claims ledger): a stat or superlative in the voiceover must be traceable to
+ * the source. Heuristic — warnings only, never errors.
+ * Narration written for local TTS normally spells figures out ("eighty
+ * percent", "fifteen of fifteen") because bare numerals mispronounce, so
+ * number-word quantities and ratios are claim shapes too (NAR-007-028). */
+const NUMBER_WORDS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+  'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+  'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty',
+  'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred',
+  'thousand', 'million', 'billion', 'trillion',
+];
+const NW = NUMBER_WORDS.join('|');
+// Trailing boundary: without it, "eight" matches inside "eighty". Hyphens are
+// allowed here so hyphenated forms ("eighty-percent") can reach the unit
+// group; a trailing hyphen alone never matches because a unit is required.
+const NUMWORD_RUN = `(?:${NW})(?:[\\s-]+(?:and[\\s-]+)?(?:${NW}))*(?!\\w)`;
+const CLAIM_PATTERNS = [
+  /\d[\d,.]*\s*(?:%|percent\b|x\b|\+|k\b|million\b|billion\b|users?\b|products?\b|customers?\b|downloads?\b|countries\b)/i,
+  // Bare "points" is deliberately not a unit ("one point about pacing",
+  // "six-point plan" are idioms, not quantities); "percentage points" is.
+  new RegExp(`\\b${NUMWORD_RUN}(?:[\\s-]+percent\\b|\\s+percentage\\s+points?\\b|\\s+times\\b|\\s+fold\\b)`, 'i'),
+  new RegExp(`\\b(?:${NUMWORD_RUN}|\\d[\\d,.]*)\\s+of\\s+(?:${NUMWORD_RUN}|\\d[\\d,.]*)\\b`, 'i'),
+  /\b(?:leading|best[- ]in-class|industry[- ]first|world'?s first|largest|most popular|#1|number one|top-rated|half of)\b/i,
+];
+
+function findClaims(config) {
+  const hits = [];
+  for (const s of config.scenes) {
+    s.vo.forEach((t, j) => {
+      if (CLAIM_PATTERNS.some(re => re.test(t.text))) {
+        hits.push({ ref: `scene "${s.id}" turn ${j}: "${t.text.length > 90 ? t.text.slice(0, 87) + '\u2026' : t.text}"`, text: t.text });
+      }
+    });
+  }
+
+  return hits;
+}
+
+/* Number-word runs ("ninety-four", "two thousand five hundred") → digits.
+ * Compact parser: enough for spoken quantities; non-numeric text returns null. */
+const WORD_VALUES = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const WORD_SCALES = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
+function wordsToNumber(run) {
+  const tokens = run.toLowerCase().split(/[\s-]+/).filter(t => t && t !== 'and');
+  let total = 0, current = 0;
+  for (const t of tokens) {
+    if (t in WORD_VALUES) current += WORD_VALUES[t];
+    else if (t in WORD_SCALES) {
+      const scale = WORD_SCALES[t];
+      if (scale === 100) current = (current || 1) * scale;
+      else { total += (current || 1) * scale; current = 0; }
+    } else return null;
+  }
+  const n = total + current;
+  return n > 0 || tokens[0] === 'zero' ? n : null;
+}
+
+/* Quantity fragments of a turn for content-based ledger matching (NAR-007-029):
+ * each number-word run with its unit, in raw and digit-normalized forms
+ * ("ninety-four percent" → also "94 percent", "94%"), plus ratio runs
+ * ("fifteen of fifteen" → "15 of 15"). Digit fragments pass through raw. */
+function quantityFragments(text) {
+  const lower = text.toLowerCase();
+  const frags = [];
+  const runRe = new RegExp(`\\b(${NUMWORD_RUN})(?:([\\s-]+percent|\\s+percentage\\s+points?|\\s+times|\\s+fold)|(?:\\s+of\\s+)(${NUMWORD_RUN}))?`, 'g');
+  for (const m of lower.matchAll(runRe)) {
+    const run = m[1], unit = m[2] || '', second = m[3] || '';
+    // Only shaped fragments (unit or ratio present): bare numbers match too
+    // loosely ("15" inside "2015") and carry no claim meaning alone.
+    if (!unit && !second) continue;
+    const unitNorm = unit ? unit.replace(/[\s-]+/g, ' ')
+      : (second ? ` of ${second}` : '');
+    frags.push((run + unitNorm).trim());
+    const n = wordsToNumber(run);
+    if (n != null) {
+      frags.push(`${n}${unitNorm}`);
+      if (/^\s*percent\b/.test(unitNorm)) frags.push(`${n}%`);
+      if (/^\s*times\b/.test(unitNorm)) frags.push(`${n}x`);
+    }
+    if (second) {
+      const n2 = wordsToNumber(second);
+      if (n2 != null && n != null) frags.push(`${n} of ${n2}`);
+    }
+  }
+  const digitRe = /\b\d[\d,.]*(?:\s*(?:%|percent|percentage\s+points?|points?|times|fold|x)\b|\s+of\s+\d[\d,.]*\b)?/g;
+  for (const m of lower.matchAll(digitRe)) {
+    const f = m[0].replace(/\s+/g, ' ').trim();
+    if (!/(%|percent|points?|times|fold|x|of)/i.test(f)) continue; // shaped only
+    frags.push(f);
+    const dm = f.match(/^(\d[\d,.]*)\s*(%|percent|points?|times|x)$/i);
+    if (dm) {
+      if (/^percent$/i.test(dm[2])) frags.push(`${dm[1]}%`);
+      if (/^times$/i.test(dm[2])) frags.push(`${dm[1]}x`);
+    }
+  }
+  return frags;
+}
+
+/* Parse a claims.md ledger into an array of claim-text lines for matching.
+ * Supports three formats (NAR-007-029 — bullets count anywhere in the file,
+ * heading or not, so a human-organized ledger is never silently empty):
+ *   1. ## claim: ... headings
+ *   2. Bullet lines anywhere in the document
+ *   3. Markdown table rows under ## Claims (the format generated by `narova ingest`) */
+function readClaimsLedger(config) {
+  const dir = config.projectDir || '.';
+  for (const name of ['claims.md', 'CLAIMS.md']) {
+    const p = path.join(dir, name);
+    if (fs.existsSync(p)) {
+      const text = fs.readFileSync(p, 'utf8');
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const claimLines = [];
+      let inClaimsTable = false;
+      for (const l of lines) {
+        if (l.startsWith('## claim:') || l.startsWith('## Claim:')) {
+          inClaimsTable = false;
+          claimLines.push(l.replace(/^##\s*claim:\s*/i, '').trim());
+        } else if (l === '## Claims' || /^##\s+Claims/i.test(l)) {
+          inClaimsTable = true;
+        } else if (inClaimsTable && /^\|[-|\s]+\|$/.test(l)) {
+          // Separator row (e.g. |---|---|) — skip.
+          continue;
+        } else if (inClaimsTable && l.startsWith('|')) {
+          // Table row: extract the second column (claim text).
+          const cols = l.split('|').map(c => c.trim()).filter(Boolean);
+          if (cols.length >= 2) {
+            const claimCol = cols[1];
+            if (claimCol.length > 4) claimLines.push(claimCol);
+          }
+        } else if (!inClaimsTable && l.startsWith('- ')) {
+          const bullet = l.replace(/^-\s+/, '');
+          if (bullet.length > 4) claimLines.push(bullet);
+        }
+      }
+      return { path: p, claims: claimLines };
+    }
+  }
+  return null;
+}
+
+/* Check if a vo claim is ledgered. Matching (NAR-007-029): the pre-existing
+ * prefix rules (turn prefix in the ledger) OR quantity-content matching — the
+ * claim's matched quantity appears in a ledger entry, across digit↔number-word
+ * spelling. Strictly additive: nothing that matched before stops matching.
+ * Fragments are digit-boundary anchored: "8%" must not satisfy a claim by
+ * landing inside "48%", and "15 of 15" must not land inside "15 of 150". */
+function matchClaim(claimText, ledger) {
+  if (!ledger || !ledger.claims.length) return false;
+  const needle = claimText.toLowerCase();
+  // Also try a shorter digest: drop leading punctuation/stopwords for a
+  // looser match.
+  const short = needle.replace(/^[^a-z0-9]*/, '').slice(0, 40);
+  const fragRes = quantityFragments(claimText)
+    .filter(f => f.length > 1)
+    .map(f => {
+      const esc = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const tail = /\d$/.test(f) ? '(?!\\d)' : '';
+      return new RegExp(`(?<![\\d.])${esc}${tail}`, 'i');
+    });
+  return ledger.claims.some(entry => {
+    const hay = entry.toLowerCase();
+    return hay.includes(needle.slice(0, 60)) || hay.includes(short)
+      || fragRes.some(re => re.test(hay));
+  });
+}
+
+function visualFacts(root) {
+  const facts = { content: false, text: false, assets: [] };
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'text' && String(node.text || '').trim()) facts.text = facts.content = true;
+    if (['rect', 'circle', 'line', 'path', 'image', 'svg', 'progress'].includes(node.type)) facts.content = true;
+    if ((node.type === 'image' || node.type === 'svg') && node.src) facts.assets.push({ ref: node.src, kind: node.type });
+    if (node.style && node.style.fontFile) facts.assets.push({ ref: node.style.fontFile, kind: 'font' });
+    (node.children || []).forEach(visit);
+  }
+  visit(root);
+  return facts;
+}
+
+function measuredProductionSeconds(config, opts = {}) {
+  const outDir = opts.outDir;
+  if (!outDir) return null;
+  const timingsPath = path.join(outDir, 'timings.json');
+  const fingerprintPath = path.join(outDir, '.timings-fingerprint');
+  if (!fs.existsSync(timingsPath) || !fs.existsSync(fingerprintPath)) return null;
+  try {
+    if (fs.readFileSync(fingerprintPath, 'utf8').trim() !== timingsFingerprint(config)) return null;
+    const timings = JSON.parse(fs.readFileSync(timingsPath, 'utf8'));
+    // The audio fingerprint deliberately ignores silent-scene duration because
+    // it identifies synthesized speech. Compose measured narration with the
+    // current silent runtime so a stale timing file cannot keep an old silence
+    // length alive after the author shortens or extends that scene.
+    const durations = (config.scenes || []).map(s => (s.vo || []).length === 0
+      ? s.dur
+      : timings[s.id] && timings[s.id].dur);
+    return durations.every(d => Number.isFinite(d) && d >= 0)
+      ? durations.reduce((n, d) => n + d, 0) : null;
+  } catch {
+    return null;
+  }
+}
+
+function productionSeconds(config, opts = {}) {
+  const scenes = config.scenes || [];
+  let planned = 0;
+  for (const scene of scenes) {
+    if ((scene.vo || []).length === 0) {
+      if (Number.isFinite(scene.dur)) planned += scene.dur;
+      continue;
+    }
+    const estimated = estimateSeconds({ ...config, scenes: [scene] });
+    const authored = scene._durAuthored && Number.isFinite(scene.dur) ? scene.dur : 0;
+    planned += Math.max(estimated, authored);
+  }
+  const measured = measuredProductionSeconds(config, opts);
+  return Math.max(planned, measured == null ? 0 : measured);
+}
+
+function needsCreativeBrief(config, opts = {}) {
+  const scenes = config.scenes || [];
+  return productionSeconds(config, opts) >= 30 || scenes.length >= 5;
+}
+
+/* Release-mode checks that are too slow or pedantic for normal `check`. */
+function releaseChecks(config, errors, opts = {}) {
+  const requiresBrief = needsCreativeBrief(config, opts);
+  const brief = creativeBriefStatus(config, opts);
+
+  const projectDir = config.projectDir || '.';
+  // NAR-017-057 — caption sidecar release check. A delivered set containing
+  // narration audio must not carry an empty-or-absent caption sidecar without
+  // an explicitly recorded derivation reason (out/captions-omitted.json,
+  // written by build when derivation produced no sentences). Correctness, not
+  // judgment: an empty published sidecar is broken by definition.
+  {
+    const outDir = opts.outDir || path.join(projectDir, 'out');
+    const audioPath = path.join(outDir, 'audio', 'full.wav');
+    if (fs.existsSync(audioPath)) {
+      const srtPath = path.join(outDir, 'captions.srt');
+      const omissionPath = path.join(outDir, 'captions-omitted.json');
+      let recordedReason = null;
+      if (fs.existsSync(omissionPath)) {
+        try {
+          const omitted = JSON.parse(fs.readFileSync(omissionPath, 'utf8'));
+          if (omitted && typeof omitted.reason === 'string' && omitted.reason.trim()) recordedReason = omitted.reason;
+        } catch { /* unreadable marker falls through to the failure below */ }
+      }
+      const sidecarExists = fs.existsSync(srtPath);
+      const sidecarEmpty = sidecarExists && fs.statSync(srtPath).size === 0;
+      if ((sidecarExists && sidecarEmpty) || (!sidecarExists && !recordedReason)) {
+        errors.push(`captions: narration audio is present but the published caption sidecar (${path.relative(projectDir, srtPath)}) is ${sidecarEmpty ? 'empty' : 'absent'} without a recorded derivation reason — rebuild, or record the intentional omission in ${path.relative(projectDir, omissionPath)}`);
+      }
+    }
+  }
+  if (fs.existsSync(assetLockPath(projectDir))) {
+    try {
+      const report = verifyAssets(projectDir);
+      for (const result of report.results.filter(item => !item.ok)) {
+        errors.push(`asset provenance: ${result.file} — ${result.issues.join('; ')}`);
+      }
+    } catch (error) {
+      errors.push(`asset provenance: ${error.message}`);
+    }
+  }
+  if (requiresBrief || brief.ambitious) {
+    if (requiresBrief && !brief.exists) {
+      errors.push('creative: non-trivial release needs creative-brief.md with an approved pilot and observable rejection criteria');
+    } else if (!brief.approved) {
+      errors.push('creative: creative-brief.md is not approved — prove the declared creative risks before release');
+    } else if (brief.ambitious && !brief.proofSet) {
+      errors.push('creative: ambitious brief needs 2–3 existing project-bound proof branches with rationale and rendered evidence before full release');
+    } else if (brief.ambitious && !brief.selectedProof) {
+      errors.push('creative: ambitious brief must select one approved branch from its declared proof set before full release');
+    } else if (brief.ambitious && !brief.expansionLineage) {
+      errors.push('creative: ambitious release must record the selected branch and exact proof identity it expanded from');
+    } else if (brief.ambitious && !brief.rejectionCriteria) {
+      errors.push('creative: ambitious brief needs observable, medium-specific rejection criteria before full release');
+    }
+  }
+
+  for (const s of config.scenes) {
+    // Black-frame / empty scene: body with no visible text, images, videos, or SVG.
+    const body = String(s.body || '');
+    const hasText = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '').trim().length > 0;
+    const hasVisual = /<(?:img|video|svg|path|circle|rect|ellipse|polygon|line|use)\b/i.test(body);
+    const portable = visualFacts(s.visual);
+    const hasVisibleWalkthrough = s.walkthrough && s.walkthrough.opacity !== 0;
+    const hasThreeScene = !!(s.three && s.three.objects && s.three.objects.length);
+    const hasThreeModule = !!s._threeModuleContents;
+    if (!hasText && !hasVisual && !portable.content && !s.clip && !hasVisibleWalkthrough && !hasThreeScene && !hasThreeModule) {
+      errors.push(`scene "${s.id}": body/visual has no visible content and no b-roll, walkthrough, or 3D scene — scene will render as a black frame`);
+    }
+
+    // Remote dependencies in body HTML.
+    // Scenes using narova's managed Three.js (scene.three) or element compiler
+    // generate their own <script>/<canvas> — these are intentional, not remote.
+    const hasManaged3D = !!(s.three || s.elements);
+    if (!hasManaged3D) {
+      for (const t of tags(body)) {
+        const tagName = t.match(/^<(\w+)/);
+        if (tagName && ['script', 'link', 'iframe'].includes(tagName[1].toLowerCase())) {
+          errors.push(`scene "${s.id}": contains a <${tagName[1]}> element — remote dependencies are not supported during render`);
+        }
+      }
+    }
+
+    // Unsupported HTML patterns that HyperFrames cannot render.
+    // Canvas in narova-managed Three.js scenes is intentional.
+    if (!hasManaged3D && /<(?:canvas|web-component|marquee|blink)\b/i.test(body)) {
+      errors.push(`scene "${s.id}": contains an unsupported HTML element (<canvas>, <web-component>) — HyperFrames may not render it deterministically`);
+    }
+
+    // 3D scene correctness: camera is required for rendering.
+    if (s.three) {
+      if (!s.three.camera) {
+        errors.push(`scene "${s.id}": 3D scene has no camera — add a camera element or three.camera`);
+      }
+      // Shadow/PBR quality hints moved to narova critique --presentation.
+    }
+  }
+
+  // Remote url() references in theme.css.
+  for (const ref of cssUrls(config.themeCss || '')) {
+    if (/^(?:https?:)?\/\//i.test(ref)) {
+      errors.push(`theme.css: remote url() "${ref}" — download the asset into project assets/ before rendering`);
+    }
+  }
+}
+
+/* All opening tags in a body, with HTML comments stripped first — attributes
+ * are only linted inside tags, never in visible prose. */
+function tags(body) {
+  return String(body).replace(/<!--[\s\S]*?-->/g, '').match(/<[a-zA-Z][^>]*>/g) || [];
+}
+
+function attr(tag, name) {
+  const m = new RegExp(`(?<![-\\w])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>"']+))`).exec(tag);
+  return m ? (m[1] ?? m[2] ?? m[3]) : undefined;
+}
+
+function cssUrls(css) {
+  const refs = [];
+  const re = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]+))\s*\)/gi;
+  let m;
+  while ((m = re.exec(String(css))) !== null) refs.push(m[1] ?? m[2] ?? m[3]);
+  return refs;
+}
+
+function inspectAssetRef(ref, config, at, warnings, opts = {}) {
+  const release = !!opts.release;
+  const errors = opts._errors || null;  // release mode: push failures here instead
+  if (!ref || /^(?:data:|blob:|#|mailto:|tel:)/i.test(ref)) return;
+  if (/^(?:https?:)?\/\//i.test(ref)) {
+    if (release && errors) {
+      errors.push(`remote asset: "${ref}" — download it into project assets/ before rendering (${at})`);
+    } else {
+      warnings.push(`${at}: remote asset "${ref}" — download it into project assets/ before rendering`);
+    }
+    return;
+  }
+  if (!ref.startsWith('assets/')) {
+    if (release && errors) errors.push(`${at}: local asset "${ref}" must live under project assets/ and be referenced as assets/...`);
+    else warnings.push(`${at}: local asset "${ref}" must live under project assets/ and be referenced as assets/...`);
+    return;
+  }
+  if (!config.assetsDir) {
+    if (release && errors) errors.push(`${at}: "${ref}" is referenced but the project has no assets directory`);
+    else warnings.push(`${at}: "${ref}" is referenced but the project has no assets directory`);
+    return;
+  }
+  const relative = ref.slice('assets/'.length).split(/[?#]/, 1)[0];
+  const target = path.resolve(config.assetsDir, relative);
+  const boundary = path.relative(config.assetsDir, target);
+  if (!relative || boundary === '..' || boundary.startsWith(`..${path.sep}`) || path.isAbsolute(boundary)) {
+    if (release && errors) errors.push(`${at}: asset path "${ref}" escapes project assets/`);
+    else warnings.push(`${at}: asset path "${ref}" escapes project assets/`);
+  } else if (!fs.existsSync(target)) {
+    if (release && errors) errors.push(`${at}: asset not found: ${ref}`);
+    else warnings.push(`${at}: asset not found: ${ref}`);
+  }
+}
+
+/* Rough narration-length estimate so a target duration ("about 2 minutes") can
+ * be tuned BEFORE synth: piper at ~1.1–1.2 tempo speaks near 170 wpm base
+ * (calibrated against real builds; 647 words at 1.12 ≈ 231s actual), scaled
+ * by tempo (matching the narova_tts default of 1.18 when unset), plus the
+ * exact gap structure narration assembly inserts (NAR-007-030): lead+tail per
+ * scene, one gap per turn boundary, and one sentence gap between consecutive
+ * sentences within a turn — the pipeline synthesizes per sentence and pads
+ * between them, so per-turn accounting alone drifts low as tempo rises.
+ * Silent scenes contribute their authored duration. Word timing is computed,
+ * not measured — this is a planning number, not a promise. */
+const SENTENCE_SPLIT_RE = /(?<=[.!?۔؟])\s+/;
+function countSentences(text) {
+  return text.trim().split(SENTENCE_SPLIT_RE).filter(Boolean).length || 1;
+}
+function estimateSeconds(config) {
+  const timing = config.timing || {};
+  const tempo = timing.tempo || 1.18;
+  const wps = (170 * tempo) / 60;
+  const lead = timing.lead ?? 0.16, tail = timing.tail ?? 0.58;
+  const gapS = timing.gapSentence ?? 0.24, gapT = timing.gapTurn ?? 0.44;
+  let total = 0;
+  for (const s of config.scenes) {
+    if (!s.vo || !s.vo.length) {
+      total += s.dur ?? 2.0;
+      continue;
+    }
+    total += lead + tail;
+    s.vo.forEach((t, i) => {
+      total += t.text.trim().split(/\s+/).length / wps
+        + (countSentences(t.text) - 1) * gapS
+        + (i ? gapT : 0);
+    });
+  }
+
+  return total;
+}
+
+function fmtDuration(sec) {
+  const s = Math.round(sec);
+  return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+}
+
+/* Scene transition kinds (compose/runtime.js): anything else falls back to
+ * fade at runtime — warn here so the fallback is never a surprise. */
+const SCENE_TRANSITIONS = new Set(['fade', 'wipe', 'slide', 'zoom']);
+
+/* data-mark annotation kinds (compose/runtime.js): the runtime IGNORES any
+ * other value, so an unknown kind is a warning, mirroring the runtime set
+ * exactly. */
+const MARK_KINDS = new Set(['underline', 'circle', 'box', 'highlight']);
+
+/* HyperFrames-reserved class names — if used in body HTML they collide with
+ * the generated composition structure and silently break layout. */
+const HF_RESERVED_CLASSES = new Set([
+  'scene', 'clip', 'chrome', 'overlay', 'canvas', 'scenebody', 'capzone',
+  'progress', 'topbar', 'wordmark', 'counter', 'cap-stage', 'cap-group',
+  'spk', 'cap-w', 'caption2', 'marklayer', 'walkthrough-media',
+  'walkthrough-shell', 'walkthrough-titlebar', 'walkthrough-dots',
+  'has-walkthrough', 'walkthrough-window', 'walkthrough-full',
+]);
+
+/* Determinism hazards in a project choreography file (config.choreography).
+ * Deliberately un-anchored substring matches with no /g flag — these are
+ * advisory sniffs, and a stateful lastIndex would make them fire every other
+ * call. */
+const CHOREOGRAPHY_DETERMINISM_RULES = [
+  { pattern: /\bDate\b/,                  desc: 'Date (wall-clock time)' },
+  { pattern: /\bMath\s*\.\s*random\b/,    desc: 'Math.random()' },
+  { pattern: /\brequestAnimationFrame\b/, desc: 'requestAnimationFrame()' },
+  { pattern: /\bsetTimeout\b/,            desc: 'setTimeout()' },
+  { pattern: /\bfetch\b/,                 desc: 'fetch() (a remote dependency)' },
+];
+
+/* Past this the file has stopped being choreography and started being an
+ * application — flagged so the logic moves into the tool instead. */
+const CHOREOGRAPHY_MAX_BYTES = 32 * 1024;
+
+/* Hook enforcement (§Hook doctrine in the skill references).
+ * Viral video mechanics in 2026: muted autoplay is 80%+, hooks are measured at
+ * 2s, the first syllable must land within ~200ms. Scene 1 is the hook.
+ *
+ * Hook/CTA advice is CREATIVE CRAFT — it depends on the intended video shape.
+ * Silent projects, music visualizers, cinematic films, and projects that
+ * disable captions are deliberately outside the social-media grammar and
+ * should not receive hook enforcement. */
+function checkHook(config, warnings) {
+  const craftWarn = (msg) => warnings.push('craft: ' + msg);
+  const voices = config.voices || {};
+  const hasVoiceover = Object.keys(voices).length > 0;
+  const hasSynthesis = config.scenes.some(s => (s.vo || []).length > 0);
+
+  // Skip hook enforcement for explicitly non-social projects.
+  // captions:false is a strong signal the author is not targeting social video.
+  // Silent projects (no voices, no synthesis) are works of motion design.
+  if (!hasVoiceover && !hasSynthesis) return;
+  if (config.captionsEnabled === false) return;
+
+  const s1 = config.scenes[0];
+  if (!s1) return;
+
+  const timing = config.timing || {};
+
+  // 1 — lead-in silence > 200ms (dead air at the head loses viewers in <2s).
+  const lead = timing.lead ?? 0.16;
+  if (lead > 0.2) {
+    craftWarn(`hook: timing.lead is ${lead}s (>200ms) — the first syllable should land within 200ms; set "timing.lead" ≤ 0.2`);
+  }
+
+  // 2 — no visible text on-screen for muted viewers.
+  const body = String(s1.body || '');
+  const portable = visualFacts(s1.visual);
+  const textEls = body.match(/<(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)\b[^>]*>[^<]+<\/(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)>/gi);
+  if ((!textEls || textEls.length === 0) && !portable.text) {
+    craftWarn(s1.walkthrough
+      ? 'hook: scene 1 shows the product but has no on-screen hook text — add a short claim so muted viewers know why the action matters'
+      : 'hook: scene 1 has no visible text — muted viewers (80%+ of autoplay) see a blank screen; add hook text on-screen');
+  }
+
+  // 3 — platform duration band already checked (see check() below).
+
+  // 4 — last scene has no saveable end-frame (no text, no image, no CTA).
+  const last = config.scenes[config.scenes.length - 1];
+  const lastBody = String(last.body || '');
+  const lastPortable = visualFacts(last.visual);
+  const hasImage = /<(?:img|svg|video)\b/i.test(lastBody);
+  const lastTextEls = lastBody.match(/<(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)\b[^>]*>[^<]+<\/(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)>/gi);
+  if (!hasImage && !lastPortable.content && (!lastTextEls || lastTextEls.length === 0)) {
+    craftWarn(`saveable: last scene "${last.id}" has no text or image — a saveable end-card lifts completion rate; add a title, logo, or CTA`);
+  }
+}
+
+/* Print warnings + a one-line summary. Returns true (warnings never fail).
+ * Cue semantics (compose/runtime.js): data-cue="k" is coerced with +k and
+ * looked up in turns[] (0-based) when it is a non-negative integer in range;
+ * anything else falls back to scene entry. Mirror that coercion exactly —
+ * never warn about a spelling the runtime resolves. */
+function check(config, opts = {}) {
+  const warnings = [];
+  const errors = [];
+  const release = !!opts.release;
+  const strict = release || !!opts.strict;
+  const bodyIds = new Set();
+
+  const issue = (msg, category = 'quality') => {
+    const prefix = category === 'correctness' ? 'correctness: ' : category === 'craft' ? 'craft: ' : '';
+    const full = prefix + msg;
+    return release ? errors.push(full) : warnings.push(full);
+  };
+  const releaseIssue = (msg) => errors.push(msg);
+
+  for (const s of config.scenes) {
+    const sceneIds = new Set();
+    for (const asset of visualFacts(s.visual).assets) {
+      inspectAssetRef(asset.ref, config, `scene "${s.id}" visual ${asset.kind}`, warnings, { release, _errors: errors });
+    }
+    if (s.transition != null && !SCENE_TRANSITIONS.has(s.transition)) {
+      warnings.push(`scene "${s.id}": unknown transition "${s.transition}" (valid: fade, wipe, slide, zoom) — the runtime falls back to fade`);
+    }
+    if (s.transition === 'wipe' && estimateSeconds(config) > 30) {
+      warnings.push(`scene "${s.id}": "wipe" transition uses clip-path, which forces screenshot capture on all frames — consider "fade" for faster renders on videos over 30s`);
+    }
+    for (const t of tags(s.body)) {
+      for (const name of ['src', 'poster']) {
+        const ref = attr(t, name);
+        if (ref != null) inspectAssetRef(ref, config, `scene "${s.id}" ${name}`, warnings, { release, _errors: errors });
+      }
+      const href = attr(t, 'href');
+      if (/^(?:https?:)?\/\//i.test(href || '') || /^assets\//.test(href || '')) {
+        inspectAssetRef(href, config, `scene "${s.id}" href`, warnings, { release, _errors: errors });
+      }
+      // cues
+      if (/(?<![-\w])data-cue\s*=/.test(t)) {
+        const raw = attr(t, 'data-cue');
+        // Named markers: data-cue="marker:name" — resolve against config.markers.
+        if (raw && raw.indexOf('marker:') === 0) {
+          const name = raw.slice(7);
+          if (config.markers && !(name in config.markers)) {
+            warnings.push(`scene "${s.id}": data-cue="${raw}" — marker "${name}" not found in config.markers`);
+          }
+        } else {
+          const k = +raw;
+          if (!Number.isInteger(k) || k < 0) {
+            warnings.push(`scene "${s.id}": data-cue="${raw}" does not resolve to a turn — it reveals at scene entry`);
+          } else if (k >= s.vo.length) {
+            warnings.push(`scene "${s.id}": data-cue="${raw}" but turns are indexed 0..${s.vo.length - 1} — it reveals at scene entry`);
+          }
+        }
+      } else if (/class\s*=\s*["'][^"']*\bcue\b/.test(t)) {
+        warnings.push(`scene "${s.id}": class="cue" without data-cue — it animates at scene entry, not on a turn`);
+      }
+      if (/(?<![-\w])data-drift\s*=/.test(t) &&
+          (/(?<![-\w])data-cue\s*=/.test(t) || /class\s*=\s*["'][^"']*\b(?:reveal|cue)\b/.test(t))) {
+        warnings.push(`scene "${s.id}": data-drift="${attr(t, 'data-drift')}" on the same element as .reveal/.cue — both drive transform and fight; move the reveal/cue to a wrapper`);
+      }
+      const delay = attr(t, 'data-delay');
+      if (delay != null && !Number.isFinite(+delay)) {
+        warnings.push(`scene "${s.id}": data-delay="${delay}" is not a number of seconds`);
+      }
+      const count = attr(t, 'data-count');
+      if (count != null && !Number.isFinite(parseFloat(count))) {
+        warnings.push(`scene "${s.id}": data-count="${count}" is not numeric — the runtime skips it`);
+      }
+      if (/(?<![-\w])data-mark\s*=/.test(t)) {
+        const kind = attr(t, 'data-mark');
+        if (!MARK_KINDS.has(kind)) {
+          warnings.push(`scene "${s.id}": data-mark="${kind}" is not a known mark (valid: underline, circle, box, highlight) — the runtime ignores it`);
+        }
+      }
+      const classVal = attr(t, 'class');
+      if (classVal) {
+        const names = classVal.split(/\s+/);
+        const hits = names.filter(n => HF_RESERVED_CLASSES.has(n));
+        if (hits.length) {
+          warnings.push(`scene "${s.id}": class="${classVal}" uses HyperFrames-reserved name${hits.length > 1 ? 's' : ''} ${hits.map(c => `"${c}"`).join(', ')} — rename to avoid silent layout breakage`);
+        }
+      }
+      const id = attr(t, 'id');
+      if (id != null) {
+        bodyIds.add(id);
+        if (sceneIds.has(id)) {
+          warnings.push(`scene "${s.id}": duplicate id "${id}" within the scene — its url(#…) / href="#…" references become ambiguous`);
+        } else sceneIds.add(id);
+      }
+    }
+    for (const ref of cssUrls(s.body)) {
+      inspectAssetRef(ref, config, `scene "${s.id}" inline style`, warnings, { release, _errors: errors });
+    }
+
+    if (s.clip) {
+      const ext = path.extname(s.clip).toLowerCase();
+      if (!['.mp4', '.webm', '.mov'].includes(ext)) {
+        warnings.push(`scene "${s.id}": clip "${s.clip}" has unusual extension ${ext} — HyperFrames supports .mp4, .webm, .mov`);
+      }
+    }
+  }
+
+  const webglScenes = config.scenes.filter(s => s.three || s._threeModuleContents).length;
+  if (webglScenes > 12) {
+    warnings.push(`${webglScenes} WebGL scenes exceed the safe eager-preview context budget (12) — build and shots isolate scenes automatically; use motion shots instead of relying on the full Studio preview`);
+  }
+
+  const timingsPath = path.join(opts.outDir || path.join(config.projectDir || '.', 'out'), 'timings.json');
+  let timings = null;
+  if (fs.existsSync(timingsPath)) {
+    try { timings = JSON.parse(fs.readFileSync(timingsPath, 'utf8')); } catch { /* synth will report malformed timings */ }
+  }
+  for (const [id, flow] of Object.entries(config.walkthroughs || {})) {
+    const status = captureStatus(config, id, timings, {
+      outDir: opts.outDir || path.join(config.projectDir || '.', 'out'),
+    });
+    if (!status.ok) {
+      issue(`walkthrough "${id}": ${status.reason} — run \`narova walkthrough capture ${id}\` after synth`);
+    }
+    if (flow.mutates) {
+      warnings.push(`walkthrough "${id}" declares mutating actions — capture against disposable demo data, never a production account`);
+    }
+  }
+
+  // choreography
+  // A declared file that cannot be read is always an error: resolveConfig
+  // throws on it, so reaching here means the config was assembled another way
+  // and the composition would silently render with no choreography at all.
+  if (config.choreographyPath && !fs.existsSync(config.choreographyPath)) {
+    releaseIssue(`config.choreography: file not found: ${config.choreographyPath}`);
+  }
+  // Collect every blob of author-authored JS that gets inlined into the
+  // composition: project choreography + per-scene choreographyFile/scriptFile
+  // + the raw Three.js escape hatch (scene.threeModule). All of them are
+  // seeked on a paused timeline, so all of them carry the same determinism
+  // contract. Scan each against the hazard rules and attribute the source.
+  const authorJsBlobs = [];
+  if (config.choreography) authorJsBlobs.push({ src: 'choreography', code: config.choreography });
+  for (const s of config.scenes) {
+    if (s._choreographyFileContents) authorJsBlobs.push({ src: `scene "${s.id}" choreographyFile`, code: s._choreographyFileContents });
+    if (s._scriptFileContents) authorJsBlobs.push({ src: `scene "${s.id}" scriptFile`, code: s._scriptFileContents });
+    if (s._threeModuleContents) authorJsBlobs.push({ src: `scene "${s.id}" threeModule`, code: s._threeModuleContents, threeModule: true });
+  }
+  for (const blob of authorJsBlobs) {
+    // Frames are rendered by seeking a paused timeline, so anything that reads
+    // wall-clock time, randomizes, or schedules its own work paints a different
+    // picture on every pass. Warnings, not errors — string matching has false
+    // positives (a variable named `updateDate`, "fetch" inside a comment) and
+    // the determinism contract carries the hard rule.
+    for (const rule of CHOREOGRAPHY_DETERMINISM_RULES) {
+      if (rule.pattern.test(blob.code)) {
+        warnings.push(`${blob.src}: references ${rule.desc} — frames are rendered by seeking a paused timeline, so this will not reproduce`);
+      }
+    }
+    if (blob.threeModule && /\btl\.(?:to|from|fromTo|set|call)\s*\(/.test(blob.code)
+        && !/\b(?:sceneTl|timeline)\.(?:to|from|fromTo|set|call)\s*\(/.test(blob.code)
+        && !/\bat\s*\(/.test(blob.code)) {
+      issue(`${blob.src}: schedules on the composition-global tl without at() — use sceneTl with local positions or wrap global positions in at()`, 'correctness');
+    }
+  }
+  const projectChoreoBytes = config.choreography ? Buffer.byteLength(config.choreography, 'utf8') : 0;
+  if (projectChoreoBytes > CHOREOGRAPHY_MAX_BYTES) {
+    warnings.push(`choreography: ${Math.round(projectChoreoBytes / 1024)}KB exceeds the ${CHOREOGRAPHY_MAX_BYTES / 1024}KB guideline — a choreography file growing without bound is a sign the logic belongs in the tool`);
+  }
+
+  // NAR-004-022 — selective-render downgrade visibility. The same conditions
+  // that downgrade browser-profile caching to whole-video mode at build time
+  // (scene-cache.js selectiveRenderSafe) are surfaced here as an attributed
+  // warning, so the author learns BEFORE a long render that per-scene cache
+  // recovery will be unavailable. Information only: the downgrade itself is
+  // correct behavior ("never creatively wrong"); the freedom to use project
+  // choreography is unchanged.
+  if ((config.renderer || 'hyperframes') === 'hyperframes') {
+    const jsImport = Object.entries(config.imports || {}).find(([, file]) => typeof file === 'string' && file.toLowerCase().endsWith('.js'));
+    if (config.choreography && String(config.choreography).trim()) {
+      warnings.push('scene cache: project choreography downgrades HyperFrames caching to whole-video mode — per-scene render recovery is unavailable for this project; scene-local choreographyFile/scriptFile stay cacheable');
+    } else if (jsImport) {
+      warnings.push(`scene cache: project import "${jsImport[0]}" is JavaScript inlined into the global timeline, downgrading HyperFrames caching to whole-video mode — per-scene render recovery is unavailable for this project`);
+    }
+  }
+
+  // NAR-018-069 — unsupported-markup advisory. When synthesis text carries a
+  // markup family the selected backend DECLARES as ignored, warn. Honored and
+  // unknown families stay silent (no false positives from self-reported-but-
+  // drifting declarations). Advisory only: text is sent unaltered either way.
+  const backendsInUse = [...new Set(Object.values(config.voices || {}).map(v => v.backend).filter(Boolean))];
+  for (const backend of backendsInUse) {
+    const capabilities = deliveryCapabilitiesFor(backend, name => (isBuiltinBackend(name) ? null : getProvider(name)));
+    if (!capabilities) continue; // undeclared/unknown backend — stay silent
+    for (const s of config.scenes) {
+      for (const [ti, turn] of (s.vo || []).entries()) {
+        const text = turn.synthesisText != null ? String(turn.synthesisText) : null;
+        if (!text) continue;
+        for (const { family, pattern } of MARKUP_FAMILIES) {
+          if (capabilities[family] === 'ignored' && pattern.test(text)) {
+            warnings.push(`scene "${s.id}" vo[${ti}] (voice ${turn.who}, backend ${backend}): ${family} is declared ignored by this backend and will be spoken as literal text or dropped — the declaration is advisory; the text is sent unaltered`);
+          }
+        }
+      }
+    }
+  }
+
+
+  // theme.css
+  if (/animation[^;{}]*\binfinite\b/.test(config.themeCss || '')) {
+    issue('theme.css uses "animation: … infinite" — not deterministic under frame rendering; move motion to data-cue/.reveal or drop it', 'correctness');
+  }
+  // Check for HyperFrames-reserved class names used as CSS selectors in theme.css.
+  for (const klass of HF_RESERVED_CLASSES) {
+    const re = new RegExp('\\.' + klass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w-])', 'g');
+    const matches = (config.themeCss || '').match(re);
+    if (matches && matches.length) {
+      warnings.push(`theme.css uses reserved class name "${klass}" as a selector — this may collide with generated composition classes`);
+    }
+  }
+  if (/(?:font-family|--[\w-]*(?:font|serif|sans|mono))\s*:[^;{}]*(?:Georgia|Times New Roman|Arial|Roboto)/i.test(config.themeCss || '')) {
+    warnings.push('theme.css uses a named fallback font — HyperFrames may fetch it; use the bundled family plus serif/sans-serif/monospace unless the extra family is intentional');
+  }
+
+  const SLOW_PATH_RULES = [
+    { pattern: /\bbackdrop-filter\s*:/gi,  desc: 'backdrop-filter forces screenshot capture for every frame' },
+    { pattern: /\bfilter\s*:\s*blur\b/gi,  desc: 'filter: blur() forces screenshot capture' },
+    { pattern: /\bfilter\s*:\s*drop-shadow\b/gi,  desc: 'filter: drop-shadow() forces screenshot capture' },
+    { pattern: /\bfilter\s*:\s*(?:brightness|saturate|contrast)\(/gi,  desc: 'filter: brightness/saturate/contrast() forces screenshot capture; use opacity instead' },
+    { pattern: /\bmix-blend-mode\s*:/gi,   desc: 'mix-blend-mode is incompatible with the render capture path' },
+  ];
+  for (const rule of SLOW_PATH_RULES) {
+    if (rule.pattern.test(config.themeCss || '')) {
+      warnings.push(`theme.css: ${rule.desc} — remove the property or accept significantly slower renders`);
+    }
+  }
+  for (const s of config.scenes) {
+    if (!s.body) continue;
+    for (const rule of SLOW_PATH_RULES) {
+      if (rule.pattern.test(s.body)) {
+        warnings.push(`scene "${s.id}" body: ${rule.desc} — move the effect to a plain color/opacity treatment in theme.css`);
+      }
+    }
+  }
+  for (const ref of cssUrls(config.themeCss || '')) {
+    inspectAssetRef(ref, config, 'theme.css', warnings, { release, _errors: errors });
+  }
+  for (const id of bodyIds) {
+    if (new RegExp(`#${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![-\\w])`).test(config.themeCss || '')) {
+      warnings.push(`theme.css targets #${id}, but compose renames body ids to <scene>--${id} — use a class selector instead`);
+    }
+  }
+
+  // Craft advice (hook, platform bands) has moved to narova critique.
+  // Run `narova critique` or `narova check --critique` for optional craft checks.
+
+  // ---- Creative identity (NAR-002-027, NAR-007-031..034) ----
+  // Advisory-only convergence surfaces. Never gated; never affects validity.
+  // Runs at every check level. Deduplicated per project-state change via the
+  // fingerprint-only local ledger.
+  try {
+    const ci = creativeIdentity.run(config, {
+      projectDir: config.projectDir,
+      outDir: opts.outDir,
+      emitArtifact: !!opts.emitCreativeArtifact,
+    });
+    for (const line of ci.lines) warnings.push(line);
+    if (opts.emitCreativeArtifact && ci.artifactPath) {
+      console.log(`creative-identity: wrote ${ci.artifactPath}`);
+    }
+  } catch (error) {
+    // The identity surfaces are advisory; a harness defect must not break check.
+    warnings.push(`creative-identity: advisory skipped (${error.message})`);
+  }
+
+  // ---- Strict / Release ----
+
+  // Claims ledger: in strict mode, warn on unledgered claims.
+  // In release mode, error on unledgered claims.
+  const claims = findClaims(config);
+  // Coverage statement (NAR-007-028): informational at every level, never a
+  // warning — a low count against figure-heavy narration is the visible
+  // signal that the heuristic sees little, where silence hid everything.
+  const totalVoTurns = config.scenes.reduce((n, s) => n + (s.vo ? s.vo.length : 0), 0);
+  if (totalVoTurns > 0) {
+    console.log(`claims: ${claims.length} of ${totalVoTurns} vo turns look factual (heuristic)`);
+  }
+  if (claims.length) {
+    if (strict) {
+      const ledger = readClaimsLedger(config);
+      if (!ledger) {
+        releaseIssue(
+          `vo contains ${claims.length} factual claim${claims.length === 1 ? '' : 's'} but the project has no claims.md ledger — ` +
+          'tag each verbatim/paraphrase/inference against the source before synth (references/url-to-source.md):',
+        );
+        for (const c of claims.slice(0, 5)) releaseIssue(`  ${c.ref}`);
+      } else {
+        const unledgered = claims.filter(c => !matchClaim(c.text, ledger));
+        if (unledgered.length) {
+          const msg = `${unledgered.length} of ${claims.length} claim${claims.length === 1 ? '' : 's'} not found in ${path.relative(config.projectDir || '.', ledger.path)}:`;
+          if (release) {
+            releaseIssue(msg);
+            for (const c of unledgered.slice(0, 5)) releaseIssue(`  ${c.ref}`);
+          } else {
+            warnings.push(msg);
+            for (const c of unledgered.slice(0, 5)) warnings.push(`  ${c.ref}`);
+          }
+        }
+      }
+    } else {
+      // Non-strict: warn only if no ledger at all.
+      const dir = config.projectDir || '.';
+      const hasLedger = ['claims.md', 'CLAIMS.md'].some(f => fs.existsSync(path.join(dir, f)));
+      if (!hasLedger) {
+        warnings.push(
+          `vo contains ${claims.length} factual claim${claims.length === 1 ? '' : 's'} but the project has no claims.md ledger — ` +
+          'tag each verbatim/paraphrase/inference against the source before synth (references/url-to-source.md):',
+          ...claims.slice(0, 5).map(c => `  ${c.ref}`),
+        );
+      }
+    }
+  }
+
+  // Release-mode exclusive checks
+  if (release) {
+    releaseChecks(config, errors, opts);
+  }
+
+  // Print
+  for (const w of warnings) console.log(`warn: ${w}`);
+  for (const e of errors) console.log(`${release ? 'fail' : 'warn'}: ${e}`);
+
+  if (release) {
+    if (errors.length) {
+      console.log(`FAIL (release): ${errors.length} error${errors.length === 1 ? '' : 's'} — fix before building`);
+    } else {
+      console.log(`ok: release check passed — ${warnings.length} warning${warnings.length === 1 ? '' : 's'} (clean build gate)`);
+    }
+  }
+
+  const turns = config.scenes.reduce((n, s) => n + s.vo.length, 0);
+  const words = config.scenes.reduce((n, s) =>
+    n + s.vo.reduce((m, t) => m + t.text.trim().split(/\s+/).length, 0), 0);
+  const hasExternalNarration = !!(config.narrationSource && config.narrationSource.file);
+  const backends = hasExternalNarration ? 'external'
+    : [...new Set(Object.values(config.voices).map(v => v.backend))].join('+') || 'silent';
+  const est = hasExternalNarration
+    ? fmtDuration(config.scenes.reduce((n, s) => n + (s.dur || 0), 0))
+    : fmtDuration(estimateSeconds(config));
+  const tempo = (config.timing && config.timing.tempo) || 1.18;
+  const walkthroughCount = Object.keys(config.walkthroughs || {}).length;
+  const walkthroughSummary = walkthroughCount ? `, ${walkthroughCount} walkthrough${walkthroughCount === 1 ? '' : 's'}` : '';
+  const karaokeNote = config.narrationSource?.wordTimings ? `, ${config.narrationSource.wordTimings.length} karaoke cues` : '';
+  console.log(`ok: "${config.title}" — ${config.scenes.length} scenes, ${turns} turns${walkthroughSummary}${karaokeNote}, ~${words} words, ≈${est} narration (est. at tempo ${tempo}) (${config.size.w}x${config.size.h}, ${backends})`);
+
+  return !(release && errors.length > 0);
+}
+
+/* ---- critique: opt-in creative craft assessment ------------------------------
+ * Critique runs optional craft/heuristic checks that are NOT correctness
+ * concerns. It never fails the build. Checks are organized into profiles
+ * so the model can deliberately request specific advice domains.
+ *
+ * Profiles:
+ *   creative        — visual contract, pilot approval, production readiness
+ *   social-short    — hook, saveable end-card, platform duration
+ *   explainer       — structure, pacing, scene-count distribution
+ *   presentation    — 3D shadow/PBR quality, visual balance hints
+ *   cinematic       — shot density, camera/action coverage, long tableaux
+ *   accessibility   — caption contrast, text readability
+ *   all             — every craft check (default when no profile is set)
+ *
+ * Use `narova critique` (or `check --critique`) to run these. A narration-only
+ * edit, a silent mood piece, or an experimental film may skip critique
+ * entirely — these checks exist for moments when craft advice is wanted. */
+function matchingBraceEnd(code, open) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let i = open; i < code.length; i++) {
+    const ch = code[i];
+    const next = code[i + 1];
+    if (lineComment) {
+      if (ch === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') { blockComment = false; i++; }
+      continue;
+    }
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '/' && next === '/') { lineComment = true; i++; continue; }
+    if (ch === '/' && next === '*') { blockComment = true; i++; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}' && --depth === 0) return i + 1;
+  }
+  return code.length;
+}
+
+function maskRanges(code, ranges) {
+  if (!ranges.length) return code;
+  const chars = [...code];
+  for (const [start, end] of ranges) {
+    for (let i = start; i < end; i++) if (chars[i] !== '\n') chars[i] = ' ';
+  }
+  return chars.join('');
+}
+
+function maskCameraHelperImplementations(code) {
+  const helperNames = '(?:shot|cameraCut|cameraMove|cameraTrack)';
+  const starts = [];
+  const declarations = new RegExp(`\\bfunction\\s+${helperNames}\\s*\\([^)]*\\)\\s*\\{`, 'g');
+  for (const match of code.matchAll(declarations)) {
+    const open = match.index + match[0].lastIndexOf('{');
+    starts.push([match.index, matchingBraceEnd(code, open)]);
+  }
+  const assignments = new RegExp(`\\b(?:const|let|var)\\s+${helperNames}\\s*=\\s*(?:async\\s+)?(?:function(?:\\s+[A-Za-z_$][\\w$]*)?\\s*\\([^)]*\\)|(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*=>)\\s*`, 'g');
+  for (const match of code.matchAll(assignments)) {
+    let end;
+    if (code[match.index + match[0].length] === '{') {
+      end = matchingBraceEnd(code, match.index + match[0].length);
+    } else {
+      const terminator = code.slice(match.index + match[0].length).search(/[;\n]/);
+      end = terminator < 0 ? code.length : match.index + match[0].length + terminator + 1;
+    }
+    starts.push([match.index, end]);
+  }
+  return maskRanges(code, starts);
+}
+
+function expressionArgumentEnd(code, start) {
+  const stack = [];
+  let quote = null;
+  let escaped = false;
+  for (let i = start; i < code.length; i++) {
+    const ch = code[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
+    else if (ch === ')' || ch === ']' || ch === '}') stack.pop();
+    else if (ch === ',' && stack.length === 0) return i;
+  }
+  return code.length;
+}
+
+function callableDefinitionRanges(code) {
+  const ranges = [];
+  const declarations = /\bfunction\s+[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{/g;
+  for (const match of code.matchAll(declarations)) {
+    const open = match.index + match[0].lastIndexOf('{');
+    ranges.push([match.index, matchingBraceEnd(code, open)]);
+  }
+  const assignments = /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s+)?(?:function(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\)|(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>)\s*/g;
+  for (const match of code.matchAll(assignments)) {
+    const bodyStart = match.index + match[0].length;
+    if (code[bodyStart] === '{') ranges.push([match.index, matchingBraceEnd(code, bodyStart)]);
+    else {
+      const offset = code.slice(bodyStart).search(/[;\n]/);
+      ranges.push([match.index, offset < 0 ? code.length : bodyStart + offset + 1]);
+    }
+  }
+  return ranges;
+}
+
+const ownCallableBody = body => maskRanges(body, callableDefinitionRanges(body));
+
+function namedCameraCallbackInfo(code, cameraMutation) {
+  const names = new Set();
+  const ranges = [];
+  const declarations = /\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g;
+  for (const match of code.matchAll(declarations)) {
+    const open = match.index + match[0].lastIndexOf('{');
+    const end = matchingBraceEnd(code, open);
+    if (cameraMutation.test(ownCallableBody(code.slice(open + 1, end - 1)))) {
+      names.add(match[1]);
+      ranges.push([match.index, end]);
+    }
+  }
+  const assignments = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\)|(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>)\s*/g;
+  for (const match of code.matchAll(assignments)) {
+    const bodyStart = match.index + match[0].length;
+    const block = code[bodyStart] === '{';
+    const end = block
+      ? matchingBraceEnd(code, bodyStart)
+      : (() => {
+        const offset = code.slice(bodyStart).search(/[;\n]/);
+        return offset < 0 ? code.length : bodyStart + offset + 1;
+      })();
+    const body = code.slice(bodyStart + (block ? 1 : 0), end - (block ? 1 : 0));
+    if (cameraMutation.test(ownCallableBody(body))) {
+      names.add(match[1]);
+      ranges.push([match.index, end]);
+    }
+  }
+  return { names, ranges };
+}
+
+function internalShotCount(code = '') {
+  const helperNames = '(?:shot|cameraCut|cameraMove|cameraTrack)';
+  const outsideHelpers = maskCameraHelperImplementations(code);
+  const calls = (outsideHelpers.match(new RegExp(`\\b${helperNames}\\s*\\(`, 'g')) || []).length;
+  const cameraMutation = /\bcamera(?:\.(?:position|rotation))?\.(?:set|copy)\s*\(|\bcamera\.lookAt\s*\(|\b(?:sceneTl|timeline|tl)\.(?:set|to|from|fromTo)\s*\(\s*camera(?:\.(?:position|rotation))?\b/;
+  const callbackStarts = [...outsideHelpers.matchAll(/\b(?:sceneTl|timeline|tl)\.call\s*\(\s*(?:async\s+)?(?:function(?:\s+[A-Za-z_$][\w$]*)?\s*\([^)]*\)\s*|(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*)/g)];
+  let inlineCallbacks = 0;
+  for (const match of callbackStarts) {
+    const bodyStart = match.index + match[0].length;
+    const block = outsideHelpers[bodyStart] === '{';
+    const end = block
+      ? matchingBraceEnd(outsideHelpers, bodyStart)
+      : expressionArgumentEnd(outsideHelpers, bodyStart);
+    const body = outsideHelpers.slice(bodyStart + (block ? 1 : 0), end - (block ? 1 : 0));
+    if (cameraMutation.test(ownCallableBody(body))) inlineCallbacks++;
+  }
+  // Inspect definitions in the original source so a helper-named function used
+  // as timeline.call(cameraCut) is not erased by direct-helper masking. Calls
+  // are still counted from outsideHelpers, which prevents implementation code
+  // from becoming phantom scheduled cuts.
+  const named = namedCameraCallbackInfo(code, cameraMutation);
+  const namedCalls = [...outsideHelpers.matchAll(/\b(?:sceneTl|timeline|tl)\.call\s*\(\s*([A-Za-z_$][\w$]*)\b/g)]
+    .filter(match => named.names.has(match[1])).length;
+  const directSource = maskRanges(outsideHelpers, named.ranges);
+  const directOps = (directSource.match(/\b(?:sceneTl|timeline|tl)\.(?:set|to|from|fromTo)\s*\(\s*camera(?:\.(?:position|rotation))?\b/g) || []).length;
+  return calls + directOps + inlineCallbacks + namedCalls;
+}
+
+function creativeBriefStatus(config, opts = {}) {
+  const projectDir = opts.projectDir || config.projectDir;
+  if (!projectDir) return { exists: false, approved: false };
+  const briefPath = path.join(projectDir, 'creative-brief.md');
+  if (!fs.existsSync(briefPath)) return { exists: false, approved: false, path: briefPath };
+  try {
+    const text = fs.readFileSync(briefPath, 'utf8');
+    const selected = text.match(/^Selected proof branch:\s*(.+?)\s*$/im);
+    const selectedName = selected && selected[1].trim();
+    const expandedFrom = text.match(/^Expanded from proof branch:\s*(.+?)\s*$/im);
+    const expandedFromName = expandedFrom && expandedFrom[1].trim();
+    const expandedIdentity = text.match(/^Expanded proof identity:\s*([a-f0-9]{64})\s*$/im);
+    const expandedProofIdentity = expandedIdentity && expandedIdentity[1].toLowerCase();
+    const proofSection = text.match(/^## Proof branches[^\n]*\n([\s\S]*?)(?=\n## |(?![\s\S]))/im);
+    const proofNames = proofSection ? [...proofSection[1].matchAll(/^\|\s*([^|\n]+?)\s*\|/gm)]
+      .map(match => match[1].trim())
+      .filter(name => name && !/^branch$/i.test(name) && !/^[-: ]+$/.test(name)) : [];
+    const distinctProofNames = [...new Set(proofNames)];
+    const rejection = text.match(/^## Rejection criteria[^\n]*\n([\s\S]*?)(?=\n## |(?![\s\S]))/im);
+    const rejectionText = rejection ? rejection[1].replace(/<!--[^]*?-->/g, '').trim() : '';
+    let selectedProof = false;
+    let expansionLineage = false;
+    let proofSet = false;
+    if (distinctProofNames.length || selectedName) {
+      try {
+        const branchStore = opts.branchStore || require('./releases');
+        const validProof = (name, requireApproved = false) => {
+          const branch = branchStore.readBranch(name);
+          const metadataDir = branchStore.branchDir ? branchStore.branchDir(name) : branchStore.releasePath(name);
+          const snapshotDir = branchStore.releasePath(name);
+          const snapshotManifest = path.join(snapshotDir, 'manifest.json');
+          const hasSnapshot = branch && typeof branch.snapshotManifestSha256 === 'string'
+            && branch.snapshotManifestSha256 && hashFile(snapshotManifest) === branch.snapshotManifestSha256;
+          const hasEvidence = branch && Array.isArray(branch.evidence) && branch.evidence.length > 0
+            && branch.evidence.every(ref => {
+            if (typeof ref !== 'string' || !ref.trim()) return false;
+            const candidate = path.resolve(metadataDir, ref);
+            const relative = path.relative(metadataDir, candidate);
+            const expected = branch.evidenceHashes && branch.evidenceHashes[ref];
+            return relative && relative !== '..' && !relative.startsWith('..' + path.sep)
+              && typeof expected === 'string' && hashFile(candidate) === expected;
+          });
+          return branch && (!requireApproved || branch.status === 'approved') && hasSnapshot
+            && String(branch.rationale || '').trim() && hasEvidence
+            && verifyProofBundle(metadataDir, snapshotDir, branch, projectIdentity(projectDir))
+            ? branch : null;
+        };
+        const proofs = distinctProofNames.map(name => validProof(name));
+        proofSet = distinctProofNames.length >= 2 && distinctProofNames.length <= 3
+          && proofs.every(Boolean)
+          && new Set(proofs.map(branch => branch.snapshotIdentity)).size === proofs.length
+          && new Set(proofs.map(branch => branch.proofIdentity)).size === proofs.length;
+        const selectedBranch = proofSet && selectedName && distinctProofNames.includes(selectedName)
+          ? validProof(selectedName, true) : null;
+        selectedProof = !!selectedBranch;
+        expansionLineage = !!(selectedBranch && expandedFromName === selectedName
+          && expandedProofIdentity === selectedBranch.proofIdentity);
+      } catch { /* a missing, malformed, or inaccessible branch is not approved proof */ }
+    }
+    return {
+      exists: true,
+      approved: /^Status:\s*approved\s*$/im.test(text),
+      ambitious: /^Ambition:\s*ambitious\s*$/im.test(text),
+      proofSet,
+      proofBranchNames: distinctProofNames,
+      selectedProof,
+      selectedProofName: selectedName || '',
+      expansionLineage,
+      rejectionCriteria: rejectionText.length >= 20,
+      path: briefPath,
+    };
+  } catch {
+    return { exists: true, approved: false, path: briefPath };
+  }
+}
+
+function critique(config, opts = {}) {
+  const results = [];
+  const profile = opts.profile || 'all';
+  const active = profile === 'all' ? null : new Set(profile.split(',').map(s => s.trim()));
+
+  function activeFor(p) { return active == null || active.has(p); }
+  function note(msg) { results.push(msg); }
+
+  // -- narration: unused capability hints (NAR-007-027) ----------------------
+  // Critique-only by design: default check stays silent on this subject in
+  // every case. A backend declaring delivery-instruct honored while the
+  // project configures no delivery direction is an unused capability, not a
+  // defect — the note names where direction would be set.
+  if (activeFor('narration') || activeFor('all')) {
+    const voicesInUse = config.voices || {};
+    const byBackend = new Map();
+    for (const v of Object.values(voicesInUse)) {
+      if (!v.backend) continue;
+      if (!byBackend.has(v.backend)) byBackend.set(v.backend, []);
+      byBackend.get(v.backend).push(v);
+    }
+    for (const [backend, vs] of byBackend) {
+      const caps = deliveryCapabilitiesFor(backend, name => (isBuiltinBackend(name) ? null : getProvider(name)));
+      if (!caps || caps['delivery-instruct'] !== 'honored') continue;
+      if (!vs.some(v => v.instruct && String(v.instruct).trim())) {
+        note(`narration: backend ${backend} honors delivery direction (per-voice \`instruct\`) but no voice using it configures one — a free performance surface, e.g. instruct: "warm, measured storyteller; never flat"`);
+      }
+    }
+  }
+
+  // -- creative: ambition and pilot readiness -------------------------------
+  if (activeFor('creative') || activeFor('cinematic') || activeFor('all')) {
+    if (needsCreativeBrief(config, opts)) {
+      const brief = creativeBriefStatus(config, opts);
+      if (!brief.exists) {
+        note('creative: non-trivial project has no creative-brief.md — define the visual contract, pilot gate, and rejection criteria before full production');
+      } else if (!brief.approved) {
+        note('creative: creative-brief.md is still draft — approve it only after the selected proof meets the declared intent');
+      } else if (brief.ambitious && !brief.proofSet) {
+        note('creative: ambitious brief needs 2–3 intact project-bound proof branches with rationale before expansion');
+      } else if (brief.ambitious && !brief.selectedProof) {
+        note('creative: ambitious brief must select one approved branch from its declared proof set');
+      } else if (brief.ambitious && !brief.expansionLineage) {
+        note('creative: ambitious release must record the selected branch and exact proof identity it expanded from');
+      } else if (brief.ambitious && !brief.rejectionCriteria) {
+        note('creative: ambitious brief needs observable, medium-specific rejection criteria');
+      }
+    }
+  }
+
+  // -- social-short: hook / saveable / duration-band advice ------------------
+  if (activeFor('social-short') || activeFor('all')) {
+    // Only generate hook advice for projects with voiceover and captions enabled.
+    const voices = config.voices || {};
+    const hasVoiceover = Object.keys(voices).length > 0;
+    const hasSynthesis = config.scenes.some(s => (s.vo || []).length > 0);
+    if ((hasVoiceover || hasSynthesis) && config.captionsEnabled !== false) {
+      const s1 = config.scenes[0];
+      const last = config.scenes[config.scenes.length - 1];
+      const timing = config.timing || {};
+
+      const lead = timing.lead ?? 0.16;
+      if (lead > 0.2) {
+        note(`social-short: timing.lead is ${lead}s (>200ms) — the first syllable should land within 200ms; set timing.lead ≤ 0.2`);
+      }
+
+      if (s1) {
+        const body = String(s1.body || '');
+        const portable = visualFacts(s1.visual);
+        const textEls = body.match(/<(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)\b[^>]*>[^<]+<\/(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)>/gi);
+        if ((!textEls || textEls.length === 0) && !portable.text) {
+          note(s1.walkthrough
+            ? 'social-short: scene 1 shows the product but has no on-screen hook text — add a short claim so muted viewers know why the action matters'
+            : 'social-short: scene 1 has no visible text — muted viewers (80%+ of autoplay) see a blank screen; add hook text on-screen');
+        }
+      }
+
+      if (last) {
+        const lastBody = String(last.body || '');
+        const lastPortable = visualFacts(last.visual);
+        const hasImage = /<(?:img|svg|video)\b/i.test(lastBody);
+        const lastTextEls = lastBody.match(/<(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)\b[^>]*>[^<]+<\/(?:h[1-6]|p|span|div|a|li|label|figcaption|blockquote)>/gi);
+        if (!hasImage && !lastPortable.content && (!lastTextEls || lastTextEls.length === 0)) {
+          note(`social-short: last scene "${last.id}" has no text or image — a saveable end-card lifts completion rate; add a title, logo, or CTA`);
+        }
+      }
+    }
+
+    if (config.platform && PLATFORMS[config.platform]) {
+      const [lo, hi] = PLATFORMS[config.platform].band;
+      const estSec = estimateSeconds(config);
+      if (estSec < lo) {
+        note(`social-short: platform ${config.platform} targets ${lo}–${hi}s; estimated narration is ${Math.round(estSec)}s — add material or pick a shorter format`);
+      } else if (estSec > hi) {
+        const band = lo > 0 ? `targets ${lo}–${hi}s` : `allows up to ${hi}s`;
+        note(`social-short: platform ${config.platform} ${band}; estimated narration is ${Math.round(estSec)}s — tighten the script or pick a longer format`);
+      }
+    }
+  }
+
+  // -- explainer: scene-count distribution, pacing advice -------------------
+  if (activeFor('explainer') || activeFor('all')) {
+    const sceneCount = config.scenes.length;
+    const turns = config.scenes.reduce((n, s) => n + s.vo.length, 0);
+    const estSec = estimateSeconds(config);
+    if (estSec > 30 && sceneCount < 3 && turns > 2) {
+      note('explainer: script has multiple turns but few scenes — consider breaking into more visual segments for clarity');
+    }
+  }
+
+  // -- presentation: 3D quality hints ---------------------------------------
+  if (activeFor('presentation') || activeFor('all')) {
+    for (const s of config.scenes) {
+      if (!s.three) continue;
+      const hasShadowLight = (s.three.lights || []).some(l => l.shadow);
+      const hasShadowReceiver = (s.three.objects || []).some(o => o.receiveShadow);
+      if (hasShadowLight && !hasShadowReceiver) {
+        note(`presentation: scene "${s.id}" — lights cast shadows but no object has receiveShadow:true; shadows won't be visible`);
+      }
+      const usesPBR = (s.three.objects || []).some(o =>
+        o.roughness != null || o.metalness != null || o.roughnessMap || o.metalnessMap);
+      if (usesPBR && !s.three.envMap) {
+        note(`presentation: scene "${s.id}" — PBR materials (roughness/metalness) used without envMap; surfaces will look flat`);
+      }
+    }
+  }
+
+  // -- cinematic: temporal density and directed action ----------------------
+  if (activeFor('cinematic') || activeFor('all')) {
+    const seconds = productionSeconds(config, opts);
+    const scenes = config.scenes || [];
+    const threeScenes = scenes.filter(s => s.three || s._threeModuleContents);
+    const directedShots = scenes.reduce((count, s) => count
+      + Math.max(1, s._threeModuleContents ? internalShotCount(s._threeModuleContents) : 0), 0);
+    if (seconds >= 30 && directedShots && seconds / directedShots > 8) {
+      note(`cinematic: ${directedShots} directed shot${directedShots === 1 ? '' : 's'} across ~${Math.round(seconds)}s average ${(seconds / directedShots).toFixed(1)}s — add visual beats or cuts to avoid long tableaux`);
+    }
+    if (threeScenes.length) {
+      const raw = threeScenes.filter(s => s._threeModuleContents);
+      const cameraDirected = raw.filter(s => /\b(?:camera|cameraMove|cameraTrack|lookAt)\b/.test(s._threeModuleContents)).length;
+      if (raw.length >= 3 && cameraDirected / raw.length < 0.7) {
+        note(`cinematic: only ${cameraDirected}/${raw.length} raw 3D scenes declare camera direction — add framing, tracking, or motivated camera movement`);
+      }
+      const sparse = raw.filter(s => ((s._threeModuleContents.match(/\b(?:sceneTl|timeline|tl)\.(?:to|from|fromTo|set|call)\s*\(/g) || []).length < 3));
+      if (sparse.length) {
+        note(`cinematic: ${sparse.length} raw 3D scene(s) have fewer than three timeline actions — strengthen blocking, prop/environment motion, or shot progression`);
+      }
+    }
+  }
+
+  // -- accessibility: caption/contrast hints --------------------------------
+  if (activeFor('accessibility') || activeFor('all')) {
+    if (config.captionsEnabled && config.captions && config.captions.maxWords != null && config.captions.maxWords > 15) {
+      note('accessibility: caption maxWords is high — shorter caption lines improve readability');
+    }
+  }
+
+  if (results.length) {
+    console.log(`critique (profile: ${profile}):`);
+    for (const r of results) console.log(`  • ${r}`);
+  } else {
+    console.log(`critique (profile: ${profile}): no advice — project passes all craft heuristics`);
+  }
+  return results;
+}
+
+module.exports = { check, critique, internalShotCount, creativeBriefStatus, needsCreativeBrief, productionSeconds, measuredProductionSeconds, estimateSeconds, quantityFragments, findClaims, readClaimsLedger, matchClaim };

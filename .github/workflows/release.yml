@@ -1,0 +1,455 @@
+name: Release AI Productivity Flow
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-test:
+    name: Validate Version & Run Quality Gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pytest-timeout cryptography pillow
+
+      - name: Verify Git Tag Matches Canonical Version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $baseTag = $tag.Split("-")[0]
+          $canonical = (python -c "import sys; sys.path.insert(0, 'src'); from voice_flow._version import VERSION; print(VERSION)").Trim()
+          Write-Host "Triggered Tag: $tag (Base: $baseTag), Canonical Version: $canonical"
+          if ($baseTag -ne $canonical) {
+            Write-Error "Release tag 'v$tag' (base '$baseTag') does not match canonical source version '$canonical' in src/voice_flow/_version.py!"
+            exit 1
+          }
+
+      - name: Run Version Consistency Test
+        run: |
+          pytest tests/test_version_consistency.py tests/test_update_checker.py -vv
+
+      - name: Run Platform & Core Feature Tests
+        run: |
+          pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py tests/test_runtime_guard_socket_permissions.py tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py -v --timeout=60
+
+      - name: Run macOS GUI regression tests
+        run: |
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+
+      - name: Verify License and Third-Party Notices
+        shell: pwsh
+        run: |
+          if (-not (Test-Path LICENSE)) { Write-Error "LICENSE file missing!"; exit 1 }
+          if (-not (Test-Path release/THIRD_PARTY_NOTICES.txt)) { Write-Error "release/THIRD_PARTY_NOTICES.txt missing!"; exit 1 }
+          Write-Host "License and Third-Party notices verified."
+
+      - name: Secret Scanning Quality Gate
+        shell: pwsh
+        run: |
+          $forbidden = @("ghp_[a-zA-Z0-9]{30,}", "sk-[a-zA-Z0-9]{32,}", "AIzaSy[a-zA-Z0-9_-]{33}", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----")
+          $targets = Get-ChildItem -Path src, release, scripts -Recurse -File -Exclude *.ico,*.png,*.jpg,*.zip,*.exe,*.bin,*.gguf | Select-Object -ExpandProperty FullName
+          foreach ($pattern in $forbidden) {
+            $matches = Select-String -Path $targets -Pattern $pattern
+            if ($matches) {
+              Write-Error "Potential secret found matching pattern ${pattern}:`n$matches"
+              exit 1
+            }
+          }
+          Write-Host "Secret scan passed cleanly."
+
+  package-windows:
+    name: Package & Validate Windows Installer
+    needs: validate-and-test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify Windows Release Artifacts & Smoke Test
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $exe = "dist/AI-Productivity-Flow-Setup-x64.exe"
+          $sha = "dist/AI-Productivity-Flow-Setup-x64.exe.sha256"
+
+          # 1. If not present in repo checkout, check if pre-staged in release assets
+          if (-not (Test-Path $exe)) {
+            Write-Host "Windows installer not found in checkout; probing pre-staged release assets for $tag..."
+            try {
+              gh release download "$tag" --pattern "AI-Productivity-Flow-Setup-x64.exe*" --dir dist --repo "${{ github.repository }}"
+            } catch {
+              Write-Host "No pre-existing release asset download available."
+            }
+          }
+
+          # 2. Hard fail if still missing
+          if (-not (Test-Path $exe)) {
+            Write-Error "CRITICAL: Windows installer ($exe) is missing! The release workflow requires a valid, pre-built Windows installer artifact."
+            exit 1
+          }
+
+          $size = (Get-Item $exe).Length
+          Write-Host "Found Windows Installer ($size bytes)"
+          if ($size -lt 50000000) {
+            Write-Error "Windows installer is too small ($size bytes) to contain required runtime closure!"
+            exit 1
+          }
+
+          # 3. Guard against obsolete beta binary (v0.9.0-beta installer hash)
+          $calculatedHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+          $knownOldBetaHash = "aad99333f71c76e9ec3d9b9a1cfbf59d5f713dba5531c8e18c34052d562f6057"
+          if ($calculatedHash -eq $knownOldBetaHash) {
+            Write-Error "CRITICAL INTEGRITY FAILURE: The Windows installer is byte-identical to the old v0.9.0-beta installer ($knownOldBetaHash)! Releases cannot publish outdated or recycled binaries."
+            exit 1
+          }
+
+          # 4. Guard against version and product metadata mismatch
+          $expectedVersion = $tag.TrimStart("v").Split("-")[0]
+          $installerVersion = (Get-Item $exe).VersionInfo.ProductVersion
+          if ($installerVersion) {
+            $installerVersion = $installerVersion.Trim()
+            Write-Host "Installer ProductVersion: $installerVersion, Expected Version: $expectedVersion"
+            if ($installerVersion -ne $expectedVersion) {
+              Write-Error "CRITICAL VERSION MISMATCH: Windows installer version '$installerVersion' does not match release tag version '$expectedVersion'!"
+              exit 1
+            }
+          }
+          $productName = (Get-Item $exe).VersionInfo.ProductName
+          if ($productName) {
+            $productName = $productName.Trim()
+            if ($productName -ne "AI Productivity Flow") {
+              Write-Error "CRITICAL PRODUCT NAME MISMATCH: Windows installer ProductName is '$productName', expected 'AI Productivity Flow'!"
+              exit 1
+            }
+          }
+
+          # 5. Checksum verification
+          if (Test-Path $sha) {
+            $expectedHash = (Get-Content $sha).Trim().Split()[0].ToLower()
+            if ($calculatedHash -ne $expectedHash) {
+              Write-Error "Checksum mismatch! Calculated: $calculatedHash, Expected: $expectedHash"
+              exit 1
+            }
+          } else {
+            "$calculatedHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath $sha -Encoding ascii
+          }
+          Write-Host "Windows installer smoke validation passed with hash $calculatedHash."
+
+      - name: Sign Windows Installer (Optional Authenticode)
+        shell: pwsh
+        env:
+          WINDOWS_CERT: ${{ secrets.WINDOWS_CERT }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $exe = "dist/AI-Productivity-Flow-Setup-x64.exe"
+          if ($env:WINDOWS_CERT -and $env:WINDOWS_CERT_PASSWORD) {
+            Write-Host "Signing Windows installer with provided certificate..."
+            $certPath = Join-Path $env:RUNNER_TEMP "windows_cert.pfx"
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT))
+            try {
+              $signtool = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse | Select-Object -First 1).FullName
+              if ($signtool) {
+                & $signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 /d "AI Productivity Flow" "$exe"
+                Write-Host "Windows installer signed successfully."
+                $newHash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash.ToLower()
+                "$newHash  AI-Productivity-Flow-Setup-x64.exe" | Out-File -FilePath "dist/AI-Productivity-Flow-Setup-x64.exe.sha256" -Encoding ascii
+              } else {
+                Write-Warning "signtool.exe not found in Windows SDK; skipping signing."
+              }
+            } finally {
+              if (Test-Path $certPath) { Remove-Item $certPath -Force }
+            }
+          } else {
+            Write-Host "Windows code signing skipped (WINDOWS_CERT / WINDOWS_CERT_PASSWORD not configured)."
+          }
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-artifacts
+          path: |
+            dist/AI-Productivity-Flow-Setup-x64.exe
+            dist/AI-Productivity-Flow-Setup-x64.exe.sha256
+
+  build-macos:
+    name: Build macOS Release Bundle
+    needs: validate-and-test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies & DMG tools
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pillow dmgbuild
+          brew install create-dmg || true
+
+      - name: Build macOS Application Bundle (.app, .dmg & .zip)
+        run: |
+          python scripts/build_macos_app.py --bundle-runtime --dmg
+
+      - name: Sign & Notarize macOS App and DMG (Optional)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MACOS_CERT: ${{ secrets.MACOS_CERT }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_CERT" ] && [ -n "$MACOS_CERT_PASSWORD" ]; then
+            echo "Setting up temporary keychain for Apple Developer ID signing..."
+            KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+            KEYCHAIN_PASS="$(uuidgen)"
+            security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+            security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            
+            CERT_PATH="$RUNNER_TEMP/cert.p12"
+            echo "$MACOS_CERT" | base64 --decode > "$CERT_PATH"
+            security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+            
+            IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -n 1 | awk -F'"' '{print $2}')
+            if [ -n "$IDENTITY" ]; then
+              echo "Signing AI Productivity Flow.app with identity: $IDENTITY..."
+              codesign --force --deep --options runtime --sign "$IDENTITY" --timestamp "dist/AI Productivity Flow.app"
+              
+              # Re-package DMG and ZIP with signed app
+              python scripts/build_macos_app.py --dmg-only
+              python scripts/build_macos_app.py --bundle-runtime --no-dmg
+              
+              if [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+                echo "Signing AI-Productivity-Flow-macOS.dmg with identity: $IDENTITY..."
+                codesign --force --sign "$IDENTITY" --timestamp "dist/AI-Productivity-Flow-macOS.dmg"
+              fi
+              
+              if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] && [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+                echo "Submitting DMG to Apple Notarization service..."
+                xcrun notarytool submit "dist/AI-Productivity-Flow-macOS.dmg" \
+                  --apple-id "$APPLE_ID" \
+                  --team-id "$APPLE_TEAM_ID" \
+                  --password "$APPLE_APP_PASSWORD" \
+                  --wait
+                echo "Stapling notarization ticket to DMG..."
+                xcrun stapler staple "dist/AI-Productivity-Flow-macOS.dmg"
+                echo "Stapling notarization ticket to APP..."
+                xcrun stapler staple "dist/AI Productivity Flow.app" || true
+                echo "macOS code signing and notarization completed successfully."
+              else
+                echo "Apple notarization credentials not configured; skipping notarization."
+              fi
+            else
+              echo "No Developer ID Application certificate found in keychain; skipping signing."
+            fi
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          else
+            echo "macOS signing skipped (MACOS_CERT / MACOS_CERT_PASSWORD not configured); applying ad-hoc codesign..."
+            codesign --force --deep --sign - "dist/AI Productivity Flow.app"
+            python scripts/build_macos_app.py --dmg-only
+            cd dist
+            rm -f AI-Productivity-Flow-macOS.zip AI-Productivity-Flow-macOS.zip.sha256
+            zip -r -y AI-Productivity-Flow-macOS.zip "AI Productivity Flow.app"
+            shasum -a 256 AI-Productivity-Flow-macOS.zip > AI-Productivity-Flow-macOS.zip.sha256
+            cd ..
+          fi
+
+          # Ensure hashes are fresh
+          if [ -f "dist/AI-Productivity-Flow-macOS.dmg" ]; then
+            shasum -a 256 "dist/AI-Productivity-Flow-macOS.dmg" | awk '{print $1 "  AI-Productivity-Flow-macOS.dmg"}' > "dist/AI-Productivity-Flow-macOS.dmg.sha256"
+          fi
+          shasum -a 256 "dist/AI-Productivity-Flow-macOS.zip" | awk '{print $1 "  AI-Productivity-Flow-macOS.zip"}' > "dist/AI-Productivity-Flow-macOS.zip.sha256"
+
+      - name: Verify macOS Artifacts & Smoke Test
+        run: |
+          test -f dist/AI-Productivity-Flow-macOS.dmg
+          test -f dist/AI-Productivity-Flow-macOS.dmg.sha256
+          test -f dist/AI-Productivity-Flow-macOS.zip
+          test -f dist/AI-Productivity-Flow-macOS.zip.sha256
+          echo "macOS DMG size: $(wc -c < dist/AI-Productivity-Flow-macOS.dmg) bytes"
+          echo "macOS ZIP size: $(wc -c < dist/AI-Productivity-Flow-macOS.zip) bytes"
+          cat dist/AI-Productivity-Flow-macOS.dmg.sha256
+          cat dist/AI-Productivity-Flow-macOS.zip.sha256
+          python -c "
+          import zipfile, sys
+          with zipfile.ZipFile('dist/AI-Productivity-Flow-macOS.zip', 'r') as zf:
+              names = zf.namelist()
+              required = [
+                  'AI Productivity Flow.app/Contents/Info.plist',
+                  'AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher',
+                  'AI Productivity Flow.app/Contents/Resources/AppIcon.icns',
+                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/__init__.py',
+                  'AI Productivity Flow.app/Contents/Resources/src/voice_flow/_version.py',
+                  'AI Productivity Flow.app/Contents/Resources/runtime/python/bin/python3'
+              ]
+              missing = [r for r in required if not any(n.startswith(r) for n in names)]
+              if missing:
+                  sys.exit(f'macOS zip smoke test failed! Missing entries: {missing}')
+          print('macOS zip smoke test passed (runtime dependencies verified)!')
+          "
+
+      - name: 20-Second App Launch Check
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          LAUNCHER="dist/AI Productivity Flow.app/Contents/MacOS/ai-productivity-flow-launcher"
+          chmod +x "$LAUNCHER"
+          LOG_FILE="$RUNNER_TEMP/macos_launch.log"
+          echo "Starting app in background for 20-second survival check..."
+          "$LAUNCHER" > "$LOG_FILE" 2>&1 &
+          APP_PID=$!
+          
+          for i in $(seq 1 20); do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              EXIT_CODE=0
+              wait "$APP_PID" || EXIT_CODE=$?
+              echo "App process crashed or exited prematurely after ${i}s (exit code ${EXIT_CODE})!"
+              RESOURCES="dist/AI Productivity Flow.app/Contents/Resources"
+              python scripts/report_macos_launch_failure.py \
+                --output "$RUNNER_TEMP/macos_launch_failure_safe.log" \
+                "$LOG_FILE" \
+                "$RESOURCES/crash_log.txt" \
+                "$RESOURCES/voice_flow_debug.log" \
+                "$HOME/.voice_flow/logs/voice_flow_debug.log" \
+                "$HOME/.voice_flow/gui_crash.log" \
+                "$HOME/.voice_flow/gui_launcher.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          echo "App survived 20 seconds successfully! Stopping background process..."
+          kill -TERM "$APP_PID" 2>/dev/null || true
+          sleep 2
+          kill -KILL "$APP_PID" 2>/dev/null || true
+          echo "Launch check cleanly verified." 
+
+      - name: Upload Redacted macOS Launch Failure Diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-launch-failure-diagnostics
+          path: ${{ runner.temp }}/macos_launch_failure_safe.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-artifacts
+          path: |
+            dist/AI-Productivity-Flow-macOS.dmg
+            dist/AI-Productivity-Flow-macOS.dmg.sha256
+            dist/AI-Productivity-Flow-macOS.zip
+            dist/AI-Productivity-Flow-macOS.zip.sha256
+
+  publish-github-release:
+    name: Publish Stable GitHub Release
+    needs: [validate-and-test, build-macos, package-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download All Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Verify All Required Artifacts Present & Validate Hashes
+        run: |
+          set -e
+          echo "Checking required release artifacts in release-assets/..."
+          required=(
+            "AI-Productivity-Flow-Setup-x64.exe"
+            "AI-Productivity-Flow-Setup-x64.exe.sha256"
+            "AI-Productivity-Flow-macOS.dmg"
+            "AI-Productivity-Flow-macOS.dmg.sha256"
+            "AI-Productivity-Flow-macOS.zip"
+            "AI-Productivity-Flow-macOS.zip.sha256"
+          )
+          for f in "${required[@]}"; do
+            target="release-assets/$f"
+            if [ ! -f "$target" ]; then
+              echo "::error::Required release artifact $target is MISSING! Release workflow aborted to prevent partial/broken release."
+              exit 1
+            fi
+            size=$(wc -c < "$target")
+            echo "Artifact verified: $target ($size bytes)"
+          done
+
+          cd release-assets
+          # Validate macOS zip sha256
+          sha256sum -c AI-Productivity-Flow-macOS.zip.sha256
+          # Validate macOS dmg sha256
+          sha256sum -c AI-Productivity-Flow-macOS.dmg.sha256
+          # Validate Windows exe sha256
+          expected_win_hash=$(awk '{print $1}' AI-Productivity-Flow-Setup-x64.exe.sha256 | tr '[:upper:]' '[:lower:]')
+          actual_win_hash=$(sha256sum AI-Productivity-Flow-Setup-x64.exe | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+          if [ "$expected_win_hash" != "$actual_win_hash" ]; then
+            echo "::error::Windows installer checksum mismatch! Expected $expected_win_hash, got $actual_win_hash"
+            exit 1
+          fi
+          # Ensure Windows installer is not the obsolete beta hash
+          if [ "$actual_win_hash" = "aad99333f71c76e9ec3d9b9a1cfbf59d5f713dba5531c8e18c34052d562f6057" ]; then
+            echo "::error::Obsolete v0.9.0-beta installer hash detected! Refusing to publish outdated binary."
+            exit 1
+          fi
+          echo "All release artifacts and checksums strictly validated."
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          version="${tag#v}"
+          prerelease_flag=""
+          if [[ "$tag" == *"-"* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+          
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists; updating assets and notes..."
+            gh release upload "$tag" release-assets/* --clobber --repo "${{ github.repository }}"
+            gh release edit "$tag" $prerelease_flag --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
+          else
+            gh release create "$tag" \
+              release-assets/* \
+              $prerelease_flag \
+              --title "AI Productivity Flow $tag" \
+              --notes-file CHANGELOG.md \
+              --repo "${{ github.repository }}"
+          fi
+

@@ -1,0 +1,39 @@
+{
+    "gemini": {
+        "base_url": "...",
+        "api_version": "2024-03-01-preview",
+        "api_key": "...",
+        "model": "gemini-2.5-pro-preview-05-06"
+    },
+    "gpt41": {
+        "base_url": "...",
+        "api_version": "2024-03-01-preview",
+        "api_key": "...",
+        "model": "gpt-4.1-2025-04-14"
+    },
+    "gpt5": {
+        "base_url": "...",
+        "api_version": "...",
+        "api_key": "...",
+        "model": "gpt-5-chat-2025-08-07"
+    },
+    "gpto4mini": {
+        "base_url": "...",
+        "api_version": "...",
+        "api_key": "...",
+        "model": "o4-mini-2025-04-16"
+    },
+    "gpt4o": {
+        "base_url": "...",
+        "api_version": "...",
+        "api_key": "...",
+        "model": "gpt-4o-2024-11-20"
+    },
+    "claude": {
+        "base_url": "...",
+        "api_key": "..."
+    },
+    "iconfinder": {
+        "api_key": "YOUR_ICONFINDER_KEY"
+    }
+}

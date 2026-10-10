@@ -1,0 +1,127 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.env
+*.so
+*.dll
+.uv/
+uv.lock
+
+# Logs and runtime artifacts
+*.log
+*.bak*
+*.lock
+*.flag
+crash_log.txt
+voice_flow_debug.log
+test_audio.mp3
+test_gemini_output.wav
+
+# Screenshots and temp media
+*.png
+!docs/assets/*.png
+!scripts/assets/*.png
+*.jpg
+!docs/assets/*.jpg
+*.jpeg
+*.mp4
+*.wav
+*.map
+
+# Promo build scratch directories
+master_build/
+outro_build/
+scene1_build/
+scene1_remaster/
+scene2_build/
+scene3_build/
+patch_live_tts.py
+CLAUDE_CODE_CONTEXT.md
+REVIEW.md
+research-01-video-flow-provider-models.md
+
+# Video Flow renderer build artifacts
+video_flow_renderer/node_modules/
+video_flow_renderer/out/
+video_flow_renderer/dist/
+video_flow_renderer/.cache/
+
+# Test output directories
+scratch/**
+!scratch/generate_launcher.py
+.pytest_cache/
+
+# Databases and Local User Data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+voice_flow.db
+
+# Secrets, Private Keys and Credentials
+.env
+.env.*
+*.key
+*.pem
+*.cert
+credentials.json
+token.json
+probe_temp_worker.txt
+
+# Repository-owned documentation images (hero), GUI assets, and website assets must survive media rules
+!docs/assets/**
+!src/voice_flow/gui/assets/**
+!website/**
+
+# Local onboarding development/reference assets — not shipped
+src/voice_flow/gui/assets/onboarding/ref_hero_authentic.png
+src/voice_flow/gui/assets/onboarding/video_flow_demo.mp4
+
+# Local audit, experiment, and scratch directories
+video-flow-*/
+video-flow-visual-upgrade/
+tests_archived_v5/
+docs/DOCUMENTATION_REALIGNMENT.md
+docs/VOICE_FLOW_NEXT_ACTIONS.md
+third_party/code2video/**
+!third_party/code2video/LICENSE
+!third_party/code2video/UPSTREAM.md
+!third_party/code2video/prompts/stage1.py
+!third_party/code2video/prompts/stage2.py
+!third_party/code2video/src/api_config.json
+!third_party/code2video/src/gpt_request.py
+storyboard/
+plan/
+nvmodels.json
+/test_*.txt
+/test_*.py
+/test_*.vbs
+/v2_tests_result.txt
+/render_acceptance_videos.py
+/verify_timing_mapping_benchmark.py
+*.tmp
+tmp/
+work/
+!/tests/**
+/tests/**/__pycache__/
+/tests/**/*.py[cod]
+
+# The test_*.py rule above targets throwaway probe scripts dropped in the repo
+# root. It must never hide the real suite: without this negation any NEW file
+# under tests/ is silently untracked and CI runs green against nothing.
+# Scoped deliberately to tests/ only - a broader negation would re-expose the
+# *.db / *.env rules above and leak real user transcripts and API keys.
+!tests/**/*.py
+!tests/**/*.js
+!tests/**/*.json
+

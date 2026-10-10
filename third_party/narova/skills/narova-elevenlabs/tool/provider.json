@@ -1,0 +1,22 @@
+{
+  "name": "elevenlabs",
+  "displayName": "ElevenLabs",
+  "protocol": "narova-tts-provider/v1",
+  "command": [
+    "python3",
+    "./worker.py"
+  ],
+  "requiredEnvironment": [
+    "ELEVENLABS_API_KEY"
+  ],
+  "capabilities": {
+    "synthesis": true,
+    "voiceListing": true,
+    "languages": true,
+    "wordTimings": false
+  },
+  "deliveryCapabilities": {
+    "delivery-instruct": "unknown",
+    "seed-stabilization": "honored"
+  }
+}

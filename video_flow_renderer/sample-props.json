@@ -1,0 +1,30 @@
+{
+  "title": "Video Flow verification",
+  "mode": "summary",
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "theme": "voice-flow",
+  "scenes": [
+    {
+      "id": "scene-001",
+      "type": "hook",
+      "title": "Selected text becomes a visual explanation",
+      "body": "Video Flow plans scenes, creates persistent narration, and renders an MP4.",
+      "narration": "Video Flow plans scenes, creates persistent narration, and renders an MP4.",
+      "accent": 0,
+      "durationSeconds": 2,
+      "audioFile": null
+    },
+    {
+      "id": "scene-002",
+      "type": "comparison",
+      "title": "Summary or full coverage",
+      "body": "Summary mode distills key points. Full Explanation keeps the complete source in order.",
+      "narration": "Summary mode distills key points. Full Explanation keeps the complete source in order.",
+      "accent": 1,
+      "durationSeconds": 2,
+      "audioFile": null
+    }
+  ]
+}

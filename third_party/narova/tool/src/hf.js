@@ -1,0 +1,175 @@
+'use strict';
+/* HyperFrames CLI access. narova stays zero-dep: every call goes through
+ * `npx --yes hyperframes@<PIN>` so the engine version is reproducible. The same
+ * pin is written into the generated out/hf/package.json. */
+const fs = require('fs');
+const path = require('path');
+const { spawn, spawnSync } = require('child_process');
+const net = require('net');
+
+const HYPERFRAMES_VERSION = '0.7.96';
+
+const RETRY_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN']);
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+function sleep(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* spin */ }
+}
+
+/* Check if a TCP port is available on localhost. Uses a quick connection
+ * attempt — if the connection succeeds, the port is in use. */
+function isPortAvailable(port) {
+  try {
+    const server = net.createServer();
+    server.listen(port, '127.0.0.1');
+    server.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* Find an available TCP port starting from the given port. */
+function findAvailablePort(startPort = 3002, maxAttempts = 10) {
+  for (let port = startPort; port < startPort + maxAttempts; port++) {
+    if (isPortAvailable(port)) return port;
+  }
+  return startPort; // fallback — let hyperframes report the error
+}
+
+/* npx `spawnSync` with retry for transient DNS/network errors. macOS sees
+ * intermittent ENOTFOUND on npx registry calls (resolved by a brief wait).
+ * Windows: npx is a batch shim, so spawn it through cmd.exe — a bare
+ * spawnSync('npx') fails with ENOENT there. */
+function npxSync(args, opts) {
+  let last;
+  const windows = process.platform === 'win32';
+  const command = windows ? 'cmd.exe' : 'npx';
+  const finalArgs = windows ? ['/d', '/s', '/c', 'npx', ...args] : args;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) sleep(RETRY_DELAY_MS);
+    const r = spawnSync(command, finalArgs, { windowsHide: true, windowsVerbatimArguments: false, ...opts });
+    if (!r.error || !RETRY_CODES.has(r.error.code)) return r;
+    last = r.error;
+  }
+  const r = { error: last, status: 1, stdout: '', stderr: '' };
+  return r;
+}
+
+/* Bundled HyperFrames install (packaged app): when the release carries the
+ * pinned hyperframes node_modules tree, run its CLI directly with the same
+ * Node process — no npx, no npm registry, no first-run downloads. Located
+ * via NAROVA_HF_MODULES (set by the app's engine) or the installed runtime
+ * layout relative to this vendored tool. */
+function bundledHfCli() {
+  const candidates = [];
+  if (process.env.NAROVA_HF_MODULES) {
+    candidates.push(path.join(process.env.NAROVA_HF_MODULES, 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs'));
+  }
+  candidates.push(path.resolve(__dirname, '..', '..', '..', 'runtime', 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs'));
+  for (const cli of candidates) {
+    try { if (fs.existsSync(cli)) return cli; } catch { /* not a filesystem path */ }
+  }
+  return null;
+}
+
+function hfSync(args, opts) {
+  const cli = bundledHfCli();
+  if (cli) return spawnSync(process.execPath, [cli, ...args], opts);
+  return npxSync(['--yes', `hyperframes@${HYPERFRAMES_VERSION}`, ...args], opts);
+}
+
+/* Run a hyperframes CLI command in `cwd` (normally out/hf). Inherits stdio so
+ * progress is visible. Throws on non-zero exit. */
+function runHf(args, cwd, opts = {}) {
+  const { quiet = false, ...spawnOpts } = opts;
+  const r = hfSync(args, {
+    cwd,
+    ...(quiet ? { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] } : { stdio: 'inherit' }),
+    ...spawnOpts,
+  });
+  if (r.error) throw r.error;
+  if (r.status !== 0) {
+    const detail = quiet ? String(r.stderr || r.stdout || '').trim().split('\n').pop() : '';
+    throw new Error(`hyperframes ${args[0]} exited ${r.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return r;
+}
+
+function previewUrl(cwd, port = 3002, projectName) {
+  let name = projectName || path.basename(cwd);
+  if (!projectName && name.startsWith('hf-')) name = name.slice(3); // strip hf- prefix
+  return `http://localhost:${port}/#project/${encodeURIComponent(name)}`;
+}
+
+function livePreviewPid(pidFile) {
+  if (!fs.existsSync(pidFile)) return null;
+  const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`invalid preview pid file: ${pidFile}`);
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (e) {
+    if (e.code !== 'ESRCH') return pid;
+    // Process is gone: clear both its pid and its remembered-port sidecar.
+    fs.rmSync(pidFile, { force: true });
+    fs.rmSync(portFileFor(pidFile), { force: true });
+    return null;
+  }
+}
+
+/* Start Studio in its own process group so an agent shell can return without
+ * reaping the preview server. Logs and the process id live outside out/hf,
+ * which compose replaces on every run. */
+function startHfPreview(cwd, { port, logFile, pidFile, projectName } = {}) {
+  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const log = logFile || path.join(path.dirname(cwd), 'preview.log');
+  const pid = pidFile || path.join(path.dirname(cwd), 'preview.pid');
+  const existing = livePreviewPid(pid);
+  if (existing) throw new Error(`preview already running (pid ${existing}); stop it before starting another`);
+  // Find available port — auto-detect if none specified, or validate the given one.
+  const requestedPort = port || 3002;
+  const actualPort = port != null
+    ? (isPortAvailable(port) ? port : (() => { throw new Error(`port ${port} is in use — stop the conflicting process or choose a different port`); })())
+    : findAvailablePort(requestedPort, 50);
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  const fd = fs.openSync(log, 'a');
+  const child = spawn(npx, ['--yes', `hyperframes@${HYPERFRAMES_VERSION}`, 'preview', '--port', String(actualPort)], {
+    cwd, detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
+  });
+  fs.closeSync(fd);
+  child.unref();
+  fs.writeFileSync(pid, `${child.pid}\n`);
+  fs.writeFileSync(portFileFor(pid), `${actualPort}\n`);
+  return { pid: child.pid, pidFile: pid, logFile: log, port: actualPort, url: previewUrl(cwd, actualPort, projectName) };
+}
+
+function portFileFor(pidFile) {
+  return pidFile.replace(/\.pid$/, '') + '.port';
+}
+
+/* The port a detached preview was started with, or null if unknown. */
+function previewPort(pidFile) {
+  const f = portFileFor(pidFile);
+  if (!fs.existsSync(f)) return null;
+  const port = Number(fs.readFileSync(f, 'utf8').trim());
+  return Number.isInteger(port) && port > 0 ? port : null;
+}
+
+function stopHfPreview(pidFile) {
+  if (!fs.existsSync(pidFile)) return false;
+  const pid = livePreviewPid(pidFile);
+  if (!pid) return false;
+  try {
+    process.kill(process.platform === 'win32' ? pid : -pid, 'SIGTERM');
+  } catch (e) {
+    if (e.code !== 'ESRCH') throw e;
+  }
+  fs.rmSync(pidFile, { force: true });
+  fs.rmSync(portFileFor(pidFile), { force: true });
+  return true;
+}
+
+module.exports = { HYPERFRAMES_VERSION, runHf, npxSync, previewUrl, startHfPreview, stopHfPreview, livePreviewPid, previewPort };

@@ -1,0 +1,40 @@
+{
+  "schema": "voice-flow.narova-direct-runtime/1",
+  "package": "@narova/narova",
+  "narova_version": "0.41.0",
+  "narova_git_head": "27f4e08bf98da5a00076b493dd7bf9820b9bf0f2",
+  "narova_integrity": "sha512-bqxVmx3421a61XEZd18e7oK5AnHteDg+oGc6tXVOslIzG8gWP8sfMiszR9J59tEWIIguBWvgrcVzXylJUkVuJA==",
+  "narova_tarball": "https://registry.npmjs.org/@narova/narova/-/narova-0.41.0.tgz",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "notice_file": null,
+  "notice_status": "not-shipped-in-npm-tarball",
+  "hyperframes_cli_env": "NAROVA_HF_CLI",
+  "offline_patch": "patches/0001-offline-hyperframes-cli.patch",
+  "offline_patch_applied": true,
+  "published_tarball_bytes": 1111457,
+  "published_unpacked_bytes": 4643928,
+  "hyperframes_version": "0.7.96",
+  "hyperframes_source": "Narova 0.41.0 src/hf.js HYPERFRAMES_VERSION constant",
+  "node_min_version": ">=18",
+  "declared_os": ["darwin", "linux"],
+  "windows_status": "experimental; npm package os metadata excludes win32",
+  "runtime_mode": "offline-only",
+  "production_network": false,
+  "global_install": false,
+  "npx_fetch": false,
+  "layout": {
+    "project": "narova/project",
+    "assets": "narova/assets",
+    "evidence": "narova/evidence",
+  "license_sha256": "096BE8943D47DDACFF5091F363D6FD41B445F1EE679E51B3388136BB77204B0D",
+    "out": "narova/out"
+  },
+  "required_staged_components": [
+    "Narova 0.41.0 package files",
+    "private Node.js >=18",
+    "private FFmpeg and FFprobe",
+    "private HyperFrames 0.7.96 CLI/cache",
+    "private Chrome for Testing browser"
+  ]
+}

@@ -1,0 +1,1321 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio Flow Summary</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+  <link rel="shortcut icon" href="/assets/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icon-16.png">
+  <script>
+    if (!window.__API_BASE__) {
+      const _p = new URLSearchParams(location.search);
+      window.__API_BASE__ = _p.get('api') || (location.origin && location.origin !== 'null' && !location.origin.startsWith('file:') ? location.origin : 'http://127.0.0.1:8991');
+    }
+    // Initial theme resolution: URL param > window.__ON_SCREEN_THEME__ > localStorage > default 'light'
+    (function() {
+      try {
+        const p = new URLSearchParams(location.search);
+        let t = p.get('theme') || window.__ON_SCREEN_THEME__ || localStorage.getItem('on_screen_ui_theme') || 'light';
+        if (t !== 'dark' && t !== 'light') t = 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (_) {}
+    })();
+  </script>
+  <style>
+    :root, html[data-theme="light"] {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Plus Jakarta Sans", Inter, Roboto, sans-serif;
+      --bg: #ffffff;
+      --bg-gradient: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+      --surface: #ffffff;
+      --surface-card: #f8fafc;
+      --surface-card-hover: #f1f5f9;
+      --surface-glass: rgba(255, 255, 255, 0.95);
+      --border: #e2e8f0;
+      --border-subtle: #f1f5f9;
+      --border-focus: rgba(255, 106, 0, 0.45);
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --orange: #ff6a00;
+      --orange-deep: #ea580c;
+      --orange-soft: #fff7ed;
+      --orange-border: #ffedd5;
+      --orange-gradient: linear-gradient(135deg, #ff7a1a 0%, #ea580c 100%);
+      --orange-glow: rgba(255, 106, 0, 0.28);
+      --wave-inactive: #cbd5e1;
+      --wave-hover: #94a3b8;
+      --green: #10b981;
+      --green-soft: #ecfdf5;
+      --green-border: #a7f3d0;
+      --red: #ef4444;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.08);
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0c0d12;
+      --bg-gradient: radial-gradient(120% 90% at 50% -10%, #1c182a 0%, #0d0e14 55%, #08090d 100%);
+      --surface: #14161f;
+      --surface-card: rgba(255, 255, 255, 0.04);
+      --surface-card-hover: rgba(255, 255, 255, 0.07);
+      --surface-glass: rgba(18, 20, 29, 0.92);
+      --border: rgba(255, 255, 255, 0.09);
+      --border-subtle: rgba(255, 255, 255, 0.05);
+      --border-focus: rgba(255, 106, 0, 0.45);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --orange: #ff6a00;
+      --orange-deep: #ea580c;
+      --orange-soft: rgba(255, 106, 0, 0.12);
+      --orange-border: rgba(255, 106, 0, 0.28);
+      --orange-gradient: linear-gradient(135deg, #ff7a1a 0%, #ea580c 100%);
+      --orange-glow: rgba(255, 106, 0, 0.35);
+      --wave-inactive: #334155;
+      --wave-hover: #475569;
+      --green: #10b981;
+      --green-soft: rgba(16, 185, 129, 0.15);
+      --green-border: rgba(16, 185, 129, 0.3);
+      --red: #ef4444;
+      --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.55);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text-primary);
+      user-select: none;
+      -webkit-user-select: none;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .pywebview-drag-region, .drag-region {
+      -webkit-app-region: drag;
+      app-region: drag;
+    }
+    .no-drag {
+      -webkit-app-region: no-drag;
+      app-region: no-drag;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      padding: 10px 14px 9px;
+      background: var(--bg-gradient);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* TOP HEADER */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 7px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: default;
+    }
+    .brand-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      object-fit: contain;
+      filter: drop-shadow(0 1px 4px var(--orange-glow));
+    }
+    .brand-title {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--text-primary);
+      text-transform: uppercase;
+    }
+    .depth-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: var(--orange-soft);
+      border: 1px solid var(--orange-border);
+      color: var(--orange-deep);
+    }
+    .depth-dot {
+      width: 4.5px;
+      height: 4.5px;
+      border-radius: 50%;
+      background: var(--orange);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .btn-hdr {
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: 8px;
+      height: 25px;
+      padding: 0 7px;
+      font-size: 10.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-hdr:hover {
+      background: var(--surface-card-hover);
+      border-color: var(--border-focus);
+      color: var(--orange);
+      transform: translateY(-0.5px);
+    }
+    .btn-hdr svg {
+      width: 12.5px;
+      height: 12.5px;
+    }
+    .hist-badge {
+      background: var(--orange-gradient);
+      color: #ffffff;
+      font-size: 8.5px;
+      font-weight: 800;
+      padding: 0.5px 4.5px;
+      border-radius: 999px;
+      min-width: 15px;
+      text-align: center;
+    }
+
+    /* MAIN CONTAINER */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 7px 0 3px;
+      min-height: 0;
+    }
+
+    /* HERO AUDIO CARD */
+    .media-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 7px 9px;
+      box-shadow: var(--shadow-sm);
+      flex-shrink: 0;
+    }
+    .media-art {
+      width: 38px;
+      height: 38px;
+      border-radius: 9px;
+      background: var(--orange-soft);
+      border: 1px solid var(--orange-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--orange);
+      box-shadow: 0 2px 6px var(--orange-glow);
+    }
+    .media-art svg {
+      width: 20px;
+      height: 20px;
+    }
+    .media-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5px;
+    }
+    .summary-title {
+      font-size: 12.5px;
+      font-weight: 750;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      letter-spacing: -0.01em;
+    }
+    .summary-sub {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: var(--green);
+      margin-top: 1px;
+    }
+    .status-dot {
+      width: 5.5px;
+      height: 5.5px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 5px var(--green);
+    }
+    .status-dot.loading {
+      background: var(--orange);
+      box-shadow: 0 0 5px var(--orange);
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse {
+      from { opacity: 0.5; transform: scale(0.9); }
+      to { opacity: 1; transform: scale(1.15); }
+    }
+
+    /* SOUNDWAVE PROGRESS SCRUBBER TRACK */
+    .soundwave-track-card {
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 7px 10px 6px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .waveform-visualizer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 38px;
+      gap: 2.2px;
+      cursor: pointer;
+      padding: 2px 3px;
+      border-radius: 6px;
+      transition: background 0.15s ease;
+      position: relative;
+    }
+    .waveform-visualizer:hover {
+      background: var(--surface-card-hover);
+    }
+    .wave-bar {
+      flex: 1;
+      min-width: 2.5px;
+      max-width: 6px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--wave-inactive);
+      transition: height 0.15s ease, background-color 0.1s ease;
+    }
+    .wave-bar.filled {
+      background: var(--orange-gradient);
+      box-shadow: 0 1px 4px var(--orange-glow);
+    }
+    .wave-bar.current {
+      background: #ffffff;
+      box-shadow: 0 0 6px var(--orange);
+      transform: scaleY(1.25);
+    }
+    .waveform-visualizer.playing .wave-bar.filled:nth-child(2n) {
+      animation: barDanceA 0.55s ease-in-out infinite alternate;
+    }
+    .waveform-visualizer.playing .wave-bar.filled:nth-child(2n+1) {
+      animation: barDanceB 0.65s ease-in-out infinite alternate;
+    }
+    @keyframes barDanceA {
+      0% { transform: scaleY(0.7); }
+      100% { transform: scaleY(1.25); }
+    }
+    @keyframes barDanceB {
+      0% { transform: scaleY(1.2); }
+      100% { transform: scaleY(0.75); }
+    }
+
+    /* TIMELINE RANGE SLIDER & TIMESTAMPS */
+    .timeline-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .timeline-slider-wrap {
+      position: relative;
+      width: 100%;
+      height: 6px;
+      display: flex;
+      align-items: center;
+    }
+    input[type="range"].timeline {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 5px;
+      background: var(--border);
+      border-radius: 999px;
+      outline: none;
+      cursor: pointer;
+      position: relative;
+    }
+    input[type="range"].timeline::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 2.5px solid var(--orange);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+    input[type="range"].timeline::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      box-shadow: 0 2px 7px var(--orange-glow);
+    }
+    .times {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 650;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+      padding: 0 2px;
+    }
+
+    /* PLAYBACK CONTROLS DOCK */
+    .controls-dock {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin: 2px 0 1px;
+    }
+    .btn-ctrl {
+      border: 1px solid var(--border);
+      background: var(--surface-card);
+      color: var(--text-primary);
+      border-radius: 10px;
+      width: 36px;
+      height: 32px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.14s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-ctrl:hover {
+      border-color: var(--border-focus);
+      background: var(--surface-card-hover);
+      color: var(--orange);
+      transform: translateY(-0.5px);
+    }
+    .btn-ctrl:active {
+      transform: translateY(1px);
+    }
+    .btn-ctrl svg {
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .btn-play {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: none;
+      background: var(--orange-gradient);
+      color: #ffffff;
+      box-shadow: 0 3px 12px var(--orange-glow);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.14s ease, box-shadow 0.14s ease;
+    }
+    .btn-play:hover {
+      transform: scale(1.06);
+      box-shadow: 0 5px 18px var(--orange-glow);
+    }
+    .btn-play:active {
+      transform: scale(0.96);
+    }
+    .btn-play svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    /* FOOTER TOOLBAR */
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 5px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .speed-group {
+      display: flex;
+      align-items: center;
+      background: var(--surface-card);
+      padding: 2px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      gap: 1.5px;
+    }
+    .btn-speed {
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 2.5px 5.5px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+    .btn-speed:hover {
+      color: var(--text-primary);
+    }
+    .btn-speed.active {
+      background: var(--orange-gradient);
+      color: #ffffff;
+      box-shadow: 0 1px 4px var(--orange-glow);
+    }
+    .btn-dl {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--orange-deep);
+      text-decoration: none;
+      padding: 3px 8px;
+      border-radius: 7px;
+      border: 1px solid var(--orange-border);
+      background: var(--orange-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.12s ease;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-dl:hover {
+      background: var(--orange-gradient);
+      color: #ffffff;
+      border-color: transparent;
+      box-shadow: 0 2px 8px var(--orange-glow);
+      transform: translateY(-0.5px);
+    }
+    .btn-dl svg {
+      width: 12px;
+      height: 12px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    /* HISTORY DRAWER */
+    .history-drawer {
+      position: absolute;
+      inset: 0;
+      background: var(--surface-glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      transform: translateY(100%);
+      transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 -6px 25px rgba(0, 0, 0, 0.15);
+    }
+    .history-drawer.open {
+      transform: translateY(0);
+    }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .drawer-title {
+      font-size: 12px;
+      font-weight: 750;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .drawer-close {
+      border: 1px solid var(--border);
+      background: var(--surface-card);
+      border-radius: 6px;
+      padding: 2.5px 7px;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: all 0.12s ease;
+    }
+    .drawer-close:hover {
+      color: var(--text-primary);
+      border-color: var(--border-focus);
+    }
+    .drawer-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 9px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .drawer-content::-webkit-scrollbar {
+      width: 5px;
+    }
+    .drawer-content::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 999px;
+    }
+
+    .af-card {
+      border: 1px solid var(--border);
+      background: var(--surface-card);
+      border-radius: 9px;
+      padding: 7px 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 3.5px;
+      transition: all 0.14s ease;
+      box-shadow: var(--shadow-sm);
+    }
+    .af-card:hover {
+      border-color: var(--border-focus);
+      background: var(--surface-card-hover);
+      transform: translateY(-0.5px);
+    }
+    .af-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .af-mode-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 5px;
+      border-radius: 999px;
+      font-size: 8.5px;
+      font-weight: 800;
+      background: var(--orange-soft);
+      color: var(--orange-deep);
+      border: 1px solid var(--orange-border);
+      text-transform: uppercase;
+    }
+    .af-card-time {
+      font-size: 9px;
+      color: var(--text-muted);
+    }
+    .af-card-snippet {
+      font-size: 10.5px;
+      line-height: 1.35;
+      color: var(--text-primary);
+      font-weight: 600;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .af-card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 1px;
+      padding-top: 3.5px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .af-card-actions-left {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .af-btn-action {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-primary);
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-size: 9px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.12s ease;
+    }
+    .af-btn-action:hover {
+      border-color: var(--border-focus);
+      background: var(--surface-card-hover);
+      color: var(--orange);
+    }
+    .af-btn-action.play-btn {
+      background: var(--orange-gradient);
+      color: #ffffff;
+      border-color: transparent;
+      box-shadow: 0 1px 4px var(--orange-glow);
+    }
+    .af-btn-action.play-btn:hover {
+      box-shadow: 0 2px 8px var(--orange-glow);
+      transform: translateY(-0.5px);
+    }
+    .af-btn-action.danger:hover {
+      color: var(--red);
+      border-color: rgba(239, 68, 68, 0.4);
+      background: rgba(239, 68, 68, 0.08);
+    }
+    .empty-history {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 26px 12px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- TOP HEADER -->
+    <header class="pywebview-drag-region drag-region">
+      <div class="brand-group pywebview-drag-region drag-region">
+        <img src="/assets/logo.png" alt="Voice Flow" class="brand-logo" onerror="this.src='/assets/icon-32.png'">
+        <span class="brand-title">AUDIO FLOW</span>
+        <span class="depth-badge" id="depth">
+          <span class="depth-dot"></span>
+          <span id="depth-text">BALANCED</span>
+        </span>
+      </div>
+      <div class="header-actions no-drag">
+        <button id="toggle-theme-mode" class="btn-hdr" onclick="toggleColorMode()" title="Switch Light / Dark UI">
+          <svg id="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <span id="theme-mode-label">Dark</span>
+        </button>
+        <button id="toggle-history" class="btn-hdr" onclick="toggleHistoryDrawer()" title="View audio summary history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+          <span>History</span>
+          <span id="hist-count" class="hist-badge">0</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="pywebview-drag-region drag-region">
+      <!-- HERO AUDIO CARD -->
+      <div class="media-card pywebview-drag-region drag-region">
+        <div class="media-art pywebview-drag-region drag-region">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 10v4"/><path d="M6 6v12"/><path d="M10 3v18"/><path d="M14 7v10"/><path d="M18 10v4"/><path d="M22 12v0"/>
+          </svg>
+        </div>
+        <div class="media-text pywebview-drag-region drag-region">
+          <h1 class="summary-title" id="player-title">Audio Overview</h1>
+          <p class="summary-sub" id="player-snippet">Source-grounded spoken summary</p>
+          <div class="status-badge">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status">Loading audio…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SOUNDWAVE SCRUBBER TRACK (Integrated, NOT floating dots!) -->
+      <div class="soundwave-track-card no-drag">
+        <div class="waveform-visualizer" id="visualizer" title="Click or drag to seek">
+          <!-- 40 acoustic waveform bars rendered dynamically via script -->
+        </div>
+
+        <div class="timeline-row">
+          <div class="timeline-slider-wrap">
+            <input class="timeline" id="seek" type="range" min="0" max="0" value="0" step="0.1" aria-label="Seek audio">
+          </div>
+          <div class="times">
+            <span id="current">0:00</span>
+            <span id="duration">0:00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- PLAYBACK DOCK -->
+      <div class="controls-dock no-drag">
+        <button class="btn-ctrl" id="back" title="Back 5 seconds" aria-label="Back 5 seconds">
+          <svg viewBox="0 0 24 24"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>
+        </button>
+        <button class="btn-play" id="play" title="Play / Pause" aria-label="Play or pause audio">
+          <svg viewBox="0 0 24 24" id="play-icon"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        </button>
+        <button class="btn-ctrl" id="forward" title="Forward 5 seconds" aria-label="Forward 5 seconds">
+          <svg viewBox="0 0 24 24"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg>
+        </button>
+        <button class="btn-ctrl" id="stop" title="Stop and reset" aria-label="Stop playback">
+          <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+      </div>
+    </main>
+
+    <!-- FOOTER TOOLBAR -->
+    <footer class="no-drag">
+      <div class="speed-group" role="group" aria-label="Playback speed">
+        <button class="btn-speed" data-rate="0.75">0.75×</button>
+        <button class="btn-speed active" data-rate="1">1×</button>
+        <button class="btn-speed" data-rate="1.25">1.25×</button>
+        <button class="btn-speed" data-rate="1.5">1.5×</button>
+        <button class="btn-speed" data-rate="1.75">1.75×</button>
+        <button class="btn-speed" data-rate="2">2×</button>
+      </div>
+
+      <a id="download" class="btn-dl" href="#" onclick="downloadCurrentAudio(this); return false;" title="Save summary audio to Downloads folder as MP3">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>MP3</span>
+      </a>
+    </footer>
+
+    <!-- HISTORY DRAWER -->
+    <div id="history-drawer" class="history-drawer no-drag">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <span>Summary History</span>
+          <span class="hist-badge" id="drawer-hist-count">0</span>
+        </div>
+        <button class="drawer-close" onclick="toggleHistoryDrawer(false)">Close</button>
+      </div>
+      <div class="drawer-content" id="history-list">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const audioId = params.get('id') || '';
+    const depthParam = params.get('depth') || 'balanced';
+    const titleParam = params.get('title') || '';
+    const autoplayParam = params.get('autoplay') !== '0';
+
+    window.currentAudioId = audioId;
+    window.currentAudioTitle = titleParam || 'Audio Summary';
+
+    const audio = new Audio();
+    audio.preload = 'metadata';
+
+    const playBtn = document.getElementById('play');
+    const playIcon = document.getElementById('play-icon');
+    const backBtn = document.getElementById('back');
+    const fwdBtn = document.getElementById('forward');
+    const stopBtn = document.getElementById('stop');
+    const seek = document.getElementById('seek');
+    const currentEl = document.getElementById('current');
+    const durationEl = document.getElementById('duration');
+    const statusEl = document.getElementById('status');
+    const statusDot = document.getElementById('status-dot');
+    const depthEl = document.getElementById('depth');
+    const depthText = document.getElementById('depth-text');
+    const titleEl = document.getElementById('player-title');
+    const snippetEl = document.getElementById('player-snippet');
+    const downloadEl = document.getElementById('download');
+    const visualizer = document.getElementById('visualizer');
+    const historyDrawer = document.getElementById('history-drawer');
+    const histCountEl = document.getElementById('hist-count');
+    const drawerCountEl = document.getElementById('drawer-hist-count');
+    const historyListEl = document.getElementById('history-list');
+    const toggleHistBtn = document.getElementById('toggle-history');
+    const themeModeLabel = document.getElementById('theme-mode-label');
+
+    // BUILD 40 ACOUSTIC WAVEFORM BARS
+    const NUM_BARS = 40;
+    // Acoustic natural height profile mimicking speech prosody
+    const NATURAL_HEIGHTS = [
+      10, 14, 18, 24, 16, 28, 34, 22, 14, 20,
+      30, 26, 18, 12, 22, 32, 28, 20, 14, 26,
+      34, 30, 22, 16, 24, 32, 26, 18, 12, 20,
+      28, 32, 24, 18, 14, 22, 26, 18, 14, 10
+    ];
+    visualizer.innerHTML = '';
+    const barEls = [];
+    for (let i = 0; i < NUM_BARS; i++) {
+      const b = document.createElement('div');
+      b.className = 'wave-bar';
+      b.style.height = NATURAL_HEIGHTS[i] + 'px';
+      b.dataset.index = i;
+      visualizer.appendChild(b);
+      barEls.push(b);
+    }
+
+    // Direct wave seeking
+    visualizer.onclick = (e) => {
+      const rect = visualizer.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (audio.duration && !isNaN(audio.duration)) {
+        audio.currentTime = pos * audio.duration;
+        seek.value = audio.currentTime;
+        updateWaveformProgress(pos);
+      }
+    };
+
+    function updateWaveformProgress(fraction) {
+      const filledCount = Math.round(fraction * NUM_BARS);
+      for (let i = 0; i < NUM_BARS; i++) {
+        if (i < filledCount) {
+          barEls[i].classList.add('filled');
+        } else {
+          barEls[i].classList.remove('filled');
+        }
+      }
+    }
+
+    function formatTime(s) {
+      if (!s || isNaN(s)) return '0:00';
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+    }
+
+    function formatDepth(d) {
+      const m = (d || 'balanced').toLowerCase();
+      if (m.includes('short') || m.includes('quick')) return 'SHORT';
+      if (m.includes('deep') || m.includes('detail')) return 'DEEP';
+      return 'BALANCED';
+    }
+
+    function setPlayButtonIcon(isPlaying) {
+      if (isPlaying) {
+        playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/>';
+      } else {
+        playIcon.innerHTML = '<polygon points="6 3 20 12 6 21 6 3"/>';
+      }
+    }
+
+    function safeMediaFilename(rawTitle, defaultName = 'Audio_Summary', ext = '.mp3') {
+      let name = (rawTitle || '').trim();
+      if (!name) name = defaultName;
+      name = name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '').replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '');
+      if (!name) name = defaultName;
+      if (!name.toLowerCase().endsWith(ext.toLowerCase())) name += ext;
+      return name;
+    }
+
+    // THEME SWITCHER
+    window.toggleColorMode = () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'light';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('on_screen_ui_theme', next); } catch (_) {}
+      updateThemeLabel();
+      // Sync with server setting
+      try {
+        const apiBase = (window.__API_BASE__ || '').replace(/\/$/, '');
+        fetch(`${apiBase}/api/settings/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'on_screen_ui_theme', value: next })
+        }).catch(() => {});
+      } catch (_) {}
+    };
+
+    function updateThemeLabel() {
+      const current = document.documentElement.getAttribute('data-theme') || 'light';
+      if (themeModeLabel) {
+        themeModeLabel.textContent = current === 'dark' ? 'Light' : 'Dark';
+      }
+    }
+    updateThemeLabel();
+
+    // FORMAT & SETUP UI
+    depthText.textContent = formatDepth(depthParam);
+    if (titleParam) {
+      titleEl.textContent = titleParam;
+      document.title = `${titleParam} — Audio Flow Summary`;
+    }
+
+    // RESOLVE AUDIO URL
+    let audioSrc = '';
+    const apiBase = (window.__API_BASE__ || '').replace(/\/$/, '');
+    if (audioId) {
+      const dlName = encodeURIComponent(titleParam || 'Audio Summary');
+      audioSrc = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(audioId)}&title=${dlName}`;
+      downloadEl.href = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(audioId)}&download=1&format=mp3&title=${dlName}`;
+      downloadEl.download = safeMediaFilename(titleParam || 'Audio_Summary', 'Audio_Summary', '.mp3');
+    }
+
+    statusEl.textContent = 'Preparing audio…';
+    statusDot.className = 'status-dot loading';
+
+    if (audioSrc) {
+      audio.src = audioSrc;
+      if (autoplayParam) {
+        const p = audio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            statusEl.textContent = 'Ready';
+            statusDot.className = 'status-dot';
+            setPlayButtonIcon(false);
+          });
+        }
+      }
+    } else {
+      statusEl.textContent = 'Audio unavailable';
+      statusDot.className = 'status-dot';
+    }
+
+    // METADATA & STATUS
+    audio.onloadedmetadata = () => {
+      seek.max = audio.duration;
+      durationEl.textContent = formatTime(audio.duration);
+      statusEl.textContent = 'Ready';
+      statusDot.className = 'status-dot';
+      seek.value = 0;
+      updateWaveformProgress(0);
+    };
+
+    audio.onplay = () => {
+      statusEl.textContent = 'Playing';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(true);
+      visualizer.classList.add('playing');
+    };
+
+    audio.onpause = () => {
+      if (audio.currentTime < audio.duration) {
+        statusEl.textContent = 'Paused';
+        statusDot.className = 'status-dot';
+      }
+      setPlayButtonIcon(false);
+      visualizer.classList.remove('playing');
+    };
+
+    audio.onended = () => {
+      statusEl.textContent = 'Finished';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(false);
+      visualizer.classList.remove('playing');
+      seek.value = 0;
+      updateWaveformProgress(0);
+    };
+
+    audio.onerror = () => {
+      statusEl.textContent = 'Playback error';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(false);
+      visualizer.classList.remove('playing');
+    };
+
+    let isSeeking = false;
+    audio.ontimeupdate = () => {
+      if (!isSeeking && audio.duration) {
+        seek.value = audio.currentTime;
+        currentEl.textContent = formatTime(audio.currentTime);
+        updateWaveformProgress(audio.currentTime / audio.duration);
+      }
+    };
+
+    seek.oninput = () => {
+      isSeeking = true;
+      currentEl.textContent = formatTime(seek.value);
+      if (audio.duration) {
+        updateWaveformProgress(seek.value / audio.duration);
+      }
+    };
+
+    seek.onchange = () => {
+      audio.currentTime = Number(seek.value);
+      isSeeking = false;
+      if (audio.duration) {
+        updateWaveformProgress(audio.currentTime / audio.duration);
+      }
+    };
+
+    // CONTROLS
+    playBtn.onclick = () => {
+      if (!audio.src) return;
+      if (audio.paused) {
+        audio.play().catch(() => {});
+      } else {
+        audio.pause();
+      }
+    };
+
+    backBtn.onclick = () => {
+      audio.currentTime = Math.max(0, audio.currentTime - 5);
+      seek.value = audio.currentTime;
+      currentEl.textContent = formatTime(audio.currentTime);
+      if (audio.duration) updateWaveformProgress(audio.currentTime / audio.duration);
+    };
+
+    fwdBtn.onclick = () => {
+      if (audio.duration) {
+        audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+        seek.value = audio.currentTime;
+        currentEl.textContent = formatTime(audio.currentTime);
+        updateWaveformProgress(audio.currentTime / audio.duration);
+      }
+    };
+
+    stopBtn.onclick = () => {
+      audio.pause();
+      audio.currentTime = 0;
+      seek.value = 0;
+      currentEl.textContent = '0:00';
+      updateWaveformProgress(0);
+      statusEl.textContent = 'Stopped';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(false);
+      visualizer.classList.remove('playing');
+    };
+
+    document.querySelectorAll('[data-rate]').forEach(btn => {
+      btn.onclick = () => {
+        audio.playbackRate = Number(btn.dataset.rate);
+        document.querySelectorAll('[data-rate]').forEach(b => b.classList.toggle('active', b === btn));
+      };
+    });
+
+    // WINDOW DRAGGING VIA NATIVE PYWEBVIEW HWND BRIDGE
+    document.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button, input, a, .no-drag, .af-card, .drawer-content, .timeline, .waveform-visualizer')) return;
+      if (e.button === 0 && window.pywebview?.api?.start_drag) {
+        window.pywebview.api.start_drag();
+      }
+    });
+
+    // HISTORY DRAWER LOGIC
+    let isDrawerOpen = false;
+    let historyRecords = [];
+
+    function toggleHistoryDrawer(forceState) {
+      if (typeof forceState === 'boolean') {
+        isDrawerOpen = forceState;
+      } else {
+        isDrawerOpen = !isDrawerOpen;
+      }
+      historyDrawer.classList.toggle('open', isDrawerOpen);
+      toggleHistBtn.classList.toggle('active', isDrawerOpen);
+      if (isDrawerOpen) {
+        fetchHistory();
+      }
+    }
+
+    async function fetchHistory() {
+      try {
+        const res = await fetch(`${apiBase}/api/audio-flow/history`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && Array.isArray(data.summaries)) {
+          historyRecords = data.summaries;
+          renderHistoryList();
+        }
+      } catch (_) {}
+    }
+
+    async function downloadCurrentAudio(btn) {
+      const id = window.currentAudioId || audioId;
+      const title = window.currentAudioTitle || titleParam || 'Audio Summary';
+      return downloadSummaryAudio(id, title, btn);
+    }
+    window.downloadCurrentAudio = downloadCurrentAudio;
+
+    async function downloadSummaryAudio(id, title, btn) {
+      if (!id) return;
+      if (btn && btn.classList.contains('is-downloading')) return;
+      const origHtml = btn ? btn.innerHTML : '<span>MP3</span>';
+      if (btn) {
+        btn.classList.add('is-downloading');
+        btn.disabled = true;
+        btn.innerHTML = '<span>Saving…</span>';
+      }
+      try {
+        const res = await fetch(`${apiBase}/api/audio-flow/summary/save-to-downloads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, title: title || 'Audio Summary', format: 'mp3' })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.filename) {
+            if (btn) {
+              btn.classList.remove('is-downloading');
+              btn.classList.add('is-success');
+              btn.innerHTML = '<span>✓ Saved!</span>';
+            }
+            statusEl.textContent = `Saved to Music & Downloads: "${data.filename}"`;
+            try {
+              const link = document.createElement("a");
+              link.href = `${apiBase}/api/audio-flow/summary/stream?id=${encodeURIComponent(id)}&download=1&title=${encodeURIComponent(title || data.filename || 'Audio Summary')}`;
+              link.download = data.filename;
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+            } catch (_) {}
+            setTimeout(() => {
+              if (btn) {
+                btn.classList.remove('is-success');
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+              }
+              if (statusEl.textContent.includes('Saved')) {
+                statusEl.textContent = audio.paused ? (audio.currentTime > 0 ? 'Paused' : 'Ready') : 'Playing';
+              }
+            }, 3000);
+            return;
+          }
+        }
+        throw new Error('Save failed');
+      } catch (err) {
+        console.warn('Direct download error:', err);
+        const dlName = encodeURIComponent(title || 'Audio Summary');
+        window.location.href = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(id)}&download=1&format=mp3&title=${dlName}`;
+        if (btn) {
+          btn.classList.remove('is-downloading');
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+      }
+    }
+    window.downloadSummaryAudio = downloadSummaryAudio;
+
+    function renderHistoryList() {
+      const count = historyRecords.length;
+      histCountEl.textContent = count;
+      drawerCountEl.textContent = count;
+
+      if (!count) {
+        historyListEl.innerHTML = `
+          <div class="empty-history">
+            <div style="font-size:22px;opacity:0.6;">🎧</div>
+            <strong style="font-size:12px;color:var(--text-primary);">No audio summaries yet</strong>
+            <span style="font-size:10.5px;color:var(--text-muted);">Summaries you create will appear here.</span>
+          </div>`;
+        return;
+      }
+
+      historyListEl.innerHTML = historyRecords.map(item => {
+        const dFmt = formatDepth(item.depth);
+        let dateStr = '';
+        try {
+          const d = new Date(item.created_at);
+          dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        } catch (_) {
+          dateStr = item.created_at || '';
+        }
+        const snippetSafe = (item.text_snippet || 'Audio summary').replace(/"/g, '&quot;');
+        const itemTitle = item.title || item.text_snippet || 'Audio summary';
+        const titleSafe = itemTitle.replace(/"/g, '&quot;');
+        const isFailed = item.status === 'failed' || item.status === 'cancelled';
+        const isActionable = !isFailed && (item.audio_path || item.status === 'ready');
+
+        const actionHtml = isActionable ? `
+          <div class="af-card-actions-left">
+            <button class="af-btn-action play-btn" onclick="playHistoryItem('${item.id}', '${titleSafe}', '${item.depth || 'balanced'}')">▶ Play</button>
+            <button class="af-btn-action" onclick="downloadSummaryAudio('${item.id}', '${titleSafe}', this)">⬇ MP3</button>
+          </div>` : `
+          <div class="af-card-actions-left">
+            <span class="af-failed-label" style="font-size:11px;color:#ef4444;font-weight:600;">⚠ ${item.status === 'cancelled' ? 'Cancelled' : 'Failed'}</span>
+          </div>`;
+
+        return `
+          <div class="af-card" data-id="${item.id}">
+            <div class="af-card-header">
+              <span class="af-mode-chip">${dFmt}</span>
+              <span class="af-card-time">${dateStr}</span>
+            </div>
+            <div class="af-card-snippet" title="${titleSafe}">${snippetSafe}</div>
+            <div class="af-card-actions">
+              ${actionHtml}
+              <button class="af-btn-action danger" onclick="deleteHistoryItem('${item.id}')">✕</button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    window.playHistoryItem = (id, title, depth) => {
+      toggleHistoryDrawer(false);
+      window.currentAudioId = id;
+      window.currentAudioTitle = title || 'Audio Summary';
+      titleEl.textContent = title || 'Audio Summary';
+      document.title = `${title || 'Audio Summary'} — Audio Flow`;
+      depthText.textContent = formatDepth(depth);
+      const dlName = encodeURIComponent(title || 'Audio Summary');
+      audio.src = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(id)}&title=${dlName}`;
+      downloadEl.href = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(id)}&download=1&format=mp3&title=${dlName}`;
+      downloadEl.download = safeMediaFilename(title, 'Audio_Summary', '.mp3');
+      audio.currentTime = 0;
+      seek.value = 0;
+      updateWaveformProgress(0);
+      statusEl.textContent = 'Playing';
+      statusDot.className = 'status-dot';
+      setPlayButtonIcon(true);
+      visualizer.classList.add('playing');
+      const p = audio.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(err => {
+          console.warn('Playback error or interrupted:', err);
+          if (audio.paused) {
+            statusEl.textContent = 'Ready';
+            setPlayButtonIcon(false);
+            visualizer.classList.remove('playing');
+          }
+        });
+      }
+    };
+
+    window.deleteHistoryItem = async (id) => {
+      try {
+        const res = await fetch(`${apiBase}/api/audio-flow/history/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (res.ok) {
+          historyRecords = historyRecords.filter(r => r.id !== id);
+          renderHistoryList();
+        }
+      } catch (_) {}
+    };
+
+    // Initial history fetch
+    fetchHistory();
+  </script>
+</body>
+</html>

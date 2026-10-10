@@ -1,0 +1,100 @@
+name: CI & Multi-Platform Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  windows-tests:
+    name: Windows Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package and dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pytest-timeout cryptography pillow
+
+      - name: Run Platform Tests
+        run: |
+          pytest tests/test_platform_layer.py -vv -s --timeout=30
+
+      - name: Run Runtime Compatibility Tests
+        run: |
+          pytest tests/test_runtime_compatibility.py -vv -s --timeout=30
+
+      - name: Run Version Consistency & Update Checker Tests
+        run: |
+          pytest tests/test_version_consistency.py tests/test_update_checker.py -vv
+
+      - name: Run Core Features, Security & Text Processing Tests
+        run: |
+          pytest tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v --timeout=60
+
+      - name: Run macOS GUI regression tests
+        run: |
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+
+  macos-build:
+    name: macOS Validation & App Packaging
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies & DMG tools
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-asyncio pytest-timeout pillow dmgbuild
+          brew install create-dmg || true
+
+      - name: Verify core package import
+        run: |
+          python -c "import voice_flow; print('voice_flow import OK')"
+
+      - name: Verify API server import
+        run: |
+          python -c "from voice_flow.gui.api_server import start_api_server; print('start_api_server import OK')"
+
+      - name: Run Platform Abstraction Tests
+        run: |
+          pytest tests/test_platform_layer.py -v --timeout=60
+
+      - name: Run macOS GUI regression tests
+        run: |
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+
+      - name: Build macOS Application Bundle (.app, .dmg & .zip)
+        run: |
+          python scripts/build_macos_app.py --bundle-runtime --dmg
+
+      - name: Upload macOS App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Productivity-Flow-macOS
+          path: |
+            dist/AI-Productivity-Flow-macOS.dmg
+            dist/AI-Productivity-Flow-macOS.dmg.sha256
+            dist/AI-Productivity-Flow-macOS.zip
+            dist/AI-Productivity-Flow-macOS.zip.sha256
+          if-no-files-found: error
+

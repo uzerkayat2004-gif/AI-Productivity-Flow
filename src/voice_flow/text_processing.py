@@ -1,0 +1,244 @@
+"""Conservative, deterministic formatting for dictated text."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+from voice_flow.style_formatter import style_formatter
+from voice_flow.style_models import TextboxContext
+
+
+@dataclass(frozen=True)
+class FormattingResult:
+    text: str
+    press_enter: bool = False
+
+
+_MENTION_CONTEXT = re.compile(
+    r"\b(?:do not(?:\s+ever)?|don't(?:\s+ever)?|never(?:\s+ever)?|"
+    r"say|the words?|literal(?:ly)?|phrase)\s*$",
+    re.I,
+)
+
+
+def split_press_enter(text: str, enabled: bool) -> FormattingResult:
+    """Extract only an unambiguous trailing action, before cleanup/dictionary."""
+    text = text.strip()
+    if not enabled or not re.search(r"\bpress enter(?:\s*[.!?]+)?$", text, re.I):
+        return FormattingResult(text)
+    prefix = re.sub(r"\bpress enter(?:\s*[.!?]+)?$", "", text, flags=re.I).rstrip()
+    if _MENTION_CONTEXT.search(prefix) or re.search(r"\b(?:write|type)\s+the\s+(?:words?|phrase)\s*$", prefix, re.I):
+        return FormattingResult(text)
+    prefix = re.sub(r"\s+and$", "", prefix, flags=re.I).rstrip()
+    return FormattingResult(prefix, True)
+
+
+def apply_spoken_punctuation(text: str) -> str:
+    """Convert explicit spoken punctuation without changing ordinary wording."""
+    return _spoken_punctuation(text)
+
+
+_FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
+_PROTECTED_CLEANUP_SPAN_RE = re.compile(
+    r"(``[\s\S]*?``|`[^`\n]*`|\[[^\]]+\]\([^\)]+\)|"
+    r"(?:https?|ftp)://[^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\bwww\.[^\s<>]+|"
+    r"(?:[A-Za-z]:[\\/]|\\\\|(?:\.{1,2}/|/))[^\s<>]*|\$\w+|--[\w-]+|\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b|"
+    r"\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w))"
+)
+_DICTATED_EMAIL_SALUTATION_RE = re.compile(
+    r"^\s*(?P<salutation>(?:(?:dear|hi|hello)\s+[A-Za-z][A-Za-z .'-]{0,50}|(?!(?:please|tomorrow|however|therefore|first|second|finally|yes|no)\b)[A-Z][A-Za-z'-]{1,40})),[ \t]+(?P<body>\S[\s\S]*?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _repair_unambiguous_agreement(segment: str) -> str:
+    """Repair only agreement errors with one clear grammatical outcome.
+
+    This is intentionally not a general grammar checker.  It handles a small
+    set of common ASR errors locally, without changing wording or attempting
+    subject/noun inference.  The caller applies it only to unprotected spans,
+    so quoted text, code, links, paths, and email addresses remain literal.
+    """
+    for pattern, replacement in (
+        (r"\bi\s+is\b", "I am"),
+        (r"\bi\s+has\b", "I have"),
+        (r"\bi\s+does\b", "I do"),
+        (r"\b(you|we|they)\s+is\b", r"\1 are"),
+        (r"\b(you|we|they)\s+was\b", r"\1 were"),
+        (r"\b(you|we|they)\s+has\b", r"\1 have"),
+        (r"\b(you|we|they)\s+does\b", r"\1 do"),
+        (r"\b(he|she|it)\s+are\b", r"\1 is"),
+        (r"\b(he|she|it)\s+were\b", r"\1 was"),
+        (r"\b(this|that)\s+are\b", r"\1 is"),
+        (r"\b(these|those)\s+is\b", r"\1 are"),
+    ):
+        segment = re.sub(pattern, replacement, segment, flags=re.IGNORECASE)
+    return re.sub(r"\bi\b", "I", segment, flags=re.IGNORECASE)
+
+
+def _strip_filler(match: "re.Match[str]") -> str:
+    """Drop a hesitation filler, but keep an ALL-CAPS acronym that spells one.
+
+    "The ER team approved it" must not lose "ER": it is content, not a
+    hesitation sound. An all-uppercase occurrence is treated as an acronym and
+    preserved; ordinary "er"/"um"/"uh" (including sentence-initial "Um,") is
+    removed.
+    """
+    word = match.group(1)
+    if word.isupper():
+        return match.group(0)
+    return ""
+
+
+def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> str:
+    """Independent Cleanup layer: handles spoken fillers and hesitation disfluencies."""
+    if level == "cleanup_none":
+        return text
+    text = text.strip()
+
+    def clean_unprotected(segment: str) -> str:
+        segment = _FILLER_RE.sub(_strip_filler, segment)
+        segment = re.sub(r"(?:^|,)\s*you know\s*(?=,|$)", lambda m: "," if m.group(0).startswith(",") else "", segment, flags=re.I)
+        for pattern, replacement in (
+            (r"\blet's meet at\s+([^,.]+?)\s+(?:actually|no wait|wait no)\s+([^,.]+)", r"let's meet at \2"),
+            (r"\bsend it\s+([^,.]+?)\s+(?:scratch that|actually)\s+([^,.]+)", r"send it \2"),
+            (r"\bmy code is\s+([^,.]+?)\s+(?:no wait|wait no|actually)\s+([^,.]+)", r"my code is \2"),
+        ):
+            segment = re.sub(pattern, replacement, segment, flags=re.I)
+        # A doubled first-person pronoun is a common ASR stutter. Keep all
+        # other single-word repetitions because they can carry meaning.
+        segment = re.sub(r"\b(I)(?:[ \t]+\1\b)+", r"\1", segment, flags=re.I)
+        if not preserve_repetitions:
+            segment = collapse_echo_repeats(segment)
+        if level in ("cleanup_medium", "cleanup_high"):
+            segment = re.sub(r"\b(\w+(?:\s+\w+){0,5})\s+(?:I mean|rather),?\s+\1\b", r"\1", segment, flags=re.I)
+        segment = _repair_unambiguous_agreement(segment)
+        # Explicit punctuation often reaches this layer as a symbol before
+        # deterministic cleanup.  Removing only its preceding whitespace is
+        # safe and preserves every dictated word and line boundary.
+        segment = re.sub(r"[ \t]+([,.;:?!])", r"\1", segment)
+        # Newlines are dictated structure. Normalize horizontal spacing only.
+        return re.sub(r"[ \t]+", " ", segment)
+
+    parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = clean_unprotected(parts[index])
+    return "".join(parts).strip()
+
+
+def format_dictated_email(text: str) -> str | None:
+    """Lay out an already-dictated email salutation without inventing content.
+
+    This intentionally does not create a subject, greeting, sign-off, sender,
+    or new wording. It is only a deterministic fallback when a requested AI
+    email transformation could not be safely accepted.
+    """
+    match = _DICTATED_EMAIL_SALUTATION_RE.match(text or "")
+    if not match:
+        return None
+    body = match.group("body")
+    if body[:1].islower():
+        body = body[:1].upper() + body[1:]
+    return f"{match.group('salutation')},\n\n{body}"
+
+
+def collapse_echo_repeats(text: str) -> str:
+    """Collapse a phrase the speaker repeated immediately (dictation echo).
+
+    "hey fix this hey fix this" -> "hey fix this". Only BACK-TO-BACK
+    repetitions of a 2-6 word phrase count; the same phrase appearing twice
+    in different places of the dictation is intentional and is kept.
+
+    A repetition that crosses a sentence boundary ("Send the report today.
+    Send the report today.") is deliberate emphasis or quoted text, so the
+    two halves are never merged across a terminator.
+    """
+    if not text or " " not in text:
+        return text
+
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w']", "", word).lower()
+
+    for _ in range(4):  # chained echoes: "a b a b a b"
+        tokens = text.split(" ")
+        n = len(tokens)
+        replaced = False
+        for size in range(min(6, n // 2), 1, -1):
+            i = 0
+            while i + 2 * size <= n:
+                first = [_norm(w) for w in tokens[i:i + size]]
+                second = [_norm(w) for w in tokens[i + size:i + 2 * size]]
+                if first and first == second and all(first):
+                    # Do not merge across a sentence terminator: a complete
+                    # sentence repeated is intentional, not an echo.
+                    boundary = any(
+                        w.endswith((".", "!", "?"))
+                        for w in tokens[i:i + size - 1]
+                    ) or tokens[i + size - 1].endswith((".", "!", "?"))
+                    if boundary:
+                        i += 1
+                        continue
+                    tokens = tokens[:i] + tokens[i + size:]
+                    text = " ".join(tokens)
+                    replaced = True
+                    break
+                i += 1
+            if replaced:
+                break
+        if not replaced:
+            break
+    return text
+
+
+def _spoken_punctuation(text: str) -> str:
+    protected = re.split(r"(https?://\S+|\b\S+@\S+\b)", text)
+    for i in range(0, len(protected), 2):
+        part = protected[i]
+        part = re.sub(r"\bnew paragraph\b", "\n\n", part, flags=re.I)
+        part = re.sub(r"\b(?:new line|next line|line break)\b", "\n", part, flags=re.I)
+        part = re.sub(r"[ \t]*\n[ \t]*", "\n", part)
+        protected_terms = r"(?:character|symbol|key|operator|delimiter|term|word)"
+        part = re.sub(rf"\b(?:comma|period|colon|semicolon|hash|question mark|exclamation mark)\s+{protected_terms}\b", lambda m: "__" + m.group(0).replace(" ", "_") + "__", part, flags=re.I)
+        part = re.sub(r"\b(?:the\s+word\s+comma|a\s+period\s+is\s+punctuation|period\s+drama|colon\s+cancer|hash\s+table)\b", lambda m: "__" + m.group(0).replace(" ", "_") + "__", part, flags=re.I)
+        if not re.search(r"\b(?:write|say|type)\s+the\s+words?\s+(?:question mark|comma|period)\b", part, re.I):
+            for spoken, symbol in (("question mark", "?"), ("exclamation mark", "!"), ("full stop", "."), ("comma", ","), ("period", "."), ("colon", ":"), ("semicolon", ";")):
+                part = re.sub(rf"\b{spoken}\b", symbol, part, flags=re.I)
+        part = re.sub(r"\s+([,.;:?!])", r"\1", part)
+        part = re.sub(r"__(.+?)__", lambda m: m.group(1).replace("_", " "), part)
+        protected[i] = part
+    return "".join(protected)
+
+
+def _numbered_list(text: str) -> str:
+    stripped = text.strip()
+    groups = [(r"number one\s+(.+?)\s+number two\s+(.+)", 1), (r"list:\s*first\s+(.+?)\s+second\s+(.+)", 1)]
+    for pattern, _ in groups:
+        match = re.fullmatch(pattern, stripped, re.I)
+        if match:
+            return f"1. {match.group(1).strip(' ,;.')}\n2. {match.group(2).strip(' ,;.')}"
+    return text
+
+
+def apply_style(text: str, style_id: str, context=None) -> str:
+    """Formats text according to requested style_id and surrounding textbox context."""
+    text = text.strip()
+    if not text or style_id == "cleanup_none":
+        return text
+
+    # Adapt context object if provided
+    tb_context = None
+    if context:
+        if isinstance(context, str):
+            tb_context = TextboxContext(before=context, trustworthy=True)
+        else:
+            tb_context = TextboxContext(
+                before=getattr(context, "before", ""),
+                selection=getattr(context, "selection", ""),
+                after=getattr(context, "after", ""),
+                trustworthy=getattr(context, "trustworthy", False),
+            )
+
+    return style_formatter.format(text, style=style_id, context=tb_context)
+
+
+def smart_format(text: str, style_id: str, context=None) -> str:
+    return apply_style(_numbered_list(_spoken_punctuation(text)), style_id, context)
