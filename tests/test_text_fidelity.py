@@ -201,6 +201,72 @@ def test_dropping_words_without_a_correction_marker_is_still_rejected() -> None:
     )
 
 
+def test_cleanup_keeps_hey_and_rejects_here() -> None:
+    source = "hey can you send the report to alex tomorrow"
+    assert _candidate_preserves_content(source, "Hey, can you send the report to Alex tomorrow?", task="cleanup")
+    assert not _candidate_preserves_content(source, "Here, can you send the report to Alex tomorrow?", task="cleanup")
+
+
+def test_cleanup_fallback_fixes_grammar_without_changing_hey(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _polisher(monkeypatch, "Here, can you send the report to Alex tomorrow?")
+    monkeypatch.setattr("voice_flow.local_polish.safety_net_engine", lambda *args, **kwargs: None)
+    result = engine.polish(
+        "hey can you send the report to alex tomorrow",
+        "Rephrase as a formal personal message with standard capitalization and complete punctuation.",
+        force_ai=True,
+    )
+    assert result.lower().startswith("hey")
+    assert "here" not in result.lower()
+    assert "Alex" in result or "alex" in result
+
+
+def test_cleanup_accepts_grammar_and_fixes_articles_and_apostrophes(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _polisher(monkeypatch, "Hey, I am sending a apple and I dont know the time.")
+    monkeypatch.setattr("voice_flow.local_polish.safety_net_engine", lambda *args, **kwargs: None)
+    seen = {}
+
+    def pool(*args, **kwargs):
+        seen["instruction"] = args[2] if len(args) > 2 else kwargs.get("style_instruction")
+        return "Hey, I am sending a apple and I dont know the time."
+
+    monkeypatch.setattr(engine, "_polish_with_api_pool", pool)
+    result = engine.polish(
+        "hey i is sending a apple and i dont know the time",
+        "Rephrase as a formal note.",
+        force_ai=True,
+    )
+    assert result == "Hey, I am sending an apple and I don't know the time."
+    assert "Rephrase" not in seen["instruction"]
+    assert "hey must stay hey" in seen["instruction"]
+
+
+def test_light_grammar_restores_apostrophes_without_touching_real_words() -> None:
+    from voice_flow.text_processing import light_grammar
+
+    assert light_grammar("we were going and youre late") == "we were going and you're late"
+    assert light_grammar("she lets the dog out") == "she lets the dog out"
+    assert light_grammar("its color is red") == "its color is red"
+
+
+def test_polishing_off_does_not_apply_article_fixes_or_call_a_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = TextPolisher()
+
+    def disabled(key, default=None):
+        if key == "polishing_enabled":
+            return False
+        return default
+
+    def fail_pool(*_args, **_kwargs):
+        raise AssertionError("polishing off must not call a model")
+
+    monkeypatch.setattr("voice_flow.polisher.storage.get_setting", disabled)
+    monkeypatch.setattr("voice_flow.polisher.dictionary_engine.apply_dictionary_post_processing", lambda text, trace=None: text)
+    monkeypatch.setattr(engine, "_polish_with_api_pool", fail_pool)
+    # The off switch stays on its existing fast cleanup. It does not gain the
+    # article and apostrophe pass used when polishing is on.
+    assert engine.polish("hey i is sending a apple") == "Hey I am sending a apple."
+
+
 def test_register_rewrite_may_rephrase_without_changing_the_facts() -> None:
     source = "hey so we finally shipped the new onboarding and people are actually finishing it lol can you believe it"
     professional = "We have shipped the new onboarding flow, and users are now completing it."

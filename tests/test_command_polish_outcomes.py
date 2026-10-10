@@ -220,7 +220,8 @@ def test_disabled_local_and_timeout_outcomes_do_not_leak_between_calls():
 
 
 def test_fidelity_accepts_unambiguous_contractions_without_losing_negation():
-    assert _candidate_preserves_content("I will arrive at five.", "I'll be there at five.")
+    assert _candidate_preserves_content("I will arrive at five.", "I'll arrive at five.")
+    assert not _candidate_preserves_content("I will arrive at five.", "I'll be there at five.")
     assert _candidate_preserves_content("I do not approve this release.", "I don't approve this release.")
     assert not _candidate_preserves_content("I do not approve this release.", "I approve this release.")
 

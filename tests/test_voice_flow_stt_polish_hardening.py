@@ -175,8 +175,10 @@ class TestRetentionFloor(unittest.TestCase):
         tail = self.SRC.split()[-5:]
         return " ".join(head + tail) + "."
 
-    def test_faithful_polish_at_85_percent_passes(self):
-        self.assertTrue(_candidate_preserves_content(self.SRC, self._candidate(85)))
+    def test_dropping_spoken_words_is_rejected_even_above_the_length_floor(self):
+        # 85% of the words is still a different dictation when the missing
+        # words were not fillers. Length alone must not make that look faithful.
+        self.assertFalse(_candidate_preserves_content(self.SRC, self._candidate(85)))
 
     def test_compression_below_80_percent_rejected(self):
         self.assertFalse(_candidate_preserves_content(self.SRC, self._candidate(79)))

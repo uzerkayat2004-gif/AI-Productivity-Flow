@@ -89,6 +89,71 @@ def _strip_filler(match: "re.Match[str]") -> str:
     return ""
 
 
+_A_NOT_AN = {
+    "one", "once", "university", "unique", "unit", "units", "union", "user", "users",
+    "european", "uk", "url", "useful", "usual",
+}
+_AN_NOT_A = {"hour", "hours", "honest", "honor", "honour", "heir", "heiress"}
+
+
+def _fix_articles(segment: str) -> str:
+    """Fix only the obvious article errors, never a word's meaning."""
+
+    def a_to_an(match: re.Match) -> str:
+        word = match.group(2)
+        if word.casefold() in _A_NOT_AN or word[:1].casefold() not in "aeiou":
+            return match.group(0)
+        article = "An" if match.group(1)[:1].isupper() else "an"
+        return f"{article} {word}"
+
+    def an_to_a(match: re.Match) -> str:
+        word = match.group(2)
+        if word.casefold() in _AN_NOT_A or word[:1].casefold() in "aeiou":
+            return match.group(0)
+        article = "A" if match.group(1)[:1].isupper() else "a"
+        return f"{article} {word}"
+
+    segment = re.sub(r"\b([Aa])\s+([A-Za-z][A-Za-z']*)", a_to_an, segment)
+    return re.sub(r"\b([Aa]n)\s+([A-Za-z][A-Za-z']*)", an_to_a, segment)
+
+
+def _fix_missing_apostrophes(segment: str) -> str:
+    """Restore apostrophes in common unpunctuated contractions.
+
+    Ambiguous words stay literal: ``its``, ``id``, and ``ill`` are real words.
+    """
+    for pattern, replacement in (
+        (r"\b([Dd]o|[Cc]a|[Ww]o)nt\b", r"\1n't"),
+        (r"\b([Ii]s|[Aa]re|[Ww]as|[Ww]ere|[Dd]id|[Dd]oes|[Hh]as|[Hh]ave|[Ww]ould|[Cc]ould|[Ss]hould|[Hh]ad)nt\b", r"\1n't"),
+        # "were" is the verb, and it is spelled the same as "we're" without an
+        # apostrophe, so only the unambiguous forms are restored.
+        (r"\b([Yy]ou|[Tt]hey)re\b", r"\1're"),
+        (r"\b([Tt]hat|[Tt]here|[Ww]hat)s\b", r"\1's"),
+        (r"\b([Ii])ve\b", r"I've"),
+        (r"\b([Ww]e|[Tt]hey|[Yy]ou)ve\b", r"\1've"),
+    ):
+        segment = re.sub(pattern, replacement, segment)
+    return segment
+
+
+def light_grammar(text: str) -> str:
+    """Fix grammar that does not change which words the speaker said.
+
+    Polishing ON uses this after a faithful model result and as the fallback
+    when a model rewrites the words. Polishing OFF does not call it.
+    """
+    if not text or not text.strip():
+        return text
+
+    def fix(segment: str) -> str:
+        return _fix_missing_apostrophes(_fix_articles(segment))
+
+    parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = fix(parts[index])
+    return "".join(parts)
+
+
 def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> str:
     """Independent Cleanup layer: handles spoken fillers and hesitation disfluencies."""
     if level == "cleanup_none":

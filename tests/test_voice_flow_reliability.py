@@ -90,8 +90,9 @@ class TestPromptAndGrammarInstructions(unittest.TestCase):
     def test_polish_prompt_mandates_grammar_repair(self):
         from voice_flow import polisher as pmod
 
-        self.assertIn("fix ALL speech-to-text errors", pmod.POLISHER_SYSTEM_PROMPT)
-        self.assertIn("ECHO REPEATS", pmod.POLISHER_SYSTEM_PROMPT)
+        self.assertIn("Fix grammar, agreement, articles, capitalization, and punctuation", pmod.POLISHER_SYSTEM_PROMPT)
+        self.assertIn("hey stays hey, here stays here", pmod.POLISHER_SYSTEM_PROMPT)
+        self.assertNotIn("fix ALL speech-to-text errors", pmod.POLISHER_SYSTEM_PROMPT)
         # The old contradictory guarantee must be gone.
         self.assertNotIn("strictly preserving 100%", pmod.POLISHER_SYSTEM_PROMPT)
 
