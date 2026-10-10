@@ -36,6 +36,10 @@ _n = 0
 def record(step: str, status: str, note: str = "", shot: str | None = None, **extra) -> None:
     row = {"step": step, "status": status, "note": str(note)[:600], "shot": shot, **extra}
     results.append(row)
+    try:
+        (OUT / "results.json").write_text(json.dumps(results, indent=2, default=str))
+    except Exception:
+        pass
     print(f"[{status:>7}] {step}: {row['note']}", flush=True)
 
 
@@ -300,7 +304,12 @@ def main() -> int:
     floating_bar("hover-start", hover=True)
 
     with sync_playwright() as pw:
-        browser = pw.webkit.launch()
+        try:
+            browser = pw.webkit.launch(timeout=90000)
+            record("Playwright WebKit launch", "ok", browser.version)
+        except Exception as exc:
+            record("Playwright WebKit launch", "fail", f"{exc!r} -> falling back to Chromium")
+            browser = pw.chromium.launch(timeout=90000)
         vw, vh = (int(win["w"]), int(win["h"] - 28)) if win else (1160, 732)
         ctx = browser.new_context(viewport={"width": vw, "height": vh})
         page = ctx.new_page()
@@ -380,18 +389,33 @@ def main() -> int:
         app_path = os.environ.get("APP_PATH")
         if app_path and win:
             subprocess.run(["pkill", "-f", "AI Productivity Flow.app/Contents"], check=False)
-            time.sleep(4)
+            t0 = time.time()
+            while time.time() - t0 < 30 and subprocess.run(["pgrep", "-f", "AI Productivity Flow.app/Contents"], capture_output=True).returncode == 0:
+                time.sleep(1)
+            still = subprocess.run(["pgrep", "-fl", "AI Productivity Flow.app/Contents"], capture_output=True, text=True).stdout
+            subprocess.run(["pkill", "-9", "-f", "AI Productivity Flow.app/Contents"], check=False)
+            while time.time() - t0 < 60 and subprocess.run(["lsof", "-nP", "-iTCP:8991", "-sTCP:LISTEN"], capture_output=True).returncode == 0:
+                time.sleep(1)
+            record("quit app before restart", "info", f"exited after SIGTERM in {time.time()-t0:.0f}s; still running after 30s: {still.strip()[:300] or 'none'}")
             exe = subprocess.run(["/usr/libexec/PlistBuddy", "-c", "Print CFBundleExecutable", f"{app_path}/Contents/Info.plist"],
                                  capture_output=True, text=True).stdout.strip()
-            subprocess.Popen([f"{app_path}/Contents/MacOS/{exe}"], stdout=open(OUT / "app-stdout-relaunch.txt", "w"),
-                             stderr=subprocess.STDOUT, start_new_session=True)
-            ok = wait_api(120)
-            time.sleep(12)
-            win2 = main_window()
-            record("restart app (stuck-user path)", "ok" if ok and win2 else "fail", f"api={ok} window={win2}", native_shot("after-restart"))
+            ok, win2 = False, None
+            for attempt in (1, 2):
+                subprocess.Popen([f"{app_path}/Contents/MacOS/{exe}"], stdout=open(OUT / f"app-stdout-relaunch{attempt}.txt", "w"),
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+                ok = wait_api(90)
+                time.sleep(12)
+                win2 = main_window()
+                record(f"restart app (stuck-user path), attempt {attempt}", "ok" if ok and win2 else "fail",
+                       f"api={ok} window={win2}", native_shot(f"after-restart-{attempt}"))
+                if ok and win2:
+                    break
+                time.sleep(10)
             if win2:
                 win = win2
             floating_bar("rest-after-restart")
+            if not (ok and win2):
+                raise RuntimeError("app did not come back after restart; skipping native sidebar checks")
             page.reload(wait_until="load")
             page.wait_for_timeout(5000)
             page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} try { switchPage('audioflow'); } catch(e){} }")
@@ -514,6 +538,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import signal
+
+    def _timeout(*_):
+        raise TimeoutError("walkthrough watchdog (25 min) fired")
+    signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(25 * 60)
     rc = 1
     try:
         rc = main()
