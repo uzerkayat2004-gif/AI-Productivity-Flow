@@ -202,3 +202,53 @@ def test_macos_pyobjc_dependencies_are_marked_for_darwin():
         for package in required:
             assert package in content
         assert "darwin" in content
+
+
+@pytest.mark.parametrize("mode,duration,finishes", [("ptt_only", 0.01, True), ("hybrid", 0.4, True), ("hybrid", 0.01, False), ("toggle_only", 0.4, False)])
+def test_cmd_option_release_keeps_armed_mode_after_reload(monkeypatch, mode, duration, finishes):
+    from unittest.mock import MagicMock
+    fake_keyboard = _distinct_keyboard()
+    monkeypatch.setattr(hotkeys, "keyboard", fake_keyboard)
+    listener = _listener()
+    listener._mouse_hook = MagicMock()
+    listener._safe_on_start = MagicMock()
+    listener._safe_on_finish = MagicMock()
+    for name in ("_is_ctrl_down", "_is_win_down", "_is_alt_down", "_is_shift_down", "_is_key_down"):
+        monkeypatch.setattr(hotkeys, name, lambda *_args: False)
+    monkeypatch.setattr(hotkeys.time, "time", lambda: 100.0)
+    listener.reload_config({"hotkey_trigger": "cmd_option", "dictation_trigger_mode": mode})
+    listener._on_key_press(fake_keyboard.Key.cmd)
+    listener._on_key_press(fake_keyboard.Key.alt)
+    assert listener._cmd_option_triggered and listener._is_recording
+    listener.reload_config({"hotkey_trigger": "custom", "custom_hotkey": "F9", "dictation_trigger_mode": "disabled"})
+    monkeypatch.setattr(hotkeys.time, "time", lambda: 100.0 + duration)
+    listener._on_key_release(fake_keyboard.Key.alt)
+    assert listener._is_recording is not finishes
+    assert listener._cmd_option_triggered is False
+    if not finishes:
+        listener._on_key_press(fake_keyboard.Key.alt)
+        if mode in ("hybrid", "toggle_only"):
+            assert listener._is_recording is False
+
+
+def test_cmd_option_capture_reset_and_held_key_quarantine(monkeypatch):
+    from unittest.mock import MagicMock
+    fake_keyboard = _distinct_keyboard()
+    monkeypatch.setattr(hotkeys, "keyboard", fake_keyboard)
+    listener = _listener()
+    listener._mouse_hook = MagicMock()
+    listener._mouse_hook._is_recording = False
+    listener._cmd_option_triggered = True
+    assert listener.begin_shortcut_capture("mac-capture")
+    try:
+        assert listener._cmd_option_triggered is False
+        listener._on_key_press(fake_keyboard.Key.cmd)
+        listener._on_key_press(fake_keyboard.Key.alt)
+        assert not listener._is_recording
+    finally:
+        assert listener.end_shortcut_capture("mac-capture")
+    listener._on_key_press(fake_keyboard.Key.alt)
+    assert not listener._is_recording
+    listener._on_key_release(fake_keyboard.Key.alt)
+    listener._on_key_release(fake_keyboard.Key.cmd)
+    assert not listener._capture_fallback_keys

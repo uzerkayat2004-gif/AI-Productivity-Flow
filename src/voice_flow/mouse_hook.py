@@ -11,6 +11,8 @@ Features:
 
 from __future__ import annotations
 
+from voice_flow.hotkey_config import shortcut_capture_active
+
 import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
@@ -248,6 +250,7 @@ class Win32MouseHook:
 
     def _install_hook(self) -> bool:
         """Install WH_MOUSE_LL hook with a 64-bit-safe module handle."""
+        self._capture_middle_passthrough = False
         try:
             def _low_level_mouse_proc(nCode: int, wParam: int, lParam: int) -> int:
                 if nCode >= 0:
@@ -257,6 +260,11 @@ class Win32MouseHook:
 
                         # Middle button down / double-click
                         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
+                            # Capture leases let the physical middle-button pair pass through.
+                            if shortcut_capture_active():
+                                self._capture_middle_passthrough = True
+                                self._mbutton_press_time = 0.0
+                                return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             if not getattr(self, "_enabled", True) or self._trigger_mode == "disabled":
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             now = time.time()
@@ -303,6 +311,11 @@ class Win32MouseHook:
 
                         # Middle button up
                         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
+                            # Preserve the paired release even if the capture lease expired.
+                            if getattr(self, "_capture_middle_passthrough", False):
+                                self._capture_middle_passthrough = False
+                                self._mbutton_press_time = 0.0
+                                return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             if not getattr(self, "_enabled", True) or self._trigger_mode == "disabled":
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             dictation_mode = self._trigger_mode
