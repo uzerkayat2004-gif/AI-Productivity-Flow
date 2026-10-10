@@ -796,28 +796,7 @@ def delete_downloaded_model(model_id: str) -> tuple[bool, str]:
     # Cancel if downloading
     cancel_model_download(spec["id"])
 
-    target_file = get_models_dir() / spec["filename"]
-    part_file = get_models_dir() / f"{spec['filename']}.part"
-
-    deleted = False
-    if target_file.exists():
-        try:
-            target_file.unlink()
-            deleted = True
-            log.info("[DOWNLOAD] Deleted model file: %s", target_file)
-        except OSError as exc:
-            log.warning("[DOWNLOAD] Could not delete model file %s: %s", target_file, exc)
-            return False, f"Could not delete file: {exc}"
-
-    if part_file.exists():
-        try:
-            part_file.unlink()
-        except OSError:
-            pass
-
-    with _STATE_LOCK:
-        _ACTIVE_DOWNLOADS.pop(spec["id"], None)
-
+    # 1. Unload engine from memory and collect garbage before unlinking on Windows
     try:
         from voice_flow import nemotron_engine
         nemotron_engine.clear_engine_cache(spec["id"])
@@ -841,6 +820,39 @@ def delete_downloaded_model(model_id: str) -> tuple[bool, str]:
                 setattr(lfm_engine.polish_with_lfm, "_cached_llm_path", None)
     except Exception:
         pass
+
+    import gc
+    gc.collect()
+
+    target_file = get_models_dir() / spec["filename"]
+    part_file = get_models_dir() / f"{spec['filename']}.part"
+
+    deleted = False
+    models_dir = get_models_dir()
+
+    # Collect target file, part file, and any matching backup or temporary files
+    files_to_delete = {target_file, part_file}
+    for match in models_dir.glob(f"{spec['filename']}*"):
+        files_to_delete.add(match)
+
+    for f in files_to_delete:
+        if f.exists() and f.is_file():
+            for attempt in range(3):
+                try:
+                    f.unlink()
+                    deleted = True
+                    log.info("[DOWNLOAD] Deleted model file: %s", f)
+                    break
+                except OSError as exc:
+                    if attempt < 2:
+                        time.sleep(0.08)
+                        gc.collect()
+                    else:
+                        log.warning("[DOWNLOAD] Could not delete model file %s: %s", f, exc)
+                        return False, f"Could not delete file: {exc}"
+
+    with _STATE_LOCK:
+        _ACTIVE_DOWNLOADS.pop(spec["id"], None)
 
     # Check if this model is currently active in Voice Flow settings.
     # If so, revert back to safe default.
