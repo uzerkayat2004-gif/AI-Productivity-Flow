@@ -24,6 +24,7 @@ except Exception:
 
 from voice_flow.injector import VF_SYNTHETIC_EXTRA_INFO, is_synthetic_input_active
 from voice_flow.mouse_hook import Win32MouseHook
+from voice_flow.platform.macos_keyboard_listener import create_keyboard_listener
 from voice_flow.hotkey_config import (
     parse_hotkey_string,
     key_vk as _vk_for_key_name,
@@ -527,7 +528,8 @@ class InputTriggerListener:
                     pass
                 self._key_listener = None
 
-            self._key_listener = keyboard.Listener(
+            self._key_listener = create_keyboard_listener(
+                keyboard,
                 on_press=self._on_key_press,
                 on_release=self._on_key_release,
             )

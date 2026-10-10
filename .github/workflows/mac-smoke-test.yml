@@ -56,9 +56,16 @@ jobs:
           lipo -archs "$APP_PATH"/Contents/MacOS/* 2>&1 | tee -a out/gatekeeper.txt || true
           /usr/libexec/PlistBuddy -c Print "$APP_PATH/Contents/Info.plist" | tee out/info-plist.txt || true
 
-      - name: Launch app and take screenshots
+      - name: Probe actual outer embedded runtime identity
         run: |
           xattr -dr com.apple.quarantine "$APP_PATH" || true
+          python3 scripts/probe_macos_embedded_runtime.py "$APP_PATH" out
+
+      - name: Compile native identity capture
+        run: swiftc scripts/capture_macos_app_identity.swift -o out/identity-capture
+
+      - name: Launch app and take screenshots
+        run: |
           EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
           "$APP_PATH/Contents/MacOS/$EXE" > out/app-stdout.txt 2> out/app-stderr.txt &
           PID=$!
@@ -66,17 +73,15 @@ jobs:
           for t in 5 15 30 60; do
             sleep $(( t - ${LAST:-0} )); LAST=$t
             screencapture -x out/screen-${t}s.png || true
+            if [ "$t" = 30 ] || [ "$t" = 60 ]; then
+              out/identity-capture "$APP_PATH" > "out/identity-${t}s.json"
+            fi
             if kill -0 $PID 2>/dev/null; then echo "${t}s: running" | tee -a out/alive.txt; else echo "${t}s: EXITED" | tee -a out/alive.txt; fi
           done
-          osascript -e 'tell application "System Events"
-            set outText to ""
-            repeat with p in (every process whose background only is false)
-              set outText to outText & (name of p) & ": " & (name of every window of p as text) & linefeed
-            end repeat
-            return outText
-          end tell' > out/windows.txt 2>&1 || true
+          cp out/identity-60s.json out/windows.txt
           cp "$HOME/.voice_flow/gui_launcher.log" out/gui_launcher.log 2>/dev/null || true
-          ps aux | grep -i -E "flow|python" | grep -v grep > out/processes.txt || true
+          # Identity snapshots contain process metadata without command lines.
+          cp out/identity-60s.json out/processes.txt
           kill $PID 2>/dev/null || true
 
       - name: Set up Python for artifact checks

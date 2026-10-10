@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import sys
 from pathlib import Path
 
 from PIL import Image
+
+try:
+    from scripts.probe_macos_embedded_runtime import embedded_runtime_problem
+except ModuleNotFoundError:
+    from probe_macos_embedded_runtime import embedded_runtime_problem
 
 
 _APP_WINDOW_MARKERS = ("ai productivity flow", "voice flow")
@@ -56,6 +62,8 @@ def window_report_problem(text: str) -> str | None:
     stripped = (text or "").strip()
     if not stripped:
         return "no app window"
+    if stripped.startswith("{"):
+        return identity_report_problem(stripped)
 
     app_seen = False
     browser_hit: str | None = None
@@ -71,6 +79,8 @@ def window_report_problem(text: str) -> str | None:
             continue
         structured = True
         has_app = _mentions_app_window(process) or _mentions_app_window(windows)
+        if has_app and re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", process, re.IGNORECASE):
+            return "APF window belongs to Python-named application"
         if _is_browser_process(process) and has_app:
             browser_hit = process
         elif not _is_browser_process(process) and has_app:
@@ -92,6 +102,99 @@ def window_report_problem(text: str) -> str | None:
     if not _mentions_app_window(stripped):
         return "no app window"
     return None
+
+
+def _visible_native_window(gui: dict) -> bool:
+    windows = gui.get("windowMetadata")
+    if not isinstance(windows, list):
+        raise ValueError("missing native window metadata")
+    seen = set()
+    visible = False
+    for window in windows:
+        if not isinstance(window, dict):
+            raise ValueError("invalid native window")
+        number, owner, layer = window["windowNumber"], window["ownerPid"], window["layer"]
+        if type(number) is not int or number <= 0 or number in seen:
+            raise ValueError("invalid or duplicate native window ID")
+        seen.add(number)
+        if type(owner) is not int or owner != gui["pid"] or type(layer) is not int:
+            raise ValueError("invalid native window owner/layer")
+        if type(window["onScreen"]) is not bool or not isinstance(window["title"], str):
+            raise ValueError("invalid native window visibility/title")
+        for field in ("alpha", "width", "height"):
+            value = window[field]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError("invalid native window geometry/alpha")
+        if not 0 <= window["alpha"] <= 1 or window["width"] < 0 or window["height"] < 0:
+            raise ValueError("invalid native window geometry/alpha")
+        visible |= (layer == 0 and window["onScreen"] and window["alpha"] > 0
+                    and window["width"] >= 200 and window["height"] >= 100)
+    return visible
+
+
+def identity_report_problem(text: str) -> str | None:
+    """Validate one snapshot; count distinct bundle-owned regular application PIDs."""
+    try:
+        report = json.loads(text)
+        if not isinstance(report, dict) or report.get("captureSource") != "CGWindowList":
+            raise ValueError("missing native Window Server capture source")
+        app_path = report["appPath"]
+        applications = report["applications"]
+        frontmost = report["frontmost"]
+        if not isinstance(app_path, str) or not app_path.startswith("/") or not app_path.endswith(".app"):
+            raise ValueError("invalid appPath")
+        if not isinstance(frontmost, dict) or not isinstance(frontmost.get("localizedName"), str) or not frontmost["localizedName"]:
+            raise ValueError("invalid frontmost identity")
+        if type(frontmost.get("pid")) is not int or frontmost["pid"] <= 0:
+            raise ValueError("invalid frontmost PID")
+        if not isinstance(applications, list):
+            raise ValueError("invalid applications")
+        by_pid = {}
+        for app in applications:
+            if not isinstance(app, dict):
+                raise ValueError("invalid application")
+            pid = app["pid"]
+            policy = app["activationPolicy"]
+            if type(pid) is not int or pid <= 0 or type(policy) is not int or policy not in (0, 1, 2):
+                raise ValueError("invalid PID or activation policy")
+            executable = app["executablePath"]
+            if not isinstance(executable, str) or not executable.startswith("/"):
+                raise ValueError("invalid executablePath")
+            # PID, policy and executable are mandatory even for unrelated apps.
+            # Native identity/window fields are strict only inside the APF bundle.
+            if executable.startswith(app_path.rstrip("/") + "/"):
+                for field in ("localizedName", "bundleIdentifier"):
+                    if not isinstance(app[field], str):
+                        raise ValueError(f"invalid {field}")
+                if not app["localizedName"]:
+                    raise ValueError("missing native application identity")
+                windows = app["windows"]
+                if not isinstance(windows, list) or any(not isinstance(w, str) for w in windows):
+                    raise ValueError("invalid windows")
+            if pid in by_pid and by_pid[pid] != app:
+                raise ValueError("conflicting duplicate PID")
+            by_pid[pid] = app
+        owned = [a for a in by_pid.values() if a["executablePath"].startswith(app_path.rstrip("/") + "/")]
+        expected_executable = app_path + "/Contents/MacOS/ai-productivity-flow-launcher"
+        if any(app["executablePath"] != expected_executable for app in owned):
+            return "registered APF process uses Python runtime instead of outer native launcher"
+        if any(app["localizedName"] != "AI Productivity Flow" for app in owned):
+            return "APF native application/menu name is not AI Productivity Flow"
+        regular = [a for a in owned if a["activationPolicy"] == 0]
+        if len(regular) != 1:
+            return f"expected exactly one APF Dock-visible PID, found {len(regular)}"
+        gui = regular[0]
+        if gui["localizedName"] != "AI Productivity Flow":
+            return "APF native application/menu name is not AI Productivity Flow"
+        if frontmost["pid"] == gui["pid"] and frontmost["localizedName"] != gui["localizedName"]:
+            return "frontmost APF menu name disagrees with native application identity"
+        if not _visible_native_window(gui):
+            return "branded APF desktop GUI does not own an app window"
+        if gui["windows"] and not any(_mentions_app_window(w) for w in gui["windows"]):
+            return "APF desktop window title does not identify the app"
+        return None
+    except (ValueError, KeyError, TypeError, OverflowError) as exc:
+        return f"missing or malformed application identity evidence: {exc}"
 
 
 def is_mostly_blank(image: Image.Image) -> bool:
@@ -157,6 +260,19 @@ def main(argv: list[str]) -> int:
     if window_problem:
         print(f"macOS smoke failure: {window_problem}.", file=sys.stderr)
         return 1
+
+    for seconds in (30, 60):
+        identity_problem = identity_report_problem(_read(f"identity-{seconds}s.json"))
+        if identity_problem:
+            print(f"macOS smoke failure at {seconds}s: {identity_problem}.", file=sys.stderr)
+            return 1
+
+    for seconds in (30, 60):
+        app_path = json.loads(_read(f"identity-{seconds}s.json"))["appPath"]
+        runtime_problem = embedded_runtime_problem(_read("embedded-runtime.json"), app_path)
+        if runtime_problem:
+            print(f"macOS smoke failure: {runtime_problem}.", file=sys.stderr)
+            return 1
 
     launcher_log = "\n".join((
         _read("gui_launcher.log"),

@@ -406,6 +406,8 @@ class FloatingOverlayBar:
         _enable_dpi_awareness()
         if self.root is None:
             self.root = tk.Tk()
+            from voice_flow.platform.macos_app import configure_macos_app
+            configure_macos_app("engine")
             self._main_thread_id = cur_tid
             self.root.withdraw()
             try:

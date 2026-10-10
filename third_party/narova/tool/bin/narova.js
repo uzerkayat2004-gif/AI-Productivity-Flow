@@ -204,6 +204,8 @@ function findHfDir(out) {
 }
 
 function refreshPreviewIfLive(out) {
+  // App renders are headless; leave any independently running Studio alone.
+  if (process.env.NAROVA_HEADLESS_APP === '1') return;
   const hfDir = findHfDir(out);
   const pidFile = path.join(out, 'preview.pid');
   const pid = livePreviewPid(pidFile);

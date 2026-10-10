@@ -66,6 +66,7 @@ from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY
 from voice_flow.video_flow_documents import extract_document_text
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION, RUNTIME_FEATURES
 from voice_flow.runtime_guard import runtime_is_compatible
+from voice_flow.local_server import LoopbackHTTPServer, require_loopback_host
 from voice_flow.video_flow_service import get_video_flow_service
 
 GUI_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9370,6 +9371,7 @@ def _video_flow_catalog() -> dict:
 
 
 def start_api_server(host: str = "127.0.0.1") -> None:
+    require_loopback_host(host)
     # Merge any fragmented databases from the pre-account / multi-account era
     # into the active database before serving reads, so Insights and History
     # show the user's real totals. Idempotent and non-fatal.
@@ -9383,8 +9385,8 @@ def start_api_server(host: str = "127.0.0.1") -> None:
     except Exception as exc:
         print(f"[API SERVER] Skipped database consolidation: {exc}")
     try:
-        ThreadingHTTPServer.allow_reuse_address = True
-        httpd = ThreadingHTTPServer((host, PORT), VoiceFlowApiHandler)
+        LoopbackHTTPServer.allow_reuse_address = True
+        httpd = LoopbackHTTPServer((host, PORT), VoiceFlowApiHandler)
         print(f"[API SERVER] Voice Flow Multithreaded Backend API listening on http://{host}:{PORT}")
         try:
             from voice_flow.video_flow_engine.notebooklm import start_keepalive_daemon, trigger_keepalive_now

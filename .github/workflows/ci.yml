@@ -43,9 +43,14 @@ jobs:
         run: |
           pytest tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py tests/test_lfm_engine_local_runtime.py tests/test_voice_style_command_delivery.py -v --timeout=60
 
+      - name: Set up Node for headless listener policy fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_keyboard_listener.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
   macos-build:
     name: macOS Validation & App Packaging
@@ -73,19 +78,46 @@ jobs:
 
       - name: Verify API server import
         run: |
+          mkdir -p out/mac-native-identity
+          screencapture -x out/mac-native-identity/screen-before-api-import.png
           python -c "from voice_flow.gui.api_server import start_api_server; print('start_api_server import OK')"
+          screencapture -x out/mac-native-identity/screen-after-api-import.png
 
       - name: Run Platform Abstraction Tests
         run: |
           pytest tests/test_platform_layer.py -v --timeout=60
+          screencapture -x out/mac-native-identity/screen-after-platform-tests.png
+
+      - name: Set up Node for headless listener policy fixtures
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Run macOS GUI regression tests
         run: |
-          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_keyboard_listener.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
+
+      - name: Capture privacy state after macOS regression tests
+        run: screencapture -x out/mac-native-identity/screen-after-regression-tests.png
 
       - name: Build macOS Application Bundle (.app, .dmg & .zip)
         run: |
           python scripts/build_macos_app.py --bundle-runtime --dmg
+          screencapture -x out/mac-native-identity/screen-after-bundle-build.png
+
+      - name: Verify built macOS native application identity
+        timeout-minutes: 3
+        run: |
+          mkdir -p out/mac-native-identity
+          python scripts/run_macos_identity_smoke.py "dist/AI Productivity Flow.app" out/mac-native-identity
+
+      - name: Upload macOS native identity diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-native-identity-${{ github.run_id }}
+          path: out/mac-native-identity/
+          if-no-files-found: warn
 
       - name: Upload macOS App Artifact
         uses: actions/upload-artifact@v4

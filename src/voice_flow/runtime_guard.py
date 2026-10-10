@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION
+from voice_flow.local_server import require_loopback_host
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class RuntimePortResult:
 
 
 def _runtime_payload(*, host: str, port: int, timeout: float) -> dict | None:
+    require_loopback_host(host)
     try:
         request = urllib.request.Request(
             f"http://{host}:{port}/api/runtime",
@@ -86,8 +88,9 @@ def _unprivileged_port_result(host: str, port: int) -> RuntimePortResult:
     conservatively occupied. Do not enable address reuse: it can hide owners.
     The actual server bind still handles races after this temporary probe.
     """
+    require_loopback_host(host)
     try:
-        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        family = socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as probe:
             probe.bind((host, port))
     except OSError:
@@ -150,6 +153,7 @@ def prepare_runtime_port(
     require_engine: bool = False,
 ) -> RuntimePortResult:
     """Keep a compatible runtime, reclaim a stale Voice Flow runtime, or report a foreign owner."""
+    require_loopback_host(host)
     try:
         return _prepare_runtime_port_with_pids(host=host, port=port, require_engine=require_engine)
     except PermissionError:
@@ -162,6 +166,7 @@ def prepare_runtime_port(
 
 
 def _prepare_runtime_port_with_pids(*, host: str, port: int, require_engine: bool) -> RuntimePortResult:
+    require_loopback_host(host)
     readiness_probe = runtime_is_engine_ready if require_engine else runtime_is_compatible
     if readiness_probe(host=host, port=port):
         return RuntimePortResult("compatible")
