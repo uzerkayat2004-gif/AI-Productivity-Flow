@@ -6,6 +6,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Voice Flow Fixes
+- **S1-mini by Superwhisper**: Added as an offline polish model (484 MB, English). It runs with its exact trained input format and stays warm between dictations; prompt commands restructure its cleaned sentences into Task/Context form, and the safety checks accept its self-correction resolution ("Friday, no wait, Thursday" → "Thursday") and written numbers ("three thirty pm" → "3:30 PM").
 - **Instant Release Again**: Local speech and polish models stay warm between dictations instead of being unloaded after every use; they are released after 15 idle minutes, or after 60 seconds when available memory is low.
 - **Misheard Wake Phrases**: Commands such as "Voicelow, make this a good prompt" and "hey vice flow make this a prompt" are recognised, while ordinary sentences like "the voices flow through the hall" stay plain dictation.
 - **No More Lost Last Word**: Capture continues for up to 350 ms after hotkey release while the speaker is still mid-word; releasing after a pause stays instant.
