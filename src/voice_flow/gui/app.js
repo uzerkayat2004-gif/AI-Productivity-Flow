@@ -8169,7 +8169,8 @@ async function gotoAudioFlowGuideStep(stepIdx) {
   // Cleanup leaving Step 3: restore real history state and remove elevation
   if (prevStep === 3 && stepIdx !== 3) {
     document.body.classList.remove("af-guide-step3-active");
-    if (afSummaries.length === 0) {
+    const hasRealSummaries = typeof afSummaries !== "undefined" && Array.isArray(afSummaries) && afSummaries.length > 0;
+    if (!hasRealSummaries) {
       _cleanAfGuideDemoHistoryCard();
     }
   }
@@ -8216,9 +8217,20 @@ async function gotoAudioFlowGuideStep(stepIdx) {
     document.body.classList.add("af-guide-step3-active");
     const historyPanel = document.getElementById("af-history-panel");
     if (historyPanel) historyPanel.open = true;
-    if (afSummaries.length === 0) {
+    const hasRealSummaries = typeof afSummaries !== "undefined" && Array.isArray(afSummaries) && afSummaries.length > 0;
+    if (!hasRealSummaries) {
       _injectAfGuideDemoHistoryCard();
     }
+    // The history panel re-lays out after the demo card lands; keep the
+    // spotlight on it.
+    [80, 220, 500].forEach(ms => {
+      setTimeout(() => {
+        if (_currentAfGuideStep === 3) {
+          const s3 = AUDIOFLOW_GUIDE_STEPS.find(s => s.step === 3);
+          if (s3) positionAfGuideSpotlight(s3);
+        }
+      }, ms);
+    });
   }
 
   // Step 4 Action: Auto-play Twitter screen workflow video
@@ -8305,6 +8317,9 @@ function startAudioFlowGuide(options) {
   if (typeof switchPage === "function") {
     switchPage("audioflow");
   }
+  // The guide replaces any still-visible welcome tour overlay.
+  const obOverlay = document.getElementById("onboarding-overlay");
+  if (obOverlay) obOverlay.classList.add("hidden");
 
   _afGuideForceZeroScroll();
 
@@ -8394,7 +8409,8 @@ function stopAudioFlowGuide(options) {
   if (currentAudioProvider === "gemini" && typeof closeAudioProviderDetail === "function") {
     closeAudioProviderDetail();
   }
-  if (afSummaries.length === 0) {
+  const hasRealSummaries = typeof afSummaries !== "undefined" && Array.isArray(afSummaries) && afSummaries.length > 0;
+  if (!hasRealSummaries) {
     _cleanAfGuideDemoHistoryCard();
   }
   // An unusable (unstyled) guide was never actually seen; keep it pending.

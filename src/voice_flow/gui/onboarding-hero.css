@@ -3369,3 +3369,740 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
   width: auto !important;
   height: auto !important;
 }
+
+/* ==========================================================================
+   IN-APP AUDIO FLOW FEATURE GUIDANCE OVERLAY & STUDIO HUD
+   ========================================================================== */
+
+/* Prevent app scrolling when Audio Flow guidance is active */
+body.af-guide-active,
+html.af-guide-active {
+  overflow: hidden !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+}
+
+body.af-guide-active #app,
+body.af-guide-active .app-container,
+body.af-guide-active .main-content,
+body.af-guide-active .page-view,
+body.af-guide-active #page-audioflow,
+body.af-guide-active aside,
+body.af-guide-active header,
+body.af-guide-active main {
+  overflow: hidden !important;
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+}
+
+/* Strict Interaction Isolation: disable pointer events on all elements outside the active guide overlays */
+body.af-guide-active *:not(#audioflow-guide-overlay):not(#audioflow-guide-overlay *) {
+  pointer-events: none !important;
+  user-select: none !important;
+  cursor: default !important;
+}
+
+#audioflow-guide-overlay,
+#audioflow-guide-overlay * {
+  pointer-events: auto !important;
+}
+
+/* Step 3 layout adjustment: elevate history panel to top so it's fully visible at scrollTop = 0 without scrolling */
+body.af-guide-step3-active #audio-providers-view-overview .flow-landing-audio > .page-header,
+body.af-guide-step3-active #audio-providers-view-overview .flow-cards,
+body.af-guide-step3-active #audio-providers-view-overview .flow-audio-help {
+  display: none !important;
+}
+
+body.af-guide-step3-active #af-history-panel {
+  margin-top: 8px !important;
+}
+
+.af-guide-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--polish-paper, #2b2c29);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 9px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--polish-ink, #eeede5);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.af-guide-trigger-btn:hover {
+  background: var(--polish-well, #343530);
+  border-color: var(--polish-accent, #efaa73);
+  color: var(--polish-accent, #efaa73);
+}
+
+[data-theme="light"] .af-guide-trigger-btn {
+  background: #f5ecdc;
+  border-color: #d0bea1;
+  color: #392d22;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .af-guide-trigger-btn:hover {
+  background: #ecdfc9;
+  border-color: #a94013;
+  color: #a94013;
+}
+
+.af-guide-trigger-btn .af-guide-btn-icon {
+  font-size: 13px;
+}
+
+/* Modal Overlay Layer: intercepts clicks so background cannot be clicked or scrolled */
+.af-guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999999 !important;
+  pointer-events: auto;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.af-guide-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Transparent backdrop capturing clicks */
+.af-guide-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.001);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: auto;
+  cursor: default;
+  z-index: 1;
+}
+
+/* Refined Studio Spotlight Highlight Box */
+.af-guide-spotlight-box {
+  position: absolute;
+  border-radius: 14px;
+  border: 2px solid var(--polish-accent, #efaa73);
+  box-shadow: 0 0 0 1px rgba(239, 170, 115, 0.18), 0 6px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+[data-theme="light"] .af-guide-spotlight-box {
+  border-color: var(--polish-accent, #a94013);
+  box-shadow: 0 0 0 1px rgba(169, 64, 19, 0.2), 0 4px 18px rgba(57, 45, 34, 0.12);
+}
+
+.af-guide-spotlight-pulse {
+  position: absolute;
+  inset: -5px;
+  border-radius: 18px;
+  border: 1.5px solid rgba(239, 170, 115, 0.4);
+  animation: af-spotlight-pulse 2.4s infinite ease-out;
+  pointer-events: none;
+}
+
+[data-theme="light"] .af-guide-spotlight-pulse {
+  border-color: rgba(169, 64, 19, 0.35);
+}
+
+@keyframes af-spotlight-pulse {
+  0% { transform: scale(0.99); opacity: 0.8; }
+  60% { transform: scale(1.02); opacity: 0; }
+  100% { transform: scale(1.02); opacity: 0; }
+}
+
+.af-guide-spotlight-label {
+  position: absolute;
+  top: -12px;
+  left: 16px;
+  background: var(--polish-paper, #252623);
+  border: 1px solid var(--polish-accent, #efaa73);
+  color: var(--polish-accent, #efaa73);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 6px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+
+[data-theme="light"] .af-guide-spotlight-label {
+  background: #f7efe2;
+  border-color: #a94013;
+  color: #a94013;
+  box-shadow: 0 2px 6px rgba(57, 45, 34, 0.08);
+}
+
+/* Bottom-Right Studio Companion Guidance Card */
+.af-guide-card {
+  position: fixed;
+  bottom: 24px;
+  right: 28px;
+  left: auto;
+  transform: none;
+  width: 410px;
+  max-width: calc(100vw - 44px);
+  background: var(--polish-paper, #252623);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.25);
+  z-index: 1065;
+  pointer-events: auto;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+[data-theme="light"] .af-guide-card {
+  background: #f7efe2;
+  border-color: #d0bea1;
+  box-shadow: 0 16px 36px rgba(57, 45, 34, 0.12), 0 2px 6px rgba(57, 45, 34, 0.06);
+}
+
+.af-guide-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.af-guide-step-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--polish-accent, #efaa73);
+}
+
+[data-theme="light"] .af-guide-step-tag {
+  color: var(--polish-accent, #a94013);
+}
+
+.af-guide-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--polish-accent, #efaa73);
+}
+
+[data-theme="light"] .af-guide-dot {
+  background: var(--polish-accent, #a94013);
+}
+
+.af-guide-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.af-guide-audio-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--polish-well, #343530);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 7px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--polish-ink, #eeede5);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.af-guide-audio-btn:hover {
+  border-color: var(--polish-accent, #efaa73);
+  color: var(--polish-accent, #efaa73);
+}
+
+.af-guide-audio-btn.paused {
+  opacity: 0.6;
+}
+
+[data-theme="light"] .af-guide-audio-btn {
+  background: #ecdfc9;
+  border-color: #d0bea1;
+  color: #392d22;
+}
+
+[data-theme="light"] .af-guide-audio-btn:hover {
+  border-color: #a94013;
+  color: #a94013;
+}
+
+.af-guide-close-btn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: var(--polish-muted, #b9b9ac);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.af-guide-close-btn:hover {
+  color: var(--polish-ink, #eeede5);
+  background: var(--polish-well, #343530);
+}
+
+[data-theme="light"] .af-guide-close-btn {
+  color: #705d48;
+}
+
+[data-theme="light"] .af-guide-close-btn:hover {
+  color: #392d22;
+  background: #ecdfc9;
+}
+
+.af-guide-title {
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--polish-ink, #eeede5);
+  letter-spacing: -0.02em;
+  margin: 0 0 5px;
+  line-height: 1.35;
+}
+
+[data-theme="light"] .af-guide-title {
+  color: #392d22;
+}
+
+.af-guide-desc {
+  font-size: 12.5px;
+  color: var(--polish-muted, #b9b9ac);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+[data-theme="light"] .af-guide-desc {
+  color: #705d48;
+}
+
+/* Synchronized Caption Pill */
+.af-guide-caption-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--polish-well, #343530);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 8px;
+  padding: 7px 12px;
+  margin-bottom: 12px;
+}
+
+[data-theme="light"] .af-guide-caption-pill {
+  background: #ecdfc9;
+  border-color: #d0bea1;
+}
+
+.af-guide-wave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.af-guide-wave i {
+  display: inline-block;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--polish-accent, #efaa73);
+  animation: s1-wave-bounce 1s ease-in-out infinite alternate;
+}
+
+[data-theme="light"] .af-guide-wave i {
+  background: var(--polish-accent, #a94013);
+}
+
+.af-guide-wave i:nth-child(1) { height: 5px; animation-delay: 0.0s; }
+.af-guide-wave i:nth-child(2) { height: 10px; animation-delay: 0.15s; }
+.af-guide-wave i:nth-child(3) { height: 7px; animation-delay: 0.3s; }
+.af-guide-wave i:nth-child(4) { height: 12px; animation-delay: 0.45s; }
+.af-guide-wave i:nth-child(5) { height: 4px; animation-delay: 0.2s; }
+
+.af-guide-wave.paused i {
+  animation-play-state: paused;
+  height: 3px !important;
+  opacity: 0.4;
+}
+
+.af-guide-caption-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--polish-ink, #eeede5);
+  line-height: 1.4;
+  flex: 1;
+}
+
+[data-theme="light"] .af-guide-caption-text {
+  color: #392d22;
+}
+
+/* Step 4 Real Video Showcase */
+.af-guide-screen-sim {
+  background: #141413;
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-theme="light"] .af-guide-screen-sim {
+  background: #ffffff;
+  border-color: #d0bea1;
+}
+
+.af-sim-window {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.af-sim-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: var(--polish-well, #343530);
+  border-bottom: 1px solid var(--polish-line, #484a42);
+}
+
+[data-theme="light"] .af-sim-bar {
+  background: #ecdfc9;
+  border-bottom-color: #d0bea1;
+}
+
+.af-sim-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  opacity: 0.8;
+}
+.af-sim-dot.red { background: #ef4444; }
+.af-sim-dot.yellow { background: #f59e0b; }
+.af-sim-dot.green { background: #10b981; }
+
+.af-sim-url {
+  font-size: 10px;
+  color: var(--polish-muted, #b9b9ac);
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+[data-theme="light"] .af-sim-url {
+  color: #705d48;
+}
+
+.af-sim-video-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+
+.af-sim-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.af-sim-video-overlay-badge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  background: rgba(32, 33, 31, 0.88);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--polish-ink, #eeede5);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.af-sim-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--polish-accent, #efaa73);
+  box-shadow: 0 0 4px var(--polish-accent, #efaa73);
+  animation: af-dot-pulse 1.6s infinite ease-in-out;
+}
+
+[data-theme="light"] .af-sim-live-dot {
+  background: var(--polish-accent, #a94013);
+  box-shadow: 0 0 4px var(--polish-accent, #a94013);
+}
+
+@keyframes af-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.af-sim-video-caption {
+  padding: 6px 10px;
+  background: var(--polish-well, #343530);
+  font-size: 11px;
+  color: var(--polish-muted, #b9b9ac);
+  line-height: 1.4;
+}
+
+[data-theme="light"] .af-sim-video-caption {
+  background: #ecdfc9;
+  color: #705d48;
+}
+
+/* Actions and Step Navigation */
+.af-guide-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--polish-line, #484a42);
+}
+
+[data-theme="light"] .af-guide-actions {
+  border-top-color: #d0bea1;
+}
+
+.af-guide-btn-back {
+  background: var(--polish-well, #343530);
+  border: 1px solid var(--polish-line, #484a42);
+  border-radius: 7px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--polish-ink, #eeede5);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.af-guide-btn-back:hover {
+  border-color: var(--polish-accent, #efaa73);
+  color: var(--polish-accent, #efaa73);
+}
+
+[data-theme="light"] .af-guide-btn-back {
+  background: #ecdfc9;
+  border-color: #d0bea1;
+  color: #392d22;
+}
+
+[data-theme="light"] .af-guide-btn-back:hover {
+  border-color: #a94013;
+  color: #a94013;
+}
+
+.af-guide-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.af-guide-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--polish-line, #484a42);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+[data-theme="light"] .af-guide-dots span {
+  background: #d0bea1;
+}
+
+.af-guide-dots span.active {
+  width: 14px;
+  border-radius: 3px;
+  background: var(--polish-accent, #efaa73);
+  box-shadow: none;
+}
+
+[data-theme="light"] .af-guide-dots span.active {
+  background: var(--polish-accent, #a94013);
+}
+
+.af-guide-btn-next {
+  background: var(--polish-accent, #efaa73);
+  border: 1px solid var(--polish-accent, #efaa73);
+  border-radius: 7px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1c1815;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: all 0.15s ease;
+}
+
+.af-guide-btn-next:hover {
+  background: var(--theme-hover, #ffc18e);
+  border-color: var(--theme-hover, #ffc18e);
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .af-guide-btn-next {
+  background: var(--polish-accent, #a94013);
+  border-color: var(--polish-accent, #a94013);
+  color: #fff5e7;
+}
+
+[data-theme="light"] .af-guide-btn-next:hover {
+  background: #bd4d1f;
+  border-color: #bd4d1f;
+}
+
+/* ==========================================================================
+   Step 4 Showcase Studio Modal (Centered & Expanded Video Stage)
+   ========================================================================== */
+.af-guide-card.is-step4,
+.af-guide-card.is-step5,
+.af-guide-card.is-step6 {
+  bottom: auto !important;
+  right: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: 740px !important;
+  max-width: min(92vw, 760px) !important;
+  max-height: 92vh !important;
+  overflow-y: auto !important;
+  padding: 22px 26px 24px !important;
+  border-radius: 18px !important;
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.78), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+  z-index: 1070 !important;
+}
+
+[data-theme="light"] .af-guide-card.is-step4,
+[data-theme="light"] .af-guide-card.is-step5,
+[data-theme="light"] .af-guide-card.is-step6 {
+  box-shadow: 0 24px 60px rgba(57, 45, 34, 0.2), 0 0 0 1px #d0bea1 !important;
+}
+
+.af-guide-card.is-step4 .af-guide-card-head,
+.af-guide-card.is-step5 .af-guide-card-head,
+.af-guide-card.is-step6 .af-guide-card-head {
+  margin-bottom: 10px;
+}
+
+.af-guide-card.is-step4 .af-guide-title,
+.af-guide-card.is-step5 .af-guide-title,
+.af-guide-card.is-step6 .af-guide-title {
+  font-size: 17px !important;
+  margin-bottom: 12px !important;
+  letter-spacing: -0.015em;
+}
+
+/* Minimalist Step 4 / 5 / 6: Hide paragraph essay and simulation text; rely on narration & subtitle */
+.af-guide-card.is-step4 .af-guide-desc,
+.af-guide-card.is-step5 .af-guide-desc,
+.af-guide-card.is-step6 .af-guide-desc,
+.af-guide-card.is-step4 .af-sim-video-caption,
+.af-guide-card.is-step5 .af-sim-video-caption,
+.af-guide-card.is-step6 .af-sim-video-caption {
+  display: none !important;
+}
+
+.af-guide-card.is-step4 .af-guide-screen-sim,
+.af-guide-card.is-step5 .af-guide-screen-sim,
+.af-guide-card.is-step6 .af-guide-screen-sim {
+  margin-bottom: 14px;
+}
+
+.af-guide-card.is-step4 .af-sim-window,
+.af-guide-card.is-step5 .af-sim-window,
+.af-guide-card.is-step6 .af-sim-window {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--polish-line, #484a42);
+}
+
+[data-theme="light"] .af-guide-card.is-step4 .af-sim-window,
+[data-theme="light"] .af-guide-card.is-step5 .af-sim-window,
+[data-theme="light"] .af-guide-card.is-step6 .af-sim-window {
+  border-color: #d0bea1;
+}
+
+.af-guide-card.is-step4 .af-sim-bar,
+.af-guide-card.is-step5 .af-sim-bar,
+.af-guide-card.is-step6 .af-sim-bar {
+  padding: 8px 12px;
+}
+
+.af-guide-card.is-step4 .af-sim-video-wrap,
+.af-guide-card.is-step5 .af-sim-video-wrap,
+.af-guide-card.is-step6 .af-sim-video-wrap {
+  aspect-ratio: 16 / 9;
+  max-height: 380px;
+  width: 100%;
+  background: #000;
+}
+
+.af-guide-card.is-step4 .af-sim-video,
+.af-guide-card.is-step5 .af-sim-video,
+.af-guide-card.is-step6 .af-sim-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.af-guide-card.is-step4 .af-guide-caption-pill,
+.af-guide-card.is-step5 .af-guide-caption-pill,
+.af-guide-card.is-step6 .af-guide-caption-pill {
+  margin-top: 14px;
+  margin-bottom: 14px;
+  padding: 9px 14px;
+  font-size: 13px;
+}
+
+.af-guide-card.is-step4 .af-guide-actions,
+.af-guide-card.is-step5 .af-guide-actions,
+.af-guide-card.is-step6 .af-guide-actions {
+  margin-top: 12px;
+  padding-top: 14px;
+}
+
+.af-guide-overlay.is-step4-active .af-guide-backdrop,
+.af-guide-overlay.is-step5-active .af-guide-backdrop,
+.af-guide-overlay.is-step6-active .af-guide-backdrop {
+  background: rgba(0, 0, 0, 0.68) !important;
+}
+
+[data-theme="light"] .af-guide-overlay.is-step4-active .af-guide-backdrop,
+[data-theme="light"] .af-guide-overlay.is-step5-active .af-guide-backdrop,
+[data-theme="light"] .af-guide-overlay.is-step6-active .af-guide-backdrop {
+  background: rgba(30, 24, 18, 0.48) !important;
+}
