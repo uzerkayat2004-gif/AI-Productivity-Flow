@@ -81,21 +81,47 @@ def listener_pids(host: str, port: int) -> list[int]:
     return sorted(found)
 
 
-def _unprivileged_port_result(host: str, port: int) -> RuntimePortResult:
+def _port_has_live_listener(host: str, port: int, timeout: float = 0.5) -> bool:
+    """True when something accepts connections on the port (a live owner)."""
+    import errno
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout)
+            result = client.connect_ex((host, port))
+    except Exception:
+        return True  # unknown: be conservative and assume an owner
+    return result != errno.ECONNREFUSED
+
+
+def _unprivileged_port_result(host: str, port: int, *, settle_seconds: float = 6.0) -> RuntimePortResult:
     """Check bindability without guessing an owner or terminating processes.
 
     A bind failure (including permission/unsupported-address errors) is
     conservatively occupied. Do not enable address reuse: it can hide owners.
     The actual server bind still handles races after this temporary probe.
+
+    Right after the previous instance quits, macOS keeps its closed sockets in
+    TIME_WAIT for a while, so this plain bind probe fails even though nobody is
+    listening (the real server binds with SO_REUSEADDR and would succeed). A
+    refused connection proves there is no live owner, so report 'available'
+    instead of exiting silently; otherwise retry briefly while a previous
+    instance finishes shutting down.
     """
     require_loopback_host(host)
-    try:
-        family = socket.AF_INET
-        with socket.socket(family, socket.SOCK_STREAM) as probe:
-            probe.bind((host, port))
-    except OSError:
-        return RuntimePortResult("occupied")
-    return RuntimePortResult("available")
+    deadline = time.monotonic() + max(0.0, settle_seconds)
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((host, port))
+            return RuntimePortResult("available")
+        except OSError:
+            pass
+        if not _port_has_live_listener(host, port):
+            return RuntimePortResult("available")
+        if time.monotonic() >= deadline:
+            return RuntimePortResult("occupied")
+        time.sleep(0.25)
 
 
 def _is_voice_flow_process(process: object) -> bool:
