@@ -8226,6 +8226,12 @@ async function gotoAudioFlowGuideStep(stepIdx) {
   // Step 4 Action: Auto-play Twitter screen workflow video
   if (stepIdx === 4) {
     document.body.classList.remove("af-guide-step3-active");
+    const afCaption = document.getElementById("af-guide-sim-caption");
+    if (afCaption && typeof vfIsMacPlatform === "function") {
+      afCaption.textContent = vfIsMacPlatform()
+        ? "💡 Highlight any tweet or text across your Mac to trigger floating instant audio."
+        : "💡 Highlight any tweet or text across Windows to trigger floating instant audio.";
+    }
     const vid = document.getElementById("af-guide-real-demo-video");
     if (vid) {
       vid.currentTime = 0;
@@ -12810,6 +12816,15 @@ if (document.readyState === "loading") {
 // =============================================================================
 window.vfPlatformInfo = null;
 
+function vfIsMacPlatform() {
+  if (window.vfPlatformInfo && typeof window.vfPlatformInfo.is_macos === "boolean") {
+    return window.vfPlatformInfo.is_macos;
+  }
+  return (typeof navigator !== "undefined" && navigator.platform && navigator.platform.toUpperCase().includes("MAC")) ||
+         (typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toUpperCase().includes("MAC"));
+}
+window.vfIsMacPlatform = vfIsMacPlatform;
+
 async function initPlatformAdaptation() {
   try {
     const res = await fetch("/api/platform/info");
@@ -12884,6 +12899,14 @@ async function initPlatformAdaptation() {
       if (hotkeyHint) {
         hotkeyHint.innerHTML = "Click <b>Record Any Key</b>, then press any single key (e.g. F8, Space) or combination (Cmd+Opt, Option+Space, Cmd+Shift+D).";
       }
+    }
+
+    // 7. Audio Flow screen-sim caption adaptation
+    const afCaption = document.getElementById("af-guide-sim-caption");
+    if (afCaption) {
+      afCaption.textContent = isMac
+        ? "💡 Highlight any tweet or text across your Mac to trigger floating instant audio."
+        : "💡 Highlight any tweet or text across Windows to trigger floating instant audio.";
     }
   } catch (err) {
     console.debug("[PLATFORM] Platform adaptation check skipped:", err);
