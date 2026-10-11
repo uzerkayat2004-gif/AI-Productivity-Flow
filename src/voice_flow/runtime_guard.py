@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import socket
@@ -83,8 +84,6 @@ def listener_pids(host: str, port: int) -> list[int]:
 
 def _port_has_live_listener(host: str, port: int, timeout: float = 0.5) -> bool:
     """True when something accepts connections on the port (a live owner)."""
-    import errno
-
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
             client.settimeout(timeout)
@@ -94,29 +93,35 @@ def _port_has_live_listener(host: str, port: int, timeout: float = 0.5) -> bool:
     return result != errno.ECONNREFUSED
 
 
-def _unprivileged_port_result(host: str, port: int, *, settle_seconds: float = 6.0) -> RuntimePortResult:
+# How long a relaunch waits for a previous instance's port to settle.
+_PORT_SETTLE_SECONDS = 6.0
+
+
+def _unprivileged_port_result(host: str, port: int, *, settle_seconds: float | None = None) -> RuntimePortResult:
     """Check bindability without guessing an owner or terminating processes.
 
     A bind failure (including permission/unsupported-address errors) is
     conservatively occupied. Do not enable address reuse: it can hide owners.
     The actual server bind still handles races after this temporary probe.
 
-    Right after the previous instance quits, macOS keeps its closed sockets in
-    TIME_WAIT for a while, so this plain bind probe fails even though nobody is
-    listening (the real server binds with SO_REUSEADDR and would succeed). A
-    refused connection proves there is no live owner, so report 'available'
-    instead of exiting silently; otherwise retry briefly while a previous
-    instance finishes shutting down.
+    Exception: right after the previous instance quits, macOS keeps its closed
+    sockets in TIME_WAIT, so a plain bind fails with EADDRINUSE although nobody
+    is listening (the real server binds with SO_REUSEADDR and succeeds). Only
+    for EADDRINUSE, a refused connection proves there is no live owner and the
+    port is reported 'available'; a live owner is re-checked for a few seconds
+    (a previous instance may still be shutting down) and then stays occupied.
     """
     require_loopback_host(host)
-    deadline = time.monotonic() + max(0.0, settle_seconds)
+    settle = _PORT_SETTLE_SECONDS if settle_seconds is None else settle_seconds
+    deadline = time.monotonic() + max(0.0, settle)
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.bind((host, port))
             return RuntimePortResult("available")
-        except OSError:
-            pass
+        except OSError as exc:
+            if getattr(exc, "errno", None) != errno.EADDRINUSE:
+                return RuntimePortResult("occupied")
         if not _port_has_live_listener(host, port):
             return RuntimePortResult("available")
         if time.monotonic() >= deadline:
