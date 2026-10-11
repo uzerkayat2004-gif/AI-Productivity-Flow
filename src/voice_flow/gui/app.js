@@ -1467,6 +1467,17 @@ async function changePushToTalkKey() {
   openShortcutDialog();
 }
 
+// Platform-correct wording before /api/platform/info has answered: the native
+// WKWebView user agent already says Macintosh, so macOS never flashes Windows text.
+function vfIsMacPlatform() {
+  if (window.vfPlatformInfo) return !!window.vfPlatformInfo.is_macos;
+  const nav = (typeof navigator !== "undefined" && navigator) || {};
+  return /Mac/i.test(nav.platform || "") || /Macintosh|Mac OS X/i.test(nav.userAgent || "");
+}
+function vfDefaultMicLabel() {
+  return vfIsMacPlatform() ? "System default microphone" : "Windows default microphone";
+}
+
 function openMicrophoneDialog() {
   const modal = document.getElementById("mic-sub-modal");
   if (modal) {
@@ -1492,24 +1503,24 @@ async function loadHardwareMicrophones(refresh = false) {
     const result = await safeFetchJson(refresh ? "/api/microphones?refresh=1" : "/api/microphones");
     if (generation !== _micCatalogGeneration) return;
     if (!result || !result.success) throw new Error(result?.error || "Could not refresh microphones.");
-    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}, ...(result.display_devices || result.devices)];
+    _micCatalog = [{identity:null,name:vfDefaultMicLabel(),index:null}, ...(result.display_devices || result.devices)];
     const available = result.preferred_available;
     container.innerHTML = _micCatalog.map((mic,i) => {
       const selected = available && mic.identity === result.selected_identity;
       return `<button type="button" class="mic-option-card ${selected ? 'selected-mic' : ''}" onclick="selectMicrophoneDeviceByRow(${i}, this)" ${mic.ambiguous ? 'disabled' : ''} style="text-align:left;">${escapeHtml(mic.name)}${selected ? '<span class="kbd-pill">Selected</span>' : ''}${mic.ambiguous ? '<span>Unavailable</span>' : ''}</button>`;
     }).join("");
     const selected = _micCatalog.find(m=>m.identity === result.selected_identity);
-    const name = available ? selected?.name || "Windows default microphone" : "Preferred microphone disconnected";
+    const name = available ? selected?.name || vfDefaultMicLabel() : "Preferred microphone disconnected";
     const badge = document.getElementById("current-mic-badge");
     if (badge) {badge.textContent=name;badge.title=name;}
     const desc = document.getElementById("current-mic-desc");if(desc)desc.textContent=name;
     if (status && result.busy) status.textContent = "Finish dictation before refreshing microphones. Your current selection is unchanged.";
-    else if (status) status.textContent = available ? "Choose a microphone for your next dictation." : `${result.preferred_name || "Your preferred microphone"} is unavailable. Reconnect it or choose Windows default microphone to dictate.`;
+    else if (status) status.textContent = available ? "Choose a microphone for your next dictation." : `${result.preferred_name || "Your preferred microphone"} is unavailable. Reconnect it or choose ${vfDefaultMicLabel()} to dictate.`;
     return true;
   } catch(err) {
     if (generation !== _micCatalogGeneration) return;
-    container.innerHTML = '<button type="button" class="mic-option-card" onclick="selectMicrophoneDeviceByRow(0,this)">Windows default microphone</button>';
-    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}];
+    container.innerHTML = '<button type="button" class="mic-option-card" onclick="selectMicrophoneDeviceByRow(0,this)">' + vfDefaultMicLabel() + '</button>';
+    _micCatalog = [{identity:null,name:vfDefaultMicLabel(),index:null}];
     if(status)status.textContent=err.message || "Could not refresh microphones. Try again.";
     return false;
   }
@@ -1674,7 +1685,7 @@ function renderHistoryFeed(records) {
       <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
         <div style="font-size: 42px; margin-bottom: 12px;">🎙️</div>
         <div style="font-weight: 800; font-size: 17px; color: var(--text-main);">No dictations recorded yet</div>
-        <div style="font-size: 13px; margin-top: 6px;">${(window.vfPlatformInfo && window.vfPlatformInfo.is_macos) ? "Hold <strong>Cmd + Option</strong> to dictate anywhere. Every word will appear here automatically!" : "Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!"}</div>
+        <div style="font-size: 13px; margin-top: 6px;">${vfIsMacPlatform() ? "Hold <strong>Cmd + Option</strong> to dictate anywhere. Every word will appear here automatically!" : "Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!"}</div>
       </div>
     `;
     return;
@@ -11547,6 +11558,12 @@ async function initPlatformAdaptation() {
     window.vfPlatformInfo = info;
 
     const isMac = !!info.is_macos;
+
+    // 0. Microphone dialog subtitle (index.html ships the Windows wording)
+    const micSubtitle = document.getElementById("mic-dialog-subtitle");
+    if (micSubtitle && isMac) {
+      micSubtitle.textContent = "Choose an input for dictation, or follow your macOS system default microphone.";
+    }
 
     // 1. Runtime badge in Settings > System
     const runtimeBadge = document.getElementById("runtime-os-badge");
