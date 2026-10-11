@@ -1243,6 +1243,12 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
   color: rgba(255, 255, 255, 0.45) !important;
 }
 
+.s2-monitor-spec:empty,
+.s3-monitor-spec:empty,
+.s4-monitor-spec:empty {
+  display: none !important;
+}
+
 [data-theme="dark"] .s2-monitor-spec {
   color: rgba(243, 229, 216, 0.55) !important;
 }
