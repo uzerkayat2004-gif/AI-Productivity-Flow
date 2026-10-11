@@ -4134,10 +4134,20 @@ body.af-guide-step3-active #af-history-panel {
   display: block;
 }
 
+/* Screen simulation video zoom & crop for Audio Flow Step 4 and Video Flow Step 4 (Item 16) */
 #af-guide-screen-sim .af-sim-video,
 .af-guide-card.is-step4 #af-guide-screen-sim .af-sim-video {
-  object-fit: contain !important;
-  object-position: left center !important;
+  object-fit: cover !important;
+  transform: scale(1.36) !important;
+  transform-origin: 36% 48% !important;
+  background: #000;
+}
+
+#vf-guide-screen-sim .af-sim-video,
+.vf-guide-card.is-step4 #vf-guide-screen-sim .af-sim-video {
+  object-fit: cover !important;
+  transform: scale(1.36) !important;
+  transform-origin: 46% 50% !important;
   background: #000;
 }
 
