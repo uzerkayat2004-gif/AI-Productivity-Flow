@@ -253,9 +253,10 @@ def test_post_explicit_reset_action_still_resets_active_recording(monkeypatch) -
     controller.reset_state_and_refresh.assert_called_once()
 
 
-def test_launch_desktop_gui_fast_path_when_api_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_launch_desktop_gui_fast_path_when_engine_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda enable: None)
     monkeypatch.setattr(desktop_launcher, "is_api_server_ready", lambda timeout=0.15: True)
+    monkeypatch.setattr(desktop_launcher, "is_engine_ready", lambda timeout=0.15: True)
 
     mock_ensure = MagicMock()
     monkeypatch.setattr(desktop_launcher, "ensure_backend_running", mock_ensure)
@@ -277,6 +278,9 @@ def test_launch_desktop_gui_fast_path_when_api_ready(monkeypatch: pytest.MonkeyP
 
 
 def test_focus_existing_window_handles_minimized_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The focus logic is the subject of this test; do not send native icon
+    # messages to any real window while running the Windows API mocks.
+    monkeypatch.setattr(desktop_launcher, "_apply_window_icon", lambda *_args, **_kwargs: None)
     with patch("voice_flow.gui.desktop_launcher.sys.platform", "win32"):
         with patch("ctypes.windll.user32.FindWindowW", return_value=54321):
             with patch("ctypes.windll.user32.IsWindow", return_value=True):

@@ -31,6 +31,14 @@
   -webkit-backdrop-filter: blur(18px) !important;
 }
 
+.onboarding-overlay.hidden,
+.onboarding-overlay.welcome-hero-mode.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
 /* 2. Floating Modal Card Stage */
 .onboarding-card.welcome-stage {
   position: relative !important;
@@ -990,70 +998,86 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
   box-shadow: 0 12px 30px rgba(243, 229, 216, 0.5) !important;
 }
 
-/* 13. Card-Relative Skip Tour Pill Badge */
-.scene1-skip-badge {
+/* 13. Scene 1 Bottom Actions Row */
+.s1-actions {
   position: absolute !important;
-  top: 18px !important;
-  right: 22px !important;
-  z-index: 50 !important;
+  top: 820px !important;
+  right: 370px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  z-index: 25 !important;
+}
+
+.s1-actions .s1-theme,
+.s1-actions .s1-next {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+}
+
+/* 13b. Unified Bottom Row Controls: Auto/Manual Mode and Skip Tour Badges */
+.scene1-skip-badge {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  height: 48px !important;
+  padding: 0 20px !important;
   display: inline-flex !important;
   align-items: center !important;
-  gap: 7px !important;
-  padding: 7px 16px !important;
+  gap: 8px !important;
   font-family: inherit !important;
   font-size: 13px !important;
   font-weight: 600 !important;
   color: #64748b !important;
-  background: rgba(255, 255, 255, 0.88) !important;
-  border: 1px solid rgba(226, 232, 240, 0.85) !important;
-  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 24px !important;
   cursor: pointer !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease !important;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08) !important;
+  outline: none !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
 }
 
 .scene1-skip-badge:hover {
   color: #0f172a !important;
   background: #ffffff !important;
-  border-color: #94a3b8 !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14) !important;
+  border-color: #cbd5e1 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1) !important;
 }
 
 [data-theme="dark"] .scene1-skip-badge {
   color: #f3e5d8 !important;
-  background: rgba(24, 25, 34, 0.88) !important;
-  border: 1px solid rgba(243, 229, 216, 0.22) !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  background: rgba(30, 32, 44, 0.95) !important;
+  border: 1px solid rgba(243, 229, 216, 0.2) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
 }
 
 [data-theme="dark"] .scene1-skip-badge:hover {
   color: #ffffff !important;
   background: rgba(36, 38, 50, 0.95) !important;
   border-color: rgba(243, 229, 216, 0.45) !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65) !important;
+  transform: translateY(-1px) !important;
 }
 
-/* 13b. Card-Relative Welcome Tour Auto/Manual Mode Pill Badge */
 .scene1-auto-badge {
-  position: absolute !important;
-  top: 18px !important;
-  right: 142px !important;
-  z-index: 50 !important;
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  height: 48px !important;
+  padding: 0 18px !important;
   display: inline-flex !important;
   align-items: center !important;
-  gap: 7px !important;
-  padding: 7px 15px !important;
+  gap: 8px !important;
   font-family: inherit !important;
   font-size: 13px !important;
   font-weight: 600 !important;
-  border-radius: 9999px !important;
+  border-radius: 24px !important;
   cursor: pointer !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  outline: none !important;
   transition: all 0.2s ease !important;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
   color: #059669 !important;
   background: rgba(16, 185, 129, 0.12) !important;
   border: 1px solid rgba(16, 185, 129, 0.45) !important;
@@ -1061,26 +1085,47 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
 
 .scene1-auto-badge.is-manual {
   color: #64748b !important;
-  background: rgba(255, 255, 255, 0.88) !important;
-  border-color: rgba(226, 232, 240, 0.85) !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(226, 232, 240, 0.9) !important;
 }
 
 .scene1-auto-badge:hover {
   transform: translateY(-1px) !important;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1) !important;
 }
 
 [data-theme="dark"] .scene1-auto-badge {
   color: #34d399 !important;
   background: rgba(16, 185, 129, 0.18) !important;
   border: 1px solid rgba(16, 185, 129, 0.45) !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2) !important;
 }
 
 [data-theme="dark"] .scene1-auto-badge.is-manual {
   color: #f3e5d8 !important;
-  background: rgba(24, 25, 34, 0.88) !important;
-  border-color: rgba(243, 229, 216, 0.22) !important;
+  background: rgba(30, 32, 44, 0.95) !important;
+  border-color: rgba(243, 229, 216, 0.2) !important;
+}
+
+/* Smooth, cinematic slide crossfade animation for Welcome Tour */
+.welcome-stage .welcome-hero-slide {
+  position: absolute !important;
+  inset: 0 !important;
+  display: block !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  transform: scale(0.985) !important;
+  transition: opacity 0.38s ease, transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.38s !important;
+  z-index: 1 !important;
+}
+
+.welcome-stage .welcome-hero-slide.active {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  visibility: visible !important;
+  transform: scale(1) !important;
+  z-index: 10 !important;
 }
 
 .s1-auto-dot {

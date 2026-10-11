@@ -2,17 +2,17 @@
   "1": [
     {
       "start": 0.4,
-      "end": 1.98,
-      "text": "Welcome to Audio Flow!"
+      "end": 2.3,
+      "text": "Welcome to Audio Flow."
     },
     {
-      "start": 2.26,
-      "end": 7.11,
-      "text": "Use Read mode to hear any text word-for-word with dozens of voices and speeds."
+      "start": 2.58,
+      "end": 8.14,
+      "text": "Use Read mode to hear any text word for word, with dozens of voices and speeds."
     },
     {
-      "start": 7.39,
-      "end": 13.29,
+      "start": 8.42,
+      "end": 14.47,
       "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
     }
   ],

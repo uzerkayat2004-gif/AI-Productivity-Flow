@@ -1030,11 +1030,11 @@ function switchPage(pageId, options = {}) {
   });
   updateVoiceFlowParentState(pageId);
 
-  // Cleanly dismiss active guide for other pages when leaving
-  if (!options.fromGuide) {
-    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide();
-    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide();
-    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide();
+  // Cleanly dismiss active guide for other pages when leaving without marking completed
+  if (!options.fromGuide && !options.fromWelcomeTour) {
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
   }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
@@ -7164,11 +7164,11 @@ function updateScene1CardVideos(time, isNarrating) {
   // Identify active card based on narrator timestamps
   let activeCard = 0;
   if (isNarrating) {
-    if (time >= 7.0 && time < 9.2) {
+    if (time >= 7.0 && time < 8.8) {
       activeCard = 1; // Video Flow
-    } else if (time >= 9.2 && time < 11.2) {
+    } else if (time >= 8.8 && time < 10.6) {
       activeCard = 2; // Audio Flow
-    } else if (time >= 11.2 && time <= 14.1) {
+    } else if (time >= 10.6 && time <= 12.8) {
       activeCard = 3; // Voice Flow
     }
   }
@@ -7255,6 +7255,13 @@ function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
     }, 70);
   }
 
+  const isNarrating = typeof isNarratingOverride === "boolean"
+    ? isNarratingOverride
+    : (typeof onboardingAudioPlayer !== "undefined" &&
+       onboardingAudioPlayer &&
+       !onboardingAudioPlayer.paused &&
+       !onboardingNarrationPaused);
+
   // Dynamic visual card highlighting based on voiceover in Scene 1
   const c1 = document.getElementById("card-feature-1");
   const c2 = document.getElementById("card-feature-2");
@@ -7265,21 +7272,14 @@ function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
     c2.classList.remove("highlight-blue");
     c3.classList.remove("highlight-purple");
 
-    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+    if ((isNarrating && time >= 7.0 && time < 8.8) || _hoveredScene1Card === 1) {
       c1.classList.add("highlight-orange");
-    } else if (time >= 22.8 && time < 25.8) {
+    } else if ((isNarrating && time >= 8.8 && time < 10.6) || _hoveredScene1Card === 2) {
       c2.classList.add("highlight-blue");
-    } else if (time >= 25.8 && time < 29.5) {
+    } else if ((isNarrating && time >= 10.6 && time <= 12.8) || _hoveredScene1Card === 3) {
       c3.classList.add("highlight-purple");
     }
   }
-
-  const isNarrating = typeof isNarratingOverride === "boolean"
-    ? isNarratingOverride
-    : (typeof onboardingAudioPlayer !== "undefined" &&
-       onboardingAudioPlayer &&
-       !onboardingAudioPlayer.paused &&
-       !onboardingNarrationPaused);
 
   updateScene1CardVideos(time, isNarrating);
 }
@@ -7524,7 +7524,7 @@ function renderOnboardingSlide() {
   // Auto-navigate app background to match current tour topic
   const targetPage = ONBOARDING_PAGE_MAP[onboardingSlide];
   if (targetPage && typeof switchPage === "function") {
-    switchPage(targetPage);
+    switchPage(targetPage, { fromWelcomeTour: true });
   }
 }
 
@@ -7710,7 +7710,7 @@ function speakOnboardingNarration() {
           if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
             nextOnboardingSlide();
           }
-        }, 700);
+        }, 450);
       }
     }
   });
@@ -7851,7 +7851,10 @@ function finishOnboarding() {
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
   setOnboardingFlag("vf_onboarding.done", "1");
   const overlay = document.getElementById("onboarding-overlay");
-  if (overlay) overlay.classList.add("hidden");
+  if (overlay) {
+    overlay.classList.add("hidden");
+    overlay.classList.remove("welcome-hero-mode");
+  }
 
   // Prompt for anonymous crash reporting consent if never set
   if (!localStorage.getItem("vf_crash_reporting_prompted")) {
@@ -7896,26 +7899,27 @@ const AUDIOFLOW_GUIDE_STEPS = [
     title: "Read & Summary Modes",
     desc: "Listen to text word-for-word or create two-voice podcast summaries.",
     targetId: "af-voice-card",
+    secondaryTargetId: "af-summary-model-hero",
     spotlightLabel: "Core Modes",
     nextLabel: "Next: Gemini Setup →",
     audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
     timeline: [
       {
-            "start": 0.5,
-            "end": 2.78,
-            "text": "Welcome to Audio Flow!"
+        "start": 0.4,
+        "end": 2.3,
+        "text": "Welcome to Audio Flow."
       },
       {
-            "start": 2.73,
-            "end": 7.75,
-            "text": "Use Read mode to hear any text word-for-word with dozens of voices and speeds."
+        "start": 2.58,
+        "end": 8.14,
+        "text": "Use Read mode to hear any text word for word, with dozens of voices and speeds."
       },
       {
-            "start": 7.75,
-            "end": 14.1,
-            "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
+        "start": 8.42,
+        "end": 14.47,
+        "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
       }
-]
+    ]
   },
   {
     step: 2,
@@ -8042,7 +8046,7 @@ function _afGuidePreventScrollEvent(e) {
 
 function _afGuidePreventKeyEvent(e) {
   if (e.key === "Escape") {
-    stopAudioFlowGuide();
+    stopAudioFlowGuide(true);
     e.preventDefault();
     return;
   }
@@ -8442,7 +8446,7 @@ async function gotoAudioFlowGuideStep(stepIdx) {
 
 function nextAudioFlowGuideStep() {
   if (_currentAfGuideStep >= AUDIOFLOW_GUIDE_STEPS.length) {
-    stopAudioFlowGuide();
+    stopAudioFlowGuide(true);
     return;
   }
   gotoAudioFlowGuideStep(_currentAfGuideStep + 1);
@@ -8459,10 +8463,13 @@ function startAudioFlowGuide() {
   const overlay = document.getElementById("audioflow-guide-overlay");
   if (!overlay) return;
 
-  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide();
-  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide();
+  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
+  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
   const obOverlay = document.getElementById("onboarding-overlay");
-  if (obOverlay) obOverlay.classList.add("hidden");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
 
   _afGuideForceZeroScroll();
 
@@ -8504,7 +8511,7 @@ function _onAfGuideResize() {
   }
 }
 
-function stopAudioFlowGuide() {
+function stopAudioFlowGuide(markCompleted = false) {
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
 
@@ -8553,7 +8560,9 @@ function stopAudioFlowGuide() {
   if (!hasRealSummaries) {
     _cleanAfGuideDemoHistoryCard();
   }
-  setOnboardingFlag("vf_onboarding.af_guided", "1");
+  if (markCompleted) {
+    setOnboardingFlag("vf_onboarding.af_guided", "1");
+  }
 }
 
 // ==========================================================================
@@ -8718,7 +8727,7 @@ function _vfGuidePreventScrollEvent(e) {
 
 function _vfGuidePreventKeyEvent(e) {
   if (e.key === "Escape") {
-    stopVideoFlowGuide();
+    stopVideoFlowGuide(true);
     e.preventDefault();
     return;
   }
@@ -9098,7 +9107,7 @@ async function gotoVideoFlowGuideStep(stepIdx) {
 
 function nextVideoFlowGuideStep() {
   if (_currentVfGuideStep >= VIDEOFLOW_GUIDE_STEPS.length) {
-    stopVideoFlowGuide();
+    stopVideoFlowGuide(true);
     return;
   }
   gotoVideoFlowGuideStep(_currentVfGuideStep + 1);
@@ -9115,10 +9124,13 @@ function startVideoFlowGuide() {
   const overlay = document.getElementById("videoflow-guide-overlay");
   if (!overlay) return;
 
-  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide();
-  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide();
+  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
   const obOverlay = document.getElementById("onboarding-overlay");
-  if (obOverlay) obOverlay.classList.add("hidden");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
 
   _vfGuideForceZeroScroll();
 
@@ -9158,7 +9170,7 @@ function _onVfGuideResize() {
   }
 }
 
-function stopVideoFlowGuide() {
+function stopVideoFlowGuide(markCompleted = false) {
   stopVideoFlowGuideAudio();
   window.removeEventListener("resize", _onVfGuideResize);
 
@@ -9203,7 +9215,9 @@ function stopVideoFlowGuide() {
   if (vid) vid.pause();
 
   _cleanVfGuideDemoVideoCard();
-  setOnboardingFlag("vf_onboarding.vf_guided", "1");
+  if (markCompleted) {
+    setOnboardingFlag("vf_onboarding.vf_guided", "1");
+  }
 }
 
 // ==========================================================================
@@ -9384,7 +9398,7 @@ function _voiceflowGuidePreventScrollEvent(e) {
 
 function _voiceflowGuidePreventKeyEvent(e) {
   if (e.key === "Escape") {
-    stopVoiceFlowGuide();
+    stopVoiceFlowGuide(true);
     e.preventDefault();
     return;
   }
@@ -9774,7 +9788,7 @@ function gotoVoiceFlowGuideStep(stepIdx) {
 
 function nextVoiceFlowGuideStep() {
   if (_currentVoiceFlowGuideStep >= VOICEFLOW_GUIDE_STEPS.length) {
-    stopVoiceFlowGuide();
+    stopVoiceFlowGuide(true);
     return;
   }
   gotoVoiceFlowGuideStep(_currentVoiceFlowGuideStep + 1);
@@ -9791,10 +9805,13 @@ function startVoiceFlowGuide() {
   const overlay = document.getElementById("voiceflow-guide-overlay");
   if (!overlay) return;
 
-  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide();
-  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide();
+  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
   const obOverlay = document.getElementById("onboarding-overlay");
-  if (obOverlay) obOverlay.classList.add("hidden");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
 
   _voiceflowGuideForceZeroScroll();
 
@@ -9834,7 +9851,7 @@ function _onVoiceFlowGuideResize() {
   }
 }
 
-function stopVoiceFlowGuide() {
+function stopVoiceFlowGuide(markCompleted = false) {
   stopVoiceFlowGuideAudio();
   window.removeEventListener("resize", _onVoiceFlowGuideResize);
 
@@ -9884,11 +9901,9 @@ function stopVoiceFlowGuide() {
     loadHome();
   }
 
-  if (typeof switchPage === "function" && currentPageId !== "home" && !["audioflow", "videoflow"].includes(currentPageId)) {
-    switchPage("home", { skipGuideTrigger: true, fromGuide: true });
+  if (markCompleted) {
+    setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
   }
-
-  setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
 }
 
 function replayOnboarding() {
