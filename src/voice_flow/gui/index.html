@@ -2498,7 +2498,7 @@
           </div>
 
           <!-- Skip Tour (outside the scaled stage so it keeps a constant, crisp size) -->
-          <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+          <button class="scene1-skip-badge" onclick="finishOnboarding({ skipped: true })" title="Skip Tour" aria-label="Skip Tour">
             <span>Skip Tour</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
@@ -2582,7 +2582,7 @@
             </div>
 
             <!-- Skip Tour Badge -->
-            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+            <button class="scene1-skip-badge" onclick="finishOnboarding({ skipped: true })" title="Skip Tour" aria-label="Skip Tour">
               <span>Skip Tour</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
@@ -2669,7 +2669,7 @@
             </div>
 
             <!-- Skip Tour Badge -->
-            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+            <button class="scene1-skip-badge" onclick="finishOnboarding({ skipped: true })" title="Skip Tour" aria-label="Skip Tour">
               <span>Skip Tour</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
@@ -2756,7 +2756,7 @@
             </div>
 
             <!-- Skip Tour Badge -->
-            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+            <button class="scene1-skip-badge" onclick="finishOnboarding({ skipped: true })" title="Skip Tour" aria-label="Skip Tour">
               <span>Skip Tour</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
@@ -3020,7 +3020,7 @@
             </div>
 
             <!-- Skip Tour Badge -->
-            <button class="scene1-skip-badge" onclick="finishOnboarding()" title="Skip Tour" aria-label="Skip Tour">
+            <button class="scene1-skip-badge" onclick="finishOnboarding({ skipped: true })" title="Skip Tour" aria-label="Skip Tour">
               <span>Skip Tour</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
@@ -3036,7 +3036,7 @@
         <div class="onboarding-dots" id="onboarding-dots"></div>
         <button class="onboarding-player-btn" onclick="prevOnboardingSlide()" title="Previous">‹</button>
         <button class="onboarding-player-btn onboarding-next" id="onboarding-next-btn" onclick="nextOnboardingSlide()" title="Next">›</button>
-        <button class="onboarding-skip" onclick="stopOnboardingNarration(); finishOnboarding();" style="margin-left:8px;">Exit tour</button>
+        <button class="onboarding-skip" onclick="stopOnboardingNarration(); finishOnboarding({ skipped: true });" style="margin-left:8px;">Exit tour</button>
       </div>
 
     </div>
@@ -3303,7 +3303,7 @@
       <div class="perfect-keys-header">
         <div>
           <h3 style="font-size: 18px; font-weight: 800;">Microphone Input</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose an input for dictation, or follow your Windows default microphone.</p>
+          <p id="mic-dialog-subtitle" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Choose an input for dictation, or follow your Windows default microphone.</p>
         </div>
         <button class="close-icon-btn" onclick="closeSubModal('mic-sub-modal')">✕</button>
       </div>

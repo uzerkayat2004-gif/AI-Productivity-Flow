@@ -1467,6 +1467,17 @@ async function changePushToTalkKey() {
   openShortcutDialog();
 }
 
+// Platform-correct wording before /api/platform/info has answered: the native
+// WKWebView user agent already says Macintosh, so macOS never flashes Windows text.
+function vfIsMacPlatform() {
+  if (window.vfPlatformInfo) return !!window.vfPlatformInfo.is_macos;
+  const nav = (typeof navigator !== "undefined" && navigator) || {};
+  return /Mac/i.test(nav.platform || "") || /Macintosh|Mac OS X/i.test(nav.userAgent || "");
+}
+function vfDefaultMicLabel() {
+  return vfIsMacPlatform() ? "System default microphone" : "Windows default microphone";
+}
+
 function openMicrophoneDialog() {
   const modal = document.getElementById("mic-sub-modal");
   if (modal) {
@@ -1492,24 +1503,24 @@ async function loadHardwareMicrophones(refresh = false) {
     const result = await safeFetchJson(refresh ? "/api/microphones?refresh=1" : "/api/microphones");
     if (generation !== _micCatalogGeneration) return;
     if (!result || !result.success) throw new Error(result?.error || "Could not refresh microphones.");
-    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}, ...(result.display_devices || result.devices)];
+    _micCatalog = [{identity:null,name:vfDefaultMicLabel(),index:null}, ...(result.display_devices || result.devices)];
     const available = result.preferred_available;
     container.innerHTML = _micCatalog.map((mic,i) => {
       const selected = available && mic.identity === result.selected_identity;
       return `<button type="button" class="mic-option-card ${selected ? 'selected-mic' : ''}" onclick="selectMicrophoneDeviceByRow(${i}, this)" ${mic.ambiguous ? 'disabled' : ''} style="text-align:left;">${escapeHtml(mic.name)}${selected ? '<span class="kbd-pill">Selected</span>' : ''}${mic.ambiguous ? '<span>Unavailable</span>' : ''}</button>`;
     }).join("");
     const selected = _micCatalog.find(m=>m.identity === result.selected_identity);
-    const name = available ? selected?.name || "Windows default microphone" : "Preferred microphone disconnected";
+    const name = available ? selected?.name || vfDefaultMicLabel() : "Preferred microphone disconnected";
     const badge = document.getElementById("current-mic-badge");
     if (badge) {badge.textContent=name;badge.title=name;}
     const desc = document.getElementById("current-mic-desc");if(desc)desc.textContent=name;
     if (status && result.busy) status.textContent = "Finish dictation before refreshing microphones. Your current selection is unchanged.";
-    else if (status) status.textContent = available ? "Choose a microphone for your next dictation." : `${result.preferred_name || "Your preferred microphone"} is unavailable. Reconnect it or choose Windows default microphone to dictate.`;
+    else if (status) status.textContent = available ? "Choose a microphone for your next dictation." : `${result.preferred_name || "Your preferred microphone"} is unavailable. Reconnect it or choose ${vfDefaultMicLabel()} to dictate.`;
     return true;
   } catch(err) {
     if (generation !== _micCatalogGeneration) return;
-    container.innerHTML = '<button type="button" class="mic-option-card" onclick="selectMicrophoneDeviceByRow(0,this)">Windows default microphone</button>';
-    _micCatalog = [{identity:null,name:"Windows default microphone",index:null}];
+    container.innerHTML = '<button type="button" class="mic-option-card" onclick="selectMicrophoneDeviceByRow(0,this)">' + vfDefaultMicLabel() + '</button>';
+    _micCatalog = [{identity:null,name:vfDefaultMicLabel(),index:null}];
     if(status)status.textContent=err.message || "Could not refresh microphones. Try again.";
     return false;
   }
@@ -1674,7 +1685,7 @@ function renderHistoryFeed(records) {
       <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
         <div style="font-size: 42px; margin-bottom: 12px;">🎙️</div>
         <div style="font-weight: 800; font-size: 17px; color: var(--text-main);">No dictations recorded yet</div>
-        <div style="font-size: 13px; margin-top: 6px;">${(window.vfPlatformInfo && window.vfPlatformInfo.is_macos) ? "Hold <strong>Cmd + Option</strong> to dictate anywhere. Every word will appear here automatically!" : "Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!"}</div>
+        <div style="font-size: 13px; margin-top: 6px;">${vfIsMacPlatform() ? "Hold <strong>Cmd + Option</strong> to dictate anywhere. Every word will appear here automatically!" : "Hold <strong>Middle Mouse Click</strong> or <strong>Ctrl + Win</strong> to dictate anywhere. Every word will appear here automatically!"}</div>
       </div>
     `;
     return;
@@ -7690,7 +7701,9 @@ function startOnboardingTour() {
   gotoOnboardingSlide(1);
 }
 
-function finishOnboarding() {
+function finishOnboarding(options) {
+  // Skip Tour / Exit tour must never chain into the Audio Flow guide.
+  const skipped = !!(options && options.skipped);
   stopOnboardingNarration();
   const source = document.getElementById("onboarding-source");
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
@@ -7722,10 +7735,12 @@ function finishOnboarding() {
     switchPage("audioflow");
   }
 
-  // Launch the interactive Audio Flow in-app guide automatically
+  // Launch the interactive Audio Flow in-app guide automatically, but only
+  // after a completed tour (never after Skip Tour / Exit tour).
+  if (skipped) return;
   setTimeout(() => {
     if (typeof startAudioFlowGuide === "function") {
-      startAudioFlowGuide();
+      startAudioFlowGuide({ auto: true });
     }
   }, 450);
 }
@@ -7826,7 +7841,37 @@ function _afGuideForceZeroScroll() {
   if (document.body && document.body.scrollTop !== 0) document.body.scrollTop = 0;
 }
 
+// Safety net: the guide may only lock the app while its card is actually
+// styled and visible. If the guide stylesheet is missing (unstyled overlay sits
+// in normal page flow) or the card is off-screen, the user would face an app
+// that silently ignores every click, scroll and key, so release the lock.
+function _afGuideIsUsable() {
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  const card = document.getElementById("af-guide-card");
+  if (!overlay || !card || overlay.classList.contains("hidden")) return false;
+  try {
+    const overlayStyle = window.getComputedStyle(overlay);
+    if (overlayStyle.position === "static" || overlayStyle.display === "none" || overlayStyle.visibility === "hidden") return false;
+    const cardStyle = window.getComputedStyle(card);
+    if (cardStyle.display === "none" || cardStyle.visibility === "hidden") return false;
+    const r = card.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    return r.width > 40 && r.height > 40 && r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function _afGuideReleaseIfUnusable() {
+  if (_afGuideIsUsable()) return false;
+  console.warn("[Audio Flow guide] Guide card is not visible (styles missing?); releasing the interaction lock.");
+  stopAudioFlowGuide({ unusable: true });
+  return true;
+}
+
 function _afGuideBlockAppEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   const guideCard = document.getElementById("af-guide-card");
   if (guideCard && guideCard.contains(e.target)) {
     return; // Allow clicks/taps on HUD buttons (Next, Close, Back, Voiceover, dots)
@@ -7841,6 +7886,7 @@ function _afGuideBlockAppEvent(e) {
 }
 
 function _afGuidePreventScrollEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   _afGuideForceZeroScroll();
   e.preventDefault();
   e.stopPropagation();
@@ -7851,6 +7897,7 @@ function _afGuidePreventScrollEvent(e) {
 }
 
 function _afGuidePreventKeyEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   if (e.key === "Escape") {
     stopAudioFlowGuide();
     e.preventDefault();
@@ -8246,12 +8293,18 @@ function prevAudioFlowGuideStep() {
   gotoAudioFlowGuideStep(Math.max(1, _currentAfGuideStep - 1));
 }
 
-function startAudioFlowGuide() {
+function startAudioFlowGuide(options) {
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (!overlay) return;
+  // Probe the guide stylesheet before locking anything: an unstyled overlay
+  // is position:static, and then the guide must not start at all.
+  if (window.getComputedStyle && window.getComputedStyle(overlay).position === "static") {
+    console.warn("[Audio Flow guide] Guide styles are missing; not starting the guide.");
+    return;
+  }
   if (typeof switchPage === "function") {
     switchPage("audioflow");
   }
-  const overlay = document.getElementById("audioflow-guide-overlay");
-  if (!overlay) return;
 
   _afGuideForceZeroScroll();
 
@@ -8282,6 +8335,8 @@ function startAudioFlowGuide() {
   gotoAudioFlowGuideStep(1);
 
   window.addEventListener("resize", _onAfGuideResize);
+  // Re-check once the card has laid out; release the lock if it never shows.
+  setTimeout(_afGuideReleaseIfUnusable, 1200);
 }
 
 function _onAfGuideResize() {
@@ -8293,7 +8348,8 @@ function _onAfGuideResize() {
   }
 }
 
-function stopAudioFlowGuide() {
+function stopAudioFlowGuide(options) {
+  const unusable = !!(options && options.unusable);
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
 
@@ -8341,7 +8397,8 @@ function stopAudioFlowGuide() {
   if (afSummaries.length === 0) {
     _cleanAfGuideDemoHistoryCard();
   }
-  setOnboardingFlag("vf_onboarding.af_guided", "1");
+  // An unusable (unstyled) guide was never actually seen; keep it pending.
+  if (!unusable) setOnboardingFlag("vf_onboarding.af_guided", "1");
 }
 
 function replayOnboarding() {
@@ -11547,6 +11604,12 @@ async function initPlatformAdaptation() {
     window.vfPlatformInfo = info;
 
     const isMac = !!info.is_macos;
+
+    // 0. Microphone dialog subtitle (index.html ships the Windows wording)
+    const micSubtitle = document.getElementById("mic-dialog-subtitle");
+    if (micSubtitle && isMac) {
+      micSubtitle.textContent = "Choose an input for dictation, or follow your macOS system default microphone.";
+    }
 
     // 1. Runtime badge in Settings > System
     const runtimeBadge = document.getElementById("runtime-os-badge");
