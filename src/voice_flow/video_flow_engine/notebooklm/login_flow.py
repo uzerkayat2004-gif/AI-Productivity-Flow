@@ -361,7 +361,7 @@ def _login_log_path() -> Path:
 
         log_dir = data_dir() / "logs"
     except Exception:
-        log_dir = Path.home() / ".voice_flow" / "logs"
+        log_dir = Path(os.environ.get("VOICE_FLOW_DATA_DIR") or Path.home() / ".voice_flow") / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / "notebooklm-login.log"
 

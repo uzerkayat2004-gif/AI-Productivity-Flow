@@ -50,6 +50,7 @@ if "--autoplay-policy=no-user-gesture-required" not in _wv2_args:
     )
 
 from voice_flow.platform.macos_app import configure_macos_app
+from voice_flow.paths import data_dir as _data_dir
 
 # main imports this module for focus helpers; only the executable entry point
 # owns the regular desktop role. Set its identity before webview can load Cocoa.
@@ -71,7 +72,7 @@ if _should_import_webview():
         _WEBVIEW_IMPORT_FAILED = True
         import traceback
         try:
-            crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
+            crash_path = _data_dir() / "gui_crash.log"
             crash_path.parent.mkdir(parents=True, exist_ok=True)
             crash_path.write_text(
                 "desktop_launcher optional import failure:\n" + traceback.format_exc(), encoding="utf-8"
@@ -100,7 +101,7 @@ if sys.stdout is None:
     sys.stdout = DummyWriter()
     sys.stderr = DummyWriter()
 
-_launcher_log_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_launcher.log"
+_launcher_log_path = _data_dir() / "gui_launcher.log"
 
 try:
     from voice_flow.crash_reporting import init_crash_reporting

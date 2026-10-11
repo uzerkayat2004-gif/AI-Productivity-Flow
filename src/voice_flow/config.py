@@ -6,7 +6,10 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 
-DB_PATH = os.path.join(os.path.expanduser("~"), ".voice_flow", "voice_flow.db")
+from voice_flow.paths import data_dir
+
+# Honour VOICE_FLOW_DATA_DIR (portable installs, test isolation) like storage.DB_PATH.
+DB_PATH = str(data_dir() / "voice_flow.db")
 
 
 @dataclass
