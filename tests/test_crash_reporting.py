@@ -13,11 +13,14 @@ import pytest
 
 from voice_flow._version import VERSION
 from voice_flow.crash_reporting import (
+    NO_SEND_ENV_VAR,
     SENTRY_DSN,
     before_send_scrubber,
     capture_test_crash_report,
     init_crash_reporting,
+    is_ci_environment,
     is_crash_reporting_enabled,
+    is_sending_suppressed,
 )
 from voice_flow.storage import storage
 
@@ -36,8 +39,11 @@ def test_crash_reporting_default_disabled():
         mock_init.assert_not_called()
 
 
-def test_crash_reporting_init_when_enabled():
+def test_crash_reporting_init_when_enabled(monkeypatch):
     """Enabling the setting allows initialization with strict privacy configuration."""
+    # Simulate a real user machine: not CI, sending not suppressed.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv(NO_SEND_ENV_VAR, raising=False)
     storage.save_setting("anonymous_crash_reports", True)
     assert is_crash_reporting_enabled() is True
 
@@ -192,5 +198,52 @@ def test_cli_flag_enabled():
         proc = subprocess.run(cmd, env=_get_subprocess_env(), capture_output=True, text=True, timeout=60)
         assert proc.returncode == 0
         assert f"Test crash report from AI Productivity Flow v{VERSION}" in proc.stdout
+        # Regression: the test suite used to send a real event to Sentry on every run.
+        assert "was not sent" in proc.stdout
+        assert "sent successfully" not in proc.stdout
     finally:
         storage.save_setting("anonymous_crash_reports", False)
+
+
+def test_test_suite_never_sends_crash_reports():
+    """conftest must put every test (and its subprocesses) in no-send mode."""
+    assert os.environ.get(NO_SEND_ENV_VAR) == "1"
+    assert is_sending_suppressed() is True
+
+
+@pytest.mark.parametrize("value", ["true", "1", "TRUE", "yes"])
+def test_ci_env_disables_sending_and_tags_ci(monkeypatch, value):
+    """Under CI the SDK gets no DSN (nothing is sent) and environment is 'ci'."""
+    monkeypatch.delenv(NO_SEND_ENV_VAR, raising=False)
+    monkeypatch.setenv("CI", value)
+    assert is_ci_environment() is True
+    assert is_sending_suppressed() is True
+    with patch("sentry_sdk.init") as mock_init:
+        assert init_crash_reporting(force=True) is True
+        _, kwargs = mock_init.call_args
+        assert kwargs["dsn"] is None
+        assert kwargs["environment"] == "ci"
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no"])
+def test_falsey_ci_env_keeps_sending(monkeypatch, value):
+    """A falsey CI value is a normal user machine: real DSN, non-ci environment."""
+    monkeypatch.delenv(NO_SEND_ENV_VAR, raising=False)
+    monkeypatch.setenv("CI", value)
+    assert is_sending_suppressed() is False
+    with patch("sentry_sdk.init") as mock_init:
+        assert init_crash_reporting(force=True) is True
+        _, kwargs = mock_init.call_args
+        assert kwargs["dsn"] == SENTRY_DSN
+        assert kwargs["environment"] in ("production", "development")
+
+
+def test_no_send_env_var_disables_sending_outside_ci(monkeypatch):
+    """The explicit opt-out sends nothing but keeps the normal environment tag."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv(NO_SEND_ENV_VAR, "1")
+    with patch("sentry_sdk.init") as mock_init:
+        assert init_crash_reporting(force=True) is True
+        _, kwargs = mock_init.call_args
+        assert kwargs["dsn"] is None
+        assert kwargs["environment"] in ("production", "development")
