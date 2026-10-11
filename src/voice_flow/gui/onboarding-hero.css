@@ -3568,6 +3568,34 @@ body.af-guide-step3-active #af-history-panel {
   box-shadow: 0 16px 36px rgba(57, 45, 34, 0.12), 0 2px 6px rgba(57, 45, 34, 0.06);
 }
 
+/* Video Flow Guidance: Reposition companion card to left for steps 1 and 2 so right-column options remain visible */
+#vf-guide-card.is-step1,
+#vf-guide-card.is-step2 {
+  right: auto !important;
+  left: 268px !important;
+  bottom: 24px !important;
+}
+
+@media (max-width: 1024px) {
+  #vf-guide-card.is-step1,
+  #vf-guide-card.is-step2 {
+    left: 24px !important;
+  }
+}
+
+/* Voice Flow Guidance: Reposition companion card to left for step 5 so right-column model pickers remain visible */
+#voiceflow-guide-card.is-step5 {
+  right: auto !important;
+  left: 268px !important;
+  bottom: 24px !important;
+}
+
+@media (max-width: 1024px) {
+  #voiceflow-guide-card.is-step5 {
+    left: 24px !important;
+  }
+}
+
 .af-guide-card-head {
   display: flex;
   justify-content: space-between;

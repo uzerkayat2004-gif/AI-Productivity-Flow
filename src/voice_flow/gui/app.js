@@ -7780,7 +7780,6 @@ const AUDIOFLOW_GUIDE_STEPS = [
     title: "Read & Summary Modes",
     desc: "Listen to text word-for-word or create two-voice podcast summaries.",
     targetId: "af-voice-card",
-    secondaryTargetId: "af-summary-model-hero",
     spotlightLabel: "Core Modes",
     nextLabel: "Next: Gemini Setup →",
     audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
@@ -7818,7 +7817,7 @@ const AUDIOFLOW_GUIDE_STEPS = [
     counter: "STEP 3 OF 4 · SUMMARY HISTORY",
     title: "History & MP3 Downloads",
     desc: "Replay past waveforms and download MP3s with a single click.",
-    targetId: "af-history-panel",
+    targetId: "af-history-bar-summary",
     spotlightLabel: "Summary History & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/af_guide_step3_mixed.mp3",
@@ -8415,8 +8414,7 @@ const VIDEOFLOW_GUIDE_STEPS = [
     counter: "STEP 1 OF 5 · CONTENT & FORMATS",
     title: "Content Input & Formats",
     desc: "Drop any PDF or paste text, and pick from 5 adaptive video formats.",
-    targetId: "vf-create-panel",
-    secondaryTargetId: "vf-options-column",
+    targetId: "vf-format-section",
     spotlightLabel: "Content & Video Formats",
     nextLabel: "Next: NotebookLM (No Keys) →",
     audioSrc: "assets/onboarding/vf_guide_step1_mixed.mp3",
@@ -8435,7 +8433,6 @@ const VIDEOFLOW_GUIDE_STEPS = [
     desc: "Simply sign in with your Google account. You do NOT need any API keys for NotebookLM!",
     targetId: "vf-engine-cards",
     secondaryTargetId: "vf-nlm-account-card",
-    tertiaryTargetId: "vf-nlm-no-key-badge",
     spotlightLabel: "NotebookLM · Zero API Keys Needed",
     nextLabel: "Next: Inbuilt Tool & Keys →",
     audioSrc: "assets/onboarding/vf_guide_step2_mixed.mp3",
@@ -8468,7 +8465,7 @@ const VIDEOFLOW_GUIDE_STEPS = [
     counter: "STEP 4 OF 5 · LIBRARY & DOWNLOADS",
     title: "Video Library & MP4 Downloads",
     desc: "Browse generated videos, replay chapters, and download ready MP4s.",
-    targetId: "vf-history-panel",
+    targetId: "vf-library-cards",
     spotlightLabel: "Video Library & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
@@ -8516,6 +8513,7 @@ let _vfGuideSlideToken = 0;
 let _vfGuideTimer = null;
 
 function _vfGuideForceZeroScroll() {
+  if (_currentVfGuideStep === 1) return;
   const mc = document.querySelector(".main-content");
   if (mc && mc.scrollTop !== 0) mc.scrollTop = 0;
   if (window.scrollY !== 0) window.scrollTo(0, 0);
@@ -8688,6 +8686,13 @@ function positionVfGuideSpotlight(stepObj) {
 
   box.style.display = "block";
   let target = document.getElementById(stepObj.targetId);
+  if (stepObj.step === 3) {
+    const heading = document.querySelector("#vf-api-providers-section .vf-section-heading");
+    if (heading) target = heading;
+  } else if (stepObj.step === 4) {
+    const sample = document.getElementById("vf-guide-sample-card");
+    if (sample) target = sample;
+  }
   if (!target) {
     box.style.display = "none";
     return;
@@ -8823,6 +8828,12 @@ async function gotoVideoFlowGuideStep(stepIdx) {
     if (typeof selectVideoEngine === "function") {
       selectVideoEngine("notebooklm");
     }
+    if (stepIdx === 1) {
+      const fmt = document.getElementById("vf-format-section");
+      if (fmt) {
+        fmt.scrollIntoView({ behavior: "instant", block: "nearest" });
+      }
+    }
   }
 
   // Step 3 Action: Switch to native engine, elevate API providers section
@@ -8875,10 +8886,12 @@ async function gotoVideoFlowGuideStep(stepIdx) {
     }
   }
 
-  // Step 5 UI Layout Toggle
+  // Step UI Layout Toggles
   const card = document.getElementById("vf-guide-card");
   const overlay = document.getElementById("videoflow-guide-overlay");
   if (card) {
+    card.classList.toggle("is-step1", stepIdx === 1);
+    card.classList.toggle("is-step2", stepIdx === 2);
     card.classList.toggle("is-step4", false);
     card.classList.toggle("is-step5", stepIdx === 5);
   }
@@ -9022,6 +9035,8 @@ function stopVideoFlowGuide() {
 
   const card = document.getElementById("vf-guide-card");
   if (card) {
+    card.classList.remove("is-step1");
+    card.classList.remove("is-step2");
     card.classList.remove("is-step4");
     card.classList.remove("is-step5");
   }
@@ -9051,7 +9066,7 @@ const VOICEFLOW_GUIDE_STEPS = [
     counter: "STEP 1 OF 6 · INSTANT DICTATION",
     title: "Real-Time Voice Dictation",
     desc: "Speak naturally into any app. Voice Flow transcribes and types directly into active fields in real time.",
-    targetId: "dictations-list",
+    targetId: "voiceflow-metrics-banner",
     secondaryTargetId: "history-search",
     spotlightLabel: "Live Dictation & Workspace",
     nextLabel: "Next: Insights & Speed →",
@@ -9106,7 +9121,6 @@ const VOICEFLOW_GUIDE_STEPS = [
     title: "Sentence Context & Voice Commands",
     desc: "With Voice Polishing ON, AI analyzes full context to tailor tone and executes live formatting voice commands.",
     targetId: "style-tabs-nav",
-    secondaryTargetId: "style-cards-grid",
     spotlightLabel: "AI Styles & Spoken Commands",
     nextLabel: "Next: AI Models & Providers →",
     audioSrc: "assets/onboarding/voiceflow_guide_step4_mixed.mp3",
@@ -9123,9 +9137,8 @@ const VOICEFLOW_GUIDE_STEPS = [
     counter: "STEP 5 OF 6 · AI MODELS & PROVIDERS",
     title: "Offline Models & Cloud API Keys",
     desc: "We recommend Nemotron for speech recognition and S1-mini by Superwhisper for polishing. Cloud APIs are optional.",
-    targetId: "vf-flow-cards-panel",
-    secondaryTargetId: "exec-policy-model-picker-button",
-    tertiaryTargetId: "vf-polish-model-picker-button",
+    targetId: "exec-policy-model-picker-button",
+    secondaryTargetId: "vf-polish-model-picker-button",
     spotlightLabel: "Speech & Polishing Providers",
     nextLabel: "Next: Desktop Shortcut →",
     audioSrc: "assets/onboarding/voiceflow_guide_step5_mixed.mp3",
@@ -9530,6 +9543,10 @@ function gotoVoiceFlowGuideStep(stepIdx) {
     }
   }
 
+  if (card) {
+    card.classList.toggle("is-step5", stepIdx === 5);
+  }
+
   positionVoiceFlowGuideSpotlight(stepObj);
   [60, 180, 400].forEach(ms => {
     setTimeout(() => {
@@ -9635,6 +9652,7 @@ function stopVoiceFlowGuide() {
   const card = document.getElementById("voiceflow-guide-card");
   if (card) {
     card.classList.remove("is-step4");
+    card.classList.remove("is-step5");
     card.classList.remove("is-step6");
   }
 
