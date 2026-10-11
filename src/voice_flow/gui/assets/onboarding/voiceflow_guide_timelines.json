@@ -105,17 +105,17 @@
     },
     {
       "start": 17.29,
-      "end": 25.74,
-      "text": "For voice polishing, we recommend S1 Mini by Super-RISPR, which delivers high-precision grammar refinement with a lightweight local footprint."
+      "end": 25.62,
+      "text": "For voice polishing, we recommend S1-mini by Superwhisper, which delivers high-precision grammar refinement with a lightweight local footprint."
     },
     {
-      "start": 25.74,
-      "end": 32.92,
+      "start": 25.62,
+      "end": 32.81,
       "text": "If you prefer cloud APIs like Deepgram, Groq, or OpenAI, you can easily plug in your keys anytime."
     },
     {
-      "start": 32.92,
-      "end": 36.89,
+      "start": 32.81,
+      "end": 36.77,
       "text": "Next, let's see how to dictate everywhere across Windows!"
     }
   ],

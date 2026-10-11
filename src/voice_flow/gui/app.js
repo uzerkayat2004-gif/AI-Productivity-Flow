@@ -9085,7 +9085,7 @@ const VOICEFLOW_GUIDE_STEPS = [
     page: "providers",
     counter: "STEP 5 OF 6 · AI MODELS & PROVIDERS",
     title: "Offline Models & Cloud API Keys",
-    desc: "We recommend Nemotron for speech recognition and S1 Mini by Super-RISPR for polishing. Cloud APIs are optional.",
+    desc: "We recommend Nemotron for speech recognition and S1-mini by Superwhisper for polishing. Cloud APIs are optional.",
     targetId: "vf-flow-cards-panel",
     secondaryTargetId: "exec-policy-model-picker-button",
     tertiaryTargetId: "vf-polish-model-picker-button",
@@ -9096,9 +9096,9 @@ const VOICEFLOW_GUIDE_STEPS = [
       { start: 0.5, end: 5.37, text: "Step five puts you in full control of your AI speech and polishing engines." },
       { start: 5.32, end: 11.03, text: "You can run completely offline with total privacy, or connect cloud API keys." },
       { start: 11.03, end: 17.29, text: "For speech recognition, we highly recommend the Nemotron speech model for blazing speed and accuracy." },
-      { start: 17.29, end: 25.74, text: "For voice polishing, we recommend S1 Mini by Super-RISPR, which delivers high-precision grammar refinement with a lightweight local footprint." },
-      { start: 25.74, end: 32.92, text: "If you prefer cloud APIs like Deepgram, Groq, or OpenAI, you can easily plug in your keys anytime." },
-      { start: 32.92, end: 36.89, text: "Next, let's see how to dictate everywhere across Windows!" }
+      { start: 17.29, end: 25.62, text: "For voice polishing, we recommend S1-mini by Superwhisper, which delivers high-precision grammar refinement with a lightweight local footprint." },
+      { start: 25.62, end: 32.81, text: "If you prefer cloud APIs like Deepgram, Groq, or OpenAI, you can easily plug in your keys anytime." },
+      { start: 32.81, end: 36.77, text: "Next, let's see how to dictate everywhere across Windows!" }
     ]
   },
   {
