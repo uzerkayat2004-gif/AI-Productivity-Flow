@@ -7798,7 +7798,7 @@ const AUDIOFLOW_GUIDE_STEPS = [
     step: 2,
     counter: "STEP 2 OF 4 · GEMINI SETUP",
     title: "Gemini Setup & API Keys",
-    desc: "Connect your free Gemini key to unlock NotebookLM and custom AI models.",
+    desc: "Connect your Google account for NotebookLM, or add your Gemini API key for custom models.",
     targetId: "audio-detail-header-bar",
     secondaryTargetId: "audio-detail-connections-card",
     spotlightLabel: "Gemini API Key Setup",
