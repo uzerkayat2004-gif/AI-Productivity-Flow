@@ -203,7 +203,9 @@ def _collect_privacy_evidence(out: Path) -> None:
     fields = ("timestamp", "processID", "processImagePath", "subsystem", "category", "eventMessage")
     lines = []
     for label, predicate, limit in queries:
-        remaining = deadline - time.monotonic()
+        # Clamp to the 8 s budget: a coarse monotonic clock (Windows) can make
+        # deadline - now come out as 8.000000000000028 on the first query.
+        remaining = max(0.0, min(8.0, deadline - time.monotonic()))
         if remaining <= 0:
             raise TimeoutError("public privacy collection exceeded 8 seconds")
         result = subprocess.run(

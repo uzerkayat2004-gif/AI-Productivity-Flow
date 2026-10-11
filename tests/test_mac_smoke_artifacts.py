@@ -680,3 +680,17 @@ def test_public_privacy_queries_share_one_eight_second_deadline(tmp_path, monkey
     with pytest.raises(TimeoutError, match="8 seconds"):
         runner._collect_privacy_evidence(tmp_path)
     assert len(calls) == 1 and calls[0]["timeout"] == 7
+
+
+def test_public_privacy_timeout_never_exceeds_budget_with_coarse_clock(tmp_path, monkeypatch):
+    """A clock that returns the same reading twice used to yield 8.000000000000028."""
+    from types import SimpleNamespace
+    from scripts import run_macos_identity_smoke as runner
+    seen = []
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 1018.92)  # (1018.92 + 8) - 1018.92 == 8.000000000000114
+    def log(command, **kwargs):
+        seen.append(kwargs["timeout"])
+        return SimpleNamespace(stdout="[]")
+    monkeypatch.setattr(runner.subprocess, "run", log)
+    runner._collect_privacy_evidence(tmp_path)
+    assert seen and all(0 < t <= 8 for t in seen), seen
