@@ -3583,15 +3583,15 @@ body.af-guide-step3-active #af-history-panel {
   }
 }
 
-/* Voice Flow Guidance: Reposition companion card to left for step 5 so right-column model pickers remain visible */
-#voiceflow-guide-card.is-step5 {
+/* Voice Flow Guidance: Reposition companion card to left for step 3 (Providers) so right-column model pickers remain visible */
+#voiceflow-guide-card.is-step3 {
   right: auto !important;
   left: 268px !important;
   bottom: 24px !important;
 }
 
 @media (max-width: 1024px) {
-  #voiceflow-guide-card.is-step5 {
+  #voiceflow-guide-card.is-step3 {
     left: 24px !important;
   }
 }

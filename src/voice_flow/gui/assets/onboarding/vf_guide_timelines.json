@@ -1,131 +1,86 @@
 {
   "step1": {
-    "duration": 32.71,
+    "duration": 15.65,
     "sentences": [
       {
-        "start": 0.4,
-        "end": 2.64,
+        "start": 0.5,
+        "end": 2.74,
         "text": "Welcome to Video Flow!"
       },
       {
-        "start": 2.59,
-        "end": 8.4,
-        "text": "Here, you can transform any text or document into an engaging MP4 video in minutes."
+        "start": 2.69,
+        "end": 5.68,
+        "text": "Drop in any document or paste notes."
       },
       {
-        "start": 8.4,
-        "end": 13.28,
-        "text": "On the left, drop any PDF, Word doc, or paste your notes."
-      },
-      {
-        "start": 13.28,
-        "end": 27.92,
-        "text": "On the right, pick from five smart formats: Auto-Adaptive scales to your document length, Brief delivers quick summaries, Vertical Short creates mobile-ready clips for TikTok and Reels, while Explainer and Cinematic create comprehensive visual breakdowns."
-      },
-      {
-        "start": 27.92,
-        "end": 31.86,
-        "text": "Next, let's look at AI engines and API keys!"
+        "start": 5.68,
+        "end": 14.79,
+        "text": "Choose from five smart formats\u2014Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic\u2014to generate videos in seconds."
       }
     ]
   },
   "step2": {
-    "duration": 6.5,
+    "duration": 12.96,
     "sentences": [
       {
         "start": 0.5,
-        "end": 6.5,
-        "text": "NotebookLM works with just your Google login; add an API key only if you want the built-in engine."
+        "end": 3.3,
+        "text": "Step two is choosing your AI engine."
+      },
+      {
+        "start": 3.25,
+        "end": 12.11,
+        "text": "NotebookLM works with just your Google login to generate animated slides, while Gemini and cloud API keys unlock our built-in video generator."
       }
     ]
   },
   "step3": {
-    "duration": 23.3,
+    "duration": 14.69,
     "sentences": [
       {
         "start": 0.5,
         "end": 3.28,
-        "text": "Step 3 is your Video Library."
+        "text": "Step three is your Video Library."
       },
       {
         "start": 3.23,
-        "end": 8.24,
-        "text": "Every video you create across your desktop or from this studio is saved right here."
+        "end": 6.61,
+        "text": "Every video is saved in your local workspace."
       },
       {
-        "start": 8.24,
-        "end": 13.34,
-        "text": "You can filter by status, search past projects, and preview chapters."
-      },
-      {
-        "start": 13.34,
-        "end": 18.96,
-        "text": "When a video is ready, download the full HD MP4 file with a single click."
-      },
-      {
-        "start": 18.96,
-        "end": 23.3,
-        "text": "Next, let's see how to trigger Video Flow directly from your screen!"
+        "start": 6.61,
+        "end": 13.83,
+        "text": "Filter past projects, preview chapters, and download full HD MP4 files with a single click."
       }
     ]
   },
   "step4": {
-    "duration": 23.68,
+    "duration": 12.0,
     "sentences": [
       {
-        "start": 0.4,
-        "end": 5.01,
-        "text": "Finally, Video Flow works seamlessly everywhere across Windows."
+        "start": 0.5,
+        "end": 4.47,
+        "text": "Finally, Video Flow works anywhere across Windows."
       },
       {
-        "start": 4.96,
-        "end": 13.06,
-        "text": "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut."
-      },
-      {
-        "start": 13.06,
-        "end": 17.73,
-        "text": "Video Flow generates and renders your video in the background while you keep working."
-      },
-      {
-        "start": 17.73,
-        "end": 20.58,
-        "text": "You're now ready to create your first video."
-      },
-      {
-        "start": 20.58,
-        "end": 22.84,
-        "text": "Click Get Started to begin!"
+        "start": 4.42,
+        "end": 11.13,
+        "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
       }
     ]
   },
   "step4_mac": {
-    "duration": 23.7,
+    "duration": 11.9,
     "sentences": [
       {
         "start": 0.5,
-        "end": 5.04,
-        "text": "Finally, Video Flow works seamlessly everywhere across your Mac."
+        "end": 4.38,
+        "text": "Finally, Video Flow works anywhere across your Mac."
       },
       {
-        "start": 4.99,
-        "end": 13.09,
-        "text": "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut."
-      },
-      {
-        "start": 13.09,
-        "end": 17.76,
-        "text": "Video Flow generates and renders your video in the background while you keep working."
-      },
-      {
-        "start": 17.76,
-        "end": 20.61,
-        "text": "You're now ready to create your first video."
-      },
-      {
-        "start": 20.61,
-        "end": 22.86,
-        "text": "Click Get Started to begin!"
+        "start": 4.33,
+        "end": 11.04,
+        "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
       }
     ]
   }

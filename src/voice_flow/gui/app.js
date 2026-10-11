@@ -6919,24 +6919,39 @@ const ONBOARDING_PAGE_MAP = {
 };
 
 const scene1Timeline = [
-  { start: 0.0, end: 4.2, text: "Welcome to AI Productivity Flow! We're thrilled to have you here." },
-  { start: 4.2, end: 11.0, text: "AI Productivity Flow is your completely free, 100% open-source personal productivity companion." },
-  { start: 11.0, end: 19.9, text: "Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy." },
-  { start: 19.9, end: 22.8, text: "Whether you want to generate visual explainer videos," },
-  { start: 22.8, end: 25.8, text: "listen to instant audio summaries of long articles," },
-  { start: 25.8, end: 29.5, text: "or dictate and polish text into any app effortlessly..." },
-  { start: 29.5, end: 34.8, text: "it's all built right here for you. In this quick tour, we'll walk you through how everything works," },
-  { start: 34.8, end: 40.5, text: "starting with our first feature: Video Flow. Let's dive right in!" }
+  {
+    "start": 0.5,
+    "end": 3.45,
+    "text": "Welcome to AI Productivity Flow!"
+  },
+  {
+    "start": 3.4,
+    "end": 6.99,
+    "text": "Your free open-source companion with complete privacy."
+  },
+  {
+    "start": 6.99,
+    "end": 13.23,
+    "text": "Turn ideas into high-speed action with explainer videos, audio summaries, and voice dictation."
+  }
 ];
 
 const scene2Timeline = [
-  { start: 0.0, end: 3.4, text: "Welcome to Video Flow, our first core feature." },
-  { start: 3.4, end: 9.15, text: "If you have a lengthy article, research paper, or complex notes that you want to understand visually," },
-  { start: 9.15, end: 14.2, text: "Video Flow is built for you. Simply paste your text or select an article," },
-  { start: 14.2, end: 20.0, text: "and Video Flow transforms it into an animated visual explainer with dynamic motion graphics," },
-  { start: 20.0, end: 26.35, text: "slide layouts, and natural audio narration. You can watch the full explainer right here on your screen," },
-  { start: 26.35, end: 30.8, text: "switch visual styles, or export your video in seconds." },
-  { start: 30.8, end: 35.6, text: "Next up, let's explore our second feature: Audio Flow!" }
+  {
+    "start": 0.5,
+    "end": 2.48,
+    "text": "Meet Video Flow!"
+  },
+  {
+    "start": 2.43,
+    "end": 6.56,
+    "text": "Transform articles or notes into animated explainer videos."
+  },
+  {
+    "start": 6.56,
+    "end": 13.45,
+    "text": "With motion graphics, smart layouts, and natural narration, turn any content into a video in seconds."
+  }
 ];
 
 function updateOnboardingScene2Subtitles(time) {
@@ -6970,12 +6985,21 @@ function updateScene2Video(isPlaying) {
 }
 
 const scene3Timeline = [
-  { start: 0.0, end: 2.7, text: "Welcome to Audio Flow, our second core feature." },
-  { start: 2.7, end: 8.0, text: "Imagine scrolling through Twitter or browsing a lengthy article that you do not have time to read." },
-  { start: 8.0, end: 15.9, text: "With Audio Flow, simply highlight the text or tap the summary shortcut, and an instant floating menu appears right over your content." },
-  { start: 15.9, end: 25.9, text: "Click Summary, and Audio Flow immediately generates a natural, source-grounded spoken summary with an interactive waveform player and dockable progress widget." },
-  { start: 25.9, end: 33.7, text: "You can adjust playback speeds, download the MP3, or keep listening while you continue working, without ever switching apps." },
-  { start: 33.7, end: 38.0, text: "Next up, let us discover our third feature: Voice Flow!" }
+  {
+    "start": 0.5,
+    "end": 2.53,
+    "text": "Meet Audio Flow!"
+  },
+  {
+    "start": 2.48,
+    "end": 7.0,
+    "text": "Highlight text anywhere on your screen to trigger the floating quick-action menu."
+  },
+  {
+    "start": 7.0,
+    "end": 14.01,
+    "text": "Generate instant spoken summaries with interactive waveform playback, or download the MP3 to listen on the go."
+  }
 ];
 
 function updateOnboardingScene3Subtitles(time) {
@@ -7009,10 +7033,21 @@ function updateScene3Video(isPlaying) {
 }
 
 const scene4Timeline = [
-  { start: 0.0, end: 2.86, text: "Welcome to Voice Flow, our third core feature." },
-  { start: 2.86, end: 9.45, text: "Now that you have full context from your article, you can post your thoughts or reply instantly by speaking." },
-  { start: 9.45, end: 20.92, text: "Simply speak naturally into any application, and Voice Flow transcribes and polishes your words directly into the active field in real time." },
-  { start: 20.92, end: 28.51, text: "Zero copy pasting, zero app switching. Next, let us connect with our community and get you started!" }
+  {
+    "start": 0.5,
+    "end": 2.4,
+    "text": "Meet Voice Flow!"
+  },
+  {
+    "start": 2.35,
+    "end": 9.42,
+    "text": "Speak naturally into any application and have your words transcribed and polished directly into the active field in real time."
+  },
+  {
+    "start": 9.42,
+    "end": 12.86,
+    "text": "Zero copy-pasting, zero app-switching."
+  }
 ];
 
 function updateOnboardingScene4Subtitles(time) {
@@ -7031,9 +7066,21 @@ function updateOnboardingScene4Subtitles(time) {
 }
 
 const scene5Timeline = [
-  { start: 0.0, end: 6.86, text: "Welcome to our community! AI Productivity Flow is 100% free and open source, built to supercharge your daily workflow." },
-  { start: 6.86, end: 14.73, text: "If you find this helpful, please star us on GitHub, share your feedback, and report any ideas or issues to shape future updates." },
-  { start: 14.73, end: 22.09, text: "Next, let us head into the workspace and configure your API keys and hotkeys. Click Get Started to begin!" }
+  {
+    "start": 0.5,
+    "end": 2.62,
+    "text": "Welcome to our community!"
+  },
+  {
+    "start": 2.57,
+    "end": 7.68,
+    "text": "Star us on GitHub, share your feedback, and let us shape the future together."
+  },
+  {
+    "start": 7.68,
+    "end": 11.21,
+    "text": "Click Get Started to configure your hotkeys and begin!"
+  }
 ];
 
 function updateOnboardingScene5Subtitles(time) {
@@ -7059,11 +7106,11 @@ function updateOnboardingScene5Subtitles(time) {
     c2.classList.remove("highlight-active");
     c3.classList.remove("highlight-active");
 
-    if (time >= 6.86 && time < 11.5) {
+    if (time >= 2.57 && time < 5.2) {
       c1.classList.add("highlight-active");
-    } else if (time >= 11.5 && time < 14.73) {
+    } else if (time >= 5.2 && time < 7.68) {
       c2.classList.add("highlight-active");
-    } else if (time >= 14.73 && time <= 22.09) {
+    } else if (time >= 7.68 && time <= 12.1) {
       c3.classList.add("highlight-active");
     }
   }
@@ -7095,11 +7142,11 @@ function updateScene1CardVideos(time, isNarrating) {
   // Identify active card based on narrator timestamps
   let activeCard = 0;
   if (isNarrating) {
-    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+    if (time >= 7.0 && time < 9.2) {
       activeCard = 1; // Video Flow
-    } else if (time >= 22.8 && time < 25.8) {
+    } else if (time >= 9.2 && time < 11.2) {
       activeCard = 2; // Audio Flow
-    } else if (time >= 25.8 && time < 29.5) {
+    } else if (time >= 11.2 && time <= 14.1) {
       activeCard = 3; // Voice Flow
     }
   }
@@ -7784,14 +7831,22 @@ const AUDIOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: Gemini Setup →",
     audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 2.73, text: "Welcome inside Audio Flow!" },
-      { start: 2.68, end: 5.86, text: "Here, you have two powerful ways to listen." },
-      { start: 5.86, end: 11.13, text: "With Read mode on the left, you can hear any selected text read aloud word-for-word." },
-      { start: 11.13, end: 18.15, text: "You can choose from dozens of natural voices and adjust reading speeds from 0.75x up to 2x." },
-      { start: 18.15, end: 21.97, text: "On the right is Summary mode, powered by NotebookLM." },
-      { start: 21.97, end: 28.69, text: "It extracts key ideas from lengthy articles, and you can even listen in an engaging two-voice podcast format." },
-      { start: 28.69, end: 33.33, text: "Let's move to Step 2 to explore API keys and Gemini setup." }
-    ]
+      {
+            "start": 0.5,
+            "end": 2.78,
+            "text": "Welcome to Audio Flow!"
+      },
+      {
+            "start": 2.73,
+            "end": 7.75,
+            "text": "Use Read mode to hear any text word-for-word with dozens of voices and speeds."
+      },
+      {
+            "start": 7.75,
+            "end": 14.1,
+            "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
+      }
+]
   },
   {
     step: 2,
@@ -7804,13 +7859,27 @@ const AUDIOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: History & Downloads →",
     audioSrc: "assets/onboarding/af_guide_step2_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 3.41, text: "Step 2 is connecting your API keys." },
-      { start: 3.36, end: 9.16, text: "AI Productivity Flow includes Microsoft Edge voices completely free out of the box." },
-      { start: 9.16, end: 15.4, text: "To unlock Gemini AI, Deepgram, or OpenAI, click the Gemini card right here." },
-      { start: 15.4, end: 25.51, text: "Click 'Get API Key' to open Google AI Studio in one click, copy your free key, paste it in the field, and tap 'Test Connection' to verify it." },
-      { start: 25.51, end: 29.26, text: "All keys are stored and encrypted locally on your computer." },
-      { start: 29.26, end: 33.0, text: "Next, let's explore history and audio downloads." }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.35,
+            "text": "Step two connects your voice engines."
+      },
+      {
+            "start": 3.3,
+            "end": 5.86,
+            "text": "Free Edge voices are built in."
+      },
+      {
+            "start": 5.86,
+            "end": 10.12,
+            "text": "Connect your Google account for NotebookLM or add a Gemini key."
+      },
+      {
+            "start": 10.12,
+            "end": 13.4,
+            "text": "All credentials are encrypted and stored locally."
+      }
+]
   },
   {
     step: 3,
@@ -7822,31 +7891,45 @@ const AUDIOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/af_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 3.26, text: "Step 3 is your Audio Summary History." },
-      { start: 3.21, end: 7.77, text: "You can toggle this bar open or closed anytime to see your past work." },
-      { start: 7.77, end: 12.41, text: "Every summary you create is automatically saved in your offline library." },
-      { start: 12.41, end: 22.7, text: "You can search past notes, replay waveforms, and download the MP3 audio file with one click—perfect for listening on your phone during your commute or sharing with your team." },
-      { start: 22.7, end: 27.02, text: "Next, let's see how to use Audio Flow directly on your screen!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.24,
+            "text": "Step three is your Audio History."
+      },
+      {
+            "start": 3.19,
+            "end": 6.43,
+            "text": "Every summary is saved in your local library."
+      },
+      {
+            "start": 6.43,
+            "end": 14.11,
+            "text": "Toggle the sidebar anytime to search past notes, replay waveforms, and download MP3 files with one click."
+      }
+]
   },
   {
     step: 4,
     counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Twitter Shortcut",
-    desc: "",
+    desc: "Highlight text on screen to trigger the floating quick-action menu and player.",
     targetId: "af-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Twitter & Screen Shortcut",
     nextLabel: "Finish & Start Listening 🚀",
     audioSrc: "assets/onboarding/af_guide_step4_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 6.11, text: "Finally, the true superpower of Audio Flow is that you never need to copy-paste or switch apps." },
-      { start: 6.06, end: 13.29, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reading a PDF, simply highlight any text." },
-      { start: 13.29, end: 17.38, text: "An instant floating quick-action menu appears right by your cursor." },
-      { start: 17.38, end: 24.86, text: "Click Summary or Read, and a floating player appears on your desktop with live waveforms and playback controls while you keep working." },
-      { start: 24.86, end: 27.52, text: "You're now ready to use Audio Flow." },
-      { start: 27.52, end: 29.98, text: "Click Get Started to explore!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 5.26,
+            "text": "Finally, use Audio Flow anywhere on your desktop without switching apps."
+      },
+      {
+            "start": 5.21,
+            "end": 12.25,
+            "text": "Simply highlight text on your screen to trigger the floating quick-action menu and listen in the floating waveform player while you work."
+      }
+]
   }
 ];
 
@@ -8412,19 +8495,30 @@ const VIDEOFLOW_GUIDE_STEPS = [
   {
     step: 1,
     counter: "STEP 1 OF 4 · CONTENT & FORMATS",
-    title: "Content Input & Formats",
-    desc: "Drop any PDF or paste text, and pick from 5 adaptive video formats.",
-    targetId: "vf-format-section",
-    spotlightLabel: "Content & Video Formats",
+    title: "Text to Video & Five Formats",
+    desc: "Drop any document or paste notes. Pick from five smart formats to generate explainer videos.",
+    targetId: "vf-source-card",
+    secondaryTargetId: "vf-presets-row",
+    spotlightLabel: "Content & Format Selector",
     nextLabel: "Next: Choose Video Engine →",
     audioSrc: "assets/onboarding/vf_guide_step1_mixed.mp3",
     timeline: [
-      { start: 0.4, end: 2.64, text: "Welcome to Video Flow!" },
-      { start: 2.59, end: 8.4, text: "Here, you can transform any text or document into an engaging MP4 video in minutes." },
-      { start: 8.4, end: 13.28, text: "On the left, drop any PDF, Word doc, or paste your notes." },
-      { start: 13.28, end: 27.92, text: "On the right, pick from five smart formats: Auto-Adaptive scales to your document length, Brief delivers quick summaries, Vertical Short creates mobile-ready clips for TikTok and Reels, while Explainer and Cinematic create comprehensive visual breakdowns." },
-      { start: 27.92, end: 31.86, text: "Next, let's look at AI engines and API keys!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 2.74,
+            "text": "Welcome to Video Flow!"
+      },
+      {
+            "start": 2.69,
+            "end": 5.68,
+            "text": "Drop in any document or paste notes."
+      },
+      {
+            "start": 5.68,
+            "end": 14.79,
+            "text": "Choose from five smart formats\u2014Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic\u2014to generate videos in seconds."
+      }
+]
   },
   {
     step: 2,
@@ -8437,31 +8531,50 @@ const VIDEOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: Video Library →",
     audioSrc: "assets/onboarding/vf_guide_step2_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 6.5, text: "NotebookLM works with just your Google login; add an API key only if you want the built-in engine." }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.3,
+            "text": "Step two is choosing your AI engine."
+      },
+      {
+            "start": 3.25,
+            "end": 12.11,
+            "text": "NotebookLM works with just your Google login to generate animated slides, while Gemini and cloud API keys unlock our built-in video generator."
+      }
+]
   },
   {
     step: 3,
     counter: "STEP 3 OF 4 · LIBRARY & DOWNLOADS",
     title: "Video Library & MP4 Downloads",
-    desc: "Browse generated videos, replay chapters, and download ready MP4s.",
+    desc: "Browse generated videos, replay chapters, and download ready MP4s with one click.",
     targetId: "vf-library-cards",
     spotlightLabel: "Video Library & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 3.28, text: "Step 3 is your Video Library." },
-      { start: 3.23, end: 8.24, text: "Every video you create across your desktop or from this studio is saved right here." },
-      { start: 8.24, end: 13.34, text: "You can filter by status, search past projects, and preview chapters." },
-      { start: 13.34, end: 18.96, text: "When a video is ready, download the full HD MP4 file with a single click." },
-      { start: 18.96, end: 23.3, text: "Next, let's see how to trigger Video Flow directly from your screen!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.28,
+            "text": "Step three is your Video Library."
+      },
+      {
+            "start": 3.23,
+            "end": 6.61,
+            "text": "Every video is saved in your local workspace."
+      },
+      {
+            "start": 6.61,
+            "end": 13.83,
+            "text": "Filter past projects, preview chapters, and download full HD MP4 files with a single click."
+      }
+]
   },
   {
     step: 4,
     counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Shortcut Workflow",
-    desc: "",
+    desc: "Highlight text anywhere on screen to trigger background video generation.",
     targetId: "vf-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Screen & Windows Shortcut",
@@ -8470,19 +8583,29 @@ const VIDEOFLOW_GUIDE_STEPS = [
     audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
     audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
     timeline: [
-      { start: 0.4, end: 5.01, text: "Finally, Video Flow works seamlessly everywhere across Windows." },
-      { start: 4.96, end: 13.06, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut." },
-      { start: 13.06, end: 17.73, text: "Video Flow generates and renders your video in the background while you keep working." },
-      { start: 17.73, end: 20.58, text: "You're now ready to create your first video." },
-      { start: 20.58, end: 22.84, text: "Click Get Started to begin!" }
-    ],
+      {
+            "start": 0.5,
+            "end": 4.47,
+            "text": "Finally, Video Flow works anywhere across Windows."
+      },
+      {
+            "start": 4.42,
+            "end": 11.13,
+            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
+      }
+],
     timelineMac: [
-      { start: 0.5, end: 5.04, text: "Finally, Video Flow works seamlessly everywhere across your Mac." },
-      { start: 4.99, end: 13.09, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut." },
-      { start: 13.09, end: 17.76, text: "Video Flow generates and renders your video in the background while you keep working." },
-      { start: 17.76, end: 20.61, text: "You're now ready to create your first video." },
-      { start: 20.61, end: 22.86, text: "Click Get Started to begin!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 4.38,
+            "text": "Finally, Video Flow works anywhere across your Mac."
+      },
+      {
+            "start": 4.33,
+            "end": 11.04,
+            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
+      }
+]
   }
 ];
 
@@ -9022,98 +9145,89 @@ const VOICEFLOW_GUIDE_STEPS = [
   {
     step: 1,
     page: "home",
-    counter: "STEP 1 OF 6 · INSTANT DICTATION",
-    title: "Real-Time Voice Dictation",
-    desc: "Speak naturally into any app. Voice Flow transcribes and types directly into active fields in real time.",
+    counter: "STEP 1 OF 4 · HOME & INSIGHTS",
+    title: "Real-Time Voice Dictation & Insights",
+    desc: "Speak naturally into any app. Voice Flow transcribes in real time and tracks your typing speed and streak.",
     targetId: "voiceflow-metrics-banner",
     secondaryTargetId: "history-search",
     spotlightLabel: "Live Dictation & Workspace",
-    nextLabel: "Next: Insights & Speed →",
+    nextLabel: "Next: Dictionary & Styles →",
     audioSrc: "assets/onboarding/voiceflow_guide_step1_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 2.66, text: "Welcome to Voice Flow!" },
-      { start: 2.61, end: 9.6, text: "With Voice Flow, you can speak your thoughts naturally and have them transcribed directly into whatever application you are using." },
-      { start: 9.6, end: 17.29, text: "Every dictation is saved securely in your private workspace, where you can search, copy, or review past recordings anytime." },
-      { start: 17.29, end: 22.05, text: "Next, let's explore your live productivity insights and speaking speed!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 2.66,
+            "text": "Welcome to Voice Flow!"
+      },
+      {
+            "start": 2.61,
+            "end": 7.46,
+            "text": "Speak naturally and have your words typed directly into any app in real time."
+      },
+      {
+            "start": 7.46,
+            "end": 13.69,
+            "text": "Your workspace tracks your dictation history, live typing speed in words per minute, and daily streaks."
+      }
+]
   },
   {
     step: 2,
-    page: "insights",
-    counter: "STEP 2 OF 6 · INSIGHTS & SPEED",
-    title: "Live Speaking Speed & Time Saved",
-    desc: "Track your speaking speed in WPM, time saved vs 40 WPM typing, daily streak, and app breakdown.",
-    targetId: "insights-overview-grid",
-    secondaryTargetId: "insights-wpm",
-    spotlightLabel: "Insights & Speed Analytics",
-    nextLabel: "Next: Personal Dictionary →",
+    page: "dictionary",
+    counter: "STEP 2 OF 4 · DICTIONARY & STYLES",
+    title: "Custom Jargon, Styles & Commands",
+    desc: "Register custom terms that work with polishing on or off. Enable polishing to adapt tones and voice commands.",
+    targetId: "dict-teach-panel",
+    secondaryTargetId: "dictionary-search-input",
+    spotlightLabel: "Personal Dictionary & AI Styles",
+    nextLabel: "Next: Models & Providers →",
     audioSrc: "assets/onboarding/voiceflow_guide_step2_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 3.76, text: "Step two is your live Insights dashboard." },
-      { start: 3.71, end: 14.7, text: "Right here, you can track your real-time speaking speed in Words Per Minute, see exactly how much typing time you save compared to forty words per minute typing, and monitor your daily dictation streaks." },
-      { start: 14.7, end: 22.03, text: "You can also review which desktop applications you dictate into most across seven days, thirty days, or all time." },
-      { start: 22.03, end: 25.36, text: "Next, let's check out your personal dictionary!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 4.75,
+            "text": "Step two combines your personal dictionary and AI styles."
+      },
+      {
+            "start": 4.7,
+            "end": 9.56,
+            "text": "Add custom names and jargon that work whether voice polishing is on or off."
+      },
+      {
+            "start": 9.56,
+            "end": 13.34,
+            "text": "Turn polishing on to tailor tones and voice commands."
+      }
+]
   },
   {
     step: 3,
-    page: "dictionary",
-    counter: "STEP 3 OF 6 · PERSONAL DICTIONARY",
-    title: "Custom Jargon & Phonetic Replacement",
-    desc: "Register custom names, tech acronyms, and jargon. Works with Voice Polishing OFF or ON for zero misspellings.",
-    targetId: "dict-teach-panel",
-    secondaryTargetId: "dictionary-search-input",
-    spotlightLabel: "Personal Dictionary & Jargon",
-    nextLabel: "Next: AI Styles & Commands →",
-    audioSrc: "assets/onboarding/voiceflow_guide_step3_mixed.mp3",
-    timeline: [
-      { start: 0.5, end: 3.41, text: "Step three is your Personal Dictionary." },
-      { start: 3.36, end: 9.41, text: "Add specialized jargon, product names, acronyms, or unique shortcuts right here." },
-      { start: 9.41, end: 18.4, text: "Crucially, your Dictionary works seamlessly whether Voice Polishing is turned ON or completely turned OFF, so your names and jargon come out right every time you dictate." },
-      { start: 18.4, end: 22.85, text: "Next, let's explore AI writing styles and voice commands!" }
-    ]
-  },
-  {
-    step: 4,
-    page: "style",
-    counter: "STEP 4 OF 6 · AI STYLES & COMMANDS",
-    title: "Sentence Context & Voice Commands",
-    desc: "With Voice Polishing ON, AI analyzes full context to tailor tone and executes live formatting voice commands.",
-    targetId: "style-tabs-nav",
-    spotlightLabel: "AI Styles & Spoken Commands",
-    nextLabel: "Next: AI Models & Providers →",
-    audioSrc: "assets/onboarding/voiceflow_guide_step4_mixed.mp3",
-    timeline: [
-      { start: 0.5, end: 5.6, text: "Step four gives you customizable AI Styles and real-time Voice Commands." },
-      { start: 5.55, end: 17.99, text: "When Voice Polishing is turned ON, the AI analyzes your entire sentence context and transforms your dictation into tailored tones, like Concise, Work Messages, Professional Email, or Developer formatting." },
-      { start: 17.99, end: 26.15, text: "You can also speak voice commands naturally, such as 'bullet point this' or 'make it formal', and Voice Flow executes them on the fly." },
-      { start: 26.15, end: 30.07, text: "Next, let's explore your AI models and providers!" }
-    ]
-  },
-  {
-    step: 5,
     page: "providers",
-    counter: "STEP 5 OF 6 · AI MODELS & PROVIDERS",
+    counter: "STEP 3 OF 4 · AI MODELS & PROVIDERS",
     title: "Offline Models & Cloud API Keys",
     desc: "We recommend Nemotron for speech recognition and S1-mini by Superwhisper for polishing. Cloud APIs are optional.",
     targetId: "exec-policy-model-picker-button",
     secondaryTargetId: "vf-polish-model-picker-button",
     spotlightLabel: "Speech & Polishing Providers",
     nextLabel: "Next: Desktop Shortcut →",
-    audioSrc: "assets/onboarding/voiceflow_guide_step5_mixed.mp3",
+    audioSrc: "assets/onboarding/voiceflow_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 5.37, text: "Step five puts you in full control of your AI speech and polishing engines." },
-      { start: 5.32, end: 11.03, text: "You can run completely offline with total privacy, or connect cloud API keys." },
-      { start: 11.03, end: 17.29, text: "For speech recognition, we highly recommend the Nemotron speech model for blazing speed and accuracy." },
-      { start: 17.29, end: 25.62, text: "For voice polishing, we recommend S1-mini by Superwhisper, which delivers high-precision grammar refinement with a lightweight local footprint." },
-      { start: 25.62, end: 32.81, text: "If you prefer cloud APIs like Deepgram, Groq, or OpenAI, you can easily plug in your keys anytime." },
-      { start: 32.81, end: 36.77, text: "Next, let's see how to dictate everywhere across Windows!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 4.18,
+            "text": "Step three puts you in full control of your AI engines."
+      },
+      {
+            "start": 4.13,
+            "end": 13.4,
+            "text": "Run completely offline with Nemotron for speech recognition and S1-mini by Superwhisper for local grammar polishing, or plug in cloud keys anytime."
+      }
+]
   },
   {
-    step: 6,
+    step: 4,
     page: "home",
-    counter: "STEP 6 OF 6 · GLOBAL SHORTCUT",
+    counter: "STEP 4 OF 4 · GLOBAL SHORTCUT",
     title: "Dictate Everywhere Across Windows",
     titleMac: "Dictate Everywhere Across your Mac",
     desc: "Trigger Voice Flow anywhere across Windows with a global shortcut—instant voice-to-text with zero copy-pasting.",
@@ -9123,22 +9237,42 @@ const VOICEFLOW_GUIDE_STEPS = [
     spotlightLabel: "Global Screen Dictation Shortcut",
     spotlightLabelMac: "Global Mac Dictation Shortcut",
     nextLabel: "Finish & Start Dictating 🎙️",
-    audioSrc: "assets/onboarding/voiceflow_guide_step6_mixed.mp3",
-    audioSrcMac: "assets/onboarding/voiceflow_guide_step6_mac_mixed.mp3",
+    audioSrc: "assets/onboarding/voiceflow_guide_step4_mixed.mp3",
+    audioSrcMac: "assets/onboarding/voiceflow_guide_step4_mac_mixed.mp3",
     timeline: [
-      { start: 0.5, end: 5.34, text: "Finally, Voice Flow works seamlessly across your entire Windows computer." },
-      { start: 5.29, end: 15.16, text: "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply hold your Middle Mouse Click or press Control plus Windows and start speaking." },
-      { start: 15.16, end: 22.7, text: "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting." },
-      { start: 22.7, end: 25.74, text: "You are now ready to speak at the speed of thought." },
-      { start: 25.74, end: 27.99, text: "Click Get Started to begin!" }
-    ],
+      {
+            "start": 0.5,
+            "end": 3.96,
+            "text": "Finally, dictate anywhere across Windows."
+      },
+      {
+            "start": 3.91,
+            "end": 9.11,
+            "text": "Hold your Middle Mouse Click or press Control plus Windows to speak into any application."
+      },
+      {
+            "start": 9.11,
+            "end": 13.69,
+            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+      }
+],
     timelineMac: [
-      { start: 0.5, end: 4.44, text: "Finally, Voice Flow works seamlessly across your Mac." },
-      { start: 4.39, end: 12.98, text: "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply press Command plus Option and start speaking." },
-      { start: 12.98, end: 20.52, text: "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting." },
-      { start: 20.52, end: 23.56, text: "You are now ready to speak at the speed of thought." },
-      { start: 23.56, end: 25.81, text: "Click Get Started to begin!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.87,
+            "text": "Finally, dictate anywhere across your Mac."
+      },
+      {
+            "start": 3.82,
+            "end": 7.61,
+            "text": "Press Command plus Option to speak into any application."
+      },
+      {
+            "start": 7.61,
+            "end": 12.18,
+            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+      }
+]
   }
 ];
 
@@ -9480,7 +9614,7 @@ function gotoVoiceFlowGuideStep(stepIdx) {
     subEl.style.opacity = "1";
   }
 
-  if (stepIdx >= 2 && stepIdx <= 5) {
+  if (stepIdx >= 2 && stepIdx <= 3) {
     setVoiceFlowMenuOpen(true);
   }
 
@@ -9520,13 +9654,13 @@ function gotoVoiceFlowGuideStep(stepIdx) {
   }
 
   if (card) {
-    card.classList.toggle("is-step5", stepIdx === 5);
+    card.classList.toggle("is-step3", stepIdx === 3);
   }
 
   const polishActionWrap = document.getElementById("voiceflow-guide-polish-action-wrap");
   const polishActionBtn = document.getElementById("voiceflow-guide-polish-action-btn");
   if (polishActionWrap) {
-    if (stepIdx === 4) {
+    if (stepIdx === 2 || stepIdx === 4) {
       const toggle = document.getElementById("toggle-polishing");
       let isPolishOn = toggle ? toggle.checked : true;
       if (typeof polishingConfirmedState === "boolean") {

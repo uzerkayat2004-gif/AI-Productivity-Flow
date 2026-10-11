@@ -7,170 +7,76 @@
     },
     {
       "start": 2.61,
-      "end": 9.6,
-      "text": "With Voice Flow, you can speak your thoughts naturally and have them transcribed directly into whatever application you are using."
+      "end": 7.46,
+      "text": "Speak naturally and have your words typed directly into any app in real time."
     },
     {
-      "start": 9.6,
-      "end": 17.29,
-      "text": "Every dictation is saved securely in your private workspace, where you can search, copy, or review past recordings anytime."
-    },
-    {
-      "start": 17.29,
-      "end": 22.05,
-      "text": "Next, let's explore your live productivity insights and speaking speed!"
+      "start": 7.46,
+      "end": 13.69,
+      "text": "Your workspace tracks your dictation history, live typing speed in words per minute, and daily streaks."
     }
   ],
   "2": [
     {
       "start": 0.5,
-      "end": 3.76,
-      "text": "Step two is your live Insights dashboard."
+      "end": 4.75,
+      "text": "Step two combines your personal dictionary and AI styles."
     },
     {
-      "start": 3.71,
-      "end": 14.7,
-      "text": "Right here, you can track your real-time speaking speed in Words Per Minute, see exactly how much typing time you save compared to forty words per minute typing, and monitor your daily dictation streaks."
+      "start": 4.7,
+      "end": 9.56,
+      "text": "Add custom names and jargon that work whether voice polishing is on or off."
     },
     {
-      "start": 14.7,
-      "end": 22.03,
-      "text": "You can also review which desktop applications you dictate into most across seven days, thirty days, or all time."
-    },
-    {
-      "start": 22.03,
-      "end": 25.36,
-      "text": "Next, let's check out your personal dictionary!"
+      "start": 9.56,
+      "end": 13.34,
+      "text": "Turn polishing on to tailor tones and voice commands."
     }
   ],
   "3": [
     {
       "start": 0.5,
-      "end": 3.41,
-      "text": "Step three is your Personal Dictionary."
+      "end": 4.18,
+      "text": "Step three puts you in full control of your AI engines."
     },
     {
-      "start": 3.36,
-      "end": 9.41,
-      "text": "Add specialized jargon, product names, acronyms, or unique shortcuts right here."
-    },
-    {
-      "start": 9.41,
-      "end": 18.4,
-      "text": "Crucially, your Dictionary works seamlessly whether Voice Polishing is turned ON or completely turned OFF, so your names and jargon come out right every time you dictate."
-    },
-    {
-      "start": 18.4,
-      "end": 22.85,
-      "text": "Next, let's explore AI writing styles and voice commands!"
+      "start": 4.13,
+      "end": 13.4,
+      "text": "Run completely offline with Nemotron for speech recognition and S1-mini by Superwhisper for local grammar polishing, or plug in cloud keys anytime."
     }
   ],
   "4": [
     {
       "start": 0.5,
-      "end": 5.6,
-      "text": "Step four gives you customizable AI Styles and real-time Voice Commands."
+      "end": 3.96,
+      "text": "Finally, dictate anywhere across Windows."
     },
     {
-      "start": 5.55,
-      "end": 17.99,
-      "text": "When Voice Polishing is turned ON, the AI analyzes your entire sentence context and transforms your dictation into tailored tones, like Concise, Work Messages, Professional Email, or Developer formatting."
+      "start": 3.91,
+      "end": 9.11,
+      "text": "Hold your Middle Mouse Click or press Control plus Windows to speak into any application."
     },
     {
-      "start": 17.99,
-      "end": 26.15,
-      "text": "You can also speak voice commands naturally, such as 'bullet point this' or 'make it formal', and Voice Flow executes them on the fly."
-    },
-    {
-      "start": 26.15,
-      "end": 30.07,
-      "text": "Next, let's explore your AI models and providers!"
+      "start": 9.11,
+      "end": 13.69,
+      "text": "Voice Flow types and polishes in real time with zero copy-pasting."
     }
   ],
-  "5": [
+  "4_mac": [
     {
       "start": 0.5,
-      "end": 5.37,
-      "text": "Step five puts you in full control of your AI speech and polishing engines."
+      "end": 3.87,
+      "text": "Finally, dictate anywhere across your Mac."
     },
     {
-      "start": 5.32,
-      "end": 11.03,
-      "text": "You can run completely offline with total privacy, or connect cloud API keys."
+      "start": 3.82,
+      "end": 7.61,
+      "text": "Press Command plus Option to speak into any application."
     },
     {
-      "start": 11.03,
-      "end": 17.29,
-      "text": "For speech recognition, we highly recommend the Nemotron speech model for blazing speed and accuracy."
-    },
-    {
-      "start": 17.29,
-      "end": 25.62,
-      "text": "For voice polishing, we recommend S1-mini by Superwhisper, which delivers high-precision grammar refinement with a lightweight local footprint."
-    },
-    {
-      "start": 25.62,
-      "end": 32.81,
-      "text": "If you prefer cloud APIs like Deepgram, Groq, or OpenAI, you can easily plug in your keys anytime."
-    },
-    {
-      "start": 32.81,
-      "end": 36.77,
-      "text": "Next, let's see how to dictate everywhere across Windows!"
-    }
-  ],
-  "6": [
-    {
-      "start": 0.5,
-      "end": 5.34,
-      "text": "Finally, Voice Flow works seamlessly across your entire Windows computer."
-    },
-    {
-      "start": 5.29,
-      "end": 15.16,
-      "text": "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply hold your Middle Mouse Click or press Control plus Windows and start speaking."
-    },
-    {
-      "start": 15.16,
-      "end": 22.7,
-      "text": "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting."
-    },
-    {
-      "start": 22.7,
-      "end": 25.74,
-      "text": "You are now ready to speak at the speed of thought."
-    },
-    {
-      "start": 25.74,
-      "end": 27.99,
-      "text": "Click Get Started to begin!"
-    }
-  ],
-  "6_mac": [
-    {
-      "start": 0.5,
-      "end": 4.44,
-      "text": "Finally, Voice Flow works seamlessly across your Mac."
-    },
-    {
-      "start": 4.39,
-      "end": 12.98,
-      "text": "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply press Command plus Option and start speaking."
-    },
-    {
-      "start": 12.98,
-      "end": 20.52,
-      "text": "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting."
-    },
-    {
-      "start": 20.52,
-      "end": 23.56,
-      "text": "You are now ready to speak at the speed of thought."
-    },
-    {
-      "start": 23.56,
-      "end": 25.81,
-      "text": "Click Get Started to begin!"
+      "start": 7.61,
+      "end": 12.18,
+      "text": "Voice Flow types and polishes in real time with zero copy-pasting."
     }
   ]
 }
