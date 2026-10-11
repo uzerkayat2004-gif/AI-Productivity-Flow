@@ -9439,6 +9439,23 @@ function _cleanVoiceFlowGuideDemoCard() {
   }
 }
 
+function turnOnPolishingFromVoiceFlowGuide() {
+  const toggle = document.getElementById("toggle-polishing");
+  if (toggle) {
+    toggle.checked = true;
+  }
+  if (typeof togglePolishingSetting === "function") {
+    togglePolishingSetting(true);
+  }
+  const btn = document.getElementById("voiceflow-guide-polish-action-btn");
+  if (btn) {
+    btn.textContent = "Polishing enabled ✓";
+    btn.disabled = true;
+    btn.style.opacity = "0.75";
+    btn.style.cursor = "default";
+  }
+}
+
 function gotoVoiceFlowGuideStep(stepIdx) {
   _voiceflowGuideForceZeroScroll();
   const prevStep = _currentVoiceFlowGuideStep;
@@ -9545,6 +9562,36 @@ function gotoVoiceFlowGuideStep(stepIdx) {
 
   if (card) {
     card.classList.toggle("is-step5", stepIdx === 5);
+  }
+
+  const polishActionWrap = document.getElementById("voiceflow-guide-polish-action-wrap");
+  const polishActionBtn = document.getElementById("voiceflow-guide-polish-action-btn");
+  if (polishActionWrap) {
+    if (stepIdx === 4) {
+      const toggle = document.getElementById("toggle-polishing");
+      let isPolishOn = toggle ? toggle.checked : true;
+      if (typeof polishingConfirmedState === "boolean") {
+        isPolishOn = polishingConfirmedState;
+      } else {
+        try {
+          const cached = localStorage.getItem("vf_polishing_enabled");
+          if (cached !== null) isPolishOn = (cached === "true");
+        } catch (_) {}
+      }
+      if (!isPolishOn) {
+        polishActionWrap.style.display = "block";
+        if (polishActionBtn) {
+          polishActionBtn.textContent = "Turn on polishing";
+          polishActionBtn.disabled = false;
+          polishActionBtn.style.opacity = "1";
+          polishActionBtn.style.cursor = "pointer";
+        }
+      } else {
+        polishActionWrap.style.display = "none";
+      }
+    } else {
+      polishActionWrap.style.display = "none";
+    }
   }
 
   positionVoiceFlowGuideSpotlight(stepObj);
@@ -9662,6 +9709,9 @@ function stopVoiceFlowGuide() {
     overlay.classList.remove("is-step6-active");
     overlay.classList.add("hidden");
   }
+
+  const polishActionWrap = document.getElementById("voiceflow-guide-polish-action-wrap");
+  if (polishActionWrap) polishActionWrap.style.display = "none";
 
   const vid = document.getElementById("voiceflow-guide-real-demo-video");
   if (vid) vid.pause();

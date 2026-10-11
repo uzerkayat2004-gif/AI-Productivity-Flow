@@ -3720,6 +3720,35 @@ body.af-guide-step3-active #af-history-panel {
   color: #705d48;
 }
 
+.af-guide-inline-action-wrap {
+  margin: -4px 0 12px;
+}
+
+.af-guide-inline-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--polish-accent, #efaa73);
+  color: #1a1a18;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.af-guide-inline-action-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .af-guide-inline-action-btn {
+  background: var(--polish-accent, #a94013);
+  color: #ffffff;
+}
+
 /* Synchronized Caption Pill */
 .af-guide-caption-pill {
   display: flex;
