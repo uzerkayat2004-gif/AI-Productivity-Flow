@@ -8455,9 +8455,9 @@ const VIDEOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: Video Library →",
     audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.4, end: 6.71, text: "Now, if you want to use our own built-in video generation tool, then only do you need an API key." },
-      { start: 6.66, end: 17.35, text: "Right here below in Video Flow API Providers, you can set up Google Gemini for free-tier video creation, or connect OpenAI, Groq, and custom providers with one click." },
-      { start: 17.35, end: 21.33, text: "Next, let's explore your video library and downloads!" }
+      { start: 0.5, end: 7.86, text: "Now, if you want to use our own built-in video generation tool, you only need an API key if you use our built-in engine." },
+      { start: 7.81, end: 18.5, text: "Right here below in Video Flow API Providers, you can set up Google Gemini for free-tier video creation, or connect OpenAI, Groq, and custom providers with one click." },
+      { start: 18.5, end: 22.48, text: "Next, let's explore your video library and downloads!" }
     ]
   },
   {
