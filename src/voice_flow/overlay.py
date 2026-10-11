@@ -550,6 +550,34 @@ class FloatingOverlayBar:
     # ------------------------------------------------------------------
     UI_PUMP_INTERVAL_MS = 25
 
+    MAC_DOCK_GAP = 12
+
+    def _mac_visible_area(self) -> tuple[int, int, int, int] | None:
+        """(left, top, right, bottom) of the main screen minus Dock and menu bar, in Tk coords.
+
+        Cocoa frames are bottom-left based on the primary (menu bar) screen; Tk
+        is top-left, so y is flipped against that screen's height. Returns None
+        off macOS or when AppKit is unavailable, so callers keep their old maths."""
+        if sys.platform != "darwin":
+            return None
+        try:
+            from AppKit import NSScreen
+            screens = NSScreen.screens()
+            main = NSScreen.mainScreen()
+            if main is None or not screens:
+                return None
+            primary_h = float(screens[0].frame().size.height)
+            vis = main.visibleFrame()
+            left = int(round(vis.origin.x))
+            right = int(round(vis.origin.x + vis.size.width))
+            top = int(round(primary_h - (vis.origin.y + vis.size.height)))
+            bottom = int(round(primary_h - vis.origin.y))
+            if right - left < 100 or bottom - top < 100:
+                return None
+            return left, top, right, bottom
+        except Exception:
+            return None
+
     def _mac_find_nswindow(self):
         """Locate the NSWindow backing the bar (Tk gives no direct handle)."""
         cached = getattr(self, "_mac_nswindow", None)
@@ -745,6 +773,12 @@ class FloatingOverlayBar:
             max_x = screen_w
         if screen_h is not None and max_y == 0:
             max_y = screen_h
+        if sys.platform == "darwin":
+            # Keep a dragged/saved bar out from under the Dock and menu bar.
+            area = self._mac_visible_area()
+            if area is not None:
+                min_y = max(min_y, area[1])
+                max_y = min(max_y, area[3])
         clamped_x = max(min_x, min(x, max_x - self.width))
         clamped_y = max(min_y, min(y, max_y - self.height))
         return clamped_x, clamped_y
@@ -761,12 +795,22 @@ class FloatingOverlayBar:
             x, y = self._clamp_to_screen(target_x, target_y, screen_w, screen_h)
         elif getattr(self, "dock", "bottom") == "left":
             x, y = 8, (screen_h - self.height) // 2
+            area = self._mac_visible_area()
+            if area is not None:
+                x = area[0] + 8
         elif getattr(self, "dock", "bottom") == "right":
             x, y = screen_w - self.width - 8, (screen_h - self.height) // 2
+            area = self._mac_visible_area()
+            if area is not None:
+                x = area[2] - self.width - 8
         else:
             x = (screen_w - self.width) // 2
             margin = getattr(config, "bar_bottom_margin", 60)
             y = screen_h - self.height - margin
+            # macOS: the Dock can be taller than the margin; sit above it.
+            area = self._mac_visible_area()
+            if area is not None:
+                y = min(y, area[3] - self.height - self.MAC_DOCK_GAP)
         if hasattr(self.win, "geometry"):
             self._suppress_leave_until = time.monotonic() + 0.15
             self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")

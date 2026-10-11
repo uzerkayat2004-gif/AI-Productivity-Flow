@@ -231,3 +231,90 @@ def test_windows_resize_never_schedules_mac_repaint(monkeypatch):
     bar.root.after_calls.clear()
     bar._set_bar_size(bar.width + 100, 28)
     assert not [c for c in bar.root.after_calls if c[1] == bar._mac_force_repaint]
+
+
+# ---------------------------------------------------------------------------
+# Dock overlap: the bar must sit above the Dock (visibleFrame), not 60px up.
+# ---------------------------------------------------------------------------
+def _fake_screens(monkeypatch, *, height=1080, width=1920, dock=80, menu=25):
+    import types
+
+    def rect(x, y, w, h):
+        return types.SimpleNamespace(origin=types.SimpleNamespace(x=x, y=y), size=types.SimpleNamespace(width=w, height=h))
+
+    screen = types.SimpleNamespace(
+        frame=lambda: rect(0, 0, width, height),
+        # Cocoa: origin bottom-left, so the Dock is the bottom `dock` points.
+        visibleFrame=lambda: rect(0, dock, width, height - dock - menu),
+    )
+    appkit = sys.modules["AppKit"]
+    appkit.NSScreen = types.SimpleNamespace(screens=lambda: [screen], mainScreen=lambda: screen)
+
+
+class TallRoot(FakeRoot):
+    def winfo_screenwidth(self):
+        return 1920
+
+    def winfo_screenheight(self):
+        return 1080
+
+
+def _placed_bar(monkeypatch, platform):
+    monkeypatch.setattr(overlay_mod.sys, "platform", platform)
+    bar = FloatingOverlayBar()
+    bar.root = TallRoot()
+    bar.win = FakeWin()
+    bar._user_pos = None
+    bar.dock = "bottom"
+    return bar
+
+
+def _geom(bar):
+    size, x, y = bar.win.geometry_calls[-1].split("+")
+    w, h = (int(v) for v in size.split("x"))
+    return int(x), int(y), w, h
+
+
+def test_mac_bar_sits_above_an_80px_dock(monkeypatch):
+    _fake_screens(monkeypatch, dock=80)
+    bar = _placed_bar(monkeypatch, "darwin")
+    assert bar._mac_visible_area() == (0, 25, 1920, 1000)
+    for width, height in ((bar.idle_width, bar.idle_height), (192, 28), (bar.ready_actions_width, 28)):
+        bar.width, bar.height = width, height
+        bar._position_window()
+        x, y, w, h = _geom(bar)
+        assert y + h <= 1000 - bar.MAC_DOCK_GAP, (y, h)  # bottom edge clears the Dock top (y=1000)
+        assert x == (1920 - w) // 2
+
+
+def test_mac_small_or_hidden_dock_keeps_the_usual_margin(monkeypatch):
+    _fake_screens(monkeypatch, dock=4)  # auto-hidden Dock
+    bar = _placed_bar(monkeypatch, "darwin")
+    bar._position_window()
+    x, y, w, h = _geom(bar)
+    assert y == 1080 - h - 60
+
+
+def test_mac_dragged_bar_is_clamped_out_from_under_the_dock(monkeypatch):
+    _fake_screens(monkeypatch, dock=80)
+    bar = _placed_bar(monkeypatch, "darwin")
+    _x, y = bar._clamp_to_screen(900, 1060)
+    assert y + bar.height <= 1000
+
+
+def test_mac_without_appkit_screen_falls_back(monkeypatch):
+    bar = _placed_bar(monkeypatch, "darwin")  # fixture AppKit has no NSScreen
+    assert bar._mac_visible_area() is None
+    bar._position_window()
+    _x, y, _w, h = _geom(bar)
+    assert y == 1080 - h - 60
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_non_mac_bar_position_unchanged(monkeypatch, platform):
+    _fake_screens(monkeypatch, dock=80)
+    bar = _placed_bar(monkeypatch, platform)
+    assert bar._mac_visible_area() is None
+    bar._position_window()
+    _x, y, _w, h = _geom(bar)
+    assert y == 1080 - h - 60
