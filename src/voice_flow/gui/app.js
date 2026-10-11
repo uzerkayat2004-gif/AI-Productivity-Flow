@@ -9110,8 +9110,8 @@ const VOICEFLOW_GUIDE_STEPS = [
     timeline: [
       { start: 0.5, end: 3.41, text: "Step three is your Personal Dictionary." },
       { start: 3.36, end: 9.41, text: "Add specialized jargon, product names, acronyms, or unique shortcuts right here." },
-      { start: 9.41, end: 20.09, text: "Crucially, your Dictionary works seamlessly whether Voice Polishing is turned ON or completely turned OFF, guaranteeing zero misspellings and instant phonetic replacement every single time you speak." },
-      { start: 20.09, end: 24.55, text: "Next, let's explore AI writing styles and voice commands!" }
+      { start: 9.41, end: 18.4, text: "Crucially, your Dictionary works seamlessly whether Voice Polishing is turned ON or completely turned OFF, so your names and jargon come out right every time you dictate." },
+      { start: 18.4, end: 22.85, text: "Next, let's explore AI writing styles and voice commands!" }
     ]
   },
   {
