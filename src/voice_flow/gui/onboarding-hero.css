@@ -4099,6 +4099,13 @@ body.af-guide-step3-active #af-history-panel {
   display: block;
 }
 
+#af-guide-screen-sim .af-sim-video,
+.af-guide-card.is-step4 #af-guide-screen-sim .af-sim-video {
+  object-fit: contain !important;
+  object-position: left center !important;
+  background: #000;
+}
+
 .af-guide-card.is-step4 .af-guide-caption-pill,
 .af-guide-card.is-step5 .af-guide-caption-pill,
 .af-guide-card.is-step6 .af-guide-caption-pill {
