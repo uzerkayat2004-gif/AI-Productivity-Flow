@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import queue
 import sys
 import threading
 import time
@@ -247,6 +248,13 @@ class FloatingOverlayBar:
         self._proximity_after_id = None
         self._main_thread_id: int | None = None
         self._mainloop_running: bool = False
+        # macOS: Tk 9 timers registered from a non-Tk thread never fire (the
+        # bundled _tkinter runs Tcl in non-threaded mode, so root.after() from
+        # a hotkey/API thread lands in that thread's own notifier). Work from
+        # other threads is queued here and drained by a main-thread pump.
+        self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
+        self._ui_pump_after_id = None
+        self._mac_repaint_done: bool = False
 
     def set_visible(self, visible: bool) -> bool:
         """Runtime hook for the Hub; hiding the bar deliberately leaves hotkeys live."""
@@ -396,7 +404,9 @@ class FloatingOverlayBar:
         """Create and initialize the Tkinter toplevel overlay and canvas."""
         cur_tid = threading.get_ident()
         if getattr(self, "_main_thread_id", None) is not None and cur_tid != self._main_thread_id:
-            if self.root is not None and getattr(self, "_mainloop_running", False):
+            if sys.platform == "darwin":
+                self._ui_queue.put(self._create_window)
+            elif self.root is not None and getattr(self, "_mainloop_running", False):
                 try:
                     self.root.after(0, self._create_window)
                 except Exception:
@@ -430,6 +440,9 @@ class FloatingOverlayBar:
                 pass
 
         self.win = tk.Toplevel(self.root)
+        self._mac_nswindow = None
+        self._mac_shape_key = None
+        self._mac_canvas_bg = None
         if hasattr(self.win, "withdraw"):
             self.win.withdraw()
         if hasattr(self.win, "overrideredirect"):
@@ -449,9 +462,16 @@ class FloatingOverlayBar:
                 pass
 
         self._trans_color = "#010101"
+        if sys.platform == "darwin":
+            # Aqua has no -transparentcolor, so #010101 showed as a black frame
+            # around the rounded corners (and Tk 9 paints systemTransparent
+            # canvas backgrounds black too). The Mac bar instead fills its
+            # canvas with the pill's border colour and is clipped to the pill
+            # shape by a rounded Core Animation mask (see _mac_update_shape).
+            self._trans_color = self.BORDER_REST
         if hasattr(self.win, "config"):
             self.win.config(bg=self._trans_color)
-        if hasattr(self.win, "attributes"):
+        if hasattr(self.win, "attributes") and sys.platform != "darwin":
             try:
                 self.win.attributes("-transparentcolor", self._trans_color)
             except Exception:
@@ -489,6 +509,8 @@ class FloatingOverlayBar:
         self._bring_to_top()
         self._draw()
         self._schedule_proximity_poll()
+        if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
+            self._schedule_mac_repaint()  # recreated bar (restart/refresh)
 
     def _init_tk(self) -> None:
         self._create_window()
@@ -511,10 +533,142 @@ class FloatingOverlayBar:
             self._draw()
         if self.root:
             self._mainloop_running = True
+            if sys.platform == "darwin":
+                self._schedule_ui_pump()
+                self._schedule_mac_repaint()
             try:
                 self.root.mainloop()
             finally:
                 self._mainloop_running = False
+
+    # ------------------------------------------------------------------
+    # macOS (Tk 9 / Aqua) helpers. Windows never reaches these.
+    # ------------------------------------------------------------------
+    UI_PUMP_INTERVAL_MS = 25
+
+    def _mac_find_nswindow(self):
+        """Locate the NSWindow backing the bar (Tk gives no direct handle)."""
+        cached = getattr(self, "_mac_nswindow", None)
+        if cached is not None:
+            return cached
+        try:
+            from AppKit import NSApplication
+        except Exception:
+            return None
+        try:
+            want_w, want_h = int(self.width), int(self.height)
+            want_x = int(self.win.winfo_x()) if hasattr(self.win, "winfo_x") else None
+            best = None
+            for nswin in NSApplication.sharedApplication().windows():
+                frame = nswin.frame()
+                if abs(frame.size.width - want_w) > 1 or abs(frame.size.height - want_h) > 1:
+                    continue
+                if want_x is not None and abs(frame.origin.x - want_x) > 2:
+                    continue
+                best = nswin
+                break
+            self._mac_nswindow = best
+            return best
+        except Exception:
+            return None
+
+    def _mac_update_shape(self, radius: float, fill: str) -> None:
+        """Clip the bar window to its rounded pill shape on macOS.
+
+        Without this the square window corners around the rounded pill show
+        as a dark frame. The canvas background is set to the pill's border
+        colour so the 1px canvas margin blends into the outline."""
+        canvas = self.canvas
+        if canvas is not None and hasattr(canvas, "config") and getattr(self, "_mac_canvas_bg", None) != fill:
+            try:
+                canvas.config(bg=fill)
+                self.win.config(bg=fill)
+                self._mac_canvas_bg = fill
+            except Exception:
+                pass
+        key = (id(self.win), int(self.width), int(self.height), float(radius))
+        if getattr(self, "_mac_shape_key", None) == key:
+            return
+        nswin = self._mac_find_nswindow()
+        if nswin is None:
+            return
+        try:
+            from AppKit import NSColor
+
+            nswin.setOpaque_(False)
+            nswin.setBackgroundColor_(NSColor.clearColor())
+            nswin.setHasShadow_(False)
+            view = nswin.contentView()
+            view.setWantsLayer_(True)
+            layer = view.layer()
+            layer.setCornerRadius_(float(radius))
+            layer.setMasksToBounds_(True)
+            self._mac_shape_key = key
+        except Exception:
+            self._mac_nswindow = None
+
+    def _schedule_ui_pump(self) -> None:
+        if self.root is None:
+            return
+        try:
+            self._ui_pump_after_id = self.root.after(self.UI_PUMP_INTERVAL_MS, self._pump_ui_queue)
+        except Exception:
+            self._ui_pump_after_id = None
+
+    def _pump_ui_queue(self, max_items: int = 200) -> None:
+        """Run queued cross-thread UI work on the Tk main thread."""
+        self._ui_pump_after_id = None
+        for _ in range(max_items):
+            try:
+                func = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                func()
+            except Exception:
+                pass
+        if getattr(self, "_mainloop_running", False):
+            self._schedule_ui_pump()
+
+    def _schedule_mac_repaint(self, delay_ms: int = 350) -> None:
+        if self.root is None:
+            return
+        try:
+            self.root.after(delay_ms, self._mac_force_repaint)
+        except Exception:
+            pass
+
+    def _mac_force_repaint(self) -> None:
+        """Work around Tk 9 Aqua never painting the first small toplevel.
+
+        The bar is the first window Tk maps; until its geometry changes, Aqua
+        shows the default light window background instead of the canvas (the
+        "white floating bar"). A one-pixel resize after mapping, followed by a
+        full redraw, makes Tk paint the canvas reliably."""
+        win = self.win
+        if win is None:
+            return
+        try:
+            if hasattr(win, "winfo_ismapped") and not win.winfo_ismapped():
+                if not self.visible or self.state == "HIDDEN":
+                    return  # repaint once the bar is shown again
+            if hasattr(win, "geometry"):
+                x, y = self._current_xy()
+                win.geometry(f"{self.width + 1}x{self.height}+{x}+{y}")
+                if hasattr(win, "update_idletasks"):
+                    win.update_idletasks()
+            self._mac_repaint_done = True
+        except Exception:
+            pass
+        self._position_window()
+        self._last_draw_sig = None  # bypass the redraw throttle
+        self._draw()
+
+    def _current_xy(self) -> tuple[int, int]:
+        try:
+            return int(self.win.winfo_x()), int(self.win.winfo_y())
+        except Exception:
+            return 0, 0
 
     def _on_map(self, _event: tk.Event) -> None:
         self._apply_win32_styles()
@@ -694,6 +848,13 @@ class FloatingOverlayBar:
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
         cur_tid = threading.get_ident()
+        if sys.platform == "darwin":
+            main_tid = getattr(self, "_main_thread_id", None)
+            if main_tid is not None and cur_tid != main_tid:
+                # Never touch Tk from a background thread on macOS: the pump
+                # on the Tk thread drains this queue (also before mainloop).
+                self._ui_queue.put(func)
+                return
         if self.root is not None and getattr(self, "_mainloop_running", False):
             try:
                 self.root.after(0, func)
@@ -1622,6 +1783,10 @@ class FloatingOverlayBar:
             and not getattr(self, "_selection_expanded", False)
             and not rows
         )
+        if sys.platform == "darwin" and self.win is not None:
+            radius = min(flow_height / 2, 14 if is_rest else 16)
+            self._mac_update_shape(radius, self.BORDER_REST if is_rest else self.BORDER)
+
         if self.state in ("PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
             self._draw_working_shell(flow_width, flow_height)
         elif not is_rest and self.state != "READY":
