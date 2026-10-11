@@ -68,3 +68,27 @@ def test_live_foreign_listener_is_still_occupied():
         assert result.status == "occupied"
     finally:
         server.close()
+
+
+def test_skip_tour_never_auto_starts_audio_flow_guide():
+    html = _read("index.html")
+    skip_buttons = re.findall(r'<button class="scene1-skip-badge" onclick="([^"]+)"', html)
+    assert skip_buttons and all(b == "finishOnboarding({ skipped: true })" for b in skip_buttons)
+    assert 'onclick="stopOnboardingNarration(); finishOnboarding({ skipped: true });"' in html
+    source = _read("app.js")
+    finish = source[source.index("function finishOnboarding(options)"):source.index("// AUDIO FLOW IN-APP GUIDANCE ENGINE")]
+    assert finish.index("if (skipped) return;") < finish.index("startAudioFlowGuide(")
+
+
+def test_audio_flow_guide_never_locks_app_without_visible_card():
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    harness = Path(__file__).with_name("af_guide_safety_net.cjs")
+    result = subprocess.run([node, str(harness)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr

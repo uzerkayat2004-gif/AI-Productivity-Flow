@@ -7701,7 +7701,9 @@ function startOnboardingTour() {
   gotoOnboardingSlide(1);
 }
 
-function finishOnboarding() {
+function finishOnboarding(options) {
+  // Skip Tour / Exit tour must never chain into the Audio Flow guide.
+  const skipped = !!(options && options.skipped);
   stopOnboardingNarration();
   const source = document.getElementById("onboarding-source");
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
@@ -7733,10 +7735,12 @@ function finishOnboarding() {
     switchPage("audioflow");
   }
 
-  // Launch the interactive Audio Flow in-app guide automatically
+  // Launch the interactive Audio Flow in-app guide automatically, but only
+  // after a completed tour (never after Skip Tour / Exit tour).
+  if (skipped) return;
   setTimeout(() => {
     if (typeof startAudioFlowGuide === "function") {
-      startAudioFlowGuide();
+      startAudioFlowGuide({ auto: true });
     }
   }, 450);
 }
@@ -7837,7 +7841,37 @@ function _afGuideForceZeroScroll() {
   if (document.body && document.body.scrollTop !== 0) document.body.scrollTop = 0;
 }
 
+// Safety net: the guide may only lock the app while its card is actually
+// styled and visible. If the guide stylesheet is missing (unstyled overlay sits
+// in normal page flow) or the card is off-screen, the user would face an app
+// that silently ignores every click, scroll and key, so release the lock.
+function _afGuideIsUsable() {
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  const card = document.getElementById("af-guide-card");
+  if (!overlay || !card || overlay.classList.contains("hidden")) return false;
+  try {
+    const overlayStyle = window.getComputedStyle(overlay);
+    if (overlayStyle.position === "static" || overlayStyle.display === "none" || overlayStyle.visibility === "hidden") return false;
+    const cardStyle = window.getComputedStyle(card);
+    if (cardStyle.display === "none" || cardStyle.visibility === "hidden") return false;
+    const r = card.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    return r.width > 40 && r.height > 40 && r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function _afGuideReleaseIfUnusable() {
+  if (_afGuideIsUsable()) return false;
+  console.warn("[Audio Flow guide] Guide card is not visible (styles missing?); releasing the interaction lock.");
+  stopAudioFlowGuide({ unusable: true });
+  return true;
+}
+
 function _afGuideBlockAppEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   const guideCard = document.getElementById("af-guide-card");
   if (guideCard && guideCard.contains(e.target)) {
     return; // Allow clicks/taps on HUD buttons (Next, Close, Back, Voiceover, dots)
@@ -7852,6 +7886,7 @@ function _afGuideBlockAppEvent(e) {
 }
 
 function _afGuidePreventScrollEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   _afGuideForceZeroScroll();
   e.preventDefault();
   e.stopPropagation();
@@ -7862,6 +7897,7 @@ function _afGuidePreventScrollEvent(e) {
 }
 
 function _afGuidePreventKeyEvent(e) {
+  if (_afGuideReleaseIfUnusable()) return;
   if (e.key === "Escape") {
     stopAudioFlowGuide();
     e.preventDefault();
@@ -8257,12 +8293,18 @@ function prevAudioFlowGuideStep() {
   gotoAudioFlowGuideStep(Math.max(1, _currentAfGuideStep - 1));
 }
 
-function startAudioFlowGuide() {
+function startAudioFlowGuide(options) {
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (!overlay) return;
+  // Probe the guide stylesheet before locking anything: an unstyled overlay
+  // is position:static, and then the guide must not start at all.
+  if (window.getComputedStyle && window.getComputedStyle(overlay).position === "static") {
+    console.warn("[Audio Flow guide] Guide styles are missing; not starting the guide.");
+    return;
+  }
   if (typeof switchPage === "function") {
     switchPage("audioflow");
   }
-  const overlay = document.getElementById("audioflow-guide-overlay");
-  if (!overlay) return;
 
   _afGuideForceZeroScroll();
 
@@ -8293,6 +8335,8 @@ function startAudioFlowGuide() {
   gotoAudioFlowGuideStep(1);
 
   window.addEventListener("resize", _onAfGuideResize);
+  // Re-check once the card has laid out; release the lock if it never shows.
+  setTimeout(_afGuideReleaseIfUnusable, 1200);
 }
 
 function _onAfGuideResize() {
@@ -8304,7 +8348,8 @@ function _onAfGuideResize() {
   }
 }
 
-function stopAudioFlowGuide() {
+function stopAudioFlowGuide(options) {
+  const unusable = !!(options && options.unusable);
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
 
@@ -8352,7 +8397,8 @@ function stopAudioFlowGuide() {
   if (afSummaries.length === 0) {
     _cleanAfGuideDemoHistoryCard();
   }
-  setOnboardingFlag("vf_onboarding.af_guided", "1");
+  // An unusable (unstyled) guide was never actually seen; keep it pending.
+  if (!unusable) setOnboardingFlag("vf_onboarding.af_guided", "1");
 }
 
 function replayOnboarding() {
