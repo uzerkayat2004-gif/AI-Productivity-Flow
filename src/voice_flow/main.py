@@ -119,6 +119,10 @@ class DictationState(str, Enum):
 # chunk (~1.5-1.8s) plus in-flight chunks to drain instead of being discarded.
 POST_RELEASE_WORK_BUDGET_SECONDS = 4.0
 INJECTION_RESERVE_SECONDS = 0.3
+# Keep the large speech model resident briefly between OFF-mode dictations so
+# the next short utterance can reuse it without overlapping AI polish memory.
+NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = 10.0
+_S1_WARM_GATE = threading.Lock()
 # Cloud transcription keeps the full recovery window, while optional cleanup
 # shares a separate two-second interactive release target.
 CLOUD_INTERACTIVE_TARGET_SECONDS = 2.0
@@ -231,16 +235,52 @@ def _polishing_enabled() -> bool:
     return value == 1
 
 
-def _warm_voice_gemini_transport(model_ref: object) -> None:
-    """Warm only the selected remote Gemini transport after capture is live."""
+def _warm_voice_gemini_transport(model_ref: object, session: Any = None, owner: Any = None) -> None:
+    """Warm only the selected polish engine after its capture is live."""
     try:
         if not _polishing_enabled():
+            return
+        if session is not None and owner is not None and getattr(owner, "session", None) is not session:
             return
         selected = str(model_ref or "").strip()
         if selected.lower().startswith("gemini/"):
             from voice_flow.voice_gemini_transport import warm_gemini_connection
             threading.Thread(target=warm_gemini_connection, name="voice-gemini-prewarm", daemon=True).start()
             return
+        from voice_flow import s1_engine
+        if s1_engine.is_s1_model_ref(selected) and s1_engine.is_s1_downloaded():
+            from voice_flow.local_model_resources import acquire_model_use
+            if not _S1_WARM_GATE.acquire(blocking=False):
+                return
+            try:
+                if not _polishing_enabled():
+                    return
+                if session is not None and owner is not None and getattr(owner, "session", None) is not session:
+                    return
+                lease = acquire_model_use("polish")
+                try:
+                    s1_engine.warm_s1_model(timeout_seconds=5.0)
+                    # The warm instance should remain resident through the
+                    # capture that requested it. Keep this one bounded worker
+                    # asleep until the immutable session ends or privacy is
+                    # switched off, then allow normal idle cleanup.
+                    if session is not None and owner is not None:
+                        while _polishing_enabled():
+                            if getattr(owner, "session", None) is not session:
+                                break
+                            state = getattr(owner, "state", None)
+                            state_value = str(getattr(state, "value", state) or "").lower()
+                            if state_value not in {"recording", "processing"}:
+                                break
+                            time.sleep(0.25)
+                finally:
+                    release_after_idle = getattr(lease, "release_after_idle", None)
+                    if callable(release_after_idle):
+                        release_after_idle(s1_engine.S1_WARM_IDLE_SECONDS)
+                    else:
+                        lease.release()
+            finally:
+                _S1_WARM_GATE.release()
     except Exception:
         return
 
@@ -277,7 +317,7 @@ def _call_with_optional_deadline(func, *args, deadline: float | None = None, **k
         except TypeError as exc:
             message = str(exc).lower()
             unsupported = next(
-                (key for key in ("model_ref", "deadline", "overlap_prefix_seconds", "task", "overrides", "speed_mode", "outcome_callback") if key in call_kwargs and key in message and "keyword" in message),
+                (key for key in ("model_ref", "deadline", "overlap_prefix_seconds", "task", "overrides", "speed_mode", "outcome_callback", "style_id", "command", "category", "command_format", "dictionary_trace") if key in call_kwargs and key in message and "keyword" in message),
                 None,
             )
             if unsupported is None:
@@ -911,7 +951,24 @@ class VoiceFlowApp:
         release = getattr(lease, "release", None)
         if callable(release):
             try:
-                release()
+                stt_model_ref = (
+                    session.get("stt_model_ref")
+                    if isinstance(session, dict)
+                    else getattr(session, "stt_model_ref", None)
+                )
+                try:
+                    from voice_flow.nemotron_engine import is_nemotron_model
+                    keep_nemotron_warm = (
+                        not _polishing_enabled()
+                        and is_nemotron_model(stt_model_ref)
+                    )
+                except Exception:
+                    keep_nemotron_warm = False
+                release_after_idle = getattr(lease, "release_after_idle", None)
+                if keep_nemotron_warm and callable(release_after_idle):
+                    release_after_idle(NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
+                else:
+                    release()
             except Exception:
                 log.debug("Could not release session model demand", exc_info=True)
         if isinstance(session, dict):
@@ -1199,7 +1256,7 @@ class VoiceFlowApp:
             # Polishing warm-up is advisory: do it after capture is live.
             threading.Thread(
                 target=_warm_voice_gemini_transport,
-                args=(getattr(session, "polish_model_ref", None),),
+                args=(getattr(session, "polish_model_ref", None), session, self),
                 name="voice-polish-warmup",
                 daemon=True,
             ).start()
@@ -1678,6 +1735,11 @@ class VoiceFlowApp:
                 return False
 
         selected_lfm = is_local_polish_model_ref(selected_model)
+        try:
+            from voice_flow.s1_engine import is_s1_model_ref
+            selected_s1 = is_s1_model_ref(selected_model)
+        except Exception:
+            selected_s1 = False
         command_format = getattr(command, "format", None) if command is not None else None
         command_context = getattr(command, "context_reference", None) if command is not None else None
         command_operation = getattr(command, "operation", "rewrite") if command is not None else ""
@@ -1692,7 +1754,7 @@ class VoiceFlowApp:
         )
         simple_format = False
         if (
-            selected_lfm and effective is not None and command is not None
+            selected_lfm and not selected_s1 and effective is not None and command is not None
             and command_format == "bullet_list"
             and getattr(effective, "format", None) == command_format
             and str(getattr(effective, "style_id", "") or "").endswith(("_formal", "_casual"))
@@ -1720,7 +1782,7 @@ class VoiceFlowApp:
         deterministic_format = simple_format and polishing_enabled
         deterministic_local_rewrite = False
         if (
-            selected_lfm and polishing_enabled and effective is not None and command is not None and force_ai
+            selected_lfm and not selected_s1 and polishing_enabled and effective is not None and command is not None and force_ai
             and level != "cleanup_none" and not getattr(command, "preserve_wording", False)
             and not getattr(command, "persistent_change", False) and not getattr(command, "ambiguous", False)
             and command_context is None
@@ -1748,6 +1810,9 @@ class VoiceFlowApp:
             task="cleanup" if deterministic_request else task,
             overrides=command_overrides,
             command_format=command_format,
+            style_id=str(post_style_id),
+            command=command,
+            category=getattr(effective, "category", None) if effective is not None else None,
             outcome_callback=_notify_outcome,
             dictionary_trace=dictionary_trace,
             speed_mode=_normalize_polish_speed_mode(speed_mode or getattr(session, "polish_speed_mode", None) or (session.get("polish_speed_mode") if isinstance(session, dict) else None)),
@@ -1777,8 +1842,15 @@ class VoiceFlowApp:
         local_attempt_failed = observed_outcome["value"] in {"provider_failure", "fidelity_reject", "command_unfulfilled"} or (
             observed_outcome["value"] == "timeout" and attempt_info["lfm_bridge_attempted"]
         )
+        s1_prompt_cleanup = False
+        if selected_s1 and effective is not None and command is not None and task == "prompt":
+            allowed_cleanup_overrides = {"tone", "formality"}
+            s1_prompt_cleanup = (
+                not command_overrides
+                or set(command_overrides).issubset(allowed_cleanup_overrides)
+            ) and observed_outcome["value"] == "local_model"
         if (
-            local_attempt_failed and _polishing_enabled() and not deterministic_request
+            (local_attempt_failed or s1_prompt_cleanup) and _polishing_enabled() and not deterministic_request
             and effective is not None and command is not None and force_ai
             and level != "cleanup_none" and selected_model != "local/deterministic"
             and not getattr(command, "preserve_wording", False)
@@ -1796,6 +1868,10 @@ class VoiceFlowApp:
                 observed_outcome["value"] = "local_rewrite"
                 _emit_final_outcome()
                 return local_rewrite
+            if s1_prompt_cleanup:
+                # S1 only normalized the transcript. A prompt command still
+                # needs the finite rewrite to succeed before it is fulfilled.
+                observed_outcome["value"] = "command_unfulfilled"
         # The polisher's deterministic fallback has already applied safe
         # cleanup and dictionary replacements. Do not run style formatting
         # after a disabled/failed AI attempt, because a style or command did

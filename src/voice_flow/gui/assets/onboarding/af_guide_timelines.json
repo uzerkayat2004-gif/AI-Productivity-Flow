@@ -1,0 +1,130 @@
+{
+  "1": [
+    {
+      "start": 0.1,
+      "end": 2.73,
+      "text": "Welcome inside Audio Flow!"
+    },
+    {
+      "start": 2.68,
+      "end": 5.86,
+      "text": "Here, you have two powerful ways to listen."
+    },
+    {
+      "start": 5.86,
+      "end": 11.13,
+      "text": "With Read mode on the left, you can hear any selected text read aloud word-for-word."
+    },
+    {
+      "start": 11.13,
+      "end": 18.15,
+      "text": "You can choose from dozens of natural voices and adjust reading speeds from 0.75x up to 2x."
+    },
+    {
+      "start": 18.15,
+      "end": 21.97,
+      "text": "On the right is Summary mode, powered by NotebookLM."
+    },
+    {
+      "start": 21.97,
+      "end": 28.69,
+      "text": "It extracts key ideas from lengthy articles, and you can even listen in an engaging two-voice podcast format."
+    },
+    {
+      "start": 28.69,
+      "end": 33.33,
+      "text": "Let's move to Step 2 to explore API keys and Gemini setup."
+    }
+  ],
+  "2": [
+    {
+      "start": 0.1,
+      "end": 3.41,
+      "text": "Step 2 is connecting your API keys."
+    },
+    {
+      "start": 3.36,
+      "end": 9.16,
+      "text": "AI Productivity Flow includes Microsoft Edge voices completely free out of the box."
+    },
+    {
+      "start": 9.16,
+      "end": 15.4,
+      "text": "To unlock Gemini AI, Deepgram, or OpenAI, click the Gemini card right here."
+    },
+    {
+      "start": 15.4,
+      "end": 25.51,
+      "text": "Click 'Get API Key' to open Google AI Studio in one click, copy your free key, paste it in the field, and tap 'Test Connection' to verify it."
+    },
+    {
+      "start": 25.51,
+      "end": 29.26,
+      "text": "All keys are stored and encrypted locally on your computer."
+    },
+    {
+      "start": 29.26,
+      "end": 33.0,
+      "text": "Next, let's explore history and audio downloads."
+    }
+  ],
+  "3": [
+    {
+      "start": 0.1,
+      "end": 3.26,
+      "text": "Step 3 is your Audio Summary History."
+    },
+    {
+      "start": 3.21,
+      "end": 7.77,
+      "text": "You can toggle this bar open or closed anytime to see your past work."
+    },
+    {
+      "start": 7.77,
+      "end": 12.41,
+      "text": "Every summary you create is automatically saved in your offline library."
+    },
+    {
+      "start": 12.41,
+      "end": 22.7,
+      "text": "You can search past notes, replay waveforms, and download the MP3 audio file with one click\u2014perfect for listening on your phone during your commute or sharing with your team."
+    },
+    {
+      "start": 22.7,
+      "end": 27.02,
+      "text": "Next, let's see how to use Audio Flow directly on your screen!"
+    }
+  ],
+  "4": [
+    {
+      "start": 0.1,
+      "end": 6.11,
+      "text": "Finally, the true superpower of Audio Flow is that you never need to copy-paste or switch apps."
+    },
+    {
+      "start": 6.06,
+      "end": 13.29,
+      "text": "Whenever you are reading an article on Twitter, browsing in Chrome, or reading a PDF, simply highlight any text."
+    },
+    {
+      "start": 13.29,
+      "end": 17.38,
+      "text": "An instant floating quick-action menu appears right by your cursor."
+    },
+    {
+      "start": 17.38,
+      "end": 24.86,
+      "text": "Click Summary or Read, and a floating player appears on your desktop with live waveforms and playback controls while you keep working."
+    },
+    {
+      "start": 24.86,
+      "end": 27.52,
+      "text": "You're now ready to use Audio Flow."
+    },
+    {
+      "start": 27.52,
+      "end": 29.98,
+      "text": "Click Get Started to explore!"
+    }
+  ]
+}

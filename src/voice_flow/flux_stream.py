@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 import numpy as np
 
 from voice_flow import stt_engines
+from voice_flow.voice_enhance import LiveSpeechEnhancer
 
 log = logging.getLogger(__name__)
 _CONNECTION_SLOTS = threading.BoundedSemaphore(2)
@@ -43,6 +44,17 @@ def _stream_failure_reason(exc: BaseException) -> str:
     if len(detail) > 180:
         detail = detail[:177] + "..."
     return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+
+
+def _session_enhancer():
+    """Capture the microphone profile once; state belongs to this live session."""
+    try:
+        from voice_flow.storage import storage
+
+        profile = str(storage.get_setting("voice_flow_mic_profile", "auto") or "auto")
+    except Exception:
+        profile = "auto"
+    return LiveSpeechEnhancer(profile=profile)
 
 
 class NovaStreamTranscriber:
@@ -80,6 +92,7 @@ class NovaStreamTranscriber:
         # rather than silently substituting a different accuracy/locale tier.
         self._model = model
         self._deadline = deadline
+        self._live_enhancer = _session_enhancer()
         threading.Thread(target=self._run, name="vf-nova-live", daemon=True).start()
 
     def submit_frame(self, frame, native_sr):
@@ -171,11 +184,14 @@ class NovaStreamTranscriber:
                             frame, sample_rate = item
                             if sample_rate != rate:
                                 raise RuntimeError("Microphone rate changed mid-recording")
-                            mono, pcm = self._pcm(frame)
+                            mono = np.mean(frame, axis=1) if frame.ndim > 1 else frame
+                            mono = np.nan_to_num(mono, nan=0.0, posinf=0.0, neginf=0.0)
                             audible = np.flatnonzero(np.abs(mono) > 0.002)
                             if audible.size:
                                 state["required_end"] = (samples + int(audible[-1]) + 1) / rate
                             samples += len(mono)
+                            conditioned = self._live_enhancer.process(mono, rate)
+                            pcm = (np.clip(conditioned, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
                             if pcm:
                                 websocket.send(pcm)
                         try:
@@ -268,6 +284,7 @@ class FluxStreamTranscriber:
         if self._model not in {"flux-general-en", "flux-general-multi"}:
             raise ValueError("A supported Flux model is required")
         self._deadline = deadline
+        self._live_enhancer = _session_enhancer()
         threading.Thread(target=self._run, name="vf-flux-live", daemon=True).start()
 
     def submit_frame(self, frame, native_sr):
@@ -358,7 +375,8 @@ class FluxStreamTranscriber:
                             if audible.size:
                                 state["required_end"] = (samples + int(audible[-1]) + 1) / rate
                             samples += len(mono)
-                            pending.extend((np.clip(mono, -1, 1) * 32767).astype("<i2").tobytes())
+                            conditioned = self._live_enhancer.process(mono, rate)
+                            pending.extend((np.clip(conditioned, -1, 1) * 32767).astype("<i2").tobytes())
                             while len(pending) >= frame_bytes:
                                 websocket.send(bytes(pending[:frame_bytes]))
                                 del pending[:frame_bytes]

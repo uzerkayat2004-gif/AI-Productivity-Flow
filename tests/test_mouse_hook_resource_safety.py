@@ -87,6 +87,51 @@ def test_ptt_middle_down_up_runs_actions_off_the_hook_thread(monkeypatch):
         hook.stop()
 
 
+def test_hybrid_orphan_middle_up_does_not_finish_toggle_recording(monkeypatch):
+    actions: list[str] = []
+    hook = _installed_hook(
+        monkeypatch,
+        on_start=lambda: actions.append("start"),
+        on_finish=lambda: actions.append("finish"),
+    )
+    hook._trigger_mode = "hybrid"
+    clock = iter((10.0, 10.0, 10.1, 10.1, 12.0, 12.0))
+    monkeypatch.setattr(mouse_hook.time, "time", lambda: next(clock))
+
+    hook._hook_proc_ptr(0, WM_MBUTTONDOWN, 0)
+    hook._hook_proc_ptr(0, WM_MBUTTONUP, 0)
+    hook._hook_proc_ptr(0, WM_MBUTTONUP, 0)
+
+    queued_actions = [callback for callback, _args in list(hook._control_queue.queue)]
+    assert queued_actions == [hook._safe_on_start]
+    assert hook._is_recording is True
+
+
+def test_hybrid_matched_long_middle_press_still_finishes(monkeypatch):
+    hook = _installed_hook(monkeypatch)
+    hook._trigger_mode = "hybrid"
+    clock = iter((10.0, 10.0, 10.5, 10.5))
+    monkeypatch.setattr(mouse_hook.time, "time", lambda: next(clock))
+
+    hook._hook_proc_ptr(0, WM_MBUTTONDOWN, 0)
+    hook._hook_proc_ptr(0, WM_MBUTTONUP, 0)
+
+    queued_actions = [callback for callback, _args in list(hook._control_queue.queue)]
+    assert queued_actions == [hook._safe_on_start, hook._safe_on_finish]
+    assert hook._is_recording is False
+
+
+def test_reinstall_discards_unmatched_middle_press(monkeypatch):
+    hook = _installed_hook(monkeypatch)
+    hook._mbutton_is_down = True
+    hook._mbutton_press_time = 10.0
+
+    assert hook._install_hook()
+
+    assert hook._mbutton_is_down is False
+    assert hook._mbutton_press_time == 0.0
+
+
 def test_callbacks_use_fixed_workers_and_control_overtakes_slow_selection(monkeypatch):
     selection_started = threading.Event()
     release_selection = threading.Event()

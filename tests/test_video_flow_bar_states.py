@@ -86,7 +86,7 @@ def test_video_processing_progress_strip_layout_and_geometry() -> None:
     bar.video_job_id = "job-123"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_progress_width, bar.idle_height + 4 + 26)
+    assert (w, h) == (bar.video_progress_width, 26)
     assert w >= 260
     assert h >= 24
 
@@ -110,7 +110,7 @@ def test_video_failed_state_pill_dimensions_and_interactions() -> None:
     bar.video_job_id = "job-failed-1"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_failed_width, bar.idle_height + 4 + 26)
+    assert (w, h) == (bar.video_failed_width, 26)
     assert w >= 190
     assert h >= 24
 
@@ -138,8 +138,8 @@ def test_video_ready_state_pill_dimensions_and_interactions() -> None:
     bar.video_job_id = "job-ready-1"
 
     w, h = bar._target_size()
-    assert (w, h) == (bar.video_ready_width, bar.idle_height + 4 + 26)
-    assert (w, h) == (280, 40)
+    assert (w, h) == (bar.video_ready_width, 26)
+    assert (w, h) == (280, 26)
     assert w >= 180
     assert h >= 24
 

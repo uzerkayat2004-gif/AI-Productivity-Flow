@@ -23,6 +23,14 @@ except Exception:
 
 from voice_flow.injector import VF_SYNTHETIC_EXTRA_INFO, is_synthetic_input_active
 from voice_flow.mouse_hook import Win32MouseHook
+from voice_flow.hotkey_config import (
+    parse_hotkey_string,
+    key_vk as _vk_for_key_name,
+    shortcut_capture_active,
+    _begin_shortcut_capture,
+    _renew_shortcut_capture,
+    _end_shortcut_capture,
+)
 
 log = logging.getLogger(__name__)
 
@@ -86,89 +94,6 @@ except Exception:
     kernel32 = None
 
 
-def parse_hotkey_string(hotkey_str: str) -> dict[str, Any]:
-    """Parse a hotkey combination string like 'Ctrl+Win', 'Alt+Space', 'Double Ctrl', 'Double Alt', 'F8'."""
-    raw = (hotkey_str or "").strip()
-    is_double = False
-    cleaned = raw
-    if cleaned.lower().startswith("double "):
-        is_double = True
-        cleaned = cleaned[7:].strip()
-    elif cleaned.lower().startswith("double-"):
-        is_double = True
-        cleaned = cleaned[7:].strip()
-
-    parts = [p.strip().lower() for p in cleaned.replace("-", "+").split("+") if p.strip()]
-    modifiers = set()
-    base_key = None
-    for part in parts:
-        if part in ("ctrl", "control"):
-            modifiers.add("ctrl")
-        elif part in ("alt", "menu"):
-            modifiers.add("alt")
-        elif part in ("shift",):
-            modifiers.add("shift")
-        elif part in ("win", "cmd", "windows", "super"):
-            modifiers.add("win")
-        else:
-            base_key = part
-    return {
-        "raw": hotkey_str,
-        "is_double": is_double,
-        "modifiers": modifiers,
-        "base_key": base_key,
-        "parts": parts,
-    }
-
-
-def _vk_for_key_name(name: str | None) -> int | None:
-    if not name:
-        return None
-    name = name.lower().strip()
-    special_keys = {
-        "space": 0x20,
-        "tab": 0x09,
-        "enter": 0x0D,
-        "return": 0x0D,
-        "esc": 0x1B,
-        "escape": 0x1B,
-        "caps_lock": 0x14,
-        "capslock": 0x14,
-        "insert": 0x2D,
-        "delete": 0x2E,
-        "del": 0x2E,
-        "home": 0x24,
-        "end": 0x23,
-        "pageup": 0x21,
-        "page_up": 0x21,
-        "pagedown": 0x22,
-        "page_down": 0x22,
-        "backquote": 0xC0,
-        "`": 0xC0,
-        "tilde": 0xC0,
-        "~": 0xC0,
-        "scroll_lock": 0x91,
-        "scrolllock": 0x91,
-        "pause": 0x13,
-        "backspace": 0x08,
-        "ctrl": 0x11,
-        "control": 0x11,
-        "alt": 0x12,
-        "shift": 0x10,
-        "win": 0x5B,
-    }
-    if name in special_keys:
-        return special_keys[name]
-    if name.startswith("f") and name[1:].isdigit():
-        fnum = int(name[1:])
-        if 1 <= fnum <= 24:
-            return 0x70 + (fnum - 1)
-    if len(name) == 1:
-        c = name.upper()
-        if "A" <= c <= "Z" or "0" <= c <= "9":
-            return ord(c)
-    return None
-
 
 def _is_key_down(vk: int | None) -> bool:
     if vk is None:
@@ -195,6 +120,8 @@ def _key_matches_name(key: keyboard.Key | keyboard.KeyCode | None, name: str | N
         return True
     if hasattr(key, "char") and key.char:
         if key.char.lower() == name:
+            return True
+        if _vk_for_key_name(key.char) is not None and _vk_for_key_name(key.char) == _vk_for_key_name(name):
             return True
         # Handle ASCII control characters when Ctrl is held (e.g. \x04 for 'd')
         if len(key.char) == 1 and ord(key.char) < 32 and len(name) == 1:
@@ -428,9 +355,16 @@ class InputTriggerListener:
 
         self._key_listener: keyboard.Listener | None = None
         self._pressed_keys: set[keyboard.Key | keyboard.KeyCode] = set()
+        self._native_pressed_keys: set[int] = set()
+        self._native_key_suppression: dict[int, bool] = {}
+        self._armed_custom_info = None
+        self._capture_native_keys: set[int] = set()
+        self._capture_fallback_keys: set[Any] = set()
         self._lock = threading.Lock()
         self._action_lock = threading.Lock()
         self._is_recording = False
+        self._armed_trigger_mode = None
+        self._armed_hotkey_trigger = None
         self._hotkey_triggered = False
         self._alt_space_triggered = False
         self._alt_tab_triggered = False
@@ -552,6 +486,10 @@ class InputTriggerListener:
 
     def set_recording_state(self, recording: bool) -> None:
         """Inform listener of current recording state."""
+        # A prior mouse callback must not erase a newer queued gesture.
+        sync_mouse = getattr(self._mouse_hook, "_set_recording_state_if_current", self._mouse_hook.set_recording_state)
+        if sync_mouse(recording) is False:
+            return
         with self._lock:
             self._is_recording = recording
             if not recording:
@@ -567,11 +505,61 @@ class InputTriggerListener:
                 if self._ctrl_check_timer:
                     self._ctrl_check_timer.cancel()
                     self._ctrl_check_timer = None
-        self._mouse_hook.set_recording_state(recording)
+
+    def _reset_shortcut_transients(self) -> None:
+        if self._ctrl_check_timer:
+            self._ctrl_check_timer.cancel()
+            self._ctrl_check_timer = None
+        self._pressed_keys.clear()
+        self._native_pressed_keys.clear()
+        self._native_key_suppression.clear()
+        self._last_ctrl_release_time = 0.0
+        self._last_custom_release_time = 0.0
+        self._ctrl_chord_active = False
+        self._ctrl_hold_triggered = False
+        self._ctrl_toggle_mode_active = False
+        self._ctrl_just_toggled_off = False
+        self._hotkey_triggered = False
+        self._alt_space_triggered = False
+        self._alt_tab_triggered = False
+        self._custom_hotkey_triggered = False
+        self._armed_custom_info = None
+        self._armed_trigger_mode = None
+        self._armed_hotkey_trigger = None
+
+    def begin_shortcut_capture(self, token: str) -> bool:
+        with self._lock:
+            if self._is_recording or getattr(self._mouse_hook, "_is_recording", False) is True:
+                return False
+            if not _begin_shortcut_capture(token):
+                return False
+            # A mouse DOWN accepted just before publication may already have
+            # queued its action. Refuse that race without interrupting it.
+            if getattr(self._mouse_hook, "_is_recording", False) is True:
+                _end_shortcut_capture(token)
+                return False
+            self._reset_shortcut_transients()
+            return True
+
+    def renew_shortcut_capture(self, token: str) -> bool:
+        return _renew_shortcut_capture(token)
+
+    def end_shortcut_capture(self, token: str) -> bool:
+        with self._lock:
+            if not _end_shortcut_capture(token):
+                return False
+            self._reset_shortcut_transients()
+            return True
 
     def reload_config(self, settings: dict[str, Any] | None = None) -> None:
         """Live reload trigger and hotkey settings from storage without restarting listener."""
         with self._lock:
+            previous = (self._hotkey_trigger, self._custom_hotkey_str, self._custom_trigger_type, self._trigger_mode, self._ctrl_key_dictation_enabled)
+            if self._is_recording and self._armed_trigger_mode is None:
+                self._armed_trigger_mode = self._trigger_mode
+                self._armed_hotkey_trigger = self._hotkey_trigger
+            if self._custom_hotkey_triggered and self._armed_custom_info is None:
+                self._armed_custom_info = (self._parsed_custom_keys, self._custom_trigger_type)
             from voice_flow.storage import storage as _storage
             if settings is None:
                 try:
@@ -638,6 +626,9 @@ class InputTriggerListener:
                 self._ctrl_key_dictation_enabled = True
             else:
                 self._ctrl_key_dictation_enabled = False
+            current = (self._hotkey_trigger, self._custom_hotkey_str, self._custom_trigger_type, self._trigger_mode, self._ctrl_key_dictation_enabled)
+            if current != previous and not self._is_recording:
+                self._reset_shortcut_transients()
             if self._mouse_hook:
                 try:
                     self._mouse_hook.refresh_trigger_mode(force=True)
@@ -676,12 +667,26 @@ class InputTriggerListener:
                     self._start_key_listener()
 
     def _on_native_key(self, vk: int, is_down: bool, is_up: bool, extra: int) -> bool:
+        suppressed = self._handle_native_key(vk, is_down, is_up, extra)
+        if is_down:
+            self._native_key_suppression[vk] = bool(suppressed)
+        elif is_up:
+            self._native_key_suppression.pop(vk, None)
+        return bool(suppressed)
+
+    def _handle_native_key(self, vk: int, is_down: bool, is_up: bool, extra: int) -> bool:
         """Native Win32 low-level keyboard hook callback (< 0.1ms latency).
 
         Returns True to suppress the key event from propagating to Windows Shell/apps.
         """
         try:
             if is_synthetic_input_active() or vk == VK_NONAME:
+                return False
+            if shortcut_capture_active() or vk in self._capture_native_keys:
+                if is_down:
+                    self._capture_native_keys.add(vk)
+                elif is_up:
+                    self._capture_native_keys.discard(vk)
                 return False
 
             now = time.time()
@@ -699,6 +704,26 @@ class InputTriggerListener:
             with self._lock:
                 active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
+                if self._is_recording:
+                    active_trigger = self._armed_hotkey_trigger or active_trigger
+                    active_mode = self._armed_trigger_mode or active_mode
+                custom_trigger_type = (
+                    self._armed_custom_info[1]
+                    if self._is_recording and self._armed_custom_info
+                    else self._custom_trigger_type
+                )
+
+                pressed = self._native_pressed_keys
+                if is_down:
+                    if vk in pressed:
+                        return self._native_key_suppression.get(vk, False)
+                    pressed.add(vk)
+                elif is_up:
+                    pressed.discard(vk)
+                if is_up and self._is_recording and self._armed_trigger_mode is not None:
+                    active_mode = self._armed_trigger_mode
+                if is_down and active_mode == "disabled" and not is_esc:
+                    return False
 
                 ctrl_down = _is_ctrl_down() or (is_ctrl and is_down)
                 win_down = _is_win_down() or (is_win and is_down)
@@ -718,6 +743,8 @@ class InputTriggerListener:
                             or self._ctrl_toggle_mode_active
                         ):
                             self._is_recording = False
+                            self._armed_trigger_mode = None
+                            self._armed_hotkey_trigger = None
                             self._hotkey_triggered = False
                             self._win_suppress_needed = False
                             self._alt_space_triggered = False
@@ -744,6 +771,8 @@ class InputTriggerListener:
                         elif not self._hotkey_triggered and active_mode in ("toggle_only", "hybrid"):
                             self._hotkey_triggered = True
                             self._is_recording = False
+                            self._armed_trigger_mode = None
+                            self._armed_hotkey_trigger = None
                             self._mouse_hook.set_recording_state(False)
                             threading.Thread(target=self._safe_on_finish, daemon=True).start()
                         return True
@@ -759,6 +788,8 @@ class InputTriggerListener:
                                 threading.Thread(target=self._safe_on_start, daemon=True).start()
                             elif active_mode in ("toggle_only", "hybrid"):
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
                         return True
@@ -774,13 +805,15 @@ class InputTriggerListener:
                                 threading.Thread(target=self._safe_on_start, daemon=True).start()
                             elif active_mode in ("toggle_only", "hybrid"):
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
                         return True
 
                     # 4. Custom combination trigger
                     if active_trigger == "custom":
-                        custom_info = getattr(self, "_parsed_custom_keys", None) or parse_hotkey_string(getattr(self, "_custom_hotkey_str", "Alt+Space"))
+                        custom_info = (self._armed_custom_info[0] if self._is_recording and self._armed_custom_info else self._parsed_custom_keys)
                         req_mods = custom_info.get("modifiers", set())
                         base = custom_info.get("base_key")
                         base_vk = _vk_for_key_name(base)
@@ -799,18 +832,22 @@ class InputTriggerListener:
                         if base:
                             base_match = (vk == base_vk) or _is_key_down(base_vk)
 
-                        if mods_match and base_match and (req_mods or base):
-                            is_custom_double = bool(custom_info.get("is_double") or getattr(self, "_custom_trigger_type", "hold") == "double_tap")
+                        event_matches = (vk == base_vk) or (is_ctrl and "ctrl" in req_mods) or (is_alt and "alt" in req_mods) or (is_shift and "shift" in req_mods) or (is_win and "win" in req_mods)
+                        if custom_info.get("valid", True) and event_matches and mods_match and base_match and (req_mods or base):
+                            self._armed_custom_info = (custom_info, custom_trigger_type)
+                            is_custom_double = bool(custom_info.get("is_double") or custom_trigger_type == "double_tap")
                             if is_custom_double:
                                 if self._is_recording:
                                     self._is_recording = False
+                                    self._armed_trigger_mode = None
+                                    self._armed_hotkey_trigger = None
                                     self._custom_hotkey_triggered = False
                                     self._mouse_hook.set_recording_state(False)
                                     threading.Thread(target=self._safe_on_finish, daemon=True).start()
                                     return True
                                 else:
                                     last_rel = getattr(self, "_last_custom_release_time", 0.0)
-                                    if (now - last_rel) <= 0.35:
+                                    if last_rel > 0 and not self._custom_hotkey_triggered and (now - last_rel) <= 0.35:
                                         self._custom_hotkey_triggered = True
                                         self._hotkey_press_time = now
                                         self._is_recording = True
@@ -830,8 +867,10 @@ class InputTriggerListener:
                                         self._is_recording = True
                                         self._mouse_hook.set_recording_state(True)
                                         threading.Thread(target=self._safe_on_start, daemon=True).start()
-                                    elif active_mode in ("toggle_only", "hybrid") or getattr(self, "_custom_trigger_type", "hold") == "toggle":
+                                    elif active_mode in ("toggle_only", "hybrid") or custom_trigger_type == "toggle":
                                         self._is_recording = False
+                                        self._armed_trigger_mode = None
+                                        self._armed_hotkey_trigger = None
                                         self._mouse_hook.set_recording_state(False)
                                         threading.Thread(target=self._safe_on_finish, daemon=True).start()
                             return True
@@ -868,6 +907,8 @@ class InputTriggerListener:
                                 self._ctrl_toggle_mode_active = False
                                 self._ctrl_hold_triggered = False
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 if self._ctrl_check_timer:
                                     self._ctrl_check_timer.cancel()
                                     self._ctrl_check_timer = None
@@ -876,7 +917,7 @@ class InputTriggerListener:
                             else:
                                 self._ctrl_just_toggled_off = False
                                 self._ctrl_press_time = now
-                                if (now - self._last_ctrl_release_time) <= 0.35 and active_trigger in ("double_ctrl", "single_ctrl"):
+                                if self._last_ctrl_release_time > 0 and (now - self._last_ctrl_release_time) <= 0.35 and active_trigger in ("double_ctrl", "single_ctrl"):
                                     self._ctrl_toggle_mode_active = True
                                     self._ctrl_hold_triggered = False
                                     self._is_recording = True
@@ -926,9 +967,11 @@ class InputTriggerListener:
                             _suppress_win_start_menu()
                             self._win_suppress_needed = True  # Arm suppression for second key
                             self._hotkey_triggered = False
-                            if active_mode != "toggle_only":
+                            if active_mode == "ptt_only" or (active_mode == "hybrid" and now - self._hotkey_press_time >= 0.25):
                                 if self._is_recording:
                                     self._is_recording = False
+                                    self._armed_trigger_mode = None
+                                    self._armed_hotkey_trigger = None
                                     self._mouse_hook.set_recording_state(False)
                                     # Instant finish and paste on release!
                                     threading.Thread(target=self._safe_on_finish, daemon=True).start()
@@ -950,9 +993,11 @@ class InputTriggerListener:
                         elif is_alt:
                             _suppress_win_start_menu()  # Mask active window menu bar
                         press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                        if active_mode == "ptt_only" or press_dur >= 0.25:
+                        if active_mode == "ptt_only" or (active_mode == "hybrid" and press_dur >= 0.25):
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -964,15 +1009,18 @@ class InputTriggerListener:
                         elif is_alt:
                             _suppress_win_start_menu()  # Mask active window menu bar
                         press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                        if active_mode == "ptt_only" or press_dur >= 0.25:
+                        if active_mode == "ptt_only" or (active_mode == "hybrid" and press_dur >= 0.25):
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
                     # 5. Custom hotkey release
                     if self._custom_hotkey_triggered:
-                        custom_info = getattr(self, "_parsed_custom_keys", None) or parse_hotkey_string(getattr(self, "_custom_hotkey_str", "Alt+Space"))
+                        armed = self._armed_custom_info
+                        custom_info = armed[0] if armed else self._parsed_custom_keys
                         req_mods = custom_info.get("modifiers", set())
                         base = custom_info.get("base_key")
                         base_vk = _vk_for_key_name(base)
@@ -993,13 +1041,15 @@ class InputTriggerListener:
                         if is_rel:
                             self._custom_hotkey_triggered = False
                             self._last_custom_release_time = now
-                            is_custom_double = bool(custom_info.get("is_double") or getattr(self, "_custom_trigger_type", "hold") == "double_tap")
+                            is_custom_double = bool(custom_info.get("is_double") or (armed[1] if armed else self._custom_trigger_type) == "double_tap")
                             if not is_custom_double:
                                 press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                                custom_trig_type = getattr(self, "_custom_trigger_type", "hold")
-                                if active_mode == "ptt_only" or custom_trig_type == "hold" or press_dur >= 0.25:
+                                custom_trig_type = armed[1] if armed else self._custom_trigger_type
+                                if custom_trig_type == "hold":
                                     if self._is_recording:
                                         self._is_recording = False
+                                        self._armed_trigger_mode = None
+                                        self._armed_hotkey_trigger = None
                                         self._mouse_hook.set_recording_state(False)
                                         threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1032,6 +1082,8 @@ class InputTriggerListener:
                                     self._ctrl_hold_triggered = False
                                     self._ctrl_toggle_mode_active = False
                                     self._is_recording = False
+                                    self._armed_trigger_mode = None
+                                    self._armed_hotkey_trigger = None
                                     self._mouse_hook.set_recording_state(False)
                                     threading.Thread(target=self._safe_on_finish, daemon=True).start()
                                 elif had_timer and not self._is_recording and active_trigger != "double_ctrl":
@@ -1055,8 +1107,13 @@ class InputTriggerListener:
 
             if is_synthetic_input_active():
                 return
+            if shortcut_capture_active() or key in self._capture_fallback_keys:
+                self._capture_fallback_keys.add(key)
+                return
 
             with self._lock:
+                if key in self._pressed_keys:
+                    return
                 self._pressed_keys.add(key)
 
                 # Check physical hardware state of BOTH keys using Win32 API
@@ -1067,6 +1124,16 @@ class InputTriggerListener:
 
                 active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
+                if self._is_recording:
+                    active_trigger = self._armed_hotkey_trigger or active_trigger
+                    active_mode = self._armed_trigger_mode or active_mode
+                custom_trigger_type = (
+                    self._armed_custom_info[1]
+                    if self._is_recording and self._armed_custom_info
+                    else self._custom_trigger_type
+                )
+                if active_mode == "disabled" and key != keyboard.Key.esc:
+                    return
                 now = time.time()
 
                 # 1. BOTH Ctrl and Win must be held simultaneously to trigger dictation
@@ -1084,6 +1151,8 @@ class InputTriggerListener:
                     elif not self._hotkey_triggered and active_mode in ("toggle_only", "hybrid"):
                         self._hotkey_triggered = True
                         self._is_recording = False
+                        self._armed_trigger_mode = None
+                        self._armed_hotkey_trigger = None
                         self._mouse_hook.set_recording_state(False)
                         threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1099,6 +1168,8 @@ class InputTriggerListener:
                             threading.Thread(target=self._safe_on_start, daemon=True).start()
                         elif active_mode in ("toggle_only", "hybrid"):
                             self._is_recording = False
+                            self._armed_trigger_mode = None
+                            self._armed_hotkey_trigger = None
                             self._mouse_hook.set_recording_state(False)
                             threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1114,12 +1185,14 @@ class InputTriggerListener:
                             threading.Thread(target=self._safe_on_start, daemon=True).start()
                         elif active_mode in ("toggle_only", "hybrid"):
                             self._is_recording = False
+                            self._armed_trigger_mode = None
+                            self._armed_hotkey_trigger = None
                             self._mouse_hook.set_recording_state(False)
                             threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
                 # 4. Custom combination trigger
                 if active_trigger == "custom":
-                    custom_info = getattr(self, "_parsed_custom_keys", None) or parse_hotkey_string(getattr(self, "_custom_hotkey_str", "Alt+Space"))
+                    custom_info = (self._armed_custom_info[0] if self._is_recording and self._armed_custom_info else self._parsed_custom_keys)
                     req_mods = custom_info.get("modifiers", set())
                     base = custom_info.get("base_key")
 
@@ -1138,17 +1211,21 @@ class InputTriggerListener:
                         base_vk = _vk_for_key_name(base)
                         base_match = _key_matches_name(key, base) or _is_key_down(base_vk) or any(_key_matches_name(k, base) for k in self._pressed_keys)
 
-                    if mods_match and base_match and (req_mods or base):
-                        is_custom_double = bool(custom_info.get("is_double") or getattr(self, "_custom_trigger_type", "hold") == "double_tap")
+                    event_matches = _key_matches_name(key, base) or ("ctrl" in req_mods and key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r)) or ("alt" in req_mods and key in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r, keyboard.Key.alt_gr)) or ("shift" in req_mods and key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r)) or ("win" in req_mods and key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r))
+                    if custom_info.get("valid", True) and event_matches and mods_match and base_match and (req_mods or base):
+                        self._armed_custom_info = (custom_info, custom_trigger_type)
+                        is_custom_double = bool(custom_info.get("is_double") or custom_trigger_type == "double_tap")
                         if is_custom_double:
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._custom_hotkey_triggered = False
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
                             else:
                                 last_rel = getattr(self, "_last_custom_release_time", 0.0)
-                                if (now - last_rel) <= 0.35:
+                                if last_rel > 0 and not self._custom_hotkey_triggered and (now - last_rel) <= 0.35:
                                     self._custom_hotkey_triggered = True
                                     self._hotkey_press_time = now
                                     self._is_recording = True
@@ -1165,8 +1242,10 @@ class InputTriggerListener:
                                     self._is_recording = True
                                     self._mouse_hook.set_recording_state(True)
                                     threading.Thread(target=self._safe_on_start, daemon=True).start()
-                                elif active_mode in ("toggle_only", "hybrid") or getattr(self, "_custom_trigger_type", "hold") == "toggle":
+                                elif active_mode in ("toggle_only", "hybrid") or custom_trigger_type == "toggle":
                                     self._is_recording = False
+                                    self._armed_trigger_mode = None
+                                    self._armed_hotkey_trigger = None
                                     self._mouse_hook.set_recording_state(False)
                                     threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1214,6 +1293,8 @@ class InputTriggerListener:
                             self._ctrl_toggle_mode_active = False
                             self._ctrl_hold_triggered = False
                             self._is_recording = False
+                            self._armed_trigger_mode = None
+                            self._armed_hotkey_trigger = None
                             if self._ctrl_check_timer:
                                 self._ctrl_check_timer.cancel()
                                 self._ctrl_check_timer = None
@@ -1223,7 +1304,7 @@ class InputTriggerListener:
                             self._ctrl_just_toggled_off = False
                             self._ctrl_press_time = now
                             # Check if this press came within 0.35s of previous release -> Double Tap!
-                            if (now - self._last_ctrl_release_time) <= 0.35 and active_trigger in ("double_ctrl", "single_ctrl"):
+                            if self._last_ctrl_release_time > 0 and (now - self._last_ctrl_release_time) <= 0.35 and active_trigger in ("double_ctrl", "single_ctrl"):
                                 # Double Tap detected: start toggle mode
                                 self._ctrl_toggle_mode_active = True
                                 self._ctrl_hold_triggered = False
@@ -1277,6 +1358,8 @@ class InputTriggerListener:
                         or self._ctrl_toggle_mode_active
                     ):
                         self._is_recording = False
+                        self._armed_trigger_mode = None
+                        self._armed_hotkey_trigger = None
                         self._hotkey_triggered = False
                         self._alt_space_triggered = False
                         self._alt_tab_triggered = False
@@ -1297,11 +1380,24 @@ class InputTriggerListener:
 
             if is_synthetic_input_active():
                 return
+            if shortcut_capture_active() or key in self._capture_fallback_keys:
+                self._capture_fallback_keys.discard(key)
+                return
 
             with self._lock:
                 self._pressed_keys.discard(key)
                 active_trigger = getattr(self, "_hotkey_trigger", "ctrl_win").lower().strip()
                 active_mode = getattr(self, "_trigger_mode", "hybrid").lower().strip()
+                if self._is_recording:
+                    active_trigger = self._armed_hotkey_trigger or active_trigger
+                    active_mode = self._armed_trigger_mode or active_mode
+                custom_trigger_type = (
+                    self._armed_custom_info[1]
+                    if self._is_recording and self._armed_custom_info
+                    else self._custom_trigger_type
+                )
+                if self._is_recording and self._armed_trigger_mode is not None:
+                    active_mode = self._armed_trigger_mode
                 now = time.time()
 
                 # Releasing Ctrl or Win key when Push-to-Talk shortcut was active
@@ -1313,9 +1409,11 @@ class InputTriggerListener:
                         _suppress_win_start_menu()
                         self._win_suppress_needed = True
                         self._hotkey_triggered = False
-                        if active_mode != "toggle_only":
+                        if active_mode == "ptt_only" or (active_mode == "hybrid" and now - self._hotkey_press_time >= 0.25):
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 # Finish recording, transcribe, and paste text into target app
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
@@ -1331,9 +1429,11 @@ class InputTriggerListener:
                     if self._alt_space_triggered:
                         self._alt_space_triggered = False
                         press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                        if active_mode == "ptt_only" or press_dur >= 0.25:
+                        if active_mode == "ptt_only" or (active_mode == "hybrid" and press_dur >= 0.25):
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1342,15 +1442,18 @@ class InputTriggerListener:
                     if self._alt_tab_triggered:
                         self._alt_tab_triggered = False
                         press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                        if active_mode == "ptt_only" or press_dur >= 0.25:
+                        if active_mode == "ptt_only" or (active_mode == "hybrid" and press_dur >= 0.25):
                             if self._is_recording:
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
                 # Custom hotkey release handling
                 if self._custom_hotkey_triggered:
-                    custom_info = getattr(self, "_parsed_custom_keys", None) or parse_hotkey_string(getattr(self, "_custom_hotkey_str", "Alt+Space"))
+                    armed = self._armed_custom_info
+                    custom_info = armed[0] if armed else self._parsed_custom_keys
                     req_mods = custom_info.get("modifiers", set())
                     base = custom_info.get("base_key")
                     is_rel = False
@@ -1363,13 +1466,14 @@ class InputTriggerListener:
                     if is_rel:
                         self._custom_hotkey_triggered = False
                         self._last_custom_release_time = now
-                        is_custom_double = bool(custom_info.get("is_double") or getattr(self, "_custom_trigger_type", "hold") == "double_tap")
+                        is_custom_double = bool(custom_info.get("is_double") or (armed[1] if armed else self._custom_trigger_type) == "double_tap")
                         if not is_custom_double:
-                            press_dur = now - getattr(self, "_hotkey_press_time", 0.0)
-                            custom_trig_type = getattr(self, "_custom_trigger_type", "hold")
-                            if active_mode == "ptt_only" or custom_trig_type == "hold" or press_dur >= 0.25:
+                            custom_trig_type = armed[1] if armed else self._custom_trigger_type
+                            if custom_trig_type == "hold":
                                 if self._is_recording:
                                     self._is_recording = False
+                                    self._armed_trigger_mode = None
+                                    self._armed_hotkey_trigger = None
                                     self._mouse_hook.set_recording_state(False)
                                     threading.Thread(target=self._safe_on_finish, daemon=True).start()
 
@@ -1403,6 +1507,8 @@ class InputTriggerListener:
                                 self._ctrl_hold_triggered = False
                                 self._ctrl_toggle_mode_active = False
                                 self._is_recording = False
+                                self._armed_trigger_mode = None
+                                self._armed_hotkey_trigger = None
                                 self._mouse_hook.set_recording_state(False)
                                 threading.Thread(target=self._safe_on_finish, daemon=True).start()
                             elif had_timer and not self._is_recording and active_trigger != "double_ctrl":
@@ -1423,6 +1529,8 @@ class InputTriggerListener:
             if started is False:
                 with self._lock:
                     self._is_recording = False
+                    self._armed_trigger_mode = None
+                    self._armed_hotkey_trigger = None
                     self._hotkey_triggered = False
                 if getattr(self, "_mouse_hook", None):
                     self._mouse_hook.set_recording_state(False)
@@ -1430,6 +1538,8 @@ class InputTriggerListener:
             log.error("[INPUT] Error in on_start: %s", e)
             with self._lock:
                 self._is_recording = False
+                self._armed_trigger_mode = None
+                self._armed_hotkey_trigger = None
                 self._hotkey_triggered = False
             try:
                 if getattr(self, "_mouse_hook", None):

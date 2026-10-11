@@ -12,12 +12,15 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
+import sys
 import shutil
 import sqlite3
 import threading
 import time
 import uuid
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +79,14 @@ def verify_password(password: str, password_hash: str, password_salt: str) -> bo
     except Exception:
         log.exception("Password verification error")
         return False
+
+
+class AccountRuntimeApplyError(RuntimeError):
+    """Account change persisted, but its live runtime preferences did not apply."""
+
+
+class AccountRuntimeBusyError(ValueError):
+    """Active work prevents changing the active account."""
 
 
 class AccountManager:
@@ -212,7 +223,7 @@ class AccountManager:
         return account_dir / "voice_flow.db"
 
     def get_active_account_id(self) -> str:
-        with self._lock, self._get_conn() as conn:
+        with self._lock, closing(self._get_conn()) as conn:
             row = conn.execute("SELECT value FROM account_state WHERE key = 'active_account_id'").fetchone()
             if row is not None:
                 return str(row["value"] or "")
@@ -436,6 +447,12 @@ class AccountManager:
 
     def switch_account(self, account_id: str) -> dict[str, Any]:
         """Switch active account and dynamically repoint all application storage engines."""
+        if (self.base_dir == data_dir()) or (_account_manager is self):
+            api = sys.modules.get("voice_flow.gui.api_server")
+            check = getattr(api, "settings_busy_reason", None)
+            reason = check() if callable(check) else None
+            if reason:
+                raise AccountRuntimeBusyError(reason)
         with self._lock, self._get_conn() as conn:
             row = conn.execute("SELECT id FROM accounts WHERE id = ?", (account_id,)).fetchone()
             if not row:
@@ -478,6 +495,15 @@ class AccountManager:
             except Exception:
                 pass
 
+        if is_active_manager:
+            from voice_flow.gui.api_server import runtime_controller
+            sync = getattr(runtime_controller, "sync_runtime_preferences", None)
+            if callable(sync):
+                try:
+                    sync()
+                except Exception as exc:
+                    raise AccountRuntimeApplyError("Account changed, but runtime preferences could not be applied. Restart when idle.") from exc
+
         log.info("Successfully switched active account to %s (%s)", account_id, target_db_path)
         return {
             "success": True,
@@ -494,6 +520,13 @@ class AccountManager:
         current_password: str | None = None,
     ) -> dict[str, Any]:
         """Update user profile info or password."""
+        if username is not None and (not isinstance(username, str) or not username.strip() or len(username.strip()) > 80):
+            raise ValueError("Username must be non-empty text under 81 characters.")
+        if avatar_color is not None and (not isinstance(avatar_color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", avatar_color.strip())):
+            raise ValueError("Avatar color must be a six-digit hex color.")
+        for value in (new_password, current_password):
+            if value is not None and (not isinstance(value, str) or len(value) > 1024):
+                raise ValueError("Password must be text under 1025 characters.")
         with self._lock, self._get_conn() as conn:
             row = conn.execute(
                 "SELECT password_hash, password_salt FROM accounts WHERE id = ?",
@@ -527,6 +560,12 @@ class AccountManager:
 
     def logout_account(self, session_token: str | None = None) -> bool:
         """Invalidate session token and deactivate active account on logout."""
+        if (self.base_dir == data_dir()) or (_account_manager is self):
+            api = sys.modules.get("voice_flow.gui.api_server")
+            check = getattr(api, "settings_busy_reason", None)
+            reason = check() if callable(check) else None
+            if reason:
+                raise AccountRuntimeBusyError(reason)
         with self._lock, self._get_conn() as conn:
             if session_token:
                 conn.execute("DELETE FROM auth_sessions WHERE token = ?", (session_token,))
@@ -560,6 +599,14 @@ class AccountManager:
                 invalidate_history_cache()
             except Exception:
                 pass
+        if is_active_manager:
+            from voice_flow.gui.api_server import runtime_controller
+            sync = getattr(runtime_controller, "sync_runtime_preferences", None)
+            if callable(sync):
+                try:
+                    sync()
+                except Exception as exc:
+                    raise AccountRuntimeApplyError("Account changed, but runtime preferences could not be applied. Restart when idle.") from exc
         return True
 
     # -------------------------------------------------------------------------

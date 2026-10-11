@@ -22,6 +22,7 @@ import pytest
 
 from voice_flow import installer
 from voice_flow import release_cleanup_autorun
+from voice_flow import single_instance
 from voice_flow.gui import desktop_launcher
 
 pytestmark = pytest.mark.skipif(
@@ -205,6 +206,38 @@ def test_launcher_focuses_existing_window_immediately(monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit):
         desktop_launcher._run_desktop_launcher()
 
+    launch.assert_not_called()
+
+
+def test_duplicate_instance_signal_fallback_never_requests_explicit_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_endpoints: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def fake_urlopen(req, timeout=1.0):
+        endpoint = req.full_url.split("127.0.0.1:8991", 1)[1]
+        requested_endpoints.append(endpoint)
+        if endpoint == "/api/app/restore-and-refresh":
+            raise TimeoutError("restore request timed out")
+        return FakeResponse()
+
+    monkeypatch.setattr(single_instance.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(single_instance, "_focus_and_restore_gui_window", lambda: True)
+    launch = MagicMock()
+    monkeypatch.setattr(single_instance, "_launch_desktop_gui_silently", launch)
+
+    assert single_instance.signal_running_instance_to_restore() is True
+    assert requested_endpoints == ["/api/app/restore-and-refresh", "/api/overlay/show"]
+    assert "/api/overlay/reset-and-refresh" not in requested_endpoints
     launch.assert_not_called()
 
 

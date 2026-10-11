@@ -42,6 +42,88 @@ def test_saved_heard_as_is_applied_with_polishing_off_or_on(tmp_path, monkeypatc
     assert outcomes == ["ai_accepted" if enabled else "disabled"]
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_filler_inside_exact_heard_as_survives_cleanup_until_final_dictionary_pass(
+    tmp_path, monkeypatch, enabled,
+):
+    from voice_flow import polisher as polisher_module
+
+    store = StorageEngine(str(tmp_path / "filler-heard-as.db"))
+    store.save_setting("polishing_enabled", enabled)
+    assert store.add_dictionary_entry("Kubernetes", "cube er netties")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(polisher_module, "storage", store)
+    monkeypatch.setattr(polisher_module, "dictionary_engine", engine)
+    polisher = polisher_module.TextPolisher()
+    provider_inputs = []
+
+    def echo_provider(text, *_args, **_kwargs):
+        provider_inputs.append(text)
+        return text
+
+    monkeypatch.setattr(polisher, "_polish_with_api_pool", echo_provider)
+    trace: list[dict[str, str]] = []
+    raw = "open cube er netties now"
+
+    result = polisher.polish(
+        raw,
+        cleanup_level="cleanup_medium",
+        model_ref="test/echo" if enabled else None,
+        dictionary_trace=trace,
+    )
+
+    assert result == "Open Kubernetes now."
+    assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]
+    assert provider_inputs == ([raw] if enabled else [])
+
+    unrelated_trace: list[dict[str, str]] = []
+    unrelated = "open cube netties now"
+    unrelated_result = polisher.polish(
+        unrelated,
+        cleanup_level="cleanup_medium",
+        model_ref="test/echo" if enabled else None,
+        dictionary_trace=unrelated_trace,
+    )
+
+    assert unrelated_result == "Open cube netties now."
+    assert unrelated_trace == []
+    assert provider_inputs == ([raw, unrelated] if enabled else [])
+
+
+def test_cleanup_masking_keeps_dictionary_inputs_inside_protected_spans(tmp_path, monkeypatch):
+    from voice_flow import polisher as polisher_module
+
+    store = StorageEngine(str(tmp_path / "protected-heard-as.db"))
+    store.save_setting("polishing_enabled", False)
+    assert store.add_dictionary_entry("Kubernetes", "cube er netties")
+    engine = DictionaryEngine(store)
+    monkeypatch.setattr(polisher_module, "storage", store)
+    monkeypatch.setattr(polisher_module, "dictionary_engine", engine)
+    trace: list[dict[str, str]] = []
+    raw = (
+        "cube er netties `cube er netties` "
+        "https://example.test/cube-er-netties cube.er.netties@example.test"
+    )
+    masked, token_map = engine.mask_rule_inputs_for_cleanup(raw)
+
+    assert len(token_map) == 1
+    assert "`cube er netties`" in masked
+    assert "https://example.test/cube-er-netties" in masked
+    assert "cube.er.netties@example.test" in masked
+
+    result = polisher_module.TextPolisher().polish(
+        raw,
+        cleanup_level="cleanup_medium",
+        dictionary_trace=trace,
+    )
+
+    assert result == (
+        "Kubernetes `cube er netties` "
+        "https://example.test/cube-er-netties cube.er.netties@example.test."
+    )
+    assert trace == [{"from": "Cube er netties", "to": "Kubernetes"}]
+
+
 def test_hints_use_local_store_and_only_canonical_terms_and_correction_targets(tmp_path, monkeypatch):
     store = StorageEngine(str(tmp_path / "local.db"))
     global_store = StorageEngine(str(tmp_path / "global.db"))

@@ -9,9 +9,12 @@ latched onto at startup.
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
+import threading
 
 import pytest
 
+from voice_flow.account_manager import AccountManager
 from voice_flow.storage import StorageEngine
 
 
@@ -21,6 +24,40 @@ def two_dbs(tmp_path: Path):
         "db_a": tmp_path / "voice_flow.db",
         "db_b": tmp_path / "accounts" / "acc_two" / "voice_flow.db",
     }
+
+
+def test_active_account_lookup_closes_connection_after_success(tmp_path, monkeypatch):
+    database = tmp_path / "accounts.db"
+    with sqlite3.connect(str(database)) as seed:
+        seed.execute("CREATE TABLE account_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        seed.execute("INSERT INTO account_state VALUES ('active_account_id', 'acc_test')")
+
+    connection = sqlite3.connect(str(database))
+    connection.row_factory = sqlite3.Row
+    manager = object.__new__(AccountManager)
+    manager._lock = threading.RLock()
+    monkeypatch.setattr(manager, "_get_conn", lambda: connection)
+
+    assert manager.get_active_account_id() == "acc_test"
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+
+
+def test_active_account_lookup_closes_connection_after_query_error(tmp_path, monkeypatch):
+    database = tmp_path / "accounts.db"
+    with sqlite3.connect(str(database)) as seed:
+        seed.execute("CREATE TABLE unrelated (value TEXT)")
+
+    connection = sqlite3.connect(str(database))
+    connection.row_factory = sqlite3.Row
+    manager = object.__new__(AccountManager)
+    manager._lock = threading.RLock()
+    monkeypatch.setattr(manager, "_get_conn", lambda: connection)
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        manager.get_active_account_id()
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
 
 
 def test_repoint_switches_database(two_dbs, monkeypatch):
@@ -56,6 +93,22 @@ def test_repoint_is_noop_when_already_active(two_dbs, monkeypatch):
     )
     assert engine.repoint_if_needed() is False
     assert Path(engine.db_path) == db_a
+
+
+def test_repoint_keeps_current_account_when_account_lookup_fails(two_dbs, monkeypatch):
+    """A transient accounts DB error must not select the legacy root DB."""
+    db_a = two_dbs["db_a"]
+    db_b = two_dbs["db_b"]
+    engine = StorageEngine(str(db_b))
+    monkeypatch.setattr("voice_flow.storage.DB_PATH", str(db_a))
+
+    def unavailable():
+        raise OSError("accounts database is temporarily busy")
+
+    monkeypatch.setattr("voice_flow.account_manager.get_account_manager", unavailable)
+
+    assert engine.repoint_if_needed() is False
+    assert Path(engine.db_path) == db_b
 
 
 def test_repoint_back_to_default(two_dbs, monkeypatch):

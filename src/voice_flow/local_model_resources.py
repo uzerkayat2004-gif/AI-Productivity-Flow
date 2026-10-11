@@ -16,6 +16,8 @@ _worker: threading.Thread | None = None
 _wake = threading.Event()
 _active_uses: dict[ModelKind, int] = {"speech": 0, "polish": 0}
 _cleanup_requested: set[ModelKind] = set()
+_cleanup_not_before: dict[ModelKind, float] = {}
+_immediate_cleanup_requested: set[ModelKind] = set()
 _kind_gates: dict[ModelKind, threading.Lock] = {"speech": threading.Lock(), "polish": threading.Lock()}
 _cleanup_context = threading.local()
 log = logging.getLogger(__name__)
@@ -36,6 +38,13 @@ class ModelUseLease:
         self._release_lock = threading.Lock()
 
     def release(self) -> None:
+        self._release(0.0)
+
+    def release_after_idle(self, seconds: float) -> None:
+        """Keep a small model warm briefly; explicit cleanup still wins."""
+        self._release(max(0.0, min(30.0, float(seconds))))
+
+    def _release(self, idle_grace: float) -> None:
         with self._release_lock:
             if self._released:
                 return
@@ -45,6 +54,10 @@ class ModelUseLease:
             _active_uses[self.kind] = remaining
             if remaining == 0:
                 _cleanup_requested.add(self.kind)
+                _cleanup_not_before[self.kind] = (
+                    idle_time() + idle_grace
+                    if idle_grace > 0 and self.kind not in _immediate_cleanup_requested else 0.0
+                )
         _wake.set()
 
     def __enter__(self) -> "ModelUseLease":
@@ -60,8 +73,12 @@ def acquire_model_use(kind: ModelKind) -> ModelUseLease:
         raise ValueError(f"Unknown local model kind: {kind!r}")
     with _kind_gates[kind]:
         with _lock:
+            was_idle = _active_uses[kind] == 0
             _active_uses[kind] += 1
-            _cleanup_requested.discard(kind)
+            if was_idle:
+                _cleanup_requested.discard(kind)
+                _cleanup_not_before.pop(kind, None)
+                _immediate_cleanup_requested.discard(kind)
     _ensure_worker()
     return ModelUseLease(kind)
 
@@ -97,6 +114,8 @@ def request_model_cleanup(kind: ModelKind) -> None:
         raise ValueError(f"Unknown local model kind: {kind!r}")
     with _lock:
         _cleanup_requested.add(kind)
+        _immediate_cleanup_requested.add(kind)
+        _cleanup_not_before.pop(kind, None)
     _ensure_worker()
     _wake.set()
 
@@ -133,6 +152,8 @@ def cleanup_idle_models(now: float | None = None) -> None:
                 if _active_uses.get(kind, 0) > 0:
                     continue
                 forced = kind in _cleanup_requested
+                if forced and timestamp < _cleanup_not_before.get(kind, 0.0):
+                    continue
             all_complete = True
             _cleanup_context.kind = kind if forced else None
             for callback in kind_callbacks:
@@ -148,11 +169,20 @@ def cleanup_idle_models(now: float | None = None) -> None:
                 with _lock:
                     if _active_uses.get(kind, 0) == 0:
                         _cleanup_requested.discard(kind)
+                        _cleanup_not_before.pop(kind, None)
+                        _immediate_cleanup_requested.discard(kind)
 
 
 def _run() -> None:
     while True:
-        _wake.wait(15.0)
+        with _lock:
+            deadlines = [
+                deadline for kind, deadline in _cleanup_not_before.items()
+                if kind in _cleanup_requested and _active_uses.get(kind, 0) == 0
+                and deadline > idle_time()
+            ]
+        delay = min(15.0, max(0.0, min(deadlines) - idle_time())) if deadlines else 15.0
+        _wake.wait(delay)
         _wake.clear()
         cleanup_idle_models()
 

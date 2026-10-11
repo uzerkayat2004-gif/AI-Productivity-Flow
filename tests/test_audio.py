@@ -66,6 +66,8 @@ class TestAudioCalibration(unittest.TestCase):
         rec.on_chunk_closed = None
         rec.on_audio_frame = None
         rec._stream = None
+        rec._startup_stream_overflow = False
+        rec._stream_input_failed = False
         rec._vad = AdaptiveVAD(min_speech_rms=_SILENCE_RMS)
         return rec
 
@@ -105,6 +107,23 @@ class TestAudioCalibration(unittest.TestCase):
         self.assertEqual(len(rec._buffer), 1)
         self.assertTrue(np.all(np.isfinite(rec._buffer[0])))
         self.assertFalse(np.any(np.isnan(rec._buffer[0])))
+
+    def test_input_overflow_is_reported_without_falsely_marking_stream_sink_incomplete(self):
+        class _OverflowStatus:
+            input_overflow = True
+
+        rec = self._create_recorder()
+        block = np.full((1024, 1), 0.05, dtype=np.float32)
+        with patch("voice_flow.audio.log.warning") as warning:
+            rec._audio_callback(block, 1024, None, _OverflowStatus())
+            self.assertEqual(rec._input_overflow_count, 1)
+            self.assertFalse(rec.stream_input_incomplete)
+            np.testing.assert_array_equal(rec._buffer[0], block)
+            archived = rec.stop()
+
+        warning.assert_called_once()
+        self.assertIn("overflowed", warning.call_args.args[0])
+        np.testing.assert_array_equal(archived, block[:, 0])
 
 
 class TestAdaptiveVAD(unittest.TestCase):

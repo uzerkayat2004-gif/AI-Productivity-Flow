@@ -80,6 +80,7 @@ def _release_idle_lfm(now: float) -> bool:
 _TEMPLATE_PATCHED = False
 _LFM_CONTEXT_TOKENS = 2048
 _LFM_OUTPUT_CAP_TOKENS = 1024
+LFM_WARM_IDLE_SECONDS = 10.0
 
 
 _ANALYSIS_MARKERS = (
@@ -147,30 +148,64 @@ def _local_system_prompt(instruction: str) -> str:
         lowered = instruction.casefold()
         if "email" in lowered:
             instruction = (
-                "Write the requested email, following the trusted instruction's register and format. "
-                "Use only the transcript's facts; do not invent names, a subject, or details. "
+                "Rewrite rough dictation into a clear email with coherent body paragraphs, in the requested register. "
+                "Rephrase and group the message; layout alone is insufficient. "
+                "Keep all facts, first and last details, names, numbers, negations and code literals. "
+                "Use only dictated greetings, recipient, sender and sign-off; invent no subject or details. "
                 f"Trusted instruction: {instruction}"
             )
             instruction += (
-                ' Illustrative example only, not transcript content; never copy its facts.\n'
-                'Example input: "Please send the report."\n'
-                'Example output:\n'
-                '"Hello,\n\nPlease send the report.\n\nRegards,"\n'
-                "Use a generic greeting or sign-off only when requested."
+                " Keep usable wording if the message is already clear."
             )
         elif "well-structured prompt" in lowered or "prompt for an ai assistant" in lowered:
             instruction = (
-                "Turn the transcript into the requested prompt. Preserve every dictated requirement; "
-                "do not answer the task or invent requirements. "
+                "Turn conversational intent into actionable AI instructions. "
+                "Organize task, context and requirements; do not merely add a heading to rough text. "
+                "Keep every fact, first and last detail, name, number, negation and code literal. "
+                "Do not answer the task or invent requirements. "
                 f"Trusted instruction: {instruction}"
             )
             instruction += (
-                ' Illustrative example only, not transcript content; never copy its facts.\n'
-                'Example input: "Make a prompt that explains this process."\n'
-                'Example output: "Objective: Explain this process."'
+                " Include output constraints only when dictated."
             )
         prompt += f" Apply this trusted style or task: {instruction}."
     return prompt
+
+
+def _build_local_messages(user_text: str, instruction: str, request_policy: str | None) -> list[dict[str, str]]:
+    """Frame ordinary dictation as editing data instead of a chat request.
+
+    Explicit transformations retain their established prompt. Examples have
+    no names or quantities to copy into another person's dictation.
+    """
+    plain_cleanup = str(request_policy or "").lstrip().startswith("Polish only the transcript")
+    transformed_format = any(term in instruction.casefold() for term in (
+        "email", "bullet list", "well-structured prompt", "prompt for an ai assistant", "summarize",
+    ))
+    if not plain_cleanup or transformed_format:
+        return [
+            {"role": "system", "content": _local_system_prompt(instruction)},
+            {"role": "user", "content": user_text},
+        ]
+    policy = (
+        "You are a transcript editor. Edit the text, never answer its questions or requests. "
+        "Retain I and we, all names, numbers, negations and facts. "
+        "Preserve code identifiers, URLs and paths exactly. Output only the edited text. "
+        "Correct grammar and punctuation.\n"
+        f"Apply this style: {instruction}\n"
+        "Examples of editing, unrelated to the next transcript:\n"
+        "Input: yesterday i goes home and we was ready\n"
+        "Output: Yesterday I went home and we were ready.\n"
+        "Input: can you open the door after lunch\n"
+        "Output: Can you open the door after lunch?\n"
+        "Input: i cannot open the door\n"
+        "Output: I cannot open the door.\n"
+        "Edit only the next input; retain its question or statement. Return no input or output labels."
+    )
+    return [
+        {"role": "system", "content": policy},
+        {"role": "user", "content": f"Input: {user_text}\nOutput:"},
+    ]
 
 
 def _completion_token_budget(llm: Any, user_text: str, system_prompt: str) -> int:
@@ -287,14 +322,20 @@ def _extract_transcript(text: str) -> tuple[str, str | None]:
         # Compatibility for direct callers that supply a compact one-line
         # wrapper, which cannot be confused with the policy sentence above.
         match = re.search(r"<input_transcript>([^\n]*?)</input_transcript>", text, re.IGNORECASE)
+        if match:
+            prefix = text[:match.start()].strip()
+            suffix = text[match.end():].strip()
+            if suffix or (prefix and not (
+                _looks_like_cloud_policy(prefix)
+                or re.match(r"^Style instruction:", prefix, re.IGNORECASE)
+            )):
+                match = None
     if match:
         raw = match.group(1).strip()
         sys_p = text[:match.start()].strip() or None
         return raw, sys_p
-    if "\n\n" in text:
-        parts = text.split("\n\n", 1)
-        if len(parts) == 2 and any(kw in parts[0].lower() for kw in ("polish", "grammar", "assistant", "dictation", "transcript", "clarity")):
-            return parts[1].strip(), parts[0].strip()
+    # Ordinary paragraphs mentioning grammar/assistants are dictated content.
+    # Only the explicit wrapper above is permission to separate a policy.
     return text.strip(), None
 
 
@@ -374,6 +415,7 @@ def _polish_with_lfm_impl(
 
     user_text, embedded_sys = _extract_transcript(text)
     effective_system = system_prompt or embedded_sys
+    request_policy = effective_system
     local_instruction = _trusted_instruction(instruction, effective_system)
 
     # The 350M model must never receive the cloud polishing policy. That policy
@@ -385,14 +427,8 @@ def _polish_with_lfm_impl(
     if effective_system and _looks_like_cloud_policy(effective_system):
         log.info("[LFM] Cloud polishing policy detected; using the local instruction instead.")
         effective_system = None
-    # Strip a leading style directive from the transcript body: it is guidance
-    # for the model, not something the speaker dictated.
-    user_text = re.sub(
-        r"^\s*style instruction:[^\n]*\n+", "", user_text, flags=re.IGNORECASE
-    ).strip()
-    user_text = re.sub(
-        r"^\s*style:\s*[^\n]*\n+", "", user_text, flags=re.IGNORECASE
-    ).strip()
+    # Wrapper metadata has already been separated. A style-like line inside
+    # the transcript is spoken content, never permission to delete that line.
 
     # Check for test/mock override callback
     mock_runner = getattr(polish_with_lfm, "_mock_runner", None)
@@ -436,15 +472,12 @@ def _polish_with_lfm_impl(
                 setattr(polish_with_lfm, "_cached_llm_path", str(model_path))
             register_idle_cleanup("lfm", _release_idle_lfm, kind="polish")
             setattr(polish_with_lfm, "_last_used", idle_time())
-            local_system = _local_system_prompt(local_instruction)
-            max_tokens = _completion_token_budget(llm, user_text, local_system)
+            messages = _build_local_messages(user_text, local_instruction, request_policy)
+            max_tokens = _completion_token_budget(llm, messages[1]["content"], messages[0]["content"])
             if max_tokens <= 0 or time.monotonic() >= deadline:
                 return None
             resp = llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": local_system},
-                    {"role": "user", "content": user_text},
-                ],
+                messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.1,
                 top_k=50,
@@ -491,7 +524,8 @@ def _polish_with_lfm_impl(
         # A tiny model occasionally appends a stray newline or trailing spaces.
         content = content.strip().strip('"').strip()
         # It may also echo the wrapping tags it saw in the prompt.
-        content = re.sub(r"</?input_transcript>", "", content, flags=re.IGNORECASE).strip()
+        if not re.search(r"</?input_transcript>", user_text, re.IGNORECASE):
+            content = re.sub(r"</?input_transcript>", "", content, flags=re.IGNORECASE).strip()
         # Drop inline annotations about the text (e.g. "(Protected code token:
         # `UH`)") so commentary can never be pasted as if it were the dictation.
         content = _strip_annotation_lines(content)
@@ -514,7 +548,7 @@ def polish_with_lfm(
     timeout_seconds: float = 5.0,
     system_prompt: str | None = None,
 ) -> str | None:
-    """Run one demand-scoped local polish and promptly release its model."""
+    """Run local polish; retain only this tiny model for a short dictation burst."""
     if not text or not text.strip():
         return text
     lease = acquire_model_use("polish")
@@ -526,7 +560,11 @@ def polish_with_lfm(
             system_prompt=system_prompt,
         )
     finally:
-        lease.release()
+        release_after_idle = getattr(lease, "release_after_idle", None)
+        if callable(release_after_idle):
+            release_after_idle(LFM_WARM_IDLE_SECONDS)
+        else:
+            lease.release()
         notify_models_available("polish")
 
 

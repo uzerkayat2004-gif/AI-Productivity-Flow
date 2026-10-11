@@ -42,6 +42,7 @@ from voice_flow.local_model_resources import (
     notify_models_available,
     register_idle_cleanup,
 )
+from voice_flow.voice_enhance import LiveSpeechEnhancer
 
 log = logging.getLogger(__name__)
 
@@ -1217,6 +1218,14 @@ class NemotronStreamTranscriber:
         committed_transcripts: list[str] = []
         interim_latest = ""
         t0 = time.perf_counter()
+        mic_profile = "auto"
+        try:
+            from voice_flow.storage import storage
+
+            mic_profile = str(storage.get_setting("voice_flow_mic_profile", "auto") or "auto")
+        except Exception:
+            pass
+        live_enhancer = LiveSpeechEnhancer(profile=mic_profile)
         try:
             if self._cancel.is_set() or self._expired():
                 raise RuntimeError("Stream was cancelled before model loading")
@@ -1258,6 +1267,9 @@ class NemotronStreamTranscriber:
                     mono = mono.astype(np.float32, copy=False)
 
                 if mono.size > 0:
+                    # Condition only the per-stream copy.  AudioRecorder keeps
+                    # the complete raw frames for whole-recording recovery.
+                    mono = live_enhancer.process(mono, sr)
                     ptr = mono.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
                     push_st = dll.nemo_speech_asr_stream_push_f32(stream, ptr, len(mono), int(sr))
                     if push_st != 0:

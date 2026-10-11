@@ -1,0 +1,142 @@
+{
+  "step1": {
+    "duration": 32.71,
+    "sentences": [
+      {
+        "start": 0.4,
+        "end": 2.64,
+        "text": "Welcome to Video Flow!"
+      },
+      {
+        "start": 2.59,
+        "end": 8.4,
+        "text": "Here, you can transform any text or document into an engaging MP4 video in minutes."
+      },
+      {
+        "start": 8.4,
+        "end": 13.28,
+        "text": "On the left, drop any PDF, Word doc, or paste your notes."
+      },
+      {
+        "start": 13.28,
+        "end": 27.92,
+        "text": "On the right, pick from five smart formats: Auto-Adaptive scales to your document length, Brief delivers quick summaries, Vertical Short creates mobile-ready clips for TikTok and Reels, while Explainer and Cinematic create comprehensive visual breakdowns."
+      },
+      {
+        "start": 27.92,
+        "end": 31.86,
+        "text": "Next, let's look at AI engines and API keys!"
+      }
+    ]
+  },
+  "step2": {
+    "duration": 26.47,
+    "sentences": [
+      {
+        "start": 0.4,
+        "end": 3.33,
+        "text": "Step 2 is choosing your video engine."
+      },
+      {
+        "start": 3.28,
+        "end": 11.67,
+        "text": "Here is the most important thing to know: If you just want to use NotebookLM for video generation, you do not need to do anything with API keys!"
+      },
+      {
+        "start": 11.67,
+        "end": 14.82,
+        "text": "You don't have to worry about API keys at all."
+      },
+      {
+        "start": 14.82,
+        "end": 21.59,
+        "text": "Simply log into your Google account right here, and you can create videos immediately without touching any API key."
+      },
+      {
+        "start": 21.59,
+        "end": 25.62,
+        "text": "Next, let's look at our built-in engine and API keys!"
+      }
+    ]
+  },
+  "step3": {
+    "duration": 22.17,
+    "sentences": [
+      {
+        "start": 0.4,
+        "end": 6.71,
+        "text": "Now, if you want to use our own built-in video generation tool, then only do you need an API key."
+      },
+      {
+        "start": 6.66,
+        "end": 17.35,
+        "text": "Right here below in Video Flow API Providers, you can set up Google Gemini for free-tier video creation, or connect OpenAI, Groq, and custom providers with one click."
+      },
+      {
+        "start": 17.35,
+        "end": 21.33,
+        "text": "Next, let's explore your video library and downloads!"
+      }
+    ]
+  },
+  "step4": {
+    "duration": 24.07,
+    "sentences": [
+      {
+        "start": 0.4,
+        "end": 3.2,
+        "text": "Step 4 is your Video Library."
+      },
+      {
+        "start": 3.15,
+        "end": 8.17,
+        "text": "Every video you create across your desktop or from this studio is saved right here."
+      },
+      {
+        "start": 8.17,
+        "end": 13.26,
+        "text": "You can filter by status, search past projects, and preview chapters."
+      },
+      {
+        "start": 13.26,
+        "end": 18.88,
+        "text": "When a video is ready, download the full HD MP4 file with a single click."
+      },
+      {
+        "start": 18.88,
+        "end": 23.22,
+        "text": "Next, let's see how to trigger Video Flow directly from your screen!"
+      }
+    ]
+  },
+  "step5": {
+    "duration": 23.68,
+    "sentences": [
+      {
+        "start": 0.4,
+        "end": 5.01,
+        "text": "Finally, Video Flow works seamlessly everywhere across Windows."
+      },
+      {
+        "start": 4.96,
+        "end": 13.06,
+        "text": "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut."
+      },
+      {
+        "start": 13.06,
+        "end": 17.73,
+        "text": "Video Flow generates and renders your video in the background while you keep working."
+      },
+      {
+        "start": 17.73,
+        "end": 20.58,
+        "text": "You're now ready to create your first video."
+      },
+      {
+        "start": 20.58,
+        "end": 22.84,
+        "text": "Click Get Started to begin!"
+      }
+    ]
+  }
+}

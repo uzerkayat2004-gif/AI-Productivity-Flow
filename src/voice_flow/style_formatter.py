@@ -64,6 +64,13 @@ class TokenProtector:
         if not text:
             return ""
 
+        # Import at call time: deterministic text processing uses this
+        # formatter too. Share its literal boundaries through the final pass.
+        from voice_flow.text_processing import _PROTECTED_CLEANUP_SPAN_RE
+        text = _PROTECTED_CLEANUP_SPAN_RE.sub(
+            lambda match: self._add_placeholder(match.group(0)), text,
+        )
+
         # 1. Protect URLs
         text = re.sub(
             r"\b(?:https?://|www\.)[^\s<>()]+",
@@ -223,7 +230,7 @@ def apply_punctuation_policy(
 
         # Boundary splits for closing transitions:
         # e.g. "document let me know" -> "document. Let me know"
-        text = re.sub(r"\b([a-z0-9]+)\s+(let me know|please let me know|thanks|thank you)\b", r"\1. \2", text, flags=re.I)
+        text = re.sub(r"\b([a-z0-9]+)[ \t]+(let me know|please let me know|thanks|thank you)\b", r"\1. \2", text, flags=re.I)
         # Capitalize after newly added period
         text = re.sub(r"\.\s+([a-z])", lambda m: f". {m.group(1).upper()}", text)
 

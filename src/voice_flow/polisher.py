@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from types import SimpleNamespace
 from typing import Any
 
 from voice_flow.config import config
@@ -1198,6 +1199,153 @@ class TextPolisher:
             self._last_attempt_status = "local"
             self._notify_outcome(outcome_callback, "local")
             return _apply_dictionary_with_trace(self._deterministic_cleanup(raw_text, instruction, level), dictionary_trace)
+
+        # S1 is a selected, offline engine. Route it before the generic API
+        # pool so a selected local model never incurs cloud latency or gets
+        # silently replaced by another model.  Commands it cannot author can
+        # still use its bounded transcript normalizer pass; main owns any
+        # separate finite command transformation after that cleanup.
+        try:
+            from voice_flow import s1_engine
+
+            if s1_engine.is_s1_model_ref(explicit_model):
+                self._last_lfm_bridge_attempted = True
+                attempt_outcome = "timeout"
+                supplied_effective = style_instruction if hasattr(style_instruction, "instruction") else None
+                style_id = str(
+                    getattr(supplied_effective, "style_id", None)
+                    or kwargs.get("style_id")
+                    or ""
+                )
+                effective = supplied_effective or SimpleNamespace(
+                    instruction=str(instruction or ""),
+                    style_id=style_id,
+                    category=kwargs.get("category"),
+                    format=command_format,
+                    task=task,
+                )
+                command = kwargs.get("command")
+                supported = s1_engine.s1_can_handle(
+                    effective=effective, command=command, text=raw_text,
+                    task=task, instruction=str(instruction or ""),
+                    style_id=style_id, command_format=command_format,
+                    overrides=overrides,
+                )
+                if not s1_engine.is_s1_downloaded():
+                    self._last_attempt_status = "unavailable"
+                    result = None
+                else:
+                    # Unsupported command intent may still benefit from one
+                    # local cleanup pass, provided S1's cleanup gate allows
+                    # the normalizable style snapshot. No command prompt or
+                    # unsupported override is sent to the model.
+                    cleanup_only = not supported and task in {"prompt", "rewrite", "format"}
+                    s1_effective = effective
+                    s1_task = task
+                    s1_format = command_format
+                    s1_overrides = overrides
+                    if cleanup_only:
+                        allowed_cleanup_overrides = {"tone", "formality"}
+                        cleanup_only = (
+                            not getattr(command, "persistent_change", False)
+                            and not getattr(command, "ambiguous", False)
+                            and set(overrides).issubset(allowed_cleanup_overrides)
+                        )
+                        s1_effective = SimpleNamespace(
+                            instruction="", style_id=style_id,
+                            category=getattr(effective, "category", None),
+                            format=None, task="cleanup",
+                        )
+                        s1_task = "cleanup"
+                        s1_format = None
+                        s1_overrides = {}
+                        supported = cleanup_only and s1_engine.s1_can_handle(
+                            effective=s1_effective, text=raw_text,
+                            task="cleanup", style_id=style_id,
+                        )
+                    if supported:
+                        remaining = self._remaining_budget(deadline)
+                        timeout = min(AI_POLISH_REQUEST_TIMEOUT_SECONDS, remaining)
+                        if timeout <= 0:
+                            self._last_attempt_status = "timeout"
+                            result = None
+                        else:
+                            started = time.perf_counter()
+                            result = self._run_bridge_with_timeout(
+                                lambda bounded_timeout: s1_engine.polish_with_s1(
+                                    raw_text, str(getattr(s1_effective, "instruction", "") or ""),
+                                    timeout_seconds=bounded_timeout,
+                                    effective=s1_effective,
+                                    command=command if not cleanup_only else None,
+                                    style_id=style_id,
+                                    command_format=s1_format,
+                                    overrides=s1_overrides,
+                                    task=s1_task,
+                                ),
+                                timeout,
+                                deadline=(float(deadline) - AI_POLISH_DETERMINISTIC_RESERVE_SECONDS)
+                                if deadline is not None else None,
+                            )
+                            if result:
+                                sanitized = self._post_process_ai_response(
+                                    result, raw_text,
+                                    preserve_terminal=(s1_task == "cleanup"),
+                                    instruction=str(getattr(s1_effective, "instruction", "") or ""),
+                                )
+                                if s1_task == "cleanup" and sanitized == raw_text:
+                                    sanitized = self._deterministic_cleanup(sanitized, "", level)
+                                else:
+                                    sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
+                                safe = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
+                                    raw_text, sanitized, task="cleanup",
+                                    command_format=s1_format,
+                                )
+                                fulfilled = safe and _fulfills_command(
+                                    raw_text, sanitized, task=s1_task,
+                                    overrides=s1_overrides, command_format=s1_format,
+                                )
+                                if fulfilled:
+                                    sanitized = self._apply_style_register(sanitized, style_id or instruction)
+                                    self._record_polish_latency(s1_engine.S1_MODEL_ID, started, is_local=True)
+                                    self._notify_outcome(outcome_callback, "local_model")
+                                    return _apply_dictionary_with_trace(sanitized, dictionary_trace)
+                                self._last_attempt_status = "fidelity_reject"
+                                attempt_outcome = "command_unfulfilled" if task != "cleanup" else "fidelity_reject"
+                            else:
+                                attempt_outcome = "timeout" if self._last_attempt_status == "timeout" else "provider_failure"
+                                if self._last_attempt_status == "timeout":
+                                    try:
+                                        from voice_flow.polish_latency import record_timeout
+
+                                        record_timeout(
+                                            s1_engine.S1_MODEL_ID,
+                                            elapsed=time.perf_counter() - started,
+                                            mode=str(kwargs.get("speed_mode") or "balanced"),
+                                        )
+                                    except Exception:
+                                        log.debug("[S1] Could not record bounded timeout feedback", exc_info=True)
+                    else:
+                        self._last_attempt_status = "unsupported"
+                        attempt_outcome = "command_unfulfilled"
+                if not s1_engine.is_s1_downloaded():
+                    attempt_outcome = "command_unfulfilled" if task != "cleanup" else "provider_failure"
+                cleaned = self._apply_style_register(
+                    self._deterministic_cleanup(raw_text, "", level),
+                    style_id or instruction,
+                )
+                self._notify_outcome(outcome_callback, attempt_outcome)
+                return _apply_dictionary_with_trace(cleaned, dictionary_trace)
+        except Exception:
+            # A broken local adapter must still fail closed to deterministic
+            # cleanup and must never cause selected-S1 calls to enter the API pool.
+            try:
+                from voice_flow import s1_engine
+                if s1_engine.is_s1_model_ref(explicit_model):
+                    cleaned = self._deterministic_cleanup(raw_text, "", level)
+                    self._notify_outcome(outcome_callback, "provider_failure")
+                    return _apply_dictionary_with_trace(cleaned, dictionary_trace)
+            except Exception:
+                pass
         # Ultra-short transcripts bypass LLM API calls only when the caller did
         # not explicitly request an AI model or an AI-only transformation.
         try:
@@ -1297,6 +1445,14 @@ class TextPolisher:
         local_model_budget = self._remaining_budget(deadline)
         try:
             from voice_flow import lfm_engine, s1_engine
+            fallback_s1_effective = style_instruction if hasattr(style_instruction, "instruction") else SimpleNamespace(
+                instruction=str(instruction or ""),
+                style_id=str(kwargs.get("style_id") or ""),
+                category=kwargs.get("category"),
+                format=command_format,
+                task=task,
+            )
+            fallback_s1_command = kwargs.get("command")
             # Prefer the ACTIVE selected local model
             is_s1_active = s1_engine.is_s1_model_ref(explicit_model)
             is_lfm_active = lfm_engine.is_lfm_model_ref(explicit_model)
@@ -1310,7 +1466,12 @@ class TextPolisher:
                 if (
                     is_s1_active
                     and s1_engine.is_s1_downloaded()
-                    and s1_engine.s1_can_handle(effective=style_instruction, text=raw_text)
+                    and s1_engine.s1_can_handle(
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        text=raw_text, task=task, instruction=str(instruction or ""),
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        command_format=command_format, overrides=overrides,
+                    )
                     and not (self._last_lfm_bridge_attempted and is_s1_active)
                 ):
                     use_s1 = True
@@ -1331,17 +1492,25 @@ class TextPolisher:
                     not is_s1_active
                     and not is_lfm_active
                     and s1_engine.is_s1_downloaded()
-                    and s1_engine.s1_can_handle(effective=style_instruction, text=raw_text)
+                    and s1_engine.s1_can_handle(
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        text=raw_text, task=task, instruction=str(instruction or ""),
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        command_format=command_format, overrides=overrides,
+                    )
                     and not self._last_lfm_bridge_attempted
                 ):
                     use_s1 = True
 
             if use_s1:
                 s1_started = time.perf_counter()
+                self._last_lfm_bridge_attempted = True
                 def s1_fallback(timeout):
                     return s1_engine.polish_with_s1(
                         raw_text, instruction, timeout_seconds=timeout,
-                        command_format=command_format, overrides=overrides,
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        task=task, command_format=command_format, overrides=overrides,
                     )
 
                 s1_result = self._run_bridge_with_timeout(
@@ -1360,9 +1529,8 @@ class TextPolisher:
                         sanitized = self._deterministic_cleanup(sanitized, instruction, level)
                     else:
                         sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
-                    safe_candidate = not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
-                        raw_text, sanitized, task=task, allow_compression=allow_compression,
-                        command_format=command_format,
+                    safe_candidate = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
+                        raw_text, sanitized, task="cleanup", command_format=command_format,
                     )
                     fulfilled = safe_candidate and _fulfills_command(
                         raw_text, sanitized, task=task, overrides=overrides,
