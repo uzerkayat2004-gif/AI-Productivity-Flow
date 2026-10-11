@@ -138,5 +138,35 @@
         "text": "Click Get Started to begin!"
       }
     ]
+  },
+  "step5_mac": {
+    "duration": 23.7,
+    "sentences": [
+      {
+        "start": 0.5,
+        "end": 5.04,
+        "text": "Finally, Video Flow works seamlessly everywhere across your Mac."
+      },
+      {
+        "start": 4.99,
+        "end": 13.09,
+        "text": "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut."
+      },
+      {
+        "start": 13.09,
+        "end": 17.76,
+        "text": "Video Flow generates and renders your video in the background while you keep working."
+      },
+      {
+        "start": 17.76,
+        "end": 20.61,
+        "text": "You're now ready to create your first video."
+      },
+      {
+        "start": 20.61,
+        "end": 22.86,
+        "text": "Click Get Started to begin!"
+      }
+    ]
   }
 }

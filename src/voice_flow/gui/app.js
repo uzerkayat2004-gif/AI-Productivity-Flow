@@ -8488,14 +8488,23 @@ const VIDEOFLOW_GUIDE_STEPS = [
     targetId: "vf-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Screen & Windows Shortcut",
+    spotlightLabelMac: "Screen & Mac Shortcut",
     nextLabel: "Finish & Start Creating 🚀",
     audioSrc: "assets/onboarding/vf_guide_step5_mixed.mp3",
+    audioSrcMac: "assets/onboarding/vf_guide_step5_mac_mixed.mp3",
     timeline: [
       { start: 0.4, end: 5.01, text: "Finally, Video Flow works seamlessly everywhere across Windows." },
       { start: 4.96, end: 13.06, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut." },
       { start: 13.06, end: 17.73, text: "Video Flow generates and renders your video in the background while you keep working." },
       { start: 17.73, end: 20.58, text: "You're now ready to create your first video." },
       { start: 20.58, end: 22.84, text: "Click Get Started to begin!" }
+    ],
+    timelineMac: [
+      { start: 0.5, end: 5.04, text: "Finally, Video Flow works seamlessly everywhere across your Mac." },
+      { start: 4.99, end: 13.09, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut." },
+      { start: 13.09, end: 17.76, text: "Video Flow generates and renders your video in the background while you keep working." },
+      { start: 17.76, end: 20.61, text: "You're now ready to create your first video." },
+      { start: 20.61, end: 22.86, text: "Click Get Started to begin!" }
     ]
   }
 ];
@@ -8554,9 +8563,12 @@ function _vfGuidePreventKeyEvent(e) {
 
 function updateVideoFlowGuideSubtitles(currentTime, stepIdx) {
   const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
-  if (!stepObj || !stepObj.timeline) return;
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+  if (!timeline) return;
 
-  const match = stepObj.timeline.find(t => currentTime >= t.start && currentTime <= t.end);
+  const match = timeline.find(t => currentTime >= t.start && currentTime <= t.end);
   const subEl = document.getElementById("vf-guide-subtitle-text");
   if (!subEl) return;
 
@@ -8595,13 +8607,16 @@ function playVideoFlowGuideNarration(stepIdx) {
   if (_vfGuideNarrationPaused) return;
 
   const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
-  if (!stepObj || !stepObj.audioSrc) return;
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const audioSrc = (isMac && stepObj.audioSrcMac) ? stepObj.audioSrcMac : stepObj.audioSrc;
+  if (!audioSrc) return;
 
   const token = ++_vfGuideSlideToken;
-  let audioPath = stepObj.audioSrc;
+  let audioPath = audioSrc;
   try {
     if (window.location && window.location.origin && window.location.origin !== "null") {
-      audioPath = `${window.location.origin}/${stepObj.audioSrc}`;
+      audioPath = `${window.location.origin}/${audioSrc}`;
     }
   } catch (e) {}
 
@@ -8661,7 +8676,9 @@ function positionVfGuideSpotlight(stepObj) {
   if (!box) return;
 
   if (label) {
-    label.textContent = stepObj.spotlightLabel || "FEATURE SPOTLIGHT";
+    const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+    const lbl = (isMac && stepObj.spotlightLabelMac) ? stepObj.spotlightLabelMac : stepObj.spotlightLabel;
+    label.textContent = lbl || "FEATURE SPOTLIGHT";
   }
 
   if (stepObj.isSimulation) {
@@ -8878,9 +8895,14 @@ async function gotoVideoFlowGuideStep(stepIdx) {
   const simWidget = document.getElementById("vf-guide-screen-sim");
   const subEl = document.getElementById("vf-guide-subtitle-text");
 
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const title = (isMac && stepObj.titleMac) ? stepObj.titleMac : stepObj.title;
+  const desc = (isMac && stepObj.descMac) ? stepObj.descMac : stepObj.desc;
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+
   if (counterEl) counterEl.textContent = stepObj.counter;
-  if (titleEl) titleEl.textContent = stepObj.title;
-  if (descEl) descEl.textContent = stepObj.desc;
+  if (titleEl) titleEl.textContent = title;
+  if (descEl) descEl.textContent = desc;
   if (nextBtn) nextBtn.textContent = stepObj.nextLabel;
   if (backBtn) backBtn.style.visibility = (stepIdx === 1) ? "hidden" : "visible";
 
@@ -8888,8 +8910,8 @@ async function gotoVideoFlowGuideStep(stepIdx) {
     simWidget.style.display = stepObj.isSimulation ? "flex" : "none";
   }
 
-  if (subEl && stepObj.timeline && stepObj.timeline[0]) {
-    subEl.textContent = stepObj.timeline[0].text;
+  if (subEl && timeline && timeline[0]) {
+    subEl.textContent = timeline[0].text;
   }
 
   const dots = document.getElementById("vf-guide-dots");
