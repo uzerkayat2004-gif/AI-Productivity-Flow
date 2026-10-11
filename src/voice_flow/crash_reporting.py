@@ -6,6 +6,9 @@ Strict privacy rules:
 - Redacts local usernames in system file paths (/Users/<username> and C:\\Users\\<username>).
 - Redacts all environment tokens and API keys (OPENAI_*, ANTHROPIC_*, GROQ_*, GEMINI_*, DEEPGRAM_*, SENTRY_*, AWS_*, etc.).
 - Performance tracing and profiling are completely disabled (0% sample rate).
+- Never sends from CI or automated test runs: when ``CI`` or
+  ``VOICE_FLOW_CRASH_REPORTS_NO_SEND`` is set, the SDK is initialised without a DSN
+  (a no-op client), so test and CI runs cannot pollute the production Sentry project.
 """
 
 from __future__ import annotations
@@ -22,6 +25,25 @@ log = logging.getLogger(__name__)
 
 SENTRY_DSN = "https://fc3e1f0f34b173a05e9260221c02de15@o4512216642486272.ingest.de.sentry.io/4512224903823440"
 _CRASH_REPORTING_INITIALIZED = False
+
+# Set to 1/true to keep crash reporting fully local (no events leave the machine).
+# The pytest suite sets this automatically (see tests/conftest.py).
+NO_SEND_ENV_VAR = "VOICE_FLOW_CRASH_REPORTS_NO_SEND"
+_FALSEY = {"", "0", "false", "no", "off"}
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() not in _FALSEY
+
+
+def is_ci_environment() -> bool:
+    """True when running under a CI system (GitHub Actions, CircleCI, etc. set ``CI``)."""
+    return _env_flag("CI")
+
+
+def is_sending_suppressed() -> bool:
+    """True when crash reports must not be sent (CI, automated tests, explicit opt-out)."""
+    return _env_flag(NO_SEND_ENV_VAR) or is_ci_environment()
 
 # Regex patterns for privacy scrubbing
 _WIN_USER_PATTERN = re.compile(r"([a-zA-Z]:[\\/]Users)[\\/][^\\/:\s\"']+", re.IGNORECASE)
@@ -170,17 +192,23 @@ def init_crash_reporting(force: bool = False) -> bool:
         log.warning("sentry-sdk is not installed; crash reporting is unavailable.")
         return False
 
-    try:
-        from voice_flow import runtime_env
-        environment = "production" if runtime_env.is_installed() else "development"
-    except Exception:
-        environment = "production"
+    if is_ci_environment():
+        environment = "ci"
+    else:
+        try:
+            from voice_flow import runtime_env
+            environment = "production" if runtime_env.is_installed() else "development"
+        except Exception:
+            environment = "production"
+
+    # A DSN of None gives a disabled, no-op client: nothing is ever transmitted.
+    dsn = None if is_sending_suppressed() else SENTRY_DSN
 
     release = f"ai-productivity-flow@{VERSION}"
 
     try:
         sentry_sdk.init(
-            dsn=SENTRY_DSN,
+            dsn=dsn,
             release=release,
             environment=environment,
             send_default_pii=False,
@@ -191,7 +219,10 @@ def init_crash_reporting(force: bool = False) -> bool:
             before_send=before_send_scrubber,
         )
         _CRASH_REPORTING_INITIALIZED = True
-        log.info("Anonymous crash reporting initialized (%s, release=%s).", environment, release)
+        if dsn is None:
+            log.info("Crash reporting initialized in no-send mode (%s, release=%s).", environment, release)
+        else:
+            log.info("Anonymous crash reporting initialized (%s, release=%s).", environment, release)
         return True
     except Exception as exc:
         log.warning("Could not initialize Sentry crash reporting: %s", exc)
