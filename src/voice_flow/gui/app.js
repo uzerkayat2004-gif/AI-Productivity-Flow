@@ -9361,6 +9361,10 @@ function _injectVoiceFlowGuideDemoCard() {
 }
 
 function _cleanVoiceFlowGuideDemoCard() {
+  const sampleCard = document.getElementById("voiceflow-guide-sample-card");
+  if (sampleCard) sampleCard.remove();
+  const demoCards = document.querySelectorAll(".voiceflow-guide-demo-card");
+  demoCards.forEach(c => c.remove());
   if (typeof renderHistoryFeed === "function") {
     renderHistoryFeed(allHistoryRecords);
   }
@@ -9378,12 +9382,9 @@ function gotoVoiceFlowGuideStep(stepIdx) {
     switchPage(stepObj.page, { skipGuideTrigger: true, fromGuide: true });
   }
 
-  // Cleanup leaving Step 1: restore real history if empty
+  // Cleanup leaving Step 1: restore real history
   if (prevStep === 1 && stepIdx !== 1) {
-    const hasRealDictations = typeof allHistoryRecords !== "undefined" && Array.isArray(allHistoryRecords) && allHistoryRecords.length > 0;
-    if (!hasRealDictations) {
-      _cleanVoiceFlowGuideDemoCard();
-    }
+    _cleanVoiceFlowGuideDemoCard();
   }
 
   // Step 1 Action: show sample dictation card if new user has zero dictations
@@ -9581,9 +9582,10 @@ function stopVoiceFlowGuide() {
   const vid = document.getElementById("voiceflow-guide-real-demo-video");
   if (vid) vid.pause();
 
-  const hasRealDictations = typeof allHistoryRecords !== "undefined" && Array.isArray(allHistoryRecords) && allHistoryRecords.length > 0;
-  if (!hasRealDictations) {
-    _cleanVoiceFlowGuideDemoCard();
+  _cleanVoiceFlowGuideDemoCard();
+  lastHistoryHash = "";
+  if (typeof loadHome === "function") {
+    loadHome();
   }
 
   if (typeof switchPage === "function" && currentPageId !== "home" && !["audioflow", "videoflow"].includes(currentPageId)) {
