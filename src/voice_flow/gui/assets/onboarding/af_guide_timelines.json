@@ -1,69 +1,64 @@
 {
   "1": [
     {
-      "start": 0.5,
-      "end": 2.78,
+      "start": 0.4,
+      "end": 1.98,
       "text": "Welcome to Audio Flow!"
     },
     {
-      "start": 2.73,
-      "end": 7.75,
+      "start": 2.26,
+      "end": 7.11,
       "text": "Use Read mode to hear any text word-for-word with dozens of voices and speeds."
     },
     {
-      "start": 7.75,
-      "end": 14.1,
+      "start": 7.39,
+      "end": 13.29,
       "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
     }
   ],
   "2": [
     {
-      "start": 0.5,
-      "end": 3.35,
+      "start": 0.4,
+      "end": 3.66,
       "text": "Step two connects your voice engines."
     },
     {
-      "start": 3.3,
-      "end": 5.86,
+      "start": 3.94,
+      "end": 6.08,
       "text": "Free Edge voices are built in."
     },
     {
-      "start": 5.86,
-      "end": 10.12,
-      "text": "Connect your Google account for NotebookLM or add a Gemini key."
-    },
-    {
-      "start": 10.12,
-      "end": 13.4,
-      "text": "All credentials are encrypted and stored locally."
+      "start": 6.36,
+      "end": 14.09,
+      "text": "Connect your Google account for NotebookLM or add a Gemini key. All credentials are encrypted and stored locally."
     }
   ],
   "3": [
     {
-      "start": 0.5,
-      "end": 3.24,
+      "start": 0.4,
+      "end": 2.54,
       "text": "Step three is your Audio History."
     },
     {
-      "start": 3.19,
-      "end": 6.43,
+      "start": 2.82,
+      "end": 5.6,
       "text": "Every summary is saved in your local library."
     },
     {
-      "start": 6.43,
-      "end": 14.11,
+      "start": 5.88,
+      "end": 12.33,
       "text": "Toggle the sidebar anytime to search past notes, replay waveforms, and download MP3 files with one click."
     }
   ],
   "4": [
     {
-      "start": 0.5,
-      "end": 5.26,
+      "start": 0.4,
+      "end": 5.58,
       "text": "Finally, use Audio Flow anywhere on your desktop without switching apps."
     },
     {
-      "start": 5.21,
-      "end": 12.25,
+      "start": 5.86,
+      "end": 13.04,
       "text": "Simply highlight text on your screen to trigger the floating quick-action menu and listen in the floating waveform player while you work."
     }
   ]

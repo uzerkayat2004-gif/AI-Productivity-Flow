@@ -1035,6 +1035,69 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65) !important;
 }
 
+/* 13b. Card-Relative Welcome Tour Auto/Manual Mode Pill Badge */
+.scene1-auto-badge {
+  position: absolute !important;
+  top: 18px !important;
+  right: 142px !important;
+  z-index: 50 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 7px 15px !important;
+  font-family: inherit !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08) !important;
+  color: #059669 !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(16, 185, 129, 0.45) !important;
+}
+
+.scene1-auto-badge.is-manual {
+  color: #64748b !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(226, 232, 240, 0.85) !important;
+}
+
+.scene1-auto-badge:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+[data-theme="dark"] .scene1-auto-badge {
+  color: #34d399 !important;
+  background: rgba(16, 185, 129, 0.18) !important;
+  border: 1px solid rgba(16, 185, 129, 0.45) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="dark"] .scene1-auto-badge.is-manual {
+  color: #f3e5d8 !important;
+  background: rgba(24, 25, 34, 0.88) !important;
+  border-color: rgba(243, 229, 216, 0.22) !important;
+}
+
+.s1-auto-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  display: inline-block;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scene1-auto-badge.is-manual .s1-auto-dot {
+  background: #94a3b8;
+  box-shadow: none;
+}
+
 /* ============================================================
    SCENE 2 — VIDEO FLOW TOUR STAGE
    ============================================================ */
@@ -3677,29 +3740,44 @@ body.af-guide-step3-active #af-history-panel {
 }
 
 .af-guide-close-btn {
-  background: none;
-  border: none;
-  font-size: 14px;
-  color: var(--polish-muted, #b9b9ac);
-  cursor: pointer;
-  padding: 3px 6px;
-  border-radius: 6px;
-  transition: all 0.15s ease;
-  line-height: 1;
+  background: #ef4444 !important;
+  border: 1px solid #dc2626 !important;
+  color: #ffffff !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  border-radius: 50% !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4) !important;
 }
 
 .af-guide-close-btn:hover {
-  color: var(--polish-ink, #eeede5);
-  background: var(--polish-well, #343530);
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+  transform: scale(1.08) !important;
 }
 
 [data-theme="light"] .af-guide-close-btn {
-  color: #705d48;
+  background: #ef4444 !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
 }
 
 [data-theme="light"] .af-guide-close-btn:hover {
-  color: #392d22;
-  background: #ecdfc9;
+  background: #dc2626 !important;
+  border-color: #b91c1c !important;
+  color: #ffffff !important;
+  transform: scale(1.08) !important;
 }
 
 .af-guide-title {
@@ -4134,20 +4212,25 @@ body.af-guide-step3-active #af-history-panel {
   display: block;
 }
 
-/* Screen simulation video zoom & crop for Audio Flow Step 4 and Video Flow Step 4 (Item 16) */
+/* Screen simulation video framing for Audio Flow Step 4 and Video Flow Step 4:
+   Properly fitted in the middle of the frame without cutting edges */
 #af-guide-screen-sim .af-sim-video,
 .af-guide-card.is-step4 #af-guide-screen-sim .af-sim-video {
-  object-fit: cover !important;
-  transform: scale(1.36) !important;
-  transform-origin: 36% 48% !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  transform: none !important;
   background: #000;
 }
 
 #vf-guide-screen-sim .af-sim-video,
 .vf-guide-card.is-step4 #vf-guide-screen-sim .af-sim-video {
-  object-fit: cover !important;
-  transform: scale(1.36) !important;
-  transform-origin: 46% 50% !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  transform: none !important;
   background: #000;
 }
 

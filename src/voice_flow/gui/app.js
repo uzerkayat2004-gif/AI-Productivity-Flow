@@ -872,26 +872,48 @@ function initNavigation() {
   navItems.forEach(item => {
     item.addEventListener("click", () => {
       const pageId = item.getAttribute("data-page");
-      const isSwitching = (currentPageId !== pageId);
-      switchPage(pageId, { userInitiated: true });
-      if (pageId === "videoflow") {
+      const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
+      const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
+      const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+
+      if (isVoiceFlowFeature && !vfVoiceGuided) {
+        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
+        switchPage("home", { userInitiated: true });
         setTimeout(() => {
-          if (typeof startVideoFlowGuide === "function") {
-            startVideoFlowGuide();
+          if (typeof startVoiceFlowGuide === "function") {
+            startVoiceFlowGuide();
           }
         }, 60);
-      } else if (pageId === "home") {
+        return;
+      }
+
+      const isSwitching = (currentPageId !== pageId);
+      switchPage(pageId, { userInitiated: true });
+
+      if (pageId === "videoflow") {
+        const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
+        if (!vfSeen) {
+          setTimeout(() => {
+            if (typeof startVideoFlowGuide === "function") {
+              startVideoFlowGuide();
+            }
+          }, 60);
+        }
+      } else if (pageId === "home" && !vfVoiceGuided) {
         setTimeout(() => {
           if (typeof startVoiceFlowGuide === "function") {
             startVoiceFlowGuide();
           }
         }, 60);
       } else if (pageId === "audioflow" && isSwitching) {
-        setTimeout(() => {
-          if (typeof startAudioFlowGuide === "function") {
-            startAudioFlowGuide();
-          }
-        }, 60);
+        const afSeen = (onboardingFlag("vf_onboarding.af_guided") === "1");
+        if (!afSeen) {
+          setTimeout(() => {
+            if (typeof startAudioFlowGuide === "function") {
+              startAudioFlowGuide();
+            }
+          }, 60);
+        }
       }
     });
   });
@@ -6920,36 +6942,36 @@ const ONBOARDING_PAGE_MAP = {
 
 const scene1Timeline = [
   {
-    "start": 0.5,
-    "end": 3.45,
+    "start": 0.4,
+    "end": 2.7,
     "text": "Welcome to AI Productivity Flow!"
   },
   {
-    "start": 3.4,
-    "end": 6.99,
+    "start": 2.98,
+    "end": 6.73,
     "text": "Your free open-source companion with complete privacy."
   },
   {
-    "start": 6.99,
-    "end": 13.23,
+    "start": 7.01,
+    "end": 12.43,
     "text": "Turn ideas into high-speed action with explainer videos, audio summaries, and voice dictation."
   }
 ];
 
 const scene2Timeline = [
   {
-    "start": 0.5,
-    "end": 2.48,
+    "start": 0.4,
+    "end": 1.89,
     "text": "Meet Video Flow!"
   },
   {
-    "start": 2.43,
-    "end": 6.56,
+    "start": 2.17,
+    "end": 6.05,
     "text": "Transform articles or notes into animated explainer videos."
   },
   {
-    "start": 6.56,
-    "end": 13.45,
+    "start": 6.33,
+    "end": 12.86,
     "text": "With motion graphics, smart layouts, and natural narration, turn any content into a video in seconds."
   }
 ];
@@ -6986,19 +7008,19 @@ function updateScene2Video(isPlaying) {
 
 const scene3Timeline = [
   {
-    "start": 0.5,
-    "end": 2.53,
+    "start": 0.4,
+    "end": 2.37,
     "text": "Meet Audio Flow!"
   },
   {
-    "start": 2.48,
-    "end": 7.0,
+    "start": 2.61,
+    "end": 6.5,
     "text": "Highlight text anywhere on your screen to trigger the floating quick-action menu."
   },
   {
-    "start": 7.0,
-    "end": 14.01,
-    "text": "Generate instant spoken summaries with interactive waveform playback, or download the MP3 to listen on the go."
+    "start": 6.74,
+    "end": 13.12,
+    "text": "Generate instant spoken summaries with waveform playback, or download the MP3 on the go."
   }
 ];
 
@@ -7034,18 +7056,18 @@ function updateScene3Video(isPlaying) {
 
 const scene4Timeline = [
   {
-    "start": 0.5,
-    "end": 2.4,
+    "start": 0.4,
+    "end": 2.06,
     "text": "Meet Voice Flow!"
   },
   {
-    "start": 2.35,
-    "end": 9.42,
+    "start": 2.34,
+    "end": 9.34,
     "text": "Speak naturally into any application and have your words transcribed and polished directly into the active field in real time."
   },
   {
-    "start": 9.42,
-    "end": 12.86,
+    "start": 9.62,
+    "end": 12.65,
     "text": "Zero copy-pasting, zero app-switching."
   }
 ];
@@ -7067,18 +7089,18 @@ function updateOnboardingScene4Subtitles(time) {
 
 const scene5Timeline = [
   {
-    "start": 0.5,
-    "end": 2.62,
+    "start": 0.4,
+    "end": 1.82,
     "text": "Welcome to our community!"
   },
   {
-    "start": 2.57,
-    "end": 7.68,
+    "start": 2.1,
+    "end": 7.18,
     "text": "Star us on GitHub, share your feedback, and let us shape the future together."
   },
   {
-    "start": 7.68,
-    "end": 11.21,
+    "start": 7.46,
+    "end": 10.87,
     "text": "Click Get Started to configure your hotkeys and begin!"
   }
 ];
@@ -7348,21 +7370,18 @@ function setOnboardingFlag(key, value) {
 }
 
 async function maybeShowOnboarding() {
-  const v2Seen = onboardingFlag("vf_onboarding.v2_seen");
-  if (v2Seen === "1") {
-    const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
-    if (localFlag === "true" || localFlag === "1") return;
+  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
+  if (localFlag === "true" || localFlag === "1") return;
 
-    try {
-      const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
-      const data = await res.json();
-      if (data.success && data.value === true) {
-        setOnboardingFlag("hasViewedOnboarding", "true");
-        setOnboardingFlag("vf_onboarding.done", "1");
-        return;
-      }
-    } catch (e) {}
-  }
+  try {
+    const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
+    const data = await res.json();
+    if (data.success && data.value === true) {
+      setOnboardingFlag("hasViewedOnboarding", "true");
+      setOnboardingFlag("vf_onboarding.done", "1");
+      return;
+    }
+  } catch (e) {}
 
   // Display upgraded Scene 1 onboarding hero on user's desktop app
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
@@ -7391,6 +7410,34 @@ function renderOnboardingDots() {
 }
 
 
+let onboardingAutoMode = true; // Auto mode is active by default for Welcome Tour
+let _onboardingAutoAdvanceTimer = null;
+
+function updateOnboardingAutoModeUI() {
+  const prefixes = ["scene1", "scene2", "scene3", "scene4", "scene5"];
+  prefixes.forEach(prefix => {
+    const btn = document.getElementById(`${prefix}-auto-btn`);
+    const label = document.getElementById(`${prefix}-auto-label`);
+    if (btn) {
+      btn.classList.toggle("is-auto", onboardingAutoMode);
+      btn.classList.toggle("is-manual", !onboardingAutoMode);
+      btn.title = onboardingAutoMode ? "Auto Mode: ON (Click to switch to Manual)" : "Manual Mode: Click to switch to Auto";
+    }
+    if (label) {
+      label.textContent = onboardingAutoMode ? "Auto" : "Manual";
+    }
+  });
+}
+
+function toggleOnboardingAutoMode() {
+  onboardingAutoMode = !onboardingAutoMode;
+  if (_onboardingAutoAdvanceTimer) {
+    clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = null;
+  }
+  updateOnboardingAutoModeUI();
+}
+
 function renderOnboardingSlide() {
   const card = document.querySelector(".onboarding-card");
   if (card) {
@@ -7406,6 +7453,7 @@ function renderOnboardingSlide() {
     s.classList.toggle("active", slideIdx === onboardingSlide);
   });
   renderOnboardingDots();
+  updateOnboardingAutoModeUI();
   const player = document.getElementById("onboarding-player");
   if (player) player.style.display = (onboardingSlide >= 0 && onboardingSlide <= 4) ? "none" : "flex";
 
@@ -7656,6 +7704,14 @@ function speakOnboardingNarration() {
   player.addEventListener("ended", () => {
     if (onboardingAudioPlayer === player) {
       updateOnboardingNarrationUI(true);
+      if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
+        if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
+        _onboardingAutoAdvanceTimer = setTimeout(() => {
+          if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
+            nextOnboardingSlide();
+          }
+        }, 700);
+      }
     }
   });
   player.addEventListener("pause", () => {
@@ -7669,6 +7725,15 @@ function speakOnboardingNarration() {
       updateOnboardingNarrationUI(false);
     }
   });
+
+  if (onboardingAutoMode && targetSlide >= 0 && targetSlide < 4) {
+    if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = setTimeout(() => {
+      if (onboardingAutoMode && onboardingSlide === targetSlide && onboardingSlide < 4) {
+        nextOnboardingSlide();
+      }
+    }, 16000);
+  }
 
   const playPromise = player.play();
   if (playPromise !== undefined) {
@@ -7697,6 +7762,10 @@ function stopOnboardingNarration() {
   if (_onboardingNarrationTimer) {
     clearTimeout(_onboardingNarrationTimer);
     _onboardingNarrationTimer = null;
+  }
+  if (_onboardingAutoAdvanceTimer) {
+    clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = null;
   }
   if (onboardingAudioPlayer) {
     try {
