@@ -35,7 +35,11 @@ def prepare_job_directory(
     if stem in _RESERVED_WINDOWS:
         raise EngineError("invalid_job_id", "Job ID uses a reserved device name")
 
-    root = Path(projects_root or Path.home() / ".voice_flow" / "v3_projects").resolve()
+    if projects_root is None:
+        from voice_flow.paths import data_dir
+
+        projects_root = data_dir() / "v3_projects"
+    root = Path(projects_root).resolve()
     if project_dir is not None:
         destination = Path(project_dir).resolve()
         if destination.parent != root or destination.name != job_id:
