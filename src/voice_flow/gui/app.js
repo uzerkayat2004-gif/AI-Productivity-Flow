@@ -8722,7 +8722,7 @@ function _injectVfGuideDemoVideoCard() {
   cardsContainer.innerHTML = `
     <article class="flow-card vf-library-card flow-status-ready vf-guide-demo-card" id="vf-guide-sample-card">
       <div class="flow-card-thumb">
-        <img src="assets/onboarding/s2_videoflow_poster.jpg" alt="Video thumbnail" class="vf-thumb-img" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;">
+        <img src="assets/onboarding/vf_guide_sample_thumb.jpg" alt="Video thumbnail" class="vf-thumb-img" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;">
         <span class="flow-card-status flow-card-status-ready">Ready</span>
       </div>
       <div class="flow-card-body">
@@ -8740,9 +8740,24 @@ function _injectVfGuideDemoVideoCard() {
       </div>
     </article>
   `;
+
+  // Update counts to match the 1 ready sample video card shown
+  const count = document.getElementById("vf-history-count");
+  if (count) count.textContent = "1 video";
+  const filters = document.getElementById("vf-library-filters");
+  if (filters) {
+    const allBtn = filters.querySelector('[data-vf-filter="all"]');
+    if (allBtn) allBtn.textContent = "All (1)";
+    const readyBtn = filters.querySelector('[data-vf-filter="ready"]');
+    if (readyBtn) readyBtn.textContent = "Ready (1)";
+  }
 }
 
 function _cleanVfGuideDemoVideoCard() {
+  const sampleCard = document.getElementById("vf-guide-sample-card");
+  if (sampleCard) sampleCard.remove();
+  const demoCards = document.querySelectorAll(".vf-guide-demo-card");
+  demoCards.forEach(c => c.remove());
   if (typeof renderVideoHistory === "function") {
     renderVideoHistory();
   }
@@ -8766,10 +8781,7 @@ async function gotoVideoFlowGuideStep(stepIdx) {
   // Cleanup leaving Step 4: restore real library
   if (prevStep === 4 && stepIdx !== 4) {
     document.body.classList.remove("vf-guide-step4-active");
-    const hasRealVideos = typeof vfVideos !== "undefined" && Array.isArray(vfVideos) && vfVideos.length > 0;
-    if (!hasRealVideos) {
-      _cleanVfGuideDemoVideoCard();
-    }
+    _cleanVfGuideDemoVideoCard();
   }
 
   // Cleanup leaving Step 5: pause demo video
@@ -8996,10 +9008,7 @@ function stopVideoFlowGuide() {
   const vid = document.getElementById("vf-guide-real-demo-video");
   if (vid) vid.pause();
 
-  const hasRealVideos = typeof vfVideos !== "undefined" && Array.isArray(vfVideos) && vfVideos.length > 0;
-  if (!hasRealVideos) {
-    _cleanVfGuideDemoVideoCard();
-  }
+  _cleanVfGuideDemoVideoCard();
   setOnboardingFlag("vf_onboarding.vf_guided", "1");
 }
 
