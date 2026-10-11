@@ -30,86 +30,46 @@
     ]
   },
   "step2": {
-    "duration": 26.47,
+    "duration": 6.5,
     "sentences": [
       {
-        "start": 0.4,
-        "end": 3.33,
-        "text": "Step 2 is choosing your video engine."
-      },
-      {
-        "start": 3.28,
-        "end": 11.67,
-        "text": "Here is the most important thing to know: If you just want to use NotebookLM for video generation, you do not need to do anything with API keys!"
-      },
-      {
-        "start": 11.67,
-        "end": 14.82,
-        "text": "You don't have to worry about API keys at all."
-      },
-      {
-        "start": 14.82,
-        "end": 21.59,
-        "text": "Simply log into your Google account right here, and you can create videos immediately without touching any API key."
-      },
-      {
-        "start": 21.59,
-        "end": 25.62,
-        "text": "Next, let's look at our built-in engine and API keys!"
+        "start": 0.5,
+        "end": 6.5,
+        "text": "NotebookLM works with just your Google login; add an API key only if you want the built-in engine."
       }
     ]
   },
   "step3": {
-    "duration": 22.48,
+    "duration": 23.3,
     "sentences": [
       {
         "start": 0.5,
-        "end": 7.86,
-        "text": "Now, if you want to use our own built-in video generation tool, you only need an API key if you use our built-in engine."
+        "end": 3.28,
+        "text": "Step 3 is your Video Library."
       },
       {
-        "start": 7.81,
-        "end": 18.5,
-        "text": "Right here below in Video Flow API Providers, you can set up Google Gemini for free-tier video creation, or connect OpenAI, Groq, and custom providers with one click."
-      },
-      {
-        "start": 18.5,
-        "end": 22.48,
-        "text": "Next, let's explore your video library and downloads!"
-      }
-    ]
-  },
-  "step4": {
-    "duration": 24.07,
-    "sentences": [
-      {
-        "start": 0.4,
-        "end": 3.2,
-        "text": "Step 4 is your Video Library."
-      },
-      {
-        "start": 3.15,
-        "end": 8.17,
+        "start": 3.23,
+        "end": 8.24,
         "text": "Every video you create across your desktop or from this studio is saved right here."
       },
       {
-        "start": 8.17,
-        "end": 13.26,
+        "start": 8.24,
+        "end": 13.34,
         "text": "You can filter by status, search past projects, and preview chapters."
       },
       {
-        "start": 13.26,
-        "end": 18.88,
+        "start": 13.34,
+        "end": 18.96,
         "text": "When a video is ready, download the full HD MP4 file with a single click."
       },
       {
-        "start": 18.88,
-        "end": 23.22,
+        "start": 18.96,
+        "end": 23.3,
         "text": "Next, let's see how to trigger Video Flow directly from your screen!"
       }
     ]
   },
-  "step5": {
+  "step4": {
     "duration": 23.68,
     "sentences": [
       {
@@ -139,7 +99,7 @@
       }
     ]
   },
-  "step5_mac": {
+  "step4_mac": {
     "duration": 23.7,
     "sentences": [
       {

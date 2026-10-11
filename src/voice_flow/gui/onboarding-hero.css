@@ -4164,24 +4164,10 @@ body.af-guide-step3-active #af-history-panel {
 }
 
 /* ==========================================================================
-   Video Flow Step 3: Elevate Built-In API Providers Panel
+   Video Flow Step 3 Library Elevation
    ========================================================================== */
-body.vf-guide-step3-active #page-videoflow .vf-create-grid,
-body.vf-guide-step3-active #page-videoflow .vf-panel:has(#vf-oauth-provider-grid) {
-  display: none !important;
-}
-
-body.vf-guide-step3-active #page-videoflow #vf-api-providers-section {
-  position: relative !important;
-  z-index: 1060 !important;
-  margin-top: 12px !important;
-}
-
-/* ==========================================================================
-   Video Flow Step 4 Library Elevation
-   ========================================================================== */
-body.vf-guide-step4-active #page-videoflow #vf-panel-library,
-body.vf-guide-step4-active #page-videoflow .flow-tabs {
+body.vf-guide-step3-active #page-videoflow #vf-panel-library,
+body.vf-guide-step3-active #page-videoflow .flow-tabs {
   position: relative !important;
   z-index: 1060 !important;
 }

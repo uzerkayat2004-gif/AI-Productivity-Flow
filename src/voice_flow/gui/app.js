@@ -8411,12 +8411,12 @@ function stopAudioFlowGuide() {
 const VIDEOFLOW_GUIDE_STEPS = [
   {
     step: 1,
-    counter: "STEP 1 OF 5 · CONTENT & FORMATS",
+    counter: "STEP 1 OF 4 · CONTENT & FORMATS",
     title: "Content Input & Formats",
     desc: "Drop any PDF or paste text, and pick from 5 adaptive video formats.",
     targetId: "vf-format-section",
     spotlightLabel: "Content & Video Formats",
-    nextLabel: "Next: NotebookLM (No Keys) →",
+    nextLabel: "Next: Choose Video Engine →",
     audioSrc: "assets/onboarding/vf_guide_step1_mixed.mp3",
     timeline: [
       { start: 0.4, end: 2.64, text: "Welcome to Video Flow!" },
@@ -8428,58 +8428,38 @@ const VIDEOFLOW_GUIDE_STEPS = [
   },
   {
     step: 2,
-    counter: "STEP 2 OF 5 · NOTEBOOKLM (ZERO API KEYS)",
-    title: "NotebookLM: No API Key Needed",
-    desc: "Simply sign in with your Google account. You do NOT need any API keys for NotebookLM!",
+    counter: "STEP 2 OF 4 · CHOOSE YOUR VIDEO ENGINE",
+    title: "Choose your video engine",
+    desc: "NotebookLM works with just your Google login; add an API key only if you want the built-in engine.",
     targetId: "vf-engine-cards",
     secondaryTargetId: "vf-nlm-account-card",
-    spotlightLabel: "NotebookLM · Zero API Keys Needed",
-    nextLabel: "Next: Inbuilt Tool & Keys →",
+    spotlightLabel: "Video Engine & API Providers",
+    nextLabel: "Next: Video Library →",
     audioSrc: "assets/onboarding/vf_guide_step2_mixed.mp3",
     timeline: [
-      { start: 0.4, end: 3.33, text: "Step 2 is choosing your video engine." },
-      { start: 3.28, end: 11.67, text: "Here is the most important thing to know: If you just want to use NotebookLM for video generation, you do not need to do anything with API keys!" },
-      { start: 11.67, end: 14.82, text: "You don't have to worry about API keys at all." },
-      { start: 14.82, end: 21.59, text: "Simply log into your Google account right here, and you can create videos immediately without touching any API key." },
-      { start: 21.59, end: 25.62, text: "Next, let's look at our built-in engine and API keys!" }
+      { start: 0.5, end: 6.5, text: "NotebookLM works with just your Google login; add an API key only if you want the built-in engine." }
     ]
   },
   {
     step: 3,
-    counter: "STEP 3 OF 5 · INBUILT TOOL & API KEYS",
-    title: "Built-In Tool & API Keys Below",
-    desc: "Only our built-in tool needs an API key. Set up Gemini Free Tier or OpenAI below.",
-    targetId: "vf-api-providers-section",
-    secondaryTargetId: "vf-api-provider-grid",
-    spotlightLabel: "Video Flow API Providers (Below)",
-    nextLabel: "Next: Video Library →",
-    audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
-    timeline: [
-      { start: 0.5, end: 7.86, text: "Now, if you want to use our own built-in video generation tool, you only need an API key if you use our built-in engine." },
-      { start: 7.81, end: 18.5, text: "Right here below in Video Flow API Providers, you can set up Google Gemini for free-tier video creation, or connect OpenAI, Groq, and custom providers with one click." },
-      { start: 18.5, end: 22.48, text: "Next, let's explore your video library and downloads!" }
-    ]
-  },
-  {
-    step: 4,
-    counter: "STEP 4 OF 5 · LIBRARY & DOWNLOADS",
+    counter: "STEP 3 OF 4 · LIBRARY & DOWNLOADS",
     title: "Video Library & MP4 Downloads",
     desc: "Browse generated videos, replay chapters, and download ready MP4s.",
     targetId: "vf-library-cards",
     spotlightLabel: "Video Library & Downloads",
     nextLabel: "Next: Screen Workflow →",
-    audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
+    audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.4, end: 3.2, text: "Step 4 is your Video Library." },
-      { start: 3.15, end: 8.17, text: "Every video you create across your desktop or from this studio is saved right here." },
-      { start: 8.17, end: 13.26, text: "You can filter by status, search past projects, and preview chapters." },
-      { start: 13.26, end: 18.88, text: "When a video is ready, download the full HD MP4 file with a single click." },
-      { start: 18.88, end: 23.22, text: "Next, let's see how to trigger Video Flow directly from your screen!" }
+      { start: 0.5, end: 3.28, text: "Step 3 is your Video Library." },
+      { start: 3.23, end: 8.24, text: "Every video you create across your desktop or from this studio is saved right here." },
+      { start: 8.24, end: 13.34, text: "You can filter by status, search past projects, and preview chapters." },
+      { start: 13.34, end: 18.96, text: "When a video is ready, download the full HD MP4 file with a single click." },
+      { start: 18.96, end: 23.3, text: "Next, let's see how to trigger Video Flow directly from your screen!" }
     ]
   },
   {
-    step: 5,
-    counter: "STEP 5 OF 5 · SCREEN WORKFLOW",
+    step: 4,
+    counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Shortcut Workflow",
     desc: "",
     targetId: "vf-guide-screen-sim",
@@ -8487,8 +8467,8 @@ const VIDEOFLOW_GUIDE_STEPS = [
     spotlightLabel: "Screen & Windows Shortcut",
     spotlightLabelMac: "Screen & Mac Shortcut",
     nextLabel: "Finish & Start Creating 🚀",
-    audioSrc: "assets/onboarding/vf_guide_step5_mixed.mp3",
-    audioSrcMac: "assets/onboarding/vf_guide_step5_mac_mixed.mp3",
+    audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
+    audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
     timeline: [
       { start: 0.4, end: 5.01, text: "Finally, Video Flow works seamlessly everywhere across Windows." },
       { start: 4.96, end: 13.06, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reviewing a document, highlight any text and trigger the floating shortcut." },
@@ -8687,11 +8667,13 @@ function positionVfGuideSpotlight(stepObj) {
   box.style.display = "block";
   let target = document.getElementById(stepObj.targetId);
   if (stepObj.step === 3) {
-    const heading = document.querySelector("#vf-api-providers-section .vf-section-heading");
-    if (heading) target = heading;
-  } else if (stepObj.step === 4) {
     const sample = document.getElementById("vf-guide-sample-card");
-    if (sample) target = sample;
+    if (sample) {
+      target = sample;
+    } else {
+      const firstCard = document.querySelector("#vf-library-cards .vf-library-card");
+      if (firstCard) target = firstCard;
+    }
   }
   if (!target) {
     box.style.display = "none";
@@ -8801,19 +8783,14 @@ async function gotoVideoFlowGuideStep(stepIdx) {
 
   _vfGuideForceZeroScroll();
 
-  // Cleanup leaving Step 3: restore regular create grid
+  // Cleanup leaving Step 3: restore real library
   if (prevStep === 3 && stepIdx !== 3) {
     document.body.classList.remove("vf-guide-step3-active");
-  }
-
-  // Cleanup leaving Step 4: restore real library
-  if (prevStep === 4 && stepIdx !== 4) {
-    document.body.classList.remove("vf-guide-step4-active");
     _cleanVfGuideDemoVideoCard();
   }
 
-  // Cleanup leaving Step 5: pause demo video
-  if (prevStep === 5 && stepIdx !== 5) {
+  // Cleanup leaving Step 4: pause demo video
+  if (prevStep === 4 && stepIdx !== 4) {
     const vid = document.getElementById("vf-guide-real-demo-video");
     if (vid) vid.pause();
   }
@@ -8821,7 +8798,6 @@ async function gotoVideoFlowGuideStep(stepIdx) {
   // Step 1 & 2 Action: Ensure Create tab is visible, select NotebookLM
   if (stepIdx === 1 || stepIdx === 2) {
     document.body.classList.remove("vf-guide-step3-active");
-    document.body.classList.remove("vf-guide-step4-active");
     if (typeof vfFlowShowTab === "function") {
       vfFlowShowTab("create");
     }
@@ -8836,46 +8812,29 @@ async function gotoVideoFlowGuideStep(stepIdx) {
     }
   }
 
-  // Step 3 Action: Switch to native engine, elevate API providers section
+  // Step 3 Action: Switch to library tab and show rich sample card if empty
   if (stepIdx === 3) {
-    document.body.classList.remove("vf-guide-step4-active");
-    if (typeof vfFlowShowTab === "function") {
-      vfFlowShowTab("create");
-    }
-    if (typeof selectVideoEngine === "function") {
-      selectVideoEngine("native");
-    }
-    if (typeof loadVideoFlow === "function") {
-      loadVideoFlow();
-    }
-    document.body.classList.add("vf-guide-step3-active");
-  }
-
-  // Step 4 Action: Switch to library tab and show rich sample card if empty
-  if (stepIdx === 4) {
-    document.body.classList.remove("vf-guide-step3-active");
     if (typeof vfFlowShowTab === "function") {
       vfFlowShowTab("library");
     }
-    document.body.classList.add("vf-guide-step4-active");
+    document.body.classList.add("vf-guide-step3-active");
     const hasRealVideos = typeof vfVideos !== "undefined" && Array.isArray(vfVideos) && vfVideos.length > 0;
     if (!hasRealVideos) {
       _injectVfGuideDemoVideoCard();
     }
     [80, 220, 500].forEach(ms => {
       setTimeout(() => {
-        if (_currentVfGuideStep === 4) {
-          const s4 = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === 4);
-          if (s4) positionVfGuideSpotlight(s4);
+        if (_currentVfGuideStep === 3) {
+          const s3 = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === 3);
+          if (s3) positionVfGuideSpotlight(s3);
         }
       }, ms);
     });
   }
 
-  // Step 5 Action: Auto-play Windows desktop demo video
-  if (stepIdx === 5) {
+  // Step 4 Action: Auto-play desktop demo video
+  if (stepIdx === 4) {
     document.body.classList.remove("vf-guide-step3-active");
-    document.body.classList.remove("vf-guide-step4-active");
     if (typeof vfFlowShowTab === "function") {
       vfFlowShowTab("create");
     }
@@ -8892,12 +8851,12 @@ async function gotoVideoFlowGuideStep(stepIdx) {
   if (card) {
     card.classList.toggle("is-step1", stepIdx === 1);
     card.classList.toggle("is-step2", stepIdx === 2);
-    card.classList.toggle("is-step4", false);
-    card.classList.toggle("is-step5", stepIdx === 5);
+    card.classList.toggle("is-step4", stepIdx === 4);
+    card.classList.toggle("is-step5", false);
   }
   if (overlay) {
-    overlay.classList.toggle("is-step4-active", false);
-    overlay.classList.toggle("is-step5-active", stepIdx === 5);
+    overlay.classList.toggle("is-step4-active", stepIdx === 4);
+    overlay.classList.toggle("is-step5-active", false);
   }
 
   const counterEl = document.getElementById("vf-guide-step-counter");
