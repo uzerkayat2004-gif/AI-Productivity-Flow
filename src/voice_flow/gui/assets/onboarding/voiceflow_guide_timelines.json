@@ -145,5 +145,32 @@
       "end": 27.99,
       "text": "Click Get Started to begin!"
     }
+  ],
+  "6_mac": [
+    {
+      "start": 0.5,
+      "end": 4.44,
+      "text": "Finally, Voice Flow works seamlessly across your Mac."
+    },
+    {
+      "start": 4.39,
+      "end": 12.98,
+      "text": "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply press Command plus Option and start speaking."
+    },
+    {
+      "start": 12.98,
+      "end": 20.52,
+      "text": "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting."
+    },
+    {
+      "start": 20.52,
+      "end": 23.56,
+      "text": "You are now ready to speak at the speed of thought."
+    },
+    {
+      "start": 23.56,
+      "end": 25.81,
+      "text": "Click Get Started to begin!"
+    }
   ]
 }

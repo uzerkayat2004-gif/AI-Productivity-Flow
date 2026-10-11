@@ -9143,18 +9143,29 @@ const VOICEFLOW_GUIDE_STEPS = [
     page: "home",
     counter: "STEP 6 OF 6 · GLOBAL SHORTCUT",
     title: "Dictate Everywhere Across Windows",
+    titleMac: "Dictate Everywhere Across your Mac",
     desc: "Trigger Voice Flow anywhere across Windows with a global shortcut—instant voice-to-text with zero copy-pasting.",
+    descMac: "Trigger Voice Flow anywhere across your Mac with Command + Option—instant voice-to-text with zero copy-pasting.",
     targetId: "voiceflow-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Global Screen Dictation Shortcut",
+    spotlightLabelMac: "Global Mac Dictation Shortcut",
     nextLabel: "Finish & Start Dictating 🎙️",
     audioSrc: "assets/onboarding/voiceflow_guide_step6_mixed.mp3",
+    audioSrcMac: "assets/onboarding/voiceflow_guide_step6_mac_mixed.mp3",
     timeline: [
       { start: 0.5, end: 5.34, text: "Finally, Voice Flow works seamlessly across your entire Windows computer." },
       { start: 5.29, end: 15.16, text: "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply hold your Middle Mouse Click or press Control plus Windows and start speaking." },
       { start: 15.16, end: 22.7, text: "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting." },
       { start: 22.7, end: 25.74, text: "You are now ready to speak at the speed of thought." },
       { start: 25.74, end: 27.99, text: "Click Get Started to begin!" }
+    ],
+    timelineMac: [
+      { start: 0.5, end: 4.44, text: "Finally, Voice Flow works seamlessly across your Mac." },
+      { start: 4.39, end: 12.98, text: "Whenever you are replying to an email, drafting a document in Word, or chatting in Slack, simply press Command plus Option and start speaking." },
+      { start: 12.98, end: 20.52, text: "Voice Flow automatically types and polishes your words directly into the active field in real time, with zero copy-pasting." },
+      { start: 20.52, end: 23.56, text: "You are now ready to speak at the speed of thought." },
+      { start: 23.56, end: 25.81, text: "Click Get Started to begin!" }
     ]
   }
 ];
@@ -9213,9 +9224,12 @@ function _voiceflowGuidePreventKeyEvent(e) {
 
 function updateVoiceFlowGuideSubtitles(currentTime, stepIdx) {
   const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
-  if (!stepObj || !stepObj.timeline) return;
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+  if (!timeline) return;
 
-  const match = stepObj.timeline.find(t => currentTime >= t.start && currentTime <= t.end);
+  const match = timeline.find(t => currentTime >= t.start && currentTime <= t.end);
   const subEl = document.getElementById("voiceflow-guide-subtitle-text");
   if (!subEl) return;
 
@@ -9254,13 +9268,16 @@ function playVoiceFlowGuideNarration(stepIdx) {
   if (_voiceflowGuideNarrationPaused) return;
 
   const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
-  if (!stepObj || !stepObj.audioSrc) return;
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const audioSrc = (isMac && stepObj.audioSrcMac) ? stepObj.audioSrcMac : stepObj.audioSrc;
+  if (!audioSrc) return;
 
   const token = ++_voiceflowGuideSlideToken;
-  let audioPath = stepObj.audioSrc;
+  let audioPath = audioSrc;
   try {
     if (window.location && window.location.origin && window.location.origin !== "null") {
-      audioPath = `${window.location.origin}/${stepObj.audioSrc}`;
+      audioPath = `${window.location.origin}/${audioSrc}`;
     }
   } catch (e) {}
 
@@ -9320,7 +9337,9 @@ function positionVoiceFlowGuideSpotlight(stepObj) {
   if (!box) return;
 
   if (label) {
-    label.textContent = stepObj.spotlightLabel || "FEATURE SPOTLIGHT";
+    const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+    const lbl = (isMac && stepObj.spotlightLabelMac) ? stepObj.spotlightLabelMac : stepObj.spotlightLabel;
+    label.textContent = lbl || "FEATURE SPOTLIGHT";
   }
 
   if (stepObj.isSimulation) {
@@ -9441,10 +9460,20 @@ function gotoVoiceFlowGuideStep(stepIdx) {
   const card = document.getElementById("voiceflow-guide-card");
   const overlay = document.getElementById("voiceflow-guide-overlay");
 
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const stepTitle = (isMac && stepObj.titleMac) ? stepObj.titleMac : stepObj.title;
+  const stepDesc = (isMac && stepObj.descMac) ? stepObj.descMac : stepObj.desc;
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+
   if (counter) counter.textContent = stepObj.counter;
-  if (title) title.textContent = stepObj.title;
-  if (desc) desc.textContent = stepObj.desc;
+  if (title) title.textContent = stepTitle;
+  if (desc) desc.textContent = stepDesc;
   if (nextBtn) nextBtn.textContent = stepObj.nextLabel || "Next →";
+
+  const simBadge = document.getElementById("voiceflow-guide-sim-badge");
+  if (simBadge) {
+    simBadge.textContent = isMac ? "Mac Voice Dictation" : "Windows Voice Dictation";
+  }
 
   if (backBtn) {
     backBtn.disabled = (stepIdx === 1);
@@ -9457,8 +9486,8 @@ function gotoVoiceFlowGuideStep(stepIdx) {
     dot.classList.toggle("active", idx + 1 === stepIdx);
   });
 
-  if (subEl && stepObj.timeline && stepObj.timeline.length > 0) {
-    subEl.textContent = stepObj.timeline[0].text;
+  if (subEl && timeline && timeline.length > 0) {
+    subEl.textContent = timeline[0].text;
     subEl.style.opacity = "1";
   }
 
@@ -12929,6 +12958,12 @@ async function initPlatformAdaptation() {
       afCaption.textContent = isMac
         ? "💡 Highlight any tweet or text across your Mac to trigger floating instant audio."
         : "💡 Highlight any tweet or text across Windows to trigger floating instant audio.";
+    }
+
+    // 8. Voice Flow screen-sim badge adaptation
+    const vfBadge = document.getElementById("voiceflow-guide-sim-badge");
+    if (vfBadge) {
+      vfBadge.textContent = isMac ? "Mac Voice Dictation" : "Windows Voice Dictation";
     }
   } catch (err) {
     console.debug("[PLATFORM] Platform adaptation check skipped:", err);
