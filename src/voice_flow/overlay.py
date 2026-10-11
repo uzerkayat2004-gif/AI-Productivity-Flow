@@ -390,6 +390,10 @@ class FloatingOverlayBar:
                 if hasattr(self.canvas, "config"):
                     self.canvas.config(width=self.width, height=self.height)
                 self._position_window()
+                if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
+                    # Tk 9 Aqua leaves a freshly enlarged bar unpainted (black)
+                    # until its geometry changes again; repaint right after.
+                    self._schedule_mac_repaint(delay_ms=30)
 
     def _drawn_width(self) -> int:
         """Width the bar was last drawn at (current on-screen geometry)."""
@@ -631,10 +635,11 @@ class FloatingOverlayBar:
             self._schedule_ui_pump()
 
     def _schedule_mac_repaint(self, delay_ms: int = 350) -> None:
-        if self.root is None:
-            return
+        if self.root is None or getattr(self, "_mac_repaint_pending", False):
+            return  # coalesce bursts of resizes into one repaint
         try:
             self.root.after(delay_ms, self._mac_force_repaint)
+            self._mac_repaint_pending = True
         except Exception:
             pass
 
@@ -645,6 +650,7 @@ class FloatingOverlayBar:
         shows the default light window background instead of the canvas (the
         "white floating bar"). A one-pixel resize after mapping, followed by a
         full redraw, makes Tk paint the canvas reliably."""
+        self._mac_repaint_pending = False
         win = self.win
         if win is None:
             return

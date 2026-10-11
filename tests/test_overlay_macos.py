@@ -211,3 +211,23 @@ def test_macos_forced_repaint_resizes_once_and_redraws_dark_rest_pill(monkeypatc
     assert win.geometry_calls[-1].startswith(f"{bar.width}x{bar.height}+")
     fills = [p.get("fill") for p in canvas.polygons]
     assert bar.BG_REST in fills, "rest state must paint the dark pill"
+
+
+def test_macos_resize_schedules_one_coalesced_repaint(monkeypatch):
+    bar, win, canvas = _create(monkeypatch, "darwin")
+    bar._mainloop_running = True
+    bar.root.after_calls.clear()
+    bar._set_bar_size(bar.width + 100, 28)
+    bar._set_bar_size(bar.width + 20, 28)
+    repaints = [c for c in bar.root.after_calls if c[1] == bar._mac_force_repaint]
+    assert len(repaints) == 1
+    bar._mac_force_repaint()
+    assert bar._mac_repaint_pending is False
+
+
+def test_windows_resize_never_schedules_mac_repaint(monkeypatch):
+    bar, win, canvas = _create(monkeypatch, "win32")
+    bar._mainloop_running = True
+    bar.root.after_calls.clear()
+    bar._set_bar_size(bar.width + 100, 28)
+    assert not [c for c in bar.root.after_calls if c[1] == bar._mac_force_repaint]
