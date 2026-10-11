@@ -839,18 +839,15 @@ function toggleVoiceFlowMenu(event) {
   const group = document.getElementById("voiceflow-nav-group");
   const isChevron = event && event.target && event.target.classList.contains("nav-chevron");
 
-  if (isChevron && currentPageId === "home" && group) {
+  if (isChevron && group) {
     group.classList.toggle("open");
     return;
   }
 
   if (group) group.classList.add("open");
-  switchPage("home", { userInitiated: true });
-  setTimeout(() => {
-    if (typeof startVoiceFlowGuide === "function") {
-      startVoiceFlowGuide();
-    }
-  }, 60);
+  if (currentPageId !== "home") {
+    switchPage("home", { userInitiated: true });
+  }
 }
 
 function setVoiceFlowMenuOpen(open) {
@@ -867,6 +864,11 @@ function updateVoiceFlowParentState(pageId) {
   if (isChild) setVoiceFlowMenuOpen(true);
 }
 
+function isExistingUserOrOnboardingDone() {
+  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done") || onboardingFlag("vf_onboarding.v2_seen");
+  return localFlag === "true" || localFlag === "1";
+}
+
 function initNavigation() {
   const navItems = document.querySelectorAll(".sidebar .nav-item[data-page]");
   navItems.forEach(item => {
@@ -874,7 +876,7 @@ function initNavigation() {
       const pageId = item.getAttribute("data-page");
       const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
       const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
-      const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+      const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1") || isExistingUserOrOnboardingDone();
 
       if (isVoiceFlowFeature && !vfVoiceGuided) {
         // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
@@ -889,6 +891,10 @@ function initNavigation() {
 
       const isSwitching = (currentPageId !== pageId);
       switchPage(pageId, { userInitiated: true });
+
+      if (isExistingUserOrOnboardingDone()) {
+        return;
+      }
 
       if (pageId === "videoflow") {
         const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
@@ -1023,6 +1029,10 @@ function resetAllSubViews() {
 
 function switchPage(pageId, options = {}) {
   const previousPageId = currentPageId;
+  if (previousPageId === pageId && !options.force) {
+    resetAllSubViews();
+    return;
+  }
   currentPageId = pageId;
   document.body.classList.toggle("flow-workspace-active", ["audioflow", "videoflow", "providers", "dictionary"].includes(pageId));
   document.querySelectorAll(".sidebar .nav-item[data-page]").forEach(nav => {
@@ -1030,11 +1040,11 @@ function switchPage(pageId, options = {}) {
   });
   updateVoiceFlowParentState(pageId);
 
-  // Cleanly dismiss active guide for other pages when leaving without marking completed
+  // Cleanly dismiss active guide for other pages when leaving
   if (!options.fromGuide && !options.fromWelcomeTour) {
-    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
-    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
-    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(true);
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(true);
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(true);
   }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
@@ -1074,9 +1084,6 @@ function switchPage(pageId, options = {}) {
 
     if (!options.skipScrollReset) {
       requestAnimationFrame(() => resetPageScroll(target));
-      setTimeout(() => resetPageScroll(target), 50);
-      setTimeout(() => resetPageScroll(target), 150);
-      setTimeout(() => resetPageScroll(target), 300);
     }
   }
 }
@@ -7371,7 +7378,12 @@ function setOnboardingFlag(key, value) {
 
 async function maybeShowOnboarding() {
   const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
-  if (localFlag === "true" || localFlag === "1") return;
+  if (localFlag === "true" || localFlag === "1") {
+    setOnboardingFlag("vf_onboarding.af_guided", "1");
+    setOnboardingFlag("vf_onboarding.vf_guided", "1");
+    setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
+    return;
+  }
 
   try {
     const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
@@ -7379,6 +7391,9 @@ async function maybeShowOnboarding() {
     if (data.success && data.value === true) {
       setOnboardingFlag("hasViewedOnboarding", "true");
       setOnboardingFlag("vf_onboarding.done", "1");
+      setOnboardingFlag("vf_onboarding.af_guided", "1");
+      setOnboardingFlag("vf_onboarding.vf_guided", "1");
+      setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
       return;
     }
   } catch (e) {}
@@ -8457,7 +8472,7 @@ function prevAudioFlowGuideStep() {
 }
 
 function startAudioFlowGuide() {
-  if (typeof switchPage === "function") {
+  if (typeof switchPage === "function" && currentPageId !== "audioflow") {
     switchPage("audioflow", { skipGuideTrigger: true, fromGuide: true });
   }
   const overlay = document.getElementById("audioflow-guide-overlay");
@@ -9118,7 +9133,7 @@ function prevVideoFlowGuideStep() {
 }
 
 function startVideoFlowGuide() {
-  if (typeof switchPage === "function") {
+  if (typeof switchPage === "function" && currentPageId !== "videoflow") {
     switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
   }
   const overlay = document.getElementById("videoflow-guide-overlay");
@@ -9799,7 +9814,7 @@ function prevVoiceFlowGuideStep() {
 }
 
 function startVoiceFlowGuide() {
-  if (typeof switchPage === "function") {
+  if (typeof switchPage === "function" && currentPageId !== "home") {
     switchPage("home", { skipGuideTrigger: true, fromGuide: true });
   }
   const overlay = document.getElementById("voiceflow-guide-overlay");
@@ -9909,6 +9924,9 @@ function stopVoiceFlowGuide(markCompleted = false) {
 function replayOnboarding() {
   setOnboardingFlag("vf_onboarding.done", "");
   setOnboardingFlag("hasViewedOnboarding", "");
+  setOnboardingFlag("vf_onboarding.af_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_voice_guided", "");
   if (typeof closeSettings === "function") closeSettings();
   onboardingSlide = 0;
   renderOnboardingSlide();

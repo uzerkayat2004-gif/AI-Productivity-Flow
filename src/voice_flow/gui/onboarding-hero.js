@@ -37,6 +37,8 @@
   }
 
   function fitStage() {
+    const overlay = document.getElementById("onboarding-overlay");
+    if (!overlay || overlay.classList.contains("hidden")) return;
     ["s1-stage", "s2-stage", "s3-stage", "s4-stage", "s5-stage"].forEach(id => {
       const stage = document.getElementById(id);
       const vp = stage && stage.parentElement;
@@ -61,34 +63,46 @@
   }
 
   // Caption clock fallback: only if no narration audio player is created (e.g. offline audio fallback)
-  let clockT = 0, lastTick = 0;
+  let clockT = 0, lastTick = 0, animFrameId = null;
   function tick(now) {
     const overlay = document.getElementById("onboarding-overlay");
     const visible = overlay && !overlay.classList.contains("hidden") && overlay.classList.contains("welcome-hero-mode");
-    if (visible) {
-      let hasAudioPlayer = false;
-      try {
-        // eslint-disable-next-line no-undef
-        hasAudioPlayer = typeof onboardingAudioPlayer !== "undefined" && onboardingAudioPlayer !== null;
-      } catch (e) { /* ignore */ }
-
-      if (hasAudioPlayer) {
-        // The HTML Audio player drives all timeupdate events directly
-        lastTick = now;
-        requestAnimationFrame(tick);
-        return;
-      }
-
-      const dt = lastTick ? (now - lastTick) / 1000 : 0;
-      clockT = (clockT + dt) % 40.5;
-      if (typeof updateOnboardingScene1Subtitles === "function") {
-        updateOnboardingScene1Subtitles(clockT, false);
-      }
-    } else {
+    if (!visible) {
       clockT = 0;
+      lastTick = 0;
+      animFrameId = null;
+      return;
+    }
+
+    let hasAudioPlayer = false;
+    try {
+      // eslint-disable-next-line no-undef
+      hasAudioPlayer = typeof onboardingAudioPlayer !== "undefined" && onboardingAudioPlayer !== null;
+    } catch (e) { /* ignore */ }
+
+    if (hasAudioPlayer) {
+      // The HTML Audio player drives all timeupdate events directly
+      lastTick = now;
+      animFrameId = requestAnimationFrame(tick);
+      return;
+    }
+
+    const dt = lastTick ? (now - lastTick) / 1000 : 0;
+    clockT = (clockT + dt) % 40.5;
+    if (typeof updateOnboardingScene1Subtitles === "function") {
+      updateOnboardingScene1Subtitles(clockT, false);
     }
     lastTick = now;
-    requestAnimationFrame(tick);
+    animFrameId = requestAnimationFrame(tick);
+  }
+
+  function ensureTick() {
+    const overlay = document.getElementById("onboarding-overlay");
+    const visible = overlay && !overlay.classList.contains("hidden") && overlay.classList.contains("welcome-hero-mode");
+    if (visible && !animFrameId) {
+      lastTick = 0;
+      animFrameId = requestAnimationFrame(tick);
+    }
   }
 
   function init() {
@@ -106,8 +120,13 @@
     window.addEventListener("resize", fitStage);
     new MutationObserver(syncThemeLabel).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const overlay = document.getElementById("onboarding-overlay");
-    if (overlay) new MutationObserver(() => requestAnimationFrame(fitStage)).observe(overlay, { attributes: true, attributeFilter: ["class"] });
-    requestAnimationFrame(tick);
+    if (overlay) {
+      new MutationObserver(() => {
+        requestAnimationFrame(fitStage);
+        ensureTick();
+      }).observe(overlay, { attributes: true, attributeFilter: ["class"] });
+    }
+    ensureTick();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
