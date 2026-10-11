@@ -125,3 +125,12 @@ work/
 !tests/**/*.js
 !tests/**/*.json
 
+
+# OS, local QA and build outputs (smoke/walkthrough evidence, installers)
+.DS_Store
+/out/
+/mac-out*/
+*.dmg
+/*.patch
+/*.orig
+/*.rej
