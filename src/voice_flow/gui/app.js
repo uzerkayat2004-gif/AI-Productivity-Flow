@@ -8519,12 +8519,9 @@ function startAudioFlowGuide(options) {
   if (typeof switchPage === "function") {
     switchPage("audioflow", { skipGuideTrigger: true, fromGuide: true });
   }
-  // The guide replaces any still-visible welcome tour overlay.
-  const obOverlay = document.getElementById("onboarding-overlay");
-  if (obOverlay) obOverlay.classList.add("hidden");
-
   if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
   if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
+  // The guide replaces any still-visible welcome tour overlay.
   const obOverlay = document.getElementById("onboarding-overlay");
   if (obOverlay) {
     obOverlay.classList.add("hidden");
@@ -8573,54 +8570,6 @@ function _onAfGuideResize() {
   }
 }
 
-  stopAudioFlowGuideAudio();
-  window.removeEventListener("resize", _onAfGuideResize);
-
-  // Remove capture listeners
-  for (const ev of _afGuideEventTypes) {
-    window.removeEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
-    document.removeEventListener(ev, _afGuideBlockAppEvent, { capture: true, passive: false });
-  }
-  window.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
-  document.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
-  window.removeEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
-  document.removeEventListener("touchmove", _afGuidePreventScrollEvent, { capture: true, passive: false });
-  window.removeEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
-  window.removeEventListener("keydown", _afGuidePreventKeyEvent, { capture: true });
-
-  const mc = document.querySelector(".main-content");
-  if (mc) {
-    mc.removeEventListener("scroll", _afGuideForceZeroScroll, { capture: true, passive: false });
-    mc.removeEventListener("wheel", _afGuidePreventScrollEvent, { capture: true, passive: false });
-  }
-
-  if (window._afGuideConnCardObserver) {
-    window._afGuideConnCardObserver.disconnect();
-    window._afGuideConnCardObserver = null;
-  }
-
-  // Restore CSS state
-  document.body.classList.remove("af-guide-active");
-  document.body.classList.remove("af-guide-step3-active");
-
-  const card = document.getElementById("af-guide-card");
-  if (card) card.classList.remove("is-step4");
-
-  const overlay = document.getElementById("audioflow-guide-overlay");
-  if (overlay) {
-    overlay.classList.remove("is-step4-active");
-    overlay.classList.add("hidden");
-  }
-
-  const vid = document.getElementById("af-guide-real-demo-video");
-  if (vid) vid.pause();
-  if (currentAudioProvider === "gemini" && typeof closeAudioProviderDetail === "function") {
-    closeAudioProviderDetail();
-  }
-  const hasRealSummaries = typeof afSummaries !== "undefined" && Array.isArray(afSummaries) && afSummaries.length > 0;
-  if (!hasRealSummaries) {
-    _cleanAfGuideDemoHistoryCard();
-  }
 function stopAudioFlowGuide(options) {
   let unusable = false;
   let markCompleted = false;

@@ -47,12 +47,13 @@ def test_guide_overlay_is_fixed_and_hidden_class_hides_it():
         assert f"@keyframes {keyframes}" in css
 
 
-def test_guide_stylesheet_is_loaded_and_ships_no_unfinished_guides():
+def test_guide_stylesheet_is_loaded_and_ships_finished_guides():
     html = (GUI / "index.html").read_text(encoding="utf-8")
     assert re.search(r'href="onboarding-hero\.css\?v=[^"]+"', html)
     css = _css()
-    for unfinished in ("vf-guide", "videoflow-guide", "voiceflow-guide"):
-        assert unfinished not in css
+    # Audio, Video, and Voice Flow guides all ship styled now.
+    for selector in (".af-guide-overlay", ".vf-guide-card", ".af-guide-card"):
+        assert _has_rule(css, selector), selector
 
 
 def test_guide_media_is_in_the_repo():
