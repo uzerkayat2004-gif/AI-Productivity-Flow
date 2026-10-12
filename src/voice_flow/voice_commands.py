@@ -45,6 +45,10 @@ class VoiceCommand:
     persistent_change: bool = False
     ambiguous: bool = False
     preserve_wording: bool = False
+    # Free-text writing constraints that belong to the command clause and have
+    # no structured field ("without hashtags", "keep both deadlines").  They
+    # are forwarded verbatim to the model as the VF-1 [Instruction] text.
+    constraints: tuple = ()
 
     def label(self) -> str:
         """Short human label for UI feedback, e.g. 'Email / Excited'."""
@@ -64,6 +68,8 @@ class VoiceCommand:
         for key in ("tone", "formality", "length", "clarity"):
             if key in overrides:
                 parts.append(str(overrides[key]).title())
+        if self.operation == "unsupported":
+            parts.append("Unsupported")
         if self.persistent_change:
             parts.append("Save")
         return " / ".join(parts)
@@ -122,7 +128,8 @@ _LEADING_FILLER_RE = re.compile(r"^(?:um+|uh+|well|so|okay|ok)[,.\s]+", re.IGNOR
 # dictation.  The parser must not consume the rest of a report merely because
 # it contains the words a user would say to Voice Flow.
 _REPORTED_WAKE_PREFIX_RE = re.compile(
-    r"\b(?:i|you|we|they|someone)\s+(?:said|mentioned|heard)\s*[, :]?\s*$"
+    r"\b(?:said|says|saying|mentioned|heard|told\s+(?:me|us|him|her|them|you)|asked(?:\s+(?:me|us|him|her|them|you))?|"
+    r"was\s+like|goes|wrote|texted|messaged)\s*[, :]?\s*$"
     r"|\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
     r"(?:say|said|says|mention|mentioned|use|used|hear|heard)\s*$",
     re.IGNORECASE,
@@ -133,7 +140,11 @@ _REPORTED_WAKE_PREFIX_RE = re.compile(
 # an unknown following word stays in the user's content.
 _UNPUNCTUATED_INTENT_END_RE = re.compile(
     r"\b(?:"
-    r"e-?mail|bullets?|bullet(?:ed)?\s+(?:list|points)|linkedin\s+post|"
+    r"e-?mail|bullets?|bullet(?:ed)?\s+(?:list|points)|numbered\s+(?:list|points|steps)|linkedin\s+post|"
+    r"(?:slack|teams)\s+(?:message|chat|msg)|text\s+message|"
+    r"(?:make|turn|convert)\s+(?:this|it)\s+(?:into\s+)?(?:a\s+)?(?:list|summary)|summary|"
+    r"simplify(?:\s+(?:this|it))?|remove\s+(?:the\s+)?duplicates?|(?:sound\s+)?better|improve(?:\s+(?:this|it))?|"
+    r"less\s+(?:formal|professional|casual)|"
     r"work\s+(?:message|chat|msg)|personal\s+(?:message|msg|text)|"
     r"(?:normal|casual)\s+(?:message|msg|text)|"
     r"(?:proper\s+|coding\s+|well[-\s]?structured\s+)?prompts?|"
@@ -151,7 +162,7 @@ _POLITE_COMMAND_PREFIX_RE = re.compile(r"^\s*(?:can|could|would)\s+you\s+(?:plea
 _COMMAND_START_WORDS = {
     "please", "make", "turn", "use", "write", "create", "change", "rewrite", "summarize", "summarise",
     "fix", "shorten", "clean", "polish", "convert", "send", "generate", "draft",
-    "remove", "don't", "tighten", "expand",
+    "remove", "don't", "tighten", "expand", "keep", "simplify", "improve", "format",
 }
 _COMMAND_SYNTAX_WORDS = {
     "this", "it", "as", "into", "a", "an", "the", "my", "usual", "normal", "regular",
@@ -160,18 +171,29 @@ _COMMAND_SYNTAX_WORDS = {
     "prompt", "short", "shorter", "concise", "brief", "tighten", "detailed", "longer", "more",
     "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly", "conversational",
     "confident", "persuasive", "playful", "excited", "grammar", "repetition", "repetitive",
-    "good",
+    "good", "linkedin", "slack", "teams", "numbered", "summary", "simplify", "duplicates", "duplicate",
+    "sound", "better", "improve", "less", "only", "style", "up", "steps", "keep", "wording", "words",
+    "phrasing",
 }
 _COMMAND_INTENT_WORDS = {
     "email", "mail", "bullet", "bullets", "bulleted", "list", "points", "prompt", "note", "notes",
     "message", "chat", "msg", "text", "short", "shorter", "concise", "brief", "tighten", "detailed",
     "longer", "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly",
     "conversational", "confident", "persuasive", "playful", "excited", "summarize", "summarise",
-    "grammar", "repetition", "repetitive", "don't",
+    "grammar", "repetition", "repetitive", "don't", "post", "linkedin", "summary", "simplify",
+    "duplicates", "duplicate", "better", "improve", "numbered", "wording", "steps",
 }
 _COMMAND_FORMAT_WORDS = {
     "email", "mail", "bullet", "bullets", "bulleted", "list", "points", "prompt", "note", "notes",
-    "message", "chat", "msg", "text",
+    "message", "chat", "msg", "text", "post", "summary", "steps",
+}
+# Words that may legitimately continue a format phrase that is already
+# complete ("text message", "bullet points", "linkedin post", "fix grammar
+# only", "email in my work style").
+_FORMAT_CONTINUATION_WORDS = {
+    "list", "points", "steps", "message", "msg", "chat", "post", "only", "formal", "professional",
+    "casual", "friendly", "conversational", "excited", "confident", "persuasive", "playful",
+    "short", "shorter", "concise", "brief", "detailed", "summary",
 }
 
 
@@ -236,7 +258,7 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
 # --------------------------------------------------------------------------
 
 _FORMAT_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
-    ("work_message", re.compile(r"\bwork\s+(?:message|chat|msg)\b", re.I)),
+    ("work_message", re.compile(r"\b(?:work|slack|teams)\s+(?:message|chat|msg)\b", re.I)),
     ("personal_message", re.compile(r"\bpersonal\s+(?:message|msg|text)\b", re.I)),
     # A generic message is personal by default.  Limit this to command-shaped
     # wording so ordinary dictation such as "draft a message to the team"
@@ -248,7 +270,11 @@ _FORMAT_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         re.I,
     )),
     ("linkedin_post", re.compile(r"\blinkedin\s+post\b", re.I)),
-    ("bullet_list", re.compile(r"\bbullets?\b|\bbullet(?:ed)?\s+(?:list|points)\b", re.I)),
+    ("numbered_list", re.compile(r"\bnumbered\s+(?:list|points|steps)\b", re.I)),
+    ("bullet_list", re.compile(
+        r"\bbullets?\b|\bbullet(?:ed)?\s+(?:list|points)\b"
+        r"|\b(?:make|turn|convert)\s+(?:this|it)\s+(?:into\s+)?(?:a\s+)?list\b",
+        re.I)),
     ("email", re.compile(r"\be-?mail\b", re.I)),
     # "note(s)" only counts as a format command in an explicit make/turn/as
     # construction — "the meeting notes are due" is content, not a command.
@@ -279,11 +305,51 @@ _TONE_WORDS = {
 }
 _FORMALITY_WORDS = {"professional": "professional", "formal": "formal"}
 _LENGTH_SHORT_RE = re.compile(r"\b(?:short(?:er)?|concise|brief|tighten(?:\s+it\s+up)?)\b", re.I)
-_LENGTH_DETAILED_RE = re.compile(r"\b(?:longer|more\s+detailed|expand)\b", re.I)
-_CLARITY_RE = re.compile(r"\b(?:clearer|easier\s+to\s+(?:read|understand)|simpler)\b", re.I)
+_LENGTH_DETAILED_RE = re.compile(r"\b(?:longer|(?:more\s+)?detailed|expand)\b", re.I)
+_CLARITY_RE = re.compile(r"\b(?:clearer|easier\s+to\s+(?:read|understand)|simpler|simplify)\b", re.I)
+_IMPROVE_RE = re.compile(r"\b(?:sound\s+better|better|improve|polish(?:ed)?)\b", re.I)
 _GRAMMAR_RE = re.compile(r"\bfix\s+(?:the\s+)?grammar\b", re.I)
-_DEDUPE_RE = re.compile(r"\bremove\s+(?:the\s+)?repetit(?:ion|ive)\b", re.I)
-_SUMMARIZE_RE = re.compile(r"\bsummarize|summarise\b", re.I)
+_DEDUPE_RE = re.compile(r"\bremove\s+(?:the\s+)?(?:repetit(?:ion|ive)|duplicates?|duplication)\b", re.I)
+# Only consulted after _COMMAND_SHAPE_RE accepted the clause, so a dictated
+# mention of "the summary" in ordinary content is never parsed.
+_SUMMARIZE_RE = re.compile(r"\b(?:summari[sz]e|summary|tl;?\s?dr)\b", re.I)
+# "less formal", "not so formal", "don't make it formal": lower the register.
+_REGISTER_DOWN_RE = re.compile(
+    r"\b(?:less|not\s+(?:so|too|that))\s+(?:formal|professional|stiff)\b"
+    r"|\b(?:do\s+not|don['’]?t|never)\s+make\s+(?:it|this)\s+(?:sound\s+)?(?:too\s+|so\s+)?(?:formal|professional)\b",
+    re.I,
+)
+# "less casual", "not so casual", "don't make it casual": raise the register.
+_REGISTER_UP_RE = re.compile(
+    r"\b(?:less|not\s+(?:so|too|that))\s+(?:casual|informal|relaxed)\b"
+    r"|\b(?:do\s+not|don['’]?t|never)\s+make\s+(?:it|this)\s+(?:sound\s+)?(?:too\s+|so\s+)?(?:casual|informal)\b",
+    re.I,
+)
+# Commands this processor recognises but no writing model may perform.
+_UNSUPPORTED_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:(?:can|could|would)\s+you\s+(?:please\s+)?)?"
+    r"(?:translate|answer|reply\s+to|respond\s+to|send|search(?:\s+for)?|look\s+up|google|delete|"
+    r"email\s+(?:this|it)\s+to|post\s+(?:this|it)|schedule|call|open)\b",
+    re.I,
+)
+# Constraint spans that belong to a command clause and have no structured
+# field.  They are captured verbatim and removed from the content.
+_CONSTRAINT_RE = re.compile(
+    r"(?:,?\s*\b(?:but|and)\s+)?\b(?:"
+    r"without\s+(?:any\s+)?[a-z\-]+(?:\s+(?:or|and)\s+[a-z\-]+)?(?:\s+lines?)?"
+    r"|with\s+no\s+[a-z\-]+(?:\s+(?:or|and)\s+[a-z\-]+)?"
+    r"|no\s+(?:hashtags|emojis?|subject(?:\s+line)?|greeting|sign[\s-]?off|bullets|headings|markdown)"
+    r"|(?:do\s+not|don['’]?t)\s+(?:change|touch|remove|drop|add|use|include|mention)\s+(?:my\s+|the\s+|any\s+)?[a-z\-]+"
+    r"|keep\s+(?!my\s+(?:wording|words|phrasing)\b)(?:both|all|every|the|my)\s+[a-z\-]+"
+    r")",
+    re.I,
+)
+# Inside a delimited command clause a constraint runs to the end of the clause
+# or to the next joined command ("..., and make it short").
+_CONSTRAINT_CLAUSE_RE = re.compile(
+    _CONSTRAINT_RE.pattern + r"[^,;.!?]*?(?=\s+(?:and|but)\s+(?:make|turn|keep|use)\b|\s*[,;.!?]|\s*$)",
+    re.I,
+)
 _REWRITE_RE = re.compile(r"^\s*(?:please\s+)?(?:rewrite|polish|clean\s+up)\b", re.I)
 _INSTRUCTIONS_RE = re.compile(r"\bas\s+(?:clear\s+)?instructions\b", re.I)
 _COMMAND_SHAPE_RE = re.compile(
@@ -292,7 +358,10 @@ _COMMAND_SHAPE_RE = re.compile(
     # A verified ASR substitution for "make this" used by the voice-log alias.
     r"|^\s*may\s+this\b"
     r"|^\s*keep\s+my\s+(?:wording|words|phrasing)\b"
-    r"|^\s*remove\s+(?:the\s+)?repetit(?:ion|ive)\b"
+    r"|^\s*remove\s+(?:the\s+)?(?:repetit(?:ion|ive)|duplicates?|duplication)\b"
+    r"|^\s*(?:simplify|improve|format)\b"
+    r"|^\s*(?:do\s+not|don['’]?t|never)\s+make\b"
+    r"|^\s*(?:translate|answer|reply\s+to|respond\s+to|search|look\s+up|google|delete|schedule)\b"
     r"|^\s*don['’]t\s+rewrite\b"
     r"|^\s*(?:can|could|would)\s+you\s+(?:please\s+)?"
     r"(?:make|turn|use|write|create|change|rewrite|summari[sz]e|fix|shorten|clean(?:\s+up)?|"
@@ -308,7 +377,7 @@ _PERSISTENT_RE = re.compile(
 )
 _SCOPE_NEXT_RE = re.compile(
     r"\b(?:what|whatever)\s+(?:i|i'll)\s+(?:say|speak|dictate)\s+next\b"
-    r"|\bmy\s+next\s+dictation\b",
+    r"|\bmy\s+next\s+dictation\b|\bthe\s+next\s+one\b",
     re.I,
 )
 _KEEP_WORDING_RE = re.compile(r"\bkeep\s+my\s+(?:wording|words|phrasing)\b|\bdon'?t\s+rewrite\b", re.I)
@@ -320,8 +389,8 @@ _CORRECTION_RE = re.compile(r"\b(?:actually|no\s+wait|I\s+mean|instead)\b", re.I
 # A plain "and" between a formality and a tone word is a genuine contradiction
 # (spec §24); "but"/"yet" merges them as separate dimensions (spec §25).
 _REGISTER_JOINER_RE = re.compile(
-    r"\b(?:formal|professional)\b(?:\s+\w+){0,2}?\s+and\s+(?:\s*\w+\s+){0,2}?(?:casual|friendly|conversational|relaxed)\b"
-    r"|\b(?:casual|friendly|conversational|relaxed)\b(?:\s+\w+){0,2}?\s+and\s+(?:\s*\w+\s+){0,2}?(?:formal|professional)\b",
+    r"\b(?:formal|professional)\b(?:\s+\w+){0,2}?\s+and\s+(?:\s*\w+\s+){0,2}?(?:casual|relaxed|informal)\b"
+    r"|\b(?:casual|relaxed|informal)\b(?:\s+\w+){0,2}?\s+and\s+(?:\s*\w+\s+){0,2}?(?:formal|professional)\b",
     re.I,
 )
 
@@ -349,7 +418,25 @@ def _parse_command(clause: str) -> VoiceCommand:
     # (for example, "the email from Morgan") as instructions.
     if not _COMMAND_SHAPE_RE.match(text):
         return VoiceCommand(raw_phrase=text)
+    if _UNSUPPORTED_RE.match(text):
+        return VoiceCommand(raw_phrase=text, operation="unsupported")
     lowered = text.lower()
+    # Free-text constraints are captured verbatim, then blanked so their words
+    # ("don't change my promise", "keep both deadlines") are not parsed as
+    # register, format, or keep-wording commands.
+    constraints: list[str] = []
+    for m in _CONSTRAINT_CLAUSE_RE.finditer(lowered):
+        span = re.sub(r"^\s*,?\s*(?:but|and)\s+", "", text[m.start():m.end()].strip()).strip(" ,.")
+        if span:
+            constraints.append(span)
+    lowered = _CONSTRAINT_CLAUSE_RE.sub(lambda m: " " * len(m.group(0)), lowered)
+    register_shift = None
+    if _REGISTER_DOWN_RE.search(lowered):
+        register_shift = "relaxed"
+        lowered = _REGISTER_DOWN_RE.sub(lambda m: " " * len(m.group(0)), lowered)
+    elif _REGISTER_UP_RE.search(lowered):
+        register_shift = "professional"
+        lowered = _REGISTER_UP_RE.sub(lambda m: " " * len(m.group(0)), lowered)
     preserve_wording = bool(_KEEP_WORDING_RE.search(lowered)) and not bool(
         _NEGATED_KEEP_WORDING_RE.search(lowered)
     )
@@ -358,8 +445,8 @@ def _parse_command(clause: str) -> VoiceCommand:
     ambiguous = False
 
     # -- format / context reference -------------------------------------------------
-    fmt, _ = _extract_format(text)
-    context_ref = _extract_context_reference(text)
+    fmt, _ = _extract_format(lowered)
+    context_ref = _extract_context_reference(lowered)
     operation = "rewrite"
     if _SUMMARIZE_RE.search(lowered):
         operation = "summarize"
@@ -381,6 +468,9 @@ def _parse_command(clause: str) -> VoiceCommand:
         overrides["grammar"] = "fix"
     if _DEDUPE_RE.search(lowered):
         overrides["dedupe"] = "remove"
+    if _IMPROVE_RE.search(lowered):
+        overrides.setdefault("grammar", "fix")
+        overrides.setdefault("clarity", "improved")
 
     # Register words: professional/formal raise formality; casual/friendly/…
     # set the tone. Same-word repetition keeps the last (spec §24 last clear
@@ -416,7 +506,17 @@ def _parse_command(clause: str) -> VoiceCommand:
             else:
                 overrides["tone"] = _TONE_WORDS.get(word, word)
 
-    has_intent = bool(fmt or context_ref or overrides or operation != "rewrite" or preserve_wording)
+    if register_shift:
+        overrides["formality"] = register_shift
+
+    persistent = bool(_PERSISTENT_RE.search(lowered))
+    if persistent and context_ref is None:
+        scope_word = re.search(r"\b(e-?mails?|work\s+messages?|personal\s+messages?)\b", lowered)
+        if scope_word:
+            word = scope_word.group(1)
+            context_ref = "email" if "mail" in word else ("work" if word.startswith("work") else "personal")
+
+    has_intent = bool(fmt or context_ref or overrides or operation != "rewrite" or preserve_wording or constraints)
     if not has_intent:
         # Wake phrase with no recognizable intent: treat as plain dictation.
         return VoiceCommand(raw_phrase=text)
@@ -428,9 +528,10 @@ def _parse_command(clause: str) -> VoiceCommand:
         format=fmt,
         context_reference=context_ref,
         overrides=overrides,
-        persistent_change=bool(_PERSISTENT_RE.search(lowered)),
+        persistent_change=persistent,
         ambiguous=ambiguous,
         preserve_wording=preserve_wording,
+        constraints=tuple(constraints),
     )
 
 
@@ -480,17 +581,49 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
                 consumed_end = tokens[index].end()
                 index += 1
                 continue
+        # A constraint span directly after a recognised command belongs to the
+        # command ("make this a linkedin post without hashtags ...").  Only the
+        # closed constraint grammar is consumed; anything else is content.
+        if saw_intent:
+            constraint = _CONSTRAINT_RE.match(after_wake[tokens[index].start():])
+            if constraint and token in {"without", "with", "no", "don't", "do", "keep", "but", "and"}:
+                consumed_end = tokens[index].start() + constraint.end()
+                while index < len(tokens) and tokens[index].end() <= consumed_end:
+                    index += 1
+                continue
+            style_ref = re.match(r"in\s+my\s+(?:usual\s+|normal\s+)?(?:email|work|personal|other)\s+style\b",
+                                 after_wake[tokens[index].start():], re.I)
+            if style_ref:
+                consumed_end = tokens[index].start() + style_ref.end()
+                while index < len(tokens) and tokens[index].end() <= consumed_end:
+                    index += 1
+                continue
+            register = re.match(r"(?:less|more)\s+(?:formal|professional|casual)\b",
+                                after_wake[tokens[index].start():], re.I)
+            if register:
+                consumed_end = tokens[index].start() + register.end()
+                while index < len(tokens) and tokens[index].end() <= consumed_end:
+                    index += 1
+                continue
         if token in _COMMAND_SYNTAX_WORDS or token in _COMMAND_START_WORDS:
-            # Once a format is complete, only an explicit continuation such
-            # as "but keep my wording" may extend it.  This is what prevents
-            # "email Alex the short report" from swallowing user content.
-            if saw_format and token not in {"list", "points", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
-                if token in {"but", "and", "actually", "instead", "rather"}:
-                    next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
-                    if next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
-                        break
-                else:
+            # Once a format is complete, only a format continuation word
+            # ("text message", "bullet points", "grammar only") or an explicit
+            # joined command ("and make it short", "but keep my wording") may
+            # extend it.  This is what prevents "email Alex the short report"
+            # from swallowing user content.
+            prev_token = tokens[index - 1].group(0).casefold() if index else ""
+            if saw_intent and token in _COMMAND_START_WORDS and token not in _COMMAND_INTENT_WORDS \
+                    and prev_token not in {"and", "but", "please", "to", "you", "actually", "instead", "rather", "no", "wait", "mean"}:
+                # A new verb after a complete command starts the dictation
+                # ("make it shorter send the quote to priya").
+                break
+            if saw_format and token not in _FORMAT_CONTINUATION_WORDS:
+                prev = tokens[index - 1].group(0).casefold() if index else ""
+                joined = prev in {"and", "but"} and token in {"make", "turn", "use", "keep"}
+                if not joined:
                     break
+                # A joined command starts a fresh phrase ("and make it short").
+                saw_format = False
             consumed_end = tokens[index].end()
             saw_intent = saw_intent or token in _COMMAND_INTENT_WORDS
             saw_format = saw_format or token in _COMMAND_FORMAT_WORDS
@@ -498,7 +631,7 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
             continue
         if token in {"but", "and", "actually", "instead", "rather"}:
             next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
-            if not saw_intent or next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+            if not saw_intent or next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited", "without", "don't", "no"}:
                 break
             consumed_end = tokens[index].end()
             index += 1
@@ -513,6 +646,12 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
 
     if not saw_intent or not consumed_end:
         return after_wake.strip(), ""
+    # Function words consumed at the very end of the command belong to the
+    # dictation that follows ("make it short the meeting ..."): give them back.
+    head_tokens = [t for t in tokens if t.end() <= consumed_end]
+    while len(head_tokens) > 1 and head_tokens[-1].group(0).casefold() in {"a", "an", "the", "my", "as", "into", "and", "but"}:
+        consumed_end = head_tokens[-1].start()
+        head_tokens.pop()
     head = after_wake[:consumed_end].strip(" ,:;.-?!")
     parsed = _parse_command(head)
     if not _has_any_intent(parsed):
@@ -525,12 +664,119 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
 # --------------------------------------------------------------------------
 
 
-def detect_voice_command(transcript: str) -> CommandDetection:
+def _find_legacy_wake(text: str, masked: str):
+    for match in _WAKE_RE.finditer(masked):
+        if _is_wake_at(text, match):
+            return match
+    return None
+
+
+def _reported_before(text: str, start: int) -> bool:
+    sentence_start = max(text.rfind(".", 0, start), text.rfind("!", 0, start), text.rfind("?", 0, start)) + 1
+    prefix = text[sentence_start:start]
+    return bool(_REPORTED_WAKE_PREFIX_RE.search(prefix) or re.search(
+        r"\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
+        r"(?:say|said|says|mention|mentioned|use|used|hear|heard)\b",
+        prefix, re.IGNORECASE,
+    ))
+
+
+def _make_custom_finder(activation):
+    from voice_flow.activation import BARE_NAME_CONTINUATION_RE, compile_matchers
+
+    matchers = compile_matchers(activation)
+
+    def find(text: str, masked: str):
+        best = None
+        for pattern, bare in matchers:
+            for match in pattern.finditer(masked):
+                if _reported_before(text, match.start()):
+                    continue
+                if bare:
+                    sentence_start = max(text.rfind(".", 0, match.start()), text.rfind("!", 0, match.start()),
+                                         text.rfind("?", 0, match.start()), text.rfind(",", 0, match.start())) + 1
+                    clause_prefix = text[sentence_start:match.start()]
+                    if not re.fullmatch(r"\s*(?:(?:um+|uh+|well|so|okay|ok|and|also)\s*[,.:!?\-—]?\s*)*", clause_prefix, re.I):
+                        continue
+                    if not BARE_NAME_CONTINUATION_RE.match(text[match.end():]):
+                        continue
+                if best is None or match.start() < best.start():
+                    best = match
+                break
+        return best
+
+    return find
+
+
+def _merge_commands(first: VoiceCommand, second: VoiceCommand) -> VoiceCommand:
+    """Merge two wake commands from one utterance; the later one wins per field."""
+    overrides = dict(first.overrides)
+    overrides.update(second.overrides)
+    operation = second.operation if second.operation != "rewrite" else first.operation
+    if "unsupported" in (first.operation, second.operation) and operation == "unsupported":
+        operation = first.operation if first.operation not in ("rewrite", "unsupported") else operation
+    return VoiceCommand(
+        raw_phrase=f"{first.raw_phrase} | {second.raw_phrase}",
+        scope=second.scope if second.scope != "current" else first.scope,
+        operation=operation,
+        format=second.format or first.format,
+        context_reference=second.context_reference or first.context_reference,
+        overrides=overrides,
+        persistent_change=first.persistent_change or second.persistent_change,
+        ambiguous=first.ambiguous or second.ambiguous,
+        preserve_wording=first.preserve_wording or second.preserve_wording,
+        constraints=tuple(first.constraints) + tuple(second.constraints),
+    )
+
+
+def parse_instruction(instruction: str) -> VoiceCommand | None:
+    """Parse an instruction a host already separated from the content.
+
+    For integrations that collect the instruction through their own UI (a text
+    box, a button, a different hotkey).  No wake phrase is involved.  Returns
+    None when the text is not a recognised writing instruction; the host may
+    then pass it verbatim as VF-1 ``[Instruction]`` text.
+    """
+    if not instruction or not str(instruction).strip():
+        return None
+    parsed = _parse_command(str(instruction).strip().rstrip(".!"))
+    return parsed if _has_any_intent(parsed) else None
+
+
+def detect_voice_command(transcript: str, activation=None) -> CommandDetection:
     """Split a transcript into (content, command).
+
+    ``activation`` is an :class:`voice_flow.activation.ActivationConfig`;
+    ``None`` keeps the historical "Hey Voice Flow" behaviour.  With
+    ``activation.enabled`` false the processor runs in plain dictation mode.
+    Up to three wake commands in one utterance are merged (later wins).
 
     Returns ``command=None`` for ordinary dictation. Never raises on odd
     input by contract; callers still wrap in try/except (spec §49).
     """
+    if activation is not None and not getattr(activation, "enabled", True):
+        if transcript is None:
+            return CommandDetection(content="", command=None)
+        return CommandDetection(content=str(transcript), command=None)
+    if activation is None or getattr(activation, "legacy_voice_flow", False):
+        finder = _find_legacy_wake
+    else:
+        finder = _make_custom_finder(activation)
+    first = _detect_once(transcript, finder)
+    command, content = first.command, first.content
+    rounds = 0
+    while command is not None and content and rounds < 2:
+        nxt = _detect_once(content, finder)
+        if nxt.command is None:
+            break
+        command = _merge_commands(command, nxt.command)
+        content = nxt.content
+        rounds += 1
+    return CommandDetection(content=content, command=command)
+
+
+def _detect_once(transcript: str, finder) -> CommandDetection:
+    """One wake-phrase pass (the historical detector, with a pluggable finder)."""
     if transcript is None:
         return CommandDetection(content="", command=None)
     if not isinstance(transcript, str):
@@ -545,11 +791,7 @@ def detect_voice_command(transcript: str) -> CommandDetection:
     masked = _mask_quoted(text)
 
     # Find the first wake phrase that lives OUTSIDE quoted content.
-    wake = None
-    for match in _WAKE_RE.finditer(masked):
-        if _is_wake_at(text, match):
-            wake = match
-            break
+    wake = finder(text, masked)
     if wake is None:
         return CommandDetection(content=text, command=None)
 
@@ -614,7 +856,36 @@ def detect_voice_command(transcript: str) -> CommandDetection:
         return CommandDetection(content=text, command=None)
 
     command = parsed
+    if not (content or "").strip() and _uncovered_command_words(clause):
+        # The clause holds words that are not part of any command phrase and
+        # no safe boundary separated them: segmentation is ambiguous.  Never
+        # delete them.  An unsupported command keeps its words as dictation
+        # (the host shows a notice); otherwise the whole utterance stays
+        # plain dictation.
+        if command.operation == "unsupported":
+            return CommandDetection(content=clause.strip(), command=command)
+        return CommandDetection(content=text, command=None)
     return CommandDetection(content=content if content else "", command=command)
+
+
+_COVERAGE_EXTRA = {
+    "hey", "voice", "flow", "um", "uh", "so", "okay", "ok", "well", "and", "but", "actually", "instead",
+    "rather", "can", "could", "would", "you", "always", "from", "now", "on", "remember", "save", "that",
+    "next", "dictation", "for", "what", "whatever", "i", "i'll", "say", "speak", "dictate", "usual",
+    "normal", "regular", "other", "of", "to", "do", "not", "never", "too", "is", "one", "emails", "e-mails",
+    "messages", "prompts", "posts", "lists", "texts", "chats", "mails", "my", "me", "please", "be", "sound", "more",
+    "sure", "really", "just", "little", "bit", "lot", "much", "way", "version", "prom",
+}
+
+
+def _uncovered_command_words(clause: str) -> list[str]:
+    """Words of a command clause that no command grammar accounts for."""
+    lowered = _CONSTRAINT_RE.sub(" ", clause.lower())
+    lowered = re.sub(r"\bin\s+my\s+(?:usual\s+|normal\s+)?(?:email|work|personal|other)\s+style\b", " ", lowered)
+    vocab = (_COMMAND_START_WORDS | _COMMAND_SYNTAX_WORDS | _COMMAND_INTENT_WORDS | _COMMAND_FORMAT_WORDS
+             | _FORMAT_CONTINUATION_WORDS | _COVERAGE_EXTRA | set(_TONE_WORDS) | set(_FORMALITY_WORDS))
+    words = re.findall(r"[a-z]+(?:['’][a-z]+)?", lowered)
+    return [w for w in words if w.replace("’", "'") not in vocab]
 
 
 def _has_any_intent(command: VoiceCommand) -> bool:
@@ -625,6 +896,7 @@ def _has_any_intent(command: VoiceCommand) -> bool:
         or command.operation != "rewrite"
         or command.persistent_change
         or command.preserve_wording
+        or bool(getattr(command, "constraints", ()))
     )
 
 
