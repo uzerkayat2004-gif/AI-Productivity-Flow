@@ -1,0 +1,9 @@
+{
+ "data/TRAINING_CORPUS.jsonl": "fcbdc79339eccfc10312d8245886c3a4035a2bb3d678416d19d1b6d1fbc51380",
+ "data/S1_NATIVE_REHEARSAL.jsonl": "92917781e1c4322fc45cb7fa795f2a57cbe8057577f4b415ddd0ef336809f2db",
+ "data/QUARANTINE.jsonl": "88930fe90314eb8c2c2760aeea0246f6d248ab2fdb1e94c9519e63e72a2586e1",
+ "data/mixture/mixture_stats.json": "cec3ad3960e43af62306981ca9c737933b63bc3b4b97e3a5a869b0051cde0ed1",
+ "data/mixture/qwen_schedule.jsonl": "e87eae9ed07420b95ec2f66b8129e9385eff8e3b058ef7eb555e70bacc1b06c5",
+ "data/mixture/s1_schedule.jsonl": "0c35996358536a187d7965498ed13ca7e284950793a4e67382c26fb87325a972",
+ "../vf_phase2a/data/HELDOUT_EVALUATION.jsonl": "e424303519a821739e693c607dda26b511609027f7f44d2a977f348bb0deaa7a"
+}

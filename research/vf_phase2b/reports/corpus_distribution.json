@@ -1,0 +1,203 @@
+{
+ "records": 2561,
+ "train": 2431,
+ "validation": 130,
+ "by_bucket": {
+  "cleanup_facts": 712,
+  "email": 369,
+  "messages": 345,
+  "prompt": 460,
+  "followup_style": 153,
+  "summary": 177,
+  "notes_format": 289,
+  "unsupported": 56
+ },
+ "by_bucket_split": {
+  "cleanup_facts|train": 675,
+  "cleanup_facts|validation": 37,
+  "email|train": 352,
+  "email|validation": 17,
+  "followup_style|train": 146,
+  "followup_style|validation": 7,
+  "messages|train": 331,
+  "messages|validation": 14,
+  "notes_format|train": 268,
+  "notes_format|validation": 21,
+  "prompt|train": 439,
+  "prompt|validation": 21,
+  "summary|train": 167,
+  "summary|validation": 10,
+  "unsupported|train": 53,
+  "unsupported|validation": 3
+ },
+ "by_slice": {
+  "cleanup_ordinary": 167,
+  "facts_numbers_negation": 206,
+  "corrections_vs_alternatives": 162,
+  "email": 217,
+  "messages": 208,
+  "prompt": 271,
+  "question_no_answer": 174,
+  "nl_instruction": 104,
+  "multi_constraint": 292,
+  "followup_edit": 94,
+  "summary": 177,
+  "smart_formatting": 197,
+  "no_markdown": 154,
+  "style_rules": 38,
+  "dev_custom_style": 40,
+  "unsupported_boundary": 56,
+  "host_integration": 4
+ },
+ "by_author": {
+  "hark-manual-2026-10-12": 146,
+  "W01": 168,
+  "W02": 162,
+  "W03": 162,
+  "W04": 167,
+  "W05": 223,
+  "W06": 228,
+  "W07": 173,
+  "W08": 175,
+  "W09": 167,
+  "W10": 155,
+  "W11": 142,
+  "W12": 139,
+  "W13": 169,
+  "W14": 134,
+  "W15": 51
+ },
+ "by_task": {
+  "cleanup": 753,
+  "rewrite": 1185,
+  "prompt": 348,
+  "summarize": 181,
+  "edit": 94
+ },
+ "by_format": {
+  "default": 1088,
+  "message": 424,
+  "email": 429,
+  "prompt": 347,
+  "post": 25,
+  "bullets": 69,
+  "numbered": 16,
+  "auto": 55,
+  "note": 79,
+  "prose": 29
+ },
+ "by_register": {
+  "default": 2301,
+  "formal": 149,
+  "casual": 110,
+  "neutral": 1
+ },
+ "by_tone": {
+  "default": 2446,
+  "empathetic": 17,
+  "excited": 9,
+  "friendly": 40,
+  "warm": 25,
+  "confident": 15,
+  "persuasive": 3,
+  "playful": 6
+ },
+ "by_length": {
+  "default": 2481,
+  "shorter": 69,
+  "longer": 11
+ },
+ "by_wording": {
+  "default": 2544,
+  "keep": 17
+ },
+ "by_markup": {
+  "default": 2506,
+  "markdown": 53,
+  "plain": 2
+ },
+ "by_context": {
+  "default": 1918,
+  "work": 164,
+  "personal": 22,
+  "chat": 209,
+  "email": 6,
+  "code": 43,
+  "ai": 198,
+  "general": 1
+ },
+ "by_facts": {
+  "default": 2535,
+  "correct": 26
+ },
+ "by_locale": {
+  "default": 1918,
+  "en-in": 505,
+  "en-gb": 138
+ },
+ "header_style": {
+  "default": 1793,
+  "full": 768
+ },
+ "with_instruction": 736,
+ "with_rules": 92,
+ "with_sender": 234,
+ "with_recipient": 156,
+ "command_position": {
+  "n/a": 146,
+  "structured": 1700,
+  "after": 407,
+  "before": 223,
+  "followup": 85
+ },
+ "instruction_complexity": {
+  "n/a": 146,
+  "0": 1306,
+  "2": 315,
+  "3": 223,
+  "1": 512,
+  "4": 59
+ },
+ "behavior": {
+  "transform": 1957,
+  "not_answer": 551,
+  "cleanup_only": 53
+ },
+ "markdown_allowed": 48,
+ "checker_waivers_records": 151,
+ "checker_waiver_keys": {
+  "number_missing": 83,
+  "number_invented": 71,
+  "negation_lost": 26,
+  "correction_reverted": 3,
+  "question_lost": 1,
+  "invented_subject": 17,
+  "invented_commitment": 1,
+  "assistant_preamble": 1
+ },
+ "heightened_flags": {
+  "negation": 1223,
+  "quantity": 1763,
+  "date": 972,
+  "conditional": 660,
+  "self_correction": 280,
+  "commitment": 462
+ },
+ "records_with_note": 2372,
+ "source_words": {
+  "min": 5,
+  "median": 30,
+  "max": 167,
+  "short_lt20": 766,
+  "medium_20_60": 1098,
+  "long_gt60": 697
+ },
+ "target_words": {
+  "min": 2,
+  "median": 26,
+  "max": 151
+ },
+ "control_token_literal_records": 11,
+ "devanagari_records": 5,
+ "pilot_records_included": 146
+}
