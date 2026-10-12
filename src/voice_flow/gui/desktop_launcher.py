@@ -131,7 +131,7 @@ if _WEBVIEW_IMPORT_FAILED and sys.platform == "darwin":
 
 try:
     from voice_flow.gui.api_server import start_api_server, PORT
-    from voice_flow.runtime_guard import runtime_is_compatible
+    from voice_flow.runtime_guard import runtime_is_compatible, runtime_is_engine_ready
     _API_IMPORT_ERROR = None
 except Exception as _import_exc:  # broken/partial install must never die silently
     import urllib.request as _urlreq
@@ -146,6 +146,12 @@ except Exception as _import_exc:  # broken/partial install must never die silent
                 return response.status == 200
         except Exception:
             return False
+
+    # An API-only response cannot prove that dictation is available. If the
+    # runtime guard itself could not be imported, fail closed and let startup
+    # attempt the normal watchdog path.
+    def runtime_is_engine_ready(*, host: str = "127.0.0.1", port: int = PORT, timeout: float = 1.0) -> bool:
+        return False
 
     try:
         from voice_flow.paths import data_dir
@@ -221,7 +227,7 @@ def _poke_keepalive_refresh() -> None:
 def _is_backend_running() -> bool:
     """Check if Voice Flow watchdog or main engine is already running."""
     try:
-        if is_api_server_ready(timeout=0.1):
+        if is_engine_ready(timeout=0.1):
             return True
     except Exception:
         pass
@@ -355,6 +361,14 @@ def reconcile_windows_auto_startup(enable: bool) -> bool:
 def is_api_server_ready(timeout: float = 0.2) -> bool:
     try:
         return runtime_is_compatible(port=PORT, timeout=timeout)
+    except Exception:
+        return False
+
+
+def is_engine_ready(timeout: float = 0.2) -> bool:
+    """Return whether the compatible local API has a live dictation engine."""
+    try:
+        return runtime_is_engine_ready(port=PORT, timeout=timeout)
     except Exception:
         return False
 
@@ -530,16 +544,26 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
     except Exception as exc:
         _launcher_log(f"Auto-startup initialization warning: {exc}")
 
-    # Fast-path: Check if background API server is ALREADY active and ready
+    # Start the supervisor whenever the dictation engine is missing. API
+    # readiness remains a separate concern below so an API-only listener can
+    # still serve the desktop UI while the watchdog recovers the engine.
     backend_spawned = False
-    if not is_api_server_ready(timeout=0.15):
-        # Background engine / watchdog not responding yet; ensure it is started
+    if not is_engine_ready(timeout=0.15):
         backend_spawned = bool(ensure_backend_running())
 
-        # Poll until API server responds cleanly from background engine
-        poll_iterations = 200 if (backend_spawned or _is_backend_running()) else 40
+        # When an engine process is starting, wait for its readiness probe so
+        # the UI does not attach to a compatible API-only listener just as the
+        # watchdog reclaims its port. Keep the existing bounded startup window;
+        # after it expires the regular API/browser fallback below still applies.
+        backend_starting = backend_spawned or _is_backend_running()
+        poll_iterations = 200 if backend_starting else 40
         for _ in range(poll_iterations):
-            if is_api_server_ready(timeout=0.1):
+            ready = (
+                is_engine_ready(timeout=0.1)
+                if backend_starting
+                else is_api_server_ready(timeout=0.1)
+            )
+            if ready:
                 break
             time.sleep(0.05)
 

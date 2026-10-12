@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import os
+import sqlite3
 import sys
 
 import pytest
@@ -10,6 +12,8 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from voice_flow.dictionary import DictionaryEngine
+import voice_flow.storage as storage_module
+from voice_flow.storage import StorageEngine
 
 
 class _DictionarySource:
@@ -146,6 +150,219 @@ def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
 
 
+def test_dictionary_cache_is_scoped_to_the_storage_database(tmp_path) -> None:
+    """Equal numeric revisions in different accounts are not the same snapshot."""
+    first_path = tmp_path / "first" / "voice_flow.db"
+    second_path = tmp_path / "second" / "voice_flow.db"
+    first = StorageEngine(str(first_path), custom_db=True)
+    second = StorageEngine(str(second_path), custom_db=True)
+    assert first.add_dictionary_word("Voice")
+
+    engine = DictionaryEngine(first)
+    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+    first_revision = first.get_dictionary_revision()
+
+    # switch_account touches the destination lexicon. A fresh destination and
+    # the edited source therefore both have revision 1, which used to retain
+    # the source account's cached rule indefinitely.
+    first.switch_account(str(second_path))
+    assert first.get_dictionary_revision() == first_revision
+    assert first.get_dictionary_entries() == []
+    assert engine.apply_dictionary_post_processing("voice") == "voice"
+
+
+def test_dictionary_revision_poll_is_fresh_and_read_only(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "revision poll #1%.db"
+    reader = StorageEngine(str(database), custom_db=True)
+    writer = StorageEngine(str(database), custom_db=True)
+
+    # Release disposable initialization connections before changing the
+    # database's persistent journal configuration for this assertion.
+    gc.collect()
+    with sqlite3.connect(str(database)) as observer:
+        assert observer.execute("PRAGMA journal_mode = DELETE").fetchone()[0] == "delete"
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(storage_module.sqlite3, "connect", traced_connect)
+
+    revision_before = reader.get_dictionary_revision()
+    first_poll = list(statements)
+    with original_connect(str(database)) as observer:
+        assert observer.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    statements.clear()
+    assert writer.add_dictionary_word("CrossProcessTerm") is True
+    gc.collect()
+    with original_connect(str(database)) as observer:
+        assert observer.execute("PRAGMA journal_mode = DELETE").fetchone()[0] == "delete"
+    statements.clear()
+    revision_after = reader.get_dictionary_revision()
+    second_poll = list(statements)
+
+    expected_query = "SELECT value FROM settings WHERE key = 'dictionary_revision'"
+    assert revision_after > revision_before
+    assert first_poll == [expected_query]
+    assert second_poll == [expected_query]
+    with original_connect(str(database)) as observer:
+        assert observer.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+def test_dictionary_revision_poll_does_not_create_a_missing_database(tmp_path) -> None:
+    database = tmp_path / "missing revision #2%.db"
+    reader = object.__new__(StorageEngine)
+    reader.db_path = str(database)
+
+    with pytest.raises(sqlite3.OperationalError):
+        reader.get_dictionary_revision()
+
+    assert not database.exists()
+
+
+def test_global_dictionary_repoints_before_using_cached_rules(tmp_path, monkeypatch) -> None:
+    default_path = tmp_path / "default" / "voice_flow.db"
+    account_path = tmp_path / "account" / "voice_flow.db"
+    store = StorageEngine(str(default_path))
+    StorageEngine(str(account_path), custom_db=True)
+    assert store.add_dictionary_word("Voice")
+    store.is_global_singleton = True
+    monkeypatch.setattr(
+        "voice_flow.storage.resolve_active_db_path", lambda: str(default_path)
+    )
+    engine = DictionaryEngine(store)
+    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+
+    monkeypatch.setattr(
+        "voice_flow.storage.resolve_active_db_path", lambda: str(account_path)
+    )
+
+    assert engine.apply_dictionary_post_processing("voice") == "voice"
+    assert store.db_path == str(account_path)
+
+
+def test_empty_authoritative_entries_do_not_fall_back_to_inactive_words() -> None:
+    class EmptyAuthoritativeStore:
+        def get_dictionary_revision(self):
+            return 1
+
+        def get_dictionary_entries(self, include_auto=False):
+            return []
+
+        def get_dictionary_words(self, include_snippets=False):
+            # Simulates a legacy/inactive snapshot that must not be revived.
+            return ["Voice"]
+
+        def get_dictionary_snapshot(self):
+            return 1, ["Voice"], []
+
+        def get_dictionary_corrections(self):
+            return []
+
+        def get_snippets(self):
+            return []
+
+    engine = DictionaryEngine(EmptyAuthoritativeStore())
+
+    assert engine.words == []
+    assert engine.apply_dictionary_post_processing("voice") == "voice"
+
+
+def test_generated_aliases_reject_ordinary_phrases_but_keep_technical_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine(monkeypatch, ["LinkedIn", "HyperKube", "OpenAI"])
+
+    assert engine.apply_dictionary_post_processing(
+        "These details are linked in this document."
+    ) == "These details are linked in this document."
+    assert engine.apply_dictionary_post_processing("linkedin profile") == "LinkedIn profile"
+    assert engine.apply_dictionary_post_processing("Hyper Kube uses Open AI") == "HyperKube uses OpenAI"
+
+
+def test_explicit_heard_as_can_override_a_rejected_generated_alias() -> None:
+    class ManualStore:
+        def get_dictionary_revision(self):
+            return 1
+
+        def get_dictionary_entries(self, include_auto=False):
+            return [{"word": "LinkedIn"}]
+
+        def get_dictionary_snapshot(self):
+            return 1, ["LinkedIn"], [
+                {"wrong_text": "linked in", "correct_text": "LinkedIn"}
+            ]
+
+        def get_dictionary_corrections(self):
+            return [{"wrong_text": "linked in", "correct_text": "LinkedIn"}]
+
+        def get_snippets(self):
+            return []
+
+    engine = DictionaryEngine(ManualStore())
+
+    assert engine.apply_dictionary_post_processing("linked in profile") == "LinkedIn profile"
+
+
+@pytest.mark.parametrize("polishing_enabled", [False, True])
+def test_text_polisher_preserves_exact_heard_as_input_through_cleanup(
+    monkeypatch: pytest.MonkeyPatch, polishing_enabled: bool,
+) -> None:
+    import voice_flow.polisher as polisher_module
+    from voice_flow.polisher import TextPolisher
+
+    class ManualStore:
+        def get_dictionary_revision(self):
+            return 1
+
+        def get_dictionary_entries(self, include_auto=False):
+            return [{"word": "Kubernetes"}]
+
+        def get_dictionary_snapshot(self):
+            return 1, ["Kubernetes"], [
+                {"wrong_text": "cube er netties", "correct_text": "Kubernetes"}
+            ]
+
+        def get_dictionary_corrections(self):
+            return [{"wrong_text": "cube er netties", "correct_text": "Kubernetes"}]
+
+        def get_snippets(self):
+            return []
+
+    engine = DictionaryEngine(ManualStore())
+    monkeypatch.setattr(polisher_module, "dictionary_engine", engine)
+
+    def get_setting(key, default=None):
+        if key == "polishing_enabled":
+            return polishing_enabled
+        if key == "voice_flow_polish_model":
+            return "mock/echo" if polishing_enabled else ""
+        return default
+
+    monkeypatch.setattr(polisher_module.storage, "get_setting", get_setting)
+    monkeypatch.setattr(polisher_module.storage, "get_all_api_keys", lambda: {})
+    polisher = TextPolisher()
+    monkeypatch.setattr(
+        polisher,
+        "_polish_with_api_pool",
+        lambda raw_text, *args, **kwargs: raw_text,
+    )
+    trace: list[dict[str, str]] = []
+
+    result = polisher.polish(
+        "open cube er netties now",
+        cleanup_level="cleanup_medium",
+        model_ref="mock/echo" if polishing_enabled else None,
+        dictionary_trace=trace,
+    )
+
+    assert result == "Open Kubernetes now."
+    assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]
+
+
 def test_failed_dictionary_refresh_retries_after_storage_recovers() -> None:
     class FlakyStore:
         revision = 1
@@ -181,6 +398,47 @@ def test_failed_dictionary_refresh_retries_after_storage_recovers() -> None:
     assert engine.apply_dictionary_post_processing("oldterm") == "OldTerm"
 
     store.unavailable = False
+    assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
+
+
+def test_failed_reload_after_database_switch_drops_previous_account_rules(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_path = tmp_path / "first" / "voice_flow.db"
+    second_path = tmp_path / "second" / "voice_flow.db"
+    store = StorageEngine(str(first_path), custom_db=True)
+    second = StorageEngine(str(second_path), custom_db=True)
+    assert store.add_dictionary_word("Voice")
+    assert store.add_dictionary_word("FirstOnly")
+    assert second.add_dictionary_word("NewTerm")
+    engine = DictionaryEngine(store)
+    old_revision = store.get_dictionary_revision()
+    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+
+    unavailable = False
+    original_entries = store.get_dictionary_entries
+    original_snapshot = store.get_dictionary_snapshot
+    original_words = store.get_dictionary_words
+    original_corrections = store.get_dictionary_corrections
+
+    def guarded(callable_):
+        def run(*args, **kwargs):
+            if unavailable:
+                raise OSError("new account dictionary is temporarily unavailable")
+            return callable_(*args, **kwargs)
+        return run
+
+    monkeypatch.setattr(store, "get_dictionary_entries", guarded(original_entries))
+    monkeypatch.setattr(store, "get_dictionary_snapshot", guarded(original_snapshot))
+    monkeypatch.setattr(store, "get_dictionary_words", guarded(original_words))
+    monkeypatch.setattr(store, "get_dictionary_corrections", guarded(original_corrections))
+
+    unavailable = True
+    store.switch_account(str(second_path))
+    assert store.get_dictionary_revision() == old_revision
+    assert engine.apply_dictionary_post_processing("voice") == "voice"
+
+    unavailable = False
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
 
 

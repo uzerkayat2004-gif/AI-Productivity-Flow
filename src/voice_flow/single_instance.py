@@ -1,7 +1,7 @@
 """Voice Flow Single-Instance Signaling and GUI Window Restoration.
 
 Provides fast, lightweight IPC signaling between Voice Flow processes on Windows:
-1. Signals running background engine via local loopback API to reset and refresh the floating bar.
+1. Signals the running engine to show and redraw the floating bar without resetting active work.
 2. Restores and brings the native Desktop App window to front with foreground priority.
 3. If the Desktop App window was closed, launches it fresh silently and immediately.
 """
@@ -116,9 +116,9 @@ def _launch_desktop_gui_silently() -> bool:
 
 
 def signal_running_instance_to_restore(host: str = "127.0.0.1", port: int = PORT) -> bool:
-    """Signal the active Voice Flow instance to refresh floating bar and restore GUI window."""
+    """Show and redraw the active instance without resetting capture or other work."""
     signaled = False
-    for endpoint in ("/api/app/restore-and-refresh", "/api/overlay/reset-and-refresh", "/api/overlay/show"):
+    for endpoint in ("/api/app/restore-and-refresh", "/api/overlay/show", "/api/overlay/refresh"):
         try:
             req = urllib.request.Request(
                 f"http://{host}:{port}{endpoint}",

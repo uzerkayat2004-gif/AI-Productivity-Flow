@@ -43,7 +43,7 @@ def test_overlay_audio_summary_progress_bar():
     assert overlay.audio_summary_status == "processing"
     assert overlay.audio_summary_progress == 45
     assert overlay.audio_summary_stage == "Synthesizing audio"
-    assert overlay._target_size() == (280, 10 + 4 + 26)
+    assert overlay._target_size() == (280, 26)
 
     # 3. Expanded / hovered size stacks actions below progress strip
     overlay._is_mouse_over = True

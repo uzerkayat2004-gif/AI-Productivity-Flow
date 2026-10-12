@@ -119,6 +119,28 @@ class TestEnhanceNoisyRoom(unittest.TestCase):
 
 
 class TestEnhanceSafety(unittest.TestCase):
+    def test_spectral_gate_preserves_non_aligned_terminal_samples(self):
+        """STFT framing must not replace a real final phoneme with zero padding."""
+        sr = 16000
+        # 2137 is intentionally not aligned to the 160-sample STFT hop.  Put
+        # the only signal at the end so a truncated inverse STFT is obvious.
+        clip = np.zeros(2137, dtype=np.float32)
+        t = np.arange(50, dtype=np.float32) / sr
+        clip[-50:] = 0.02 * np.sin(2 * np.pi * 700.0 * t)
+
+        out = voice_enhance._spectral_gate(clip, sr, strength=2.0, floor=0.05)
+
+        self.assertEqual(out.shape, clip.shape)
+        self.assertTrue(np.all(np.isfinite(out)))
+        self.assertGreater(_rms(out[-50:]), _rms(clip[-50:]) * 0.5)
+
+    def test_spectral_gate_fails_open_if_inverse_transform_is_short(self):
+        clip = _speechlike(0.2, peak=0.02)
+        with patch.object(voice_enhance.sig, "istft", return_value=(None, np.zeros(100, dtype=np.float32))):
+            out = voice_enhance._spectral_gate(clip, 16000, strength=2.0, floor=0.05)
+
+        np.testing.assert_array_equal(out, clip)
+
     def test_healthy_audio_gets_light_touch(self):
         healthy = _speechlike(2.0, peak=0.6)
         out, profile = enhance_for_stt(healthy, profile="normal")
@@ -139,6 +161,12 @@ class TestEnhanceSafety(unittest.TestCase):
         self.assertEqual(profile, "off")
         np.testing.assert_array_equal(np.asarray(out), clip)
 
+    def test_explicit_off_profile_is_exact_passthrough(self):
+        clip = _tone(peak=0.02)
+        out, profile = enhance_for_stt(clip, profile="off")
+        self.assertEqual(profile, "off")
+        np.testing.assert_array_equal(out, clip)
+
     def test_nan_inf_input_never_raises(self):
         garbage = np.array([np.nan, 0.5, np.inf, -0.2, 0.1], dtype=np.float32)
         out, _ = enhance_for_stt(garbage)
@@ -148,6 +176,103 @@ class TestEnhanceSafety(unittest.TestCase):
         for peak in (0.02, 0.1, 0.4, 0.9):
             out, _ = enhance_for_stt(_tone(peak=peak))
             self.assertLessEqual(float(np.max(np.abs(out))), 1.0)
+
+
+class TestLiveSpeechEnhancer(unittest.TestCase):
+    def test_none_input_returns_empty_finite_float32(self):
+        out = voice_enhance.LiveSpeechEnhancer(profile="far").process(None, 16000)
+        self.assertEqual(out.dtype, np.float32)
+        self.assertEqual(out.size, 0)
+        self.assertTrue(np.all(np.isfinite(out)))
+
+    def test_opening_soft_phoneme_is_preserved_and_quiet_speech_rises_smoothly(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="far")
+        quiet = _tone(0.1, freq=300.0, peak=0.002)
+
+        blocks = [enhancer.process(quiet, 16000) for _ in range(4)]
+
+        self.assertGreater(_rms(blocks[0][:400]), _rms(quiet[:400]) * 1.1)
+        self.assertGreater(_rms(blocks[-1]), _rms(quiet) * 2.0)
+        self.assertLessEqual(float(np.max(np.abs(np.concatenate(blocks)))), 0.95)
+
+    def test_quiet_to_close_mic_transition_stays_finite_and_bounded(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="far")
+        quiet = _tone(0.1, freq=300.0, peak=0.002)
+        close = _tone(0.1, freq=300.0, peak=0.45)
+
+        for _ in range(20):
+            enhancer.process(quiet, 16000)
+        outputs = [enhancer.process(close, 16000) for _ in range(10)]
+        joined = np.concatenate(outputs)
+
+        self.assertTrue(np.all(np.isfinite(joined)))
+        self.assertLessEqual(float(np.max(np.abs(outputs[0]))), 0.81)
+        self.assertGreater(_rms(outputs[-1]), _rms(close) * 0.7)
+
+    def test_true_silence_and_sub_floor_noise_are_not_promoted(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="far")
+        silence = np.zeros(1600, dtype=np.float32)
+        rng = np.random.default_rng(321)
+        floor_noise = (rng.standard_normal(1600) * 0.00002).astype(np.float32)
+
+        silent_out = enhancer.process(silence, 16000)
+        noise_out = enhancer.process(floor_noise, 16000)
+
+        np.testing.assert_array_equal(silent_out, silence)
+        self.assertLessEqual(_rms(noise_out), _rms(floor_noise) * 1.2)
+
+    def test_low_steady_broadband_room_noise_is_not_amplified(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="far")
+        rng = np.random.default_rng(654)
+        room_noise = (rng.standard_normal(1600) * 0.0006).astype(np.float32)
+
+        outputs = [enhancer.process(room_noise, 16000) for _ in range(20)]
+
+        self.assertLessEqual(_rms(outputs[-1]), _rms(room_noise) * 1.2)
+
+    def test_auto_profile_keeps_one_causal_highpass_across_level_changes(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="auto")
+        enhancer.process(_tone(0.1, peak=0.002), 16000)
+        first_sos = enhancer._sos
+        enhancer.process(_tone(0.1, peak=0.45), 16000)
+
+        self.assertIs(enhancer._sos, first_sos)
+        self.assertEqual(enhancer._highpass_hz, 80.0)
+
+    def test_explicit_off_profile_is_exact_live_passthrough(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="off")
+        frame = _tone(0.1, peak=0.02)
+        np.testing.assert_array_equal(enhancer.process(frame, 16000), frame)
+
+    def test_rate_change_resets_filter_state_without_retaining_audio(self):
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="whisper")
+        out_48k = enhancer.process(_tone(0.1, peak=0.005, sr=48000), 48000)
+        out_16k = enhancer.process(_tone(0.1, peak=0.005, sr=16000), 16000)
+
+        self.assertEqual(out_48k.dtype, np.float32)
+        self.assertEqual(out_16k.dtype, np.float32)
+        self.assertEqual(out_48k.size, 4800)
+        self.assertEqual(out_16k.size, 1600)
+        self.assertTrue(np.all(np.isfinite(out_48k)))
+        self.assertTrue(np.all(np.isfinite(out_16k)))
+        retained_arrays = [value for value in enhancer.__dict__.values() if isinstance(value, np.ndarray)]
+        self.assertLess(sum(value.size for value in retained_arrays), 32)
+
+    def test_three_minute_synthetic_stream_has_constant_state_and_fast_runtime(self):
+        import time
+
+        enhancer = voice_enhance.LiveSpeechEnhancer(profile="far")
+        block = _tone(0.1, freq=300.0, peak=0.002)
+        started = time.perf_counter()
+        last = block
+        for _ in range(1800):
+            last = enhancer.process(block, 16000)
+        elapsed = time.perf_counter() - started
+
+        self.assertTrue(np.all(np.isfinite(last)))
+        retained_arrays = [value for value in enhancer.__dict__.values() if isinstance(value, np.ndarray)]
+        self.assertLess(sum(value.size for value in retained_arrays), 32)
+        self.assertLess(elapsed, 3.0)
 
 
 class TestProfileSettings(unittest.TestCase):

@@ -2193,12 +2193,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_json_response({"success": True, "providers": _public_custom_providers(storage.get_video_flow_custom_providers())})
 
         elif path == "/api/voice-flow-polish/get":
-            from voice_flow import windows_ai_rewriter, lfm_engine
+            from voice_flow import windows_ai_rewriter, lfm_engine, s1_engine
             win_entry = windows_ai_rewriter.get_catalog_entry()
             lfm_entry = lfm_engine.get_catalog_entry()
+            s1_entry = s1_engine.get_catalog_entry()
             models = [
                 win_entry,
                 lfm_entry,
+                s1_entry,
                 {
                     "full_id": "local/deterministic",
                     "label": "Local Deterministic Cleanup (offline · fallback)",
@@ -4739,7 +4741,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 # A connected catalog entry without a Voice polish adapter is
                 # intentionally visible-but-disabled.  Do not report a
                 # successful save for a model the runtime cannot execute.
-                if model_id not in ("local/deterministic", "microsoft/windows-ai-text-rewriter", "windows/text-rewriter", "local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0"):
+                if model_id not in ("local/deterministic", "microsoft/windows-ai-text-rewriter", "windows/text-rewriter", "local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0", "local/s1-mini-q4_k_m", "superwhisper/s1-mini-q4_k_m"):
                     try:
                         from voice_flow.voice_polish_bridge import can_execute_model
                         is_video_catalog_model = any(
@@ -5820,6 +5822,18 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             is_polish = spec.get("category") == "voice_polishing" or "polish" in str(spec.get("tag") or "").lower()
                             if is_polish:
                                 storage.save_setting("voice_flow_polish_model", spec["full_id"])
+                                if spec["full_id"] in ("local/s1-mini-q4_k_m", "superwhisper/s1-mini-q4_k_m"):
+                                    try:
+                                        from voice_flow import s1_engine
+                                        threading.Thread(target=s1_engine.warm_s1_model, daemon=True).start()
+                                    except Exception:
+                                        pass
+                                elif spec["full_id"] in ("local/lfm2.5-350m-qad-q4_0", "liquid/lfm2.5-350m-qad-q4_0"):
+                                    try:
+                                        from voice_flow import lfm_engine
+                                        threading.Thread(target=lfm_engine.warm_lfm_model, daemon=True).start()
+                                    except Exception:
+                                        pass
                                 self.send_json_response({"success": True, "active_model": spec["full_id"], "target": "voice_flow_polish"})
                             else:
                                 storage.save_setting("voice_flow_stt_model", spec["full_id"])

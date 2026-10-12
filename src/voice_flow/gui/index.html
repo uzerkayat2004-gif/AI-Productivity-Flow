@@ -207,11 +207,6 @@
 
         <nav class="nav-group">
 
-          <div class="nav-item" onclick="replayOnboarding()" title="Welcome Tour & Overview">
-            <span class="nav-icon"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
-            <span class="nav-label">Welcome Tour</span>
-          </div>
-
           <div class="nav-item" onclick="openSettings('general')">
             <span class="nav-icon"><svg class="lucide" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span> <span class="nav-label">Settings</span>
           </div>
@@ -243,13 +238,18 @@
       <!-- PAGE 1: HOME PAGE -->
 
       <section id="page-home" class="page-view" style="display: none;">
-        <header class="workspace-page-header"><h1>Your workspace</h1><p>Your dictation activity and recent transcripts.</p></header>
+        <header class="workspace-page-header">
+          <div>
+            <h1>Your workspace</h1>
+            <p>Your dictation activity and recent transcripts.</p>
+          </div>
+        </header>
 
 
 
         <!-- STRETCHED METRICS PANEL -->
 
-        <div class="stretched-metrics-banner">
+        <div class="stretched-metrics-banner" id="voiceflow-metrics-banner">
 
           <div class="metric-block">
 
@@ -334,7 +334,7 @@
         </div>
 
         <!-- THE FOUR NUMBERS THAT MATTER -->
-        <div class="insights-top-grid">
+        <div class="insights-top-grid" id="insights-overview-grid">
 
           <!-- 1: Speed -->
           <div class="insight-card glow-accent insight-speed-card">
@@ -567,7 +567,7 @@
         </div>
 
         <p class="dict-page-intro">Useful names and technical terms are added automatically after repeated use. This works with polishing on or off. Manual add is optional.</p>
-        <div class="dict-add-card dict-studio-teach">
+        <div class="dict-add-card dict-studio-teach" id="dict-teach-panel">
           <input type="text" id="dictionary-add-input" class="flow-input dict-add-input" aria-label="Word, phrase, or shortcut" placeholder="Add a word or phrase…" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();addDictionaryWordFromInput();}">
           <input type="text" id="dictionary-heard-as-input" class="flow-input dict-add-heard-as" aria-label="Heard as (optional)" placeholder="Heard as (optional)" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();addDictionaryWordFromInput();}">
           <select id="dictionary-casing" class="flow-input dict-add-select" aria-label="Preferred capitalization">
@@ -579,7 +579,7 @@
           <div id="dictionary-add-error" class="flow-field-error" style="display: none;" role="alert"></div>
         </div>
 
-        <div class="dict-list-card dict-studio-library">
+        <div class="dict-list-card dict-studio-library" id="dict-library-panel">
           <div class="dict-list-head">
             <h2 class="flow-section-title" style="margin: 0;">Your words <span id="dict-active-count" class="dict-section-count">0</span></h2>
             <div class="dict-search-wrap">
@@ -696,7 +696,7 @@
 </div>
 </div>
 <!-- Two primary settings cards (usability redesign: .flow-cards). -->
-<div class="flow-cards">
+<div class="flow-cards" id="vf-flow-cards-panel">
 <article class="flow-card flow-ux flow-mode flow-mode-speech"><div aria-hidden="true" class="flow-mode-art"><svg fill="none" viewbox="0 0 120 120"><circle class="flow-art-disc" cx="60" cy="60" r="52"></circle><circle class="flow-art-ring" cx="60" cy="60" r="43"></circle><g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"><rect height="37" rx="10" width="20" x="50" y="33"></rect><path d="M40 58v4a20 20 0 0 0 40 0v-4M60 82v10M51 92h18"></path></g></svg></div><div class="flow-card-head"><span aria-hidden="true" class="flow-mode-step">01</span>
 <span aria-hidden="true" class="flow-feature-icon"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewbox="0 0 24 24"><rect height="12" rx="3" width="6" x="9" y="2"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"></path></svg></span>
 <h2 class="flow-card-title">Speech recognition</h2>
@@ -1002,10 +1002,6 @@
             </div>
 
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <button type="button" class="af-guide-trigger-btn" id="af-guide-trigger-btn" onclick="startAudioFlowGuide()" title="Interactive step-by-step Audio Flow guide" aria-label="Audio Flow Feature Guide">
-                <span class="af-guide-btn-icon">🎧</span>
-                <span>Feature Guide</span>
-              </button>
               <div style="display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip af2-toggle-chip">
                 <span style="font-size: 13px; font-weight: 700; color: var(--text);">Enabled</span>
                 <span id="exec-audio-status-badge" class="audio-status-badge" hidden style="display: none;">&#9679; Audio Flow Active</span>
@@ -1359,18 +1355,14 @@
 
           <span class="vf-live-pill" id="vf-engine-status">&#9679; Renderer ready</span>
 
-          <div style="display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip">
-
-            <span style="font-size: 13px; font-weight: 700; color: #fff;">Enabled</span>
-
-            <label class="toggle-switch">
-
-              <input type="checkbox" id="toggle-video-flow-feature" checked onchange="toggleVideoFlowFeature(this.checked)">
-
-              <span class="toggle-slider"></span>
-
-            </label>
-
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px; background: var(--surface-2); padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border-color);" class="pill-chip">
+              <span style="font-size: 13px; font-weight: 700; color: #fff;">Enabled</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="toggle-video-flow-feature" checked onchange="toggleVideoFlowFeature(this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
           </div>
 
         </div>
@@ -1477,13 +1469,13 @@
 
         <div id="vf-panel-create" class="flow-panel" role="tabpanel" aria-labelledby="vf-tab-create">
 
-        <div class="vf-create-panel">
+        <div class="vf-create-panel" id="vf-create-panel">
 
 
 
-          <div class="vf-create-grid">
+          <div class="vf-create-grid" id="vf-create-grid">
 
-            <div class="vf-source-column">
+            <div class="vf-source-column" id="vf-source-column">
 
               <h3 class="flow-step-title flow-section-title"><span class="flow-step-number" aria-hidden="true">1</span> Add your content</h3>
 
@@ -1523,16 +1515,16 @@
 
             </div>
 
-            <div class="vf-options-column">
+            <div class="vf-options-column" id="vf-options-column">
 
               <h3 class="flow-step-title flow-section-title"><span class="flow-step-number" aria-hidden="true">2</span> Video settings</h3>
           <!-- Create with: engine selector (relocated; handlers unchanged) -->
 
-          <div class="flow-engine-row">
+          <div class="flow-engine-row" id="vf-engine-row">
 
             <span class="vf-field-title">Create with</span>
 
-            <div class="vf-engine-cards">
+            <div class="vf-engine-cards" id="vf-engine-cards">
 
               <label class="vf-engine-card active" id="vf-engine-card-notebooklm" data-engine="notebooklm">
 
@@ -1726,15 +1718,20 @@
 
           </section>
 
+          <!-- NotebookLM Zero API Key Callout Badge -->
+          <div class="vf-key-badge-card nlm-badge" id="vf-nlm-no-key-badge">
+            <div class="vf-key-badge-icon" aria-hidden="true">✨</div>
+            <div class="vf-key-badge-text">
+              <strong>Zero API Keys Needed for NotebookLM</strong>
+              <p>Just sign in with your Google account above. You do NOT need any API keys or credentials to generate videos with NotebookLM.</p>
+            </div>
+          </div>
 
-
-
-
-              <!-- NotebookLM path options (toggled by selectVideoEngine). -->
+          <!-- NotebookLM path options (toggled by selectVideoEngine). -->
 
               <div id="vf-notebooklm-options-group" class="vf-options-subgroup">
 
-                <div class="vf-format-section">
+                <div class="vf-format-section" id="vf-format-section">
 
                   <div class="vf-format-header-row">
 
@@ -2012,6 +2009,16 @@
 
                   <label class="vf-field"><span>Visual direction <em>optional</em></span><textarea id="vf-visual-direction" rows="2" maxlength="1000" placeholder="e.g. Focus on structure or financial metrics in section 2"></textarea></label>
 
+                  <!-- Built-in Engine API Key Required Callout Badge -->
+                  <div class="vf-key-badge-card native-badge" id="vf-native-key-badge" style="margin-top: 14px;">
+                    <div class="vf-key-badge-icon" aria-hidden="true">🔑</div>
+                    <div class="vf-key-badge-text">
+                      <strong>API Key Required for Built-In Engine</strong>
+                      <p>To render videos using our built-in engine, configure your API keys (e.g. Gemini Free Tier, OpenAI, Groq) in the <strong>Video Flow API Providers</strong> section below.</p>
+                      <button type="button" class="vf-key-jump-btn" onclick="document.getElementById('vf-api-providers-section')?.scrollIntoView({behavior: 'smooth'})">Configure API Keys Below ↓</button>
+                    </div>
+                  </div>
+
                 </div>
 
               </details>
@@ -2096,9 +2103,9 @@
 
           </section>
 
-          <section class="vf-panel vf-provider-panel">
+          <section class="vf-panel vf-provider-panel" id="vf-api-providers-section">
 
-            <div class="vf-section-heading"><div><span class="vf-kicker">FREE TIER &amp; API KEYS</span><h2>Video Flow API Providers</h2><p>Keys, priority, tests, round-robin, and custom model IDs are isolated to Video Flow.</p></div><button class="btn-secondary" onclick="testAllVideoConnections()">&#9655; Test active</button></div>
+            <div class="vf-section-heading"><div><span class="vf-kicker">BUILT-IN ENGINE · FREE TIER &amp; API KEYS</span><h2>Video Flow API Providers</h2><p>Configure API keys here for our built-in engine. (Zero API keys needed if using Google NotebookLM above).</p></div><button class="btn-secondary" onclick="testAllVideoConnections()">&#9655; Test active</button></div>
 
             <div id="vf-api-provider-grid" class="vf-provider-grid"></div>
 
@@ -2296,7 +2303,7 @@
             <span id="af-guide-audio-icon">🔊</span>
             <span id="af-guide-audio-text">Voiceover</span>
           </button>
-          <button class="af-guide-close-btn" onclick="stopAudioFlowGuide()" title="Close guide" aria-label="Close guide">✕</button>
+          <button class="af-guide-close-btn" onclick="stopAudioFlowGuide(true)" title="Close guide" aria-label="Close guide">✕</button>
         </div>
       </div>
 
@@ -2321,7 +2328,7 @@
             </div>
           </div>
           <div class="af-sim-video-caption">
-            <span>💡 Highlight any tweet or text across Windows to trigger floating instant audio.</span>
+            <span id="af-guide-sim-caption">💡 Highlight any tweet or text across Windows to trigger floating instant audio.</span>
           </div>
         </div>
       </div>
@@ -2347,6 +2354,159 @@
         </div>
         <button class="af-guide-btn-next" id="af-guide-btn-next" onclick="nextAudioFlowGuideStep()">
           Next: API Keys →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIDEO FLOW IN-APP GUIDANCE OVERLAY -->
+  <div id="videoflow-guide-overlay" class="af-guide-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="vf-guide-title">
+    <div class="af-guide-backdrop" onclick="/* prevent click through */"></div>
+    <div id="vf-guide-spotlight-box" class="af-guide-spotlight-box">
+      <span class="af-guide-spotlight-pulse"></span>
+      <span class="af-guide-spotlight-label" id="vf-guide-spotlight-label">FEATURE SPOTLIGHT</span>
+    </div>
+
+    <!-- Floating Step Guidance Dialog Card -->
+    <div id="vf-guide-card" class="af-guide-card" role="region" aria-label="Video Flow Guidance">
+      <!-- Card Header: Step Pill, Audio Toggle, & Close -->
+      <div class="af-guide-card-head">
+        <div class="af-guide-step-tag">
+          <span class="af-guide-dot"></span>
+          <span id="vf-guide-step-counter">STEP 1 OF 4 · CONTENT &amp; FORMATS</span>
+        </div>
+        <div class="af-guide-head-right">
+          <button class="af-guide-audio-btn" id="vf-guide-audio-btn" onclick="toggleVideoFlowGuideAudio()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+            <span id="vf-guide-audio-icon">🔊</span>
+            <span id="vf-guide-audio-text">Voiceover</span>
+          </button>
+          <button class="af-guide-close-btn" onclick="stopVideoFlowGuide(true)" title="Close guide" aria-label="Close guide">✕</button>
+        </div>
+      </div>
+
+      <!-- Step Title & Description -->
+      <h2 class="af-guide-title" id="vf-guide-title">Content Input &amp; Video Formats</h2>
+      <p class="af-guide-desc" id="vf-guide-desc">Drop any document or paste text, and pick from 5 adaptive video formats.</p>
+
+      <!-- Step 4 Real Video Showcase Widget: Desktop & Windows Shortcut -->
+      <div id="vf-guide-screen-sim" class="af-guide-screen-sim" style="display: none;">
+        <div class="af-sim-window">
+          <div class="af-sim-bar">
+            <span class="af-sim-dot red"></span>
+            <span class="af-sim-dot yellow"></span>
+            <span class="af-sim-dot green"></span>
+            <span class="af-sim-url">desktop · Instant Highlight to Video Shortcut</span>
+          </div>
+          <div class="af-sim-video-wrap">
+            <video id="vf-guide-real-demo-video" class="af-sim-video" src="assets/onboarding/s2_videoflow_demo.mp4" poster="assets/onboarding/s2_videoflow_poster.jpg" playsinline muted loop preload="auto"></video>
+            <div class="af-sim-video-overlay-badge">
+              <span class="af-sim-live-dot"></span>
+              <span>Desktop Video Shortcut</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Synchronized Caption Pill -->
+      <div class="af-guide-caption-pill">
+        <span class="af-guide-wave" id="vf-guide-wave-indicator" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span class="af-guide-caption-text" id="vf-guide-subtitle-text">Welcome to Video Flow! Transform any text or document into an MP4 video in minutes.</span>
+      </div>
+
+      <!-- Bottom Navigation Controls -->
+      <div class="af-guide-actions">
+        <button class="af-guide-btn-back" id="vf-guide-btn-back" onclick="prevVideoFlowGuideStep()">
+          ← Back
+        </button>
+        <div class="af-guide-dots" id="vf-guide-dots">
+          <span class="active" onclick="gotoVideoFlowGuideStep(1)"></span>
+          <span onclick="gotoVideoFlowGuideStep(2)"></span>
+          <span onclick="gotoVideoFlowGuideStep(3)"></span>
+          <span onclick="gotoVideoFlowGuideStep(4)"></span>
+        </div>
+        <button class="af-guide-btn-next" id="vf-guide-btn-next" onclick="nextVideoFlowGuideStep()">
+          Next: Engines &amp; Styles →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VOICE FLOW IN-APP GUIDANCE OVERLAY -->
+  <div id="voiceflow-guide-overlay" class="af-guide-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="voiceflow-guide-title">
+    <div class="af-guide-backdrop" onclick="/* prevent click through */"></div>
+    <div id="voiceflow-guide-spotlight-box" class="af-guide-spotlight-box">
+      <span class="af-guide-spotlight-pulse"></span>
+      <span class="af-guide-spotlight-label" id="voiceflow-guide-spotlight-label">FEATURE SPOTLIGHT</span>
+    </div>
+
+    <!-- Floating Step Guidance Dialog Card -->
+    <div id="voiceflow-guide-card" class="af-guide-card" role="region" aria-label="Voice Flow Guidance">
+      <!-- Card Header: Step Pill, Audio Toggle, & Close -->
+      <div class="af-guide-card-head">
+        <div class="af-guide-step-tag">
+          <span class="af-guide-dot"></span>
+          <span id="voiceflow-guide-step-counter">STEP 1 OF 4 · INSTANT DICTATION</span>
+        </div>
+        <div class="af-guide-head-right">
+          <button class="af-guide-audio-btn" id="voiceflow-guide-audio-btn" onclick="toggleVoiceFlowGuideAudio()" title="Toggle voiceover narration" aria-label="Toggle voiceover narration">
+            <span id="voiceflow-guide-audio-icon">🔊</span>
+            <span id="voiceflow-guide-audio-text">Voiceover</span>
+          </button>
+          <button class="af-guide-close-btn" onclick="stopVoiceFlowGuide(true)" title="Close guide" aria-label="Close guide">✕</button>
+        </div>
+      </div>
+
+      <!-- Step Title & Description -->
+      <h2 class="af-guide-title" id="voiceflow-guide-title">Real-Time Voice Dictation</h2>
+      <p class="af-guide-desc" id="voiceflow-guide-desc">Speak naturally into any app. Voice Flow transcribes and types directly into active fields in real time.</p>
+      <div id="voiceflow-guide-polish-action-wrap" class="af-guide-inline-action-wrap" style="display: none;">
+        <button id="voiceflow-guide-polish-action-btn" class="af-guide-inline-action-btn" type="button" onclick="turnOnPolishingFromVoiceFlowGuide()">
+          Turn on polishing
+        </button>
+      </div>
+
+      <!-- Step 4 Real Video Showcase Widget: Desktop Voice Dictation Shortcut -->
+      <div id="voiceflow-guide-screen-sim" class="af-guide-screen-sim" style="display: none;">
+        <div class="af-sim-window">
+          <div class="af-sim-bar">
+            <span class="af-sim-dot red"></span>
+            <span class="af-sim-dot yellow"></span>
+            <span class="af-sim-dot green"></span>
+            <span class="af-sim-url">desktop · Real-Time Voice Typing Anywhere</span>
+          </div>
+          <div class="af-sim-video-wrap">
+            <video id="voiceflow-guide-real-demo-video" class="af-sim-video" src="assets/onboarding/s4_voiceflow_demo.mp4" poster="assets/onboarding/s4_voiceflow_poster.jpg" playsinline muted loop preload="auto"></video>
+            <div class="af-sim-video-overlay-badge">
+              <span class="af-sim-live-dot"></span>
+              <span id="voiceflow-guide-sim-badge">Windows Voice Dictation</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Synchronized Caption Pill -->
+      <div class="af-guide-caption-pill">
+        <span class="af-guide-wave" id="voiceflow-guide-wave-indicator" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span class="af-guide-caption-text" id="voiceflow-guide-subtitle-text">Welcome to Voice Flow! Speak naturally and transcribe directly into any application.</span>
+      </div>
+
+      <!-- Bottom Navigation Controls -->
+      <div class="af-guide-actions">
+        <button class="af-guide-btn-back" id="voiceflow-guide-btn-back" onclick="prevVoiceFlowGuideStep()">
+          ← Back
+        </button>
+        <div class="af-guide-dots" id="voiceflow-guide-dots">
+          <span class="active" onclick="gotoVoiceFlowGuideStep(1)"></span>
+          <span onclick="gotoVoiceFlowGuideStep(2)"></span>
+          <span onclick="gotoVoiceFlowGuideStep(3)"></span>
+          <span onclick="gotoVoiceFlowGuideStep(4)"></span>
+        </div>
+        <button class="af-guide-btn-next" id="voiceflow-guide-btn-next" onclick="nextVoiceFlowGuideStep()">
+          Next: Dictionary &amp; Styles →
         </button>
       </div>
     </div>
@@ -2487,14 +2647,20 @@
 
             <!-- Bottom navigation -->
             <div class="s1-step"><i></i>Step 1 of 5 · Welcome</div>
-            <button class="s1-theme" id="scene1-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
-              <span class="s1-theme-ic" aria-hidden="true">
-                <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
-                <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
-              </span>
-              <span id="scene1-theme-label">Dark Mode</span>
-            </button>
-            <button class="s1-next" id="scene1-next-btn" onclick="startOnboardingTour()">Next: Video Flow <span aria-hidden="true">→</span></button>
+            <div class="s1-actions">
+              <button class="scene1-auto-badge is-auto" id="scene1-auto-btn" onclick="toggleOnboardingAutoMode()" title="Toggle Auto Mode" aria-label="Toggle Auto Mode">
+                <span class="s1-auto-dot"></span>
+                <span id="scene1-auto-label">Auto</span>
+              </button>
+              <button class="s1-theme" id="scene1-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+                <span class="s1-theme-ic" aria-hidden="true">
+                  <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+                  <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1.5v2.5M12 20v2.5M1.5 12H4M20 12h2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></g></svg>
+                </span>
+                <span id="scene1-theme-label">Dark Mode</span>
+              </button>
+              <button class="s1-next" id="scene1-next-btn" onclick="startOnboardingTour()">Next: Video Flow <span aria-hidden="true">→</span></button>
+</div>
           </div>
 
           <!-- Skip Tour (outside the scaled stage so it keeps a constant, crisp size) -->
@@ -2533,7 +2699,7 @@
                   </div>
                   <div class="s2-monitor-cam" aria-hidden="true"></div>
                   <div class="s2-bezel-right">
-                    <span class="s2-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                    <span class="s2-monitor-spec"></span>
                   </div>
                 </div>
 
@@ -2565,6 +2731,10 @@
               </div>
 
               <div class="s2-actions">
+                <button class="scene1-auto-badge is-auto" id="scene2-auto-btn" onclick="toggleOnboardingAutoMode()" title="Toggle Auto Mode" aria-label="Toggle Auto Mode">
+                  <span class="s1-auto-dot"></span>
+                  <span id="scene2-auto-label">Auto</span>
+                </button>
                 <button class="s2-theme-btn" id="scene2-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
                   <span class="s1-theme-ic" aria-hidden="true">
                     <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
@@ -2578,7 +2748,7 @@
                 <button class="s2-next-btn" id="scene2-next-btn" onclick="gotoOnboardingSlide(2)">
                   Next: Audio Flow <span aria-hidden="true">→</span>
                 </button>
-              </div>
+</div>
             </div>
 
             <!-- Skip Tour Badge -->
@@ -2620,7 +2790,7 @@
                   </div>
                   <div class="s3-monitor-cam" aria-hidden="true"></div>
                   <div class="s3-bezel-right">
-                    <span class="s3-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                    <span class="s3-monitor-spec"></span>
                   </div>
                 </div>
 
@@ -2652,6 +2822,10 @@
               </div>
 
               <div class="s3-actions">
+                <button class="scene1-auto-badge is-auto" id="scene3-auto-btn" onclick="toggleOnboardingAutoMode()" title="Toggle Auto Mode" aria-label="Toggle Auto Mode">
+                  <span class="s1-auto-dot"></span>
+                  <span id="scene3-auto-label">Auto</span>
+                </button>
                 <button class="s3-theme-btn" id="scene3-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
                   <span class="s1-theme-ic" aria-hidden="true">
                     <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
@@ -2665,7 +2839,7 @@
                 <button class="s3-next-btn" id="scene3-next-btn" onclick="gotoOnboardingSlide(3)">
                   Next: Voice Flow <span aria-hidden="true">→</span>
                 </button>
-              </div>
+</div>
             </div>
 
             <!-- Skip Tour Badge -->
@@ -2707,7 +2881,7 @@
                   </div>
                   <div class="s4-monitor-cam" aria-hidden="true"></div>
                   <div class="s4-bezel-right">
-                    <span class="s4-monitor-spec">1080p Ultra HD · 60fps Display</span>
+                    <span class="s4-monitor-spec"></span>
                   </div>
                 </div>
 
@@ -2739,6 +2913,10 @@
               </div>
 
               <div class="s4-actions">
+                <button class="scene1-auto-badge is-auto" id="scene4-auto-btn" onclick="toggleOnboardingAutoMode()" title="Toggle Auto Mode" aria-label="Toggle Auto Mode">
+                  <span class="s1-auto-dot"></span>
+                  <span id="scene4-auto-label">Auto</span>
+                </button>
                 <button class="s4-theme-btn" id="scene4-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
                   <span class="s1-theme-ic" aria-hidden="true">
                     <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
@@ -2752,7 +2930,7 @@
                 <button class="s4-next-btn" id="scene4-next-btn" onclick="gotoOnboardingSlide(4)">
                   Next: Community &amp; Feedback <span aria-hidden="true">→</span>
                 </button>
-              </div>
+</div>
             </div>
 
             <!-- Skip Tour Badge -->
@@ -3003,6 +3181,10 @@
               </div>
 
               <div class="s5-actions">
+                <button class="scene1-auto-badge is-auto" id="scene5-auto-btn" onclick="toggleOnboardingAutoMode()" title="Toggle Auto Mode" aria-label="Toggle Auto Mode">
+                  <span class="s1-auto-dot"></span>
+                  <span id="scene5-auto-label">Auto</span>
+                </button>
                 <button class="s5-theme-btn" id="scene5-theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
                   <span class="s1-theme-ic" aria-hidden="true">
                     <svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
@@ -3016,7 +3198,7 @@
                 <button class="s5-finish-btn" id="scene5-finish-btn" onclick="finishOnboarding()">
                   Get Started <span aria-hidden="true">🚀</span>
                 </button>
-              </div>
+</div>
             </div>
 
             <!-- Skip Tour Badge -->

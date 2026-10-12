@@ -6,7 +6,9 @@ const vm = require('node:vm');
 
 const app = fs.readFileSync(path.join(__dirname, '../src/voice_flow/gui/app.js'), 'utf8');
 const start = app.indexOf('let _afGuideNarrationPaused');
-const end = app.indexOf('function replayOnboarding()');
+// Keep this harness scoped to Audio Flow guide helpers only (Video/Voice guides follow).
+let end = app.indexOf('// VIDEO FLOW IN-APP GUIDANCE ENGINE');
+if (end < 0) end = app.indexOf('function replayOnboarding()');
 assert.ok(start > 0 && end > start, 'guide section not found');
 const section = app.slice(start, end);
 
@@ -27,6 +29,7 @@ function harness({ position, cardRect }) {
   const doc = Object.assign(target(), {
     getElementById: id => ids[id] || null,
     querySelector: () => null,
+    querySelectorAll: () => [],
     body: { classList: classList([]), scrollTop: 0 },
     documentElement: { scrollTop: 0, clientWidth: 1024, clientHeight: 768 },
     activeElement: null,
@@ -43,7 +46,7 @@ function harness({ position, cardRect }) {
     currentAudioProvider: 'edge', afSummaries: [1], Audio: function () {},
   });
   vm.runInContext(section, ctx);
-  vm.runInContext('gotoAudioFlowGuideStep = function () {}; stopAudioFlowGuideAudio = function () {};', ctx);
+  vm.runInContext('gotoAudioFlowGuideStep = function () {}; stopAudioFlowGuideAudio = function () {}; stopVideoFlowGuide = function () {}; stopVoiceFlowGuide = function () {};', ctx);
   return { ctx, listeners, overlay, flags };
 }
 

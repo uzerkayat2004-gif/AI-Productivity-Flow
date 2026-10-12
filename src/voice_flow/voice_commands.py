@@ -89,11 +89,17 @@ _QUOTED_SPAN_RE = re.compile(
 # explicit prefix so ordinary mentions of a voice log remain dictation.
 _WAKE_RE = re.compile(
     r"(?<![\w])(?:"
-    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice)"
+    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice[\s-]?low|voice)"
     # A verified STT error for "Hey Voice Flow".  Keep this deliberately
     # literal and require a command continuation below; it is not fuzzy wake
     # matching for arbitrary speech that happens to contain similar words.
     r"|(?:hay|hey)\s+voiced\s+what"
+    # Deliberate wake prefix plus a narrow ASR substitution for "Voice Flow".
+    # The alias is accepted only with an explicit hey/ok/okay prefix.
+    r"|(?:hey|ok|okay)\s*[,.:!\-—]?\s*vice[\s\-]{0,3}flows?"
+    # A narrow ASR alias for "Voice Flow". _is_wake_at additionally requires
+    # a command immediately after it and a clause boundary before it.
+    r"|voice[\s-]?low"
     r"|voice[\s\-]{0,3}flows?"
     r")(?![\w])",
     re.IGNORECASE,
@@ -102,12 +108,12 @@ _WAKE_RE = re.compile(
 # continuation follows immediately: a comma or an imperative verb.
 _BARE_WAKE_CONTINUATION_RE = re.compile(
     r"^voice[\s\-]{0,3}flows?\s*(?:,|!|\.)?\s*(?:please\s+)?"
-    r"(?:make|turn|use|write|create|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
+    r"(?:make|turn|use|write|create|change|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
     re.IGNORECASE,
 )
 _PREFIX_ONLY_WAKE_CONTINUATION_RE = re.compile(
     r"^\s*[,.:!\-—]?\s*(?:please\s+)?"
-    r"(?:make|turn|use|write|create|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
+    r"(?:make|turn|use|write|create|change|rewrite|summarize|summarise|fix|shorten|clean|polish|convert|send|generate|draft)\b",
     re.IGNORECASE,
 )
 _SENTENCE_END_RE = re.compile(r"[.!?](?:\s+|$)")
@@ -116,7 +122,8 @@ _LEADING_FILLER_RE = re.compile(r"^(?:um+|uh+|well|so|okay|ok)[,.\s]+", re.IGNOR
 # dictation.  The parser must not consume the rest of a report merely because
 # it contains the words a user would say to Voice Flow.
 _REPORTED_WAKE_PREFIX_RE = re.compile(
-    r"\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
+    r"\b(?:i|you|we|they|someone)\s+(?:said|mentioned|heard)\s*[, :]?\s*$"
+    r"|\b(?:if|when|unless|whether)\s+(?:i|you|we|they|someone)\s+"
     r"(?:say|said|says|mention|mentioned|use|used|hear|heard)\s*$",
     re.IGNORECASE,
 )
@@ -126,7 +133,7 @@ _REPORTED_WAKE_PREFIX_RE = re.compile(
 # an unknown following word stays in the user's content.
 _UNPUNCTUATED_INTENT_END_RE = re.compile(
     r"\b(?:"
-    r"e-?mail|bullets?|bullet(?:ed)?\s+list|linkedin\s+post|"
+    r"e-?mail|bullets?|bullet(?:ed)?\s+(?:list|points)|linkedin\s+post|"
     r"work\s+(?:message|chat|msg)|personal\s+(?:message|msg|text)|"
     r"(?:normal|casual)\s+(?:message|msg|text)|"
     r"(?:proper\s+|coding\s+|well[-\s]?structured\s+)?prompts?|"
@@ -142,27 +149,28 @@ _UNPUNCTUATED_INTENT_END_RE = re.compile(
 _MAX_UNPUNCTUATED_COMMAND_WORDS = 18
 _POLITE_COMMAND_PREFIX_RE = re.compile(r"^\s*(?:can|could|would)\s+you\s+(?:please\s+)?", re.I)
 _COMMAND_START_WORDS = {
-    "please", "make", "turn", "use", "write", "create", "rewrite", "summarize", "summarise",
+    "please", "make", "turn", "use", "write", "create", "change", "rewrite", "summarize", "summarise",
     "fix", "shorten", "clean", "polish", "convert", "send", "generate", "draft",
     "remove", "don't", "tighten", "expand",
 }
 _COMMAND_SYNTAX_WORDS = {
     "this", "it", "as", "into", "a", "an", "the", "my", "usual", "normal", "regular",
     "proper", "coding", "well", "structured", "work", "personal", "linkedin", "post", "message",
-    "chat", "msg", "text", "bullet", "bullets", "bulleted", "list", "email", "mail", "note", "notes",
+    "chat", "msg", "text", "bullet", "bullets", "bulleted", "list", "points", "email", "mail", "note", "notes",
     "prompt", "short", "shorter", "concise", "brief", "tighten", "detailed", "longer", "more",
     "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly", "conversational",
     "confident", "persuasive", "playful", "excited", "grammar", "repetition", "repetitive",
+    "good",
 }
 _COMMAND_INTENT_WORDS = {
-    "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
+    "email", "mail", "bullet", "bullets", "bulleted", "list", "points", "prompt", "note", "notes",
     "message", "chat", "msg", "text", "short", "shorter", "concise", "brief", "tighten", "detailed",
     "longer", "expand", "clearer", "simpler", "professional", "formal", "casual", "friendly",
     "conversational", "confident", "persuasive", "playful", "excited", "summarize", "summarise",
     "grammar", "repetition", "repetitive", "don't",
 }
 _COMMAND_FORMAT_WORDS = {
-    "email", "mail", "bullet", "bullets", "bulleted", "list", "prompt", "note", "notes",
+    "email", "mail", "bullet", "bullets", "bulleted", "list", "points", "prompt", "note", "notes",
     "message", "chat", "msg", "text",
 }
 
@@ -186,6 +194,29 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
     ):
         return False
     matched = match.group(0).lower()
+    if re.fullmatch(r"voice[\s-]?low", matched, re.IGNORECASE):
+        # "Voicelow" / "Voice low" is a specific ASR substitution, not a
+        # general wake phrase. Accept it only at the start of a clause and
+        # when a known imperative follows immediately, so filenames, URLs,
+        # and ordinary mentions stay in the dictated text.
+        clause_prefix = text[sentence_start:match.start()]
+        if not re.fullmatch(r"\s*(?:(?:um+|uh+|well|so|okay|ok)\s*[,.:!?\-—]?\s*)*", clause_prefix, re.I):
+            return False
+        return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
+    if re.fullmatch(
+        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*voice[\s-]?low", matched, re.IGNORECASE
+    ):
+        # The same literal alias can follow an explicit wake prefix, but it
+        # still requires a known command immediately after the alias.
+        return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
+    if re.fullmatch(
+        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*vice[\s\-]{0,3}flows?",
+        matched,
+        re.IGNORECASE,
+    ):
+        # "Vice Flow" is a specific ASR substitution. Require an explicit
+        # wake prefix and a known imperative immediately after the alias.
+        return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.match(r"^\s*(?:hay|hey)\s+voiced\s+what\b", matched):
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.match(r"^\s*(?:hey|ok|okay)\b", matched):
@@ -217,7 +248,7 @@ _FORMAT_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         re.I,
     )),
     ("linkedin_post", re.compile(r"\blinkedin\s+post\b", re.I)),
-    ("bullet_list", re.compile(r"\bbullets?\b|\bbullet(?:ed)?\s+list\b", re.I)),
+    ("bullet_list", re.compile(r"\bbullets?\b|\bbullet(?:ed)?\s+(?:list|points)\b", re.I)),
     ("email", re.compile(r"\be-?mail\b", re.I)),
     # "note(s)" only counts as a format command in an explicit make/turn/as
     # construction — "the meeting notes are due" is content, not a command.
@@ -256,7 +287,7 @@ _SUMMARIZE_RE = re.compile(r"\bsummarize|summarise\b", re.I)
 _REWRITE_RE = re.compile(r"^\s*(?:please\s+)?(?:rewrite|polish|clean\s+up)\b", re.I)
 _INSTRUCTIONS_RE = re.compile(r"\bas\s+(?:clear\s+)?instructions\b", re.I)
 _COMMAND_SHAPE_RE = re.compile(
-    r"^\s*(?:please\s+)?(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|"
+    r"^\s*(?:please\s+)?(?:make|turn|use|write|create|change|rewrite|summari[sz]e|fix|"
     r"shorten|clean(?:\s+up)?|polish|convert|send|generate|draft|tighten|expand)\b"
     # A verified ASR substitution for "make this" used by the voice-log alias.
     r"|^\s*may\s+this\b"
@@ -264,7 +295,7 @@ _COMMAND_SHAPE_RE = re.compile(
     r"|^\s*remove\s+(?:the\s+)?repetit(?:ion|ive)\b"
     r"|^\s*don['’]t\s+rewrite\b"
     r"|^\s*(?:can|could|would)\s+you\s+(?:please\s+)?"
-    r"(?:make|turn|use|write|create|rewrite|summari[sz]e|fix|shorten|clean(?:\s+up)?|"
+    r"(?:make|turn|use|write|create|change|rewrite|summari[sz]e|fix|shorten|clean(?:\s+up)?|"
     r"polish|convert|send|generate|draft|tighten|expand)\b"
     r"|^\s*(?:always|from\s+now\s+on|remember\s+(?:this|that)|"
     r"save\s+(?:this|that)(?:\s+style)?)\s+(?:please\s+)?"
@@ -275,7 +306,11 @@ _COMMAND_SHAPE_RE = re.compile(
 _PERSISTENT_RE = re.compile(
     r"\b(?:always|from\s+now\s+on|remember\s+(?:this|that)|save\s+(?:this|that)(?:\s+style)?)\b", re.I
 )
-_SCOPE_NEXT_RE = re.compile(r"\b(?:what|whatever)\s+(?:i|i'll)\s+(?:say|speak|dictate)\s+next\b", re.I)
+_SCOPE_NEXT_RE = re.compile(
+    r"\b(?:what|whatever)\s+(?:i|i'll)\s+(?:say|speak|dictate)\s+next\b"
+    r"|\bmy\s+next\s+dictation\b",
+    re.I,
+)
 _KEEP_WORDING_RE = re.compile(r"\bkeep\s+my\s+(?:wording|words|phrasing)\b|\bdon'?t\s+rewrite\b", re.I)
 _NEGATED_KEEP_WORDING_RE = re.compile(
     r"\b(?:do\s+not|don'?t|never)\s+keep\s+my\s+(?:wording|words|phrasing)\b", re.I
@@ -428,11 +463,28 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
     index = 0
     while index < len(tokens) and index < _MAX_UNPUNCTUATED_COMMAND_WORDS:
         token = tokens[index].group(0).casefold()
+        # Scope suffixes are command metadata, not the next dictated sentence.
+        # Match complete explicit phrases only; an ordinary "for Alex" stays
+        # content. Preserve the original offsets for punctuation and payloads.
+        if saw_intent:
+            scope_suffix = re.match(
+                r"(?:for\s+)?my\s+next\s+dictation\b|from\s+now\s+on\b",
+                after_wake[tokens[index].start():], re.I,
+            )
+            if scope_suffix:
+                consumed_end = tokens[index].start() + scope_suffix.end()
+                while index < len(tokens) and tokens[index].end() <= consumed_end:
+                    index += 1
+                continue
+            if token == "style" and _extract_context_reference(after_wake[:consumed_end]):
+                consumed_end = tokens[index].end()
+                index += 1
+                continue
         if token in _COMMAND_SYNTAX_WORDS or token in _COMMAND_START_WORDS:
             # Once a format is complete, only an explicit continuation such
             # as "but keep my wording" may extend it.  This is what prevents
             # "email Alex the short report" from swallowing user content.
-            if saw_format and token not in {"list", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
+            if saw_format and token not in {"list", "points", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
                 if token in {"but", "and", "actually", "instead", "rather"}:
                     next_word = tokens[index + 1].group(0).casefold() if index + 1 < len(tokens) else ""
                     if next_word not in {"keep", "make", "turn", "use", "formal", "professional", "casual", "friendly", "conversational", "excited"}:
@@ -461,11 +513,11 @@ def _split_unpunctuated_command(after_wake: str) -> tuple[str, str]:
 
     if not saw_intent or not consumed_end:
         return after_wake.strip(), ""
-    head = after_wake[:consumed_end].strip(" ,:;.-")
+    head = after_wake[:consumed_end].strip(" ,:;.-?!")
     parsed = _parse_command(head)
     if not _has_any_intent(parsed):
         return after_wake.strip(), ""
-    return head, after_wake[consumed_end:].lstrip(" ,:;.-")
+    return head, after_wake[consumed_end:].lstrip(" ,:;.-?!")
 
 
 # --------------------------------------------------------------------------

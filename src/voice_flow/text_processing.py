@@ -38,15 +38,90 @@ def apply_spoken_punctuation(text: str) -> str:
 
 
 _FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
+# Internal lower-to-upper transitions (parseJSON, iPhone) and an acronym
+# followed by a capitalized component (HTTPClient) identify case-sensitive
+# tokens. Ordinary Titlecase words and all-uppercase prose do not qualify.
+_MIXED_CASE_IDENTIFIER_PATTERN = (
+    r"\b(?=[A-Za-z_][A-Za-z0-9_]*\b)"
+    r"(?=[A-Za-z0-9_]*(?:[a-z][A-Z]|[A-Z]{2}[a-z]))[A-Za-z0-9_]+\b"
+)
 _PROTECTED_CLEANUP_SPAN_RE = re.compile(
     r"(``[\s\S]*?``|`[^`\n]*`|\[[^\]]+\]\([^\)]+\)|"
     r"(?:https?|ftp)://[^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\bwww\.[^\s<>]+|"
     r"(?:[A-Za-z]:[\\/]|\\\\|(?:\.{1,2}/|/))[^\s<>]*|\$\w+|--[\w-]+|\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b|"
-    r"\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w))"
+    r"\"(?:\\.|[^\"\\])*\"|(?<!\w)'(?:\\.|[^'\\])*'(?!\w)|"
+    + _MIXED_CASE_IDENTIFIER_PATTERN + r")"
 )
+
+
+def is_protected_literal(text: str) -> bool:
+    """Return whether the entire nonblank input is one protected literal span."""
+    return bool(isinstance(text, str) and _PROTECTED_CLEANUP_SPAN_RE.fullmatch(text.strip()))
+
+
+def sentence_case_text(text: str) -> str:
+    """Capitalize ordinary sentence and paragraph starts without editing literals.
+
+    Protected spans use the same boundaries as deterministic cleanup, so dots
+    inside identifiers, links, paths, code, and quotes never create a sentence
+    boundary or have their contents changed.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+
+    parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
+    at_sentence_start = True
+    for index, part in enumerate(parts):
+        if index % 2:
+            # The protected token occupies any pending sentence-start slot;
+            # its spelling and punctuation remain entirely literal.
+            at_sentence_start = False
+            continue
+
+        output: list[str] = []
+        for position, char in enumerate(part):
+            if at_sentence_start and char.isalnum():
+                output.append(char.upper() if char.isalpha() else char)
+                at_sentence_start = False
+                continue
+            output.append(char)
+
+            if char == "\n":
+                at_sentence_start = True
+            elif char in "!?":
+                at_sentence_start = True
+            elif char == ".":
+                previous = part[position - 1] if position else ""
+                following = part[position + 1] if position + 1 < len(part) else ""
+                # Decimal points are internal punctuation, not sentence ends.
+                if not (previous.isdigit() and following.isdigit()):
+                    at_sentence_start = True
+        parts[index] = "".join(output)
+    return "".join(parts)
+
+
+def lowercase_prose_text(text: str) -> str:
+    """Lowercase prose while preserving spans protected by deterministic cleanup."""
+    if not isinstance(text, str) or not text:
+        return text
+    parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
+    for index in range(0, len(parts), 2):
+        parts[index] = parts[index].lower()
+    return "".join(parts)
+
+
 _DICTATED_EMAIL_SALUTATION_RE = re.compile(
     r"^\s*(?P<salutation>(?:(?:dear|hi|hello)\s+[A-Za-z][A-Za-z .'-]{0,50}|(?!(?:please|tomorrow|however|therefore|first|second|finally|yes|no)\b)[A-Z][A-Za-z'-]{1,40})),[ \t]+(?P<body>\S[\s\S]*?)\s*$",
     re.IGNORECASE,
+)
+_UNPUNCTUATED_EMAIL_SALUTATION_RE = re.compile(
+    r"^\s*(?P<salutation>(?i:dear|hi|hello)\s+[A-Z][A-Za-z'-]*"
+    r"(?:[ \t]+[A-Z][A-Za-z'-]*){0,2})[ \t]+"
+    r"(?P<body>(?i:please|can|could|would|will|i|we)\b[\s\S]+?)\s*$"
+)
+_DICTATED_EMAIL_SIGNOFF_RE = re.compile(
+    r"(?:[ \t\n]+)(?P<closing>(?i:thanks|thank you|regards|best regards|kind regards))"
+    r"[, \t]+(?P<sender>[A-Z][A-Za-z'-]*(?:[ \t]+[A-Z][A-Za-z'-]*){0,2}[.!?]?)\s*$"
 )
 
 
@@ -132,13 +207,20 @@ def format_dictated_email(text: str) -> str | None:
     or new wording. It is only a deterministic fallback when a requested AI
     email transformation could not be safely accepted.
     """
-    match = _DICTATED_EMAIL_SALUTATION_RE.match(text or "")
+    match = _DICTATED_EMAIL_SALUTATION_RE.match(text or "") or _UNPUNCTUATED_EMAIL_SALUTATION_RE.match(text or "")
     if not match:
         return None
     body = match.group("body")
+    signoff = _DICTATED_EMAIL_SIGNOFF_RE.search(body)
+    if signoff:
+        body = body[:signoff.start()].rstrip()
     if body[:1].islower():
         body = body[:1].upper() + body[1:]
-    return f"{match.group('salutation')},\n\n{body}"
+    result = f"{match.group('salutation')},\n\n{body}"
+    if signoff:
+        closing = signoff.group('closing')
+        result += f"\n\n{closing[:1].upper() + closing[1:]},\n{signoff.group('sender')}"
+    return result
 
 
 def collapse_echo_repeats(text: str) -> str:

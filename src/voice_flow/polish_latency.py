@@ -50,6 +50,12 @@ _MAX_TRACKED = 40
 # database contended with the app's own writes for the same rows; sidecar
 # storage keeps this telemetry off the user's database entirely.
 _PROFILE_FILENAME = "polish_latency_profile.json"
+_S1_MODEL_KEYS = {
+    "local/s1-mini-q4_k_m",
+    "superwhisper/s1-mini-q4_k_m",
+    "s1-mini-q4_k_m",
+    "s1-mini",
+}
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, float] | None = None
@@ -200,6 +206,13 @@ def ceiling_for(
         ceiling = COLD_START_BY_MODE[mode_key]
     else:
         ceiling = observed * CEILING_HEADROOM
+
+    # Short utterances teach the model's baseline speed, but they do not
+    # predict long-form normalization. Keep S1's mode allowance as a floor
+    # for every transcript; this remains a ceiling (never a delay), and the
+    # outer request cap still limits any individual inference.
+    if normalize_model_key(model_ref) in _S1_MODEL_KEYS:
+        ceiling = max(ceiling, COLD_START_BY_MODE[mode_key])
 
     # Long transcripts legitimately take longer to process.
     words = max(0, int(word_count or 0))

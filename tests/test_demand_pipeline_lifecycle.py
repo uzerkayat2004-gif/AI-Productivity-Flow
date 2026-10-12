@@ -126,11 +126,12 @@ def test_replaced_session_during_audio_start_aborts_without_touching_new_capture
     app.audio.stop = lambda: events.append("stop")
     app.audio.discard_stream_input_buffer = lambda: events.append("discard")
     monkeypatch.setattr(main.storage, "get_setting", lambda key, default=None: True if key == "voice_flow_enabled" else default)
-    monkeypatch.setattr("voice_flow.local_model_resources.acquire_model_use", lambda kind: lease)
+    monkeypatch.setattr("voice_flow.local_model_resources.acquire_model_use", lambda kind: events.append("acquire") or lease)
     monkeypatch.setattr(main.threading, "Timer", lambda *_args, **_kwargs: timers.append(object()))
 
     assert app._on_dictation_start() is False
-    assert lease.released
+    assert "acquire" not in events
+    assert not lease.released
     assert not any(event.startswith("prepare:") for event in events)
     assert "stream" not in events
     assert "stop" not in events
@@ -204,7 +205,22 @@ def test_pipeline_releases_speech_before_polishing(monkeypatch) -> None:
     monkeypatch.setattr(main.storage, "update_dictation", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(main, "detect_voice_command", lambda text: SimpleNamespace(command=None, content=text))
 
-    app._process_dictation_pipeline(session, np.ones(16000, dtype=np.float32), 1.0)
+    # History persistence outlives the synchronous pipeline. Join the workers
+    # created by this fixture before its disposable database is removed.
+    workers = []
+    original_thread = threading.Thread
+    def tracked_thread(*args, **kwargs):
+        worker = original_thread(*args, **kwargs)
+        workers.append(worker)
+        return worker
+    monkeypatch.setattr(main.threading, "Thread", tracked_thread)
+    try:
+        app._process_dictation_pipeline(session, np.ones(16000, dtype=np.float32), 1.0)
+    finally:
+        for worker in workers:
+            if worker.ident is not None:
+                worker.join(timeout=3)
+                assert not worker.is_alive(), "fixture history worker did not finish"
 
     assert events.index("transcribe") < events.index("release") < events.index("polish")
 

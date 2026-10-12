@@ -217,7 +217,7 @@ def test_dictation_opens_capture_before_stream_setup(monkeypatch) -> None:
     app._start_stream_for_session = lambda _session: events.append("stream")
     app._start_window_tracker = lambda _session: events.append("tracker")
     monkeypatch.setattr("voice_flow.main.storage.get_setting", lambda key, default=None: True if key == "voice_flow_enabled" else default)
-    monkeypatch.setattr("voice_flow.main._warm_voice_gemini_transport", lambda _model: events.append("warm"))
+    monkeypatch.setattr("voice_flow.main._warm_voice_gemini_transport", lambda *_args: events.append("warm"))
 
     assert app._on_dictation_start() is True
     assert events[:4] == ["buffer", "audio", "stream", "flush"]

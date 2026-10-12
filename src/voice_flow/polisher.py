@@ -13,12 +13,13 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from types import SimpleNamespace
 from typing import Any
 
 from voice_flow.config import config
 from voice_flow.dictionary import dictionary_engine
 from voice_flow.storage import storage
-from voice_flow.text_processing import cleanup_text
+from voice_flow.text_processing import cleanup_text, is_protected_literal, lowercase_prose_text, sentence_case_text
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ SELF_CORRECT_PATTERNS = [
 
 # Conversational prefix sanitizers (residual LLM intros)
 CONVERSATIONAL_PREFIX_PATTERNS = [
+    r"^(?:(?:sure|certainly)[!.,\s]*)?here(?:\s+is|['\u2019]s)\s+(?:a|the|your)\s+(?:revised|cleaned|polished|corrected)\s+(?:version|text|transcript)\s*:\s*",
     r"^(?:here\s+(?:is|'s)\s+(?:the\s+|your\s+)?(?:cleaned|polished|corrected|final)?\s*(?:text|transcript|result|output|version)?[:,\s-]*)",
     r"^(?:cleaned|polished|corrected|final)\s+(?:text|transcript|result|output|version)[:,\s-]*",
     r"^(?:sure(?:\s+thing)?|certainly|of\s+course|okay|ok|absolutely)[!.,\s-]*(?:here\s+(?:is|'s)[^:]*[:,\s-]*)?",
@@ -116,12 +118,15 @@ CONVERSATIONAL_PREFIX_PATTERNS = [
 
 # Conversational suffix sanitizers (residual LLM sign-offs)
 CONVERSATIONAL_SUFFIX_PATTERNS = [
+    r"\s*let\s+me\s+know\s+if\s+you(?:['\u2019]d|\s+would)\s+like\s+(?:any\s+)?(?:adjustments|changes|revisions)[!.?\s]*$",
     r"\s*\((?:note|cleaned|polished|note that|edited|corrected)[^)]*\)$",
     r"\s*[\-\s]*\(?(?:hope\s+this\s+helps|let\s+me\s+know\s+if\s+you\s+need|is\s+there\s+anything\s+else)[!.?\s]*\)?$",
 ]
 
 # Assistant response detection phrases (when AI acts as chatbot instead of polisher)
 ASSISTANT_RESPONSE_PATTERNS = [
+    r"\bhere(?:\s+is|['\u2019]s)\s+(?:a|the|your)\s+(?:revised|cleaned|polished|corrected)\s+(?:version|text|transcript)\s*:",
+    r"\blet\s+me\s+know\s+if\s+you(?:['\u2019]d|\s+would)\s+like\s+(?:any\s+)?(?:adjustments|changes|revisions)\b",
     r"\bas an ai\b",
     r"\blanguage model\b",
     r"\bi (?:cannot|can't|unable to|don't have|do not have)\b",
@@ -164,6 +169,7 @@ def sanitize_polished_text(text: str, source_text: str | None = None) -> str:
 
     text = text.strip()
     source_tokens = _tokenize_for_fidelity(source_text or "")
+    removed_wrapper = False
 
     def dictated_prefix(candidate: str, stripped: str) -> bool:
         """Do not erase a greeting the speaker actually dictated."""
@@ -197,6 +203,7 @@ def sanitize_polished_text(text: str, source_text: str | None = None) -> str:
             stripped = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
             if stripped != text and not dictated_prefix(text, stripped):
                 text = stripped
+                removed_wrapper = True
         text = _strip_surrounding_quotes(text)
         if text == original:
             break
@@ -206,6 +213,12 @@ def sanitize_polished_text(text: str, source_text: str | None = None) -> str:
         stripped = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
         if stripped != text and not dictated_suffix(text):
             text = stripped
+            removed_wrapper = True
+
+    # The transcript's wrapper quotes become exposed after removing an
+    # undictated closing assistant message. Dictated quotes remain literal.
+    if removed_wrapper:
+        text = _strip_surrounding_quotes(text)
 
     return text
 
@@ -504,13 +517,129 @@ def _candidate_preserves_content(
     if not cand_tokens:
         return False
 
+    # Reorganization may change prose, but must retain dictated names and
+    # labels. Sentence starts are excluded; spelling comparisons ignore case.
+    if task == "rewrite" or command_format == "email":
+        candidate_words = set(cand_tokens)
+        pronouns = {"i", "you", "we", "they", "he", "she", "it"}
+        for match in re.finditer(r"\b[A-Z][\w+#]*\b", source, flags=re.UNICODE):
+            prefix = source[:match.start()].rstrip()
+            word = match.group(0).casefold()
+            if prefix and prefix[-1] not in ".!?" and word not in pronouns and word not in candidate_words:
+                log.info("[POLISH SAFETY] Rewrite lost a dictated name or label; rejected.")
+                return False
+
+    # A complete verbatim transcript followed by more words is an undictated
+    # addition, not a grammar repair. Explicit rewrite tasks may expand prose.
+    if task == "cleanup" and cand_tokens[:len(src_tokens)] == src_tokens:
+        if len(cand_tokens) > len(src_tokens):
+            log.info("[POLISH SAFETY] Cleanup appended undictated content; rejected.")
+            return False
+
+    # Percentage overlap and global negation counts cannot tell which action
+    # a negation belongs to. Compare can-modal polarity on shared actions;
+    # quoted examples, code and URLs are mentions rather than permissions.
+    # This rejects a provider's reversal, never repairs the user's transcript.
+    from voice_flow.text_processing import _PROTECTED_CLEANUP_SPAN_RE
+
+    if not allow_compression:
+        from collections import Counter
+        literals = Counter(match.group(0) for match in _PROTECTED_CLEANUP_SPAN_RE.finditer(source))
+        candidate_literals = [match.group(0) for match in _PROTECTED_CLEANUP_SPAN_RE.finditer(candidate)]
+        for literal, count in literals.items():
+            # A prose terminator added after a URL/path is outside its literal
+            # spelling. Removing punctuation present in the source is not.
+            retained = sum(span == literal or span.rstrip(".,!?;:") == literal for span in candidate_literals)
+            if retained < count:
+                log.info("[POLISH SAFETY] Candidate changed a protected literal; rejected.")
+                return False
+
+    if task in {"cleanup", "rewrite", "format"}:
+        source_prose = set(_tokenize_for_fidelity(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", source)))
+        candidate_prose = set(_tokenize_for_fidelity(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", candidate)))
+        for perspective in ({"i", "me"}, {"we", "us"}):
+            if source_prose.intersection(perspective) and not candidate_prose.intersection(perspective):
+                log.info("[POLISH SAFETY] Candidate lost the speaker's perspective; rejected.")
+                return False
+
+    def can_actions(text: str) -> dict[str, set[bool]]:
+        prose = _PROTECTED_CLEANUP_SPAN_RE.sub(" ", text)
+        prose = _expand_unambiguous_contractions(prose)
+        actions: dict[str, set[bool]] = {}
+        for match in re.finditer(
+            r"\b(can(?:not)?)(?:\s+(not))?\s+"
+            r"(?:(?:i|you|we|they|he|she|it)\s+)?"
+            r"(?:(not)\s+)?(?:please\s+)?([a-z]+)\b",
+            prose, flags=re.IGNORECASE,
+        ):
+            action = match.group(4).casefold()
+            negative = match.group(1).casefold() == "cannot" or bool(match.group(2) or match.group(3))
+            actions.setdefault(action, set()).add(negative)
+        for match in re.finditer(r"\b(?:unable\s+to|not\s+able\s+to)\s+([a-z]+)\b", prose, re.IGNORECASE):
+            actions.setdefault(match.group(1).casefold(), set()).add(True)
+        return actions
+
+    source_actions = can_actions(source)
+    candidate_actions = can_actions(candidate)
+    for action in source_actions.keys() & candidate_actions.keys():
+        if source_actions[action] != candidate_actions[action]:
+            log.info("[POLISH SAFETY] Candidate changed can-modal polarity; rejected.")
+            return False
+
+    # A negative can-clause must survive even when the provider removes the
+    # modal itself ("cannot remove" -> "please remove"). Match local objects
+    # as well as verbs so an unrelated negative clause cannot stand in for it.
+    def negative_actions(text: str) -> dict[str, list[set[str]]]:
+        prose = _expand_unambiguous_contractions(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", text))
+        result: dict[str, list[set[str]]] = {}
+        pattern = (
+            r"\b(?:cannot|can\s+not|(?:do|does|did|must|should|will|would|could)\s+not|"
+            r"unable\s+to|not\s+able\s+to|never)\s+(?:please\s+)?([a-z]+)\b"
+        )
+        for match in re.finditer(pattern, prose, flags=re.IGNORECASE):
+            tail = re.split(r"[.,!?;:\n]|\b(?:and|but|while|because|please)\b", prose[match.end():], maxsplit=1, flags=re.IGNORECASE)[0]
+            objects = [token for token in _tokenize_for_fidelity(tail) if token not in {"a", "an", "the", "any"}][:3]
+            result.setdefault(match.group(1).casefold(), []).append(set(objects))
+        return result
+
+    source_negative = negative_actions(source)
+    candidate_negative = negative_actions(candidate)
+    for action, polarities in source_actions.items():
+        if True not in polarities:
+            continue
+        for objects in source_negative.get(action, [set()]):
+            if not any(objects.issubset(retained) for retained in candidate_negative.get(action, [])):
+                log.info("[POLISH SAFETY] Candidate lost a negative can-action or its object; rejected.")
+                return False
+
+    if command_format == "email":
+        source_prose = _expand_unambiguous_contractions(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", source))
+        candidate_prose = _expand_unambiguous_contractions(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", candidate))
+        request_pattern = r"\b(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)([a-z]+)\b"
+        requests = {match.group(1).casefold() for match in re.finditer(request_pattern, source_prose, re.IGNORECASE)}
+        retained_requests = {match.group(1).casefold() for match in re.finditer(request_pattern, candidate_prose, re.IGNORECASE)}
+        # Sentence-initial imperatives are also requests. This narrow check
+        # only rejects explicit completion/commitment assertions.
+        irregular = {"send": "sent", "write": "written", "give": "given", "make": "made"}
+        for action in requests - retained_requests:
+            if re.search(rf"(?:^|[.!?\n])\s*{re.escape(action)}\b", candidate_prose, re.IGNORECASE):
+                continue
+            past = irregular.get(action, action + ("d" if action.endswith("e") else "ed"))
+            passive_claim = rf"\b(?:will\s+be|has\s+been|have\s+been|was|were|is|are)\s+{re.escape(past)}\b"
+            active_claim = rf"\b(?:i|we|he|she|they)\s+(?:(?:have|has)\s+)?{re.escape(past)}\b|\b(?:i|we|he|she|they)\s+will\s+{re.escape(action)}\b"
+            if re.search(passive_claim, candidate_prose, re.IGNORECASE) or re.search(active_claim, candidate_prose, re.IGNORECASE):
+                log.info("[POLISH SAFETY] Email changed a request into an asserted action; rejected.")
+                return False
+
     # A lost negation or quantity can reverse meaning while passing every
     # percentage-based check. Tokenization already expands contractions.
     if not allow_compression:
         from collections import Counter
         anchors = {"not", "never", "without", "no", "neither", "nor"}
-        src_anchors = Counter(t for t in src_tokens if t in anchors or t.isdigit())
-        candidate_anchors = Counter(cand_tokens)
+        src_anchor_tokens = _tokenize_for_fidelity(re.sub(r"\b(?:cannot|unable\s+to|not\s+able\s+to)\b", "can not", _expand_unambiguous_contractions(source), flags=re.IGNORECASE))
+        cand_anchor_tokens = _tokenize_for_fidelity(re.sub(r"\b(?:cannot|unable\s+to|not\s+able\s+to)\b", "can not", _expand_unambiguous_contractions(candidate), flags=re.IGNORECASE))
+        src_anchors = Counter(t for t in src_anchor_tokens if t in anchors or t.isdigit())
+        candidate_anchors = Counter(cand_anchor_tokens)
         if any(candidate_anchors[t] < count for t, count in src_anchors.items()):
             return False
 
@@ -679,6 +808,19 @@ _BULLET_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+\S", re.MULTILINE)
 _PROMPT_LABEL_RE = re.compile(r"^\s*(?:task|objective|requirements?|context)\s*:", re.IGNORECASE | re.MULTILINE)
 
 
+def _has_rough_spoken_framing(text: str) -> bool:
+    """Only classify obvious spoken scaffolding, not a writer's selected register."""
+    from voice_flow.text_processing import _PROTECTED_CLEANUP_SPAN_RE
+    prose = _PROTECTED_CLEANUP_SPAN_RE.sub(" ", text)
+    return bool(re.search(r"\b(?:um+|uh+|you know|i mean|all that stuff|sort of|kind of)\b", prose,
+                          re.IGNORECASE)) or (len(prose.split()) >= 20 and not re.search(r"[.!?]", prose))
+
+
+def _command_body_tokens(text: str) -> list[str]:
+    # Sanitization may already remove isolated hesitation sounds from an echo.
+    return [token for token in _tokenize_for_fidelity(text) if not re.fullmatch(r"(?:um+|uh+)", token)]
+
+
 def _fulfills_command(
     source: str,
     candidate: str,
@@ -703,8 +845,24 @@ def _fulfills_command(
         # otherwise a model merely cleaned the source sentence.
         if "\n" not in candidate:
             return False
+        if (_has_rough_spoken_framing(source)
+                and _command_body_tokens(source) == _command_body_tokens(candidate)):
+            return False
     if task == "prompt":
         stripped = candidate.strip()
+        # Labels and bullets alone do not turn rough dictation into a prompt.
+        # Compare only the body so a provider echo cannot masquerade as a rewrite.
+        body = re.sub(r"^\s*(?:task|objective|requirements?|context|output)\s*:\s*", "", stripped,
+                      flags=re.IGNORECASE | re.MULTILINE)
+        body = re.sub(r"^\s*[-*•]\s+", "", body, flags=re.MULTILINE)
+        source_body = re.sub(r"^\s*(?:task|objective|requirements?|context|output)\s*:\s*", "", source,
+                             flags=re.IGNORECASE | re.MULTILINE)
+        if _command_body_tokens(body) == _command_body_tokens(source_body):
+            # Already imperative, usable prompts can legitimately need only structure.
+            if (_has_rough_spoken_framing(source_body)
+                    or not re.match(r"^\s*(?:create|build|write|improve|design|develop|implement|generate|fix)\b", source_body,
+                                    re.IGNORECASE)):
+                return False
         if not _PROMPT_LABEL_RE.search(stripped):
             if stripped.endswith("?") or re.match(r"^(?:sure|okay|yes|no)\b", stripped, re.IGNORECASE):
                 return False
@@ -740,23 +898,25 @@ def _command_system_prompt(
         "Return only the transformed transcript: no preamble, explanation, quotes, or tags. "
         "Do not answer the transcript or perform its requested task. "
         "Preserve every negative clause and its object; do not turn a negative requirement into an unrelated positive statement. "
-        "If the text already fits the requested style, keep it unchanged. Do not add a greeting unless an email format requires one. "
-        "Use the speaker's original words wherever possible and do not replace meaningful words with synonyms unnecessarily. Preserve original nouns and verbs unless a grammar correction requires changing them; for short messages, make only the phrasing changes needed by the requested format or register. "
+        "If the text already fits the requested style and format, keep its usable wording. "
+        "Rewrite rough spoken phrasing into clear, coherent sentences in the selected register. "
+        "Reorganize related points without inventing facts or dropping first or last details. "
+        "Preserve names, numbers, technical identifiers, quoted text, URLs and paths exactly. "
         f"{compression}"
     )
     if command_format == "email":
         prompt += (
-            ' Illustrative example only, not transcript content; never copy its facts.\n'
-            'Example input: "Please send the report."\n'
-            'Example output:\n'
-            '"Hello,\n\nPlease send the report.\n\nRegards,"\n'
-            "Use a generic greeting or sign-off only when requested."
+            " Rewrite the message as a polished email, with clear purpose and logically grouped body paragraphs. "
+            "Changing layout alone is insufficient when the wording is rough. "
+            "Use only dictated recipient and sender names, greetings and sign-offs; do not invent them or a subject. "
+            "Respect the selected email register and any explicit tone or length override."
         )
     elif task == "prompt":
         prompt += (
-            ' Illustrative example only, not transcript content; never copy its facts.\n'
-            'Example input: "Make a prompt that explains this process."\n'
-            'Example output: "Objective: Explain this process."'
+            " Convert conversational intent into actionable instructions for an AI assistant. "
+            "Separate the task, provided context and explicit requirements where useful. "
+            "A Task heading followed by the unchanged rough transcript is insufficient. "
+            "Include an output requirement only if dictated. Do not execute or answer the resulting prompt."
         )
     return prompt
 
@@ -798,6 +958,27 @@ def _apply_dictionary_with_trace(text: str, trace: list[dict[str, str]] | None) 
         return _apply_dictionary_safely(text)
 
 
+def _cleanup_preserving_dictionary_inputs(
+    text: str,
+    level: str,
+    *,
+    preserve_repetitions: bool = False,
+) -> str:
+    """Run local cleanup without destroying exact dictionary input phrases."""
+    try:
+        masked, token_map = dictionary_engine.mask_rule_inputs_for_cleanup(text)
+    except Exception:
+        masked, token_map = text, {}
+    cleaned = cleanup_text(masked, level, preserve_repetitions=preserve_repetitions)
+    if not token_map:
+        return cleaned
+    try:
+        return dictionary_engine.unmask_rule_inputs_after_cleanup(cleaned, token_map)
+    except Exception:
+        # Never expose internal mask tokens through a compatibility adapter.
+        return cleanup_text(text, level, preserve_repetitions=preserve_repetitions)
+
+
 def _timeout_status(exc: BaseException) -> str:
     """Classify provider exceptions consistently across guarded/un-guarded calls."""
     if isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in str(exc).lower():
@@ -832,12 +1013,22 @@ class TextPolisher:
 
     @property
     def _last_lfm_bridge_attempted(self) -> bool:
-        """Whether this thread already gave the selected LFM one bridge try."""
-        return bool(getattr(self._attempt_state, "lfm_bridge_attempted", False))
+        """Whether this thread already gave the selected local model (LFM or S1) one bridge try."""
+        return bool(getattr(self._attempt_state, "local_bridge_attempted", getattr(self._attempt_state, "lfm_bridge_attempted", False)))
 
     @_last_lfm_bridge_attempted.setter
     def _last_lfm_bridge_attempted(self, value: object) -> None:
-        self._attempt_state.lfm_bridge_attempted = bool(value)
+        val = bool(value)
+        self._attempt_state.local_bridge_attempted = val
+        self._attempt_state.lfm_bridge_attempted = val
+
+    @property
+    def _last_local_bridge_attempted(self) -> bool:
+        return self._last_lfm_bridge_attempted
+
+    @_last_local_bridge_attempted.setter
+    def _last_local_bridge_attempted(self, value: object) -> None:
+        self._last_lfm_bridge_attempted = value
 
     @staticmethod
     def _notify_outcome(callback: Any, outcome: str) -> None:
@@ -1008,6 +1199,153 @@ class TextPolisher:
             self._last_attempt_status = "local"
             self._notify_outcome(outcome_callback, "local")
             return _apply_dictionary_with_trace(self._deterministic_cleanup(raw_text, instruction, level), dictionary_trace)
+
+        # S1 is a selected, offline engine. Route it before the generic API
+        # pool so a selected local model never incurs cloud latency or gets
+        # silently replaced by another model.  Commands it cannot author can
+        # still use its bounded transcript normalizer pass; main owns any
+        # separate finite command transformation after that cleanup.
+        try:
+            from voice_flow import s1_engine
+
+            if s1_engine.is_s1_model_ref(explicit_model):
+                self._last_lfm_bridge_attempted = True
+                attempt_outcome = "timeout"
+                supplied_effective = style_instruction if hasattr(style_instruction, "instruction") else None
+                style_id = str(
+                    getattr(supplied_effective, "style_id", None)
+                    or kwargs.get("style_id")
+                    or ""
+                )
+                effective = supplied_effective or SimpleNamespace(
+                    instruction=str(instruction or ""),
+                    style_id=style_id,
+                    category=kwargs.get("category"),
+                    format=command_format,
+                    task=task,
+                )
+                command = kwargs.get("command")
+                supported = s1_engine.s1_can_handle(
+                    effective=effective, command=command, text=raw_text,
+                    task=task, instruction=str(instruction or ""),
+                    style_id=style_id, command_format=command_format,
+                    overrides=overrides,
+                )
+                if not s1_engine.is_s1_downloaded():
+                    self._last_attempt_status = "unavailable"
+                    result = None
+                else:
+                    # Unsupported command intent may still benefit from one
+                    # local cleanup pass, provided S1's cleanup gate allows
+                    # the normalizable style snapshot. No command prompt or
+                    # unsupported override is sent to the model.
+                    cleanup_only = not supported and task in {"prompt", "rewrite", "format"}
+                    s1_effective = effective
+                    s1_task = task
+                    s1_format = command_format
+                    s1_overrides = overrides
+                    if cleanup_only:
+                        allowed_cleanup_overrides = {"tone", "formality"}
+                        cleanup_only = (
+                            not getattr(command, "persistent_change", False)
+                            and not getattr(command, "ambiguous", False)
+                            and set(overrides).issubset(allowed_cleanup_overrides)
+                        )
+                        s1_effective = SimpleNamespace(
+                            instruction="", style_id=style_id,
+                            category=getattr(effective, "category", None),
+                            format=None, task="cleanup",
+                        )
+                        s1_task = "cleanup"
+                        s1_format = None
+                        s1_overrides = {}
+                        supported = cleanup_only and s1_engine.s1_can_handle(
+                            effective=s1_effective, text=raw_text,
+                            task="cleanup", style_id=style_id,
+                        )
+                    if supported:
+                        remaining = self._remaining_budget(deadline)
+                        timeout = min(AI_POLISH_REQUEST_TIMEOUT_SECONDS, remaining)
+                        if timeout <= 0:
+                            self._last_attempt_status = "timeout"
+                            result = None
+                        else:
+                            started = time.perf_counter()
+                            result = self._run_bridge_with_timeout(
+                                lambda bounded_timeout: s1_engine.polish_with_s1(
+                                    raw_text, str(getattr(s1_effective, "instruction", "") or ""),
+                                    timeout_seconds=bounded_timeout,
+                                    effective=s1_effective,
+                                    command=command if not cleanup_only else None,
+                                    style_id=style_id,
+                                    command_format=s1_format,
+                                    overrides=s1_overrides,
+                                    task=s1_task,
+                                ),
+                                timeout,
+                                deadline=(float(deadline) - AI_POLISH_DETERMINISTIC_RESERVE_SECONDS)
+                                if deadline is not None else None,
+                            )
+                            if result:
+                                sanitized = self._post_process_ai_response(
+                                    result, raw_text,
+                                    preserve_terminal=(s1_task == "cleanup"),
+                                    instruction=str(getattr(s1_effective, "instruction", "") or ""),
+                                )
+                                if s1_task == "cleanup" and sanitized == raw_text:
+                                    sanitized = self._deterministic_cleanup(sanitized, "", level)
+                                else:
+                                    sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
+                                safe = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
+                                    raw_text, sanitized, task="cleanup",
+                                    command_format=s1_format,
+                                )
+                                fulfilled = safe and _fulfills_command(
+                                    raw_text, sanitized, task=s1_task,
+                                    overrides=s1_overrides, command_format=s1_format,
+                                )
+                                if fulfilled:
+                                    sanitized = self._apply_style_register(sanitized, style_id or instruction)
+                                    self._record_polish_latency(s1_engine.S1_MODEL_ID, started, is_local=True)
+                                    self._notify_outcome(outcome_callback, "local_model")
+                                    return _apply_dictionary_with_trace(sanitized, dictionary_trace)
+                                self._last_attempt_status = "fidelity_reject"
+                                attempt_outcome = "command_unfulfilled" if task != "cleanup" else "fidelity_reject"
+                            else:
+                                attempt_outcome = "timeout" if self._last_attempt_status == "timeout" else "provider_failure"
+                                if self._last_attempt_status == "timeout":
+                                    try:
+                                        from voice_flow.polish_latency import record_timeout
+
+                                        record_timeout(
+                                            s1_engine.S1_MODEL_ID,
+                                            elapsed=time.perf_counter() - started,
+                                            mode=str(kwargs.get("speed_mode") or "balanced"),
+                                        )
+                                    except Exception:
+                                        log.debug("[S1] Could not record bounded timeout feedback", exc_info=True)
+                    else:
+                        self._last_attempt_status = "unsupported"
+                        attempt_outcome = "command_unfulfilled"
+                if not s1_engine.is_s1_downloaded():
+                    attempt_outcome = "command_unfulfilled" if task != "cleanup" else "provider_failure"
+                cleaned = self._apply_style_register(
+                    self._deterministic_cleanup(raw_text, "", level),
+                    style_id or instruction,
+                )
+                self._notify_outcome(outcome_callback, attempt_outcome)
+                return _apply_dictionary_with_trace(cleaned, dictionary_trace)
+        except Exception:
+            # A broken local adapter must still fail closed to deterministic
+            # cleanup and must never cause selected-S1 calls to enter the API pool.
+            try:
+                from voice_flow import s1_engine
+                if s1_engine.is_s1_model_ref(explicit_model):
+                    cleaned = self._deterministic_cleanup(raw_text, "", level)
+                    self._notify_outcome(outcome_callback, "provider_failure")
+                    return _apply_dictionary_with_trace(cleaned, dictionary_trace)
+            except Exception:
+                pass
         # Ultra-short transcripts bypass LLM API calls only when the caller did
         # not explicitly request an AI model or an AI-only transformation.
         try:
@@ -1074,7 +1412,13 @@ class TextPolisher:
                 pool_result, raw_text, preserve_terminal=(task == "cleanup"),
                 instruction=instruction,
             )
-            sanitized = cleanup_text(sanitized, level)
+            if task == "cleanup" and sanitized == raw_text:
+                # An unchanged provider echo still receives the same local
+                # sentence cleanup as a deterministic result. Exact dictionary
+                # inputs remain masked until the single final dictionary pass.
+                sanitized = self._deterministic_cleanup(sanitized, instruction, level)
+            else:
+                sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
             safe_candidate = not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
                 raw_text, sanitized, task=task, allow_compression=allow_compression,
                 command_format=command_format,
@@ -1093,33 +1437,141 @@ class TextPolisher:
         else:
             attempt_outcome = "timeout" if self._last_attempt_status == "timeout" else "provider_failure"
 
-        # Local safety net: the downloaded LFM model, when present. It runs on
+        # Local safety net: the downloaded local model (S1 or LFM), when present. It runs on
         # the raw transcript, never on the assembled prompt, so the model only
         # ever sees the user's own words. It is skipped when the caller's
         # deadline leaves no room for it, so it can never overrun the
         # interactive budget.
         local_model_budget = self._remaining_budget(deadline)
         try:
-            from voice_flow import lfm_engine
+            from voice_flow import lfm_engine, s1_engine
+            fallback_s1_effective = style_instruction if hasattr(style_instruction, "instruction") else SimpleNamespace(
+                instruction=str(instruction or ""),
+                style_id=str(kwargs.get("style_id") or ""),
+                category=kwargs.get("category"),
+                format=command_format,
+                task=task,
+            )
+            fallback_s1_command = kwargs.get("command")
+            # Prefer the ACTIVE selected local model
+            is_s1_active = s1_engine.is_s1_model_ref(explicit_model)
+            is_lfm_active = lfm_engine.is_lfm_model_ref(explicit_model)
+            use_s1 = False
+            use_lfm = False
+
             if (
                 local_model_budget > LOCAL_MODEL_MIN_BUDGET_SECONDS
-                and lfm_engine.is_lfm_downloaded()
                 and explicit_model != "local/deterministic"
-                and not (
-                    self._last_lfm_bridge_attempted
-                    and lfm_engine.is_lfm_model_ref(explicit_model)
-                )
             ):
-                lfm_started = time.perf_counter()
-                lfm_result = lfm_engine.polish_with_lfm(
-                    raw_text, instruction, timeout_seconds=local_model_budget,
+                if (
+                    is_s1_active
+                    and s1_engine.is_s1_downloaded()
+                    and s1_engine.s1_can_handle(
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        text=raw_text, task=task, instruction=str(instruction or ""),
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        command_format=command_format, overrides=overrides,
+                    )
+                    and not (self._last_lfm_bridge_attempted and is_s1_active)
+                ):
+                    use_s1 = True
+                elif (
+                    is_lfm_active
+                    and lfm_engine.is_lfm_downloaded()
+                    and not (self._last_lfm_bridge_attempted and is_lfm_active)
+                ):
+                    use_lfm = True
+                elif (
+                    not is_s1_active
+                    and not is_lfm_active
+                    and lfm_engine.is_lfm_downloaded()
+                    and not self._last_lfm_bridge_attempted
+                ):
+                    use_lfm = True
+                elif (
+                    not is_s1_active
+                    and not is_lfm_active
+                    and s1_engine.is_s1_downloaded()
+                    and s1_engine.s1_can_handle(
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        text=raw_text, task=task, instruction=str(instruction or ""),
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        command_format=command_format, overrides=overrides,
+                    )
+                    and not self._last_lfm_bridge_attempted
+                ):
+                    use_s1 = True
+
+            if use_s1:
+                s1_started = time.perf_counter()
+                self._last_lfm_bridge_attempted = True
+                def s1_fallback(timeout):
+                    return s1_engine.polish_with_s1(
+                        raw_text, instruction, timeout_seconds=timeout,
+                        effective=fallback_s1_effective, command=fallback_s1_command,
+                        style_id=str(getattr(fallback_s1_effective, "style_id", "") or ""),
+                        task=task, command_format=command_format, overrides=overrides,
+                    )
+
+                s1_result = self._run_bridge_with_timeout(
+                    s1_fallback, min(local_model_budget, AI_POLISH_REQUEST_TIMEOUT_SECONDS),
+                    deadline=(float(deadline) - AI_POLISH_DETERMINISTIC_RESERVE_SECONDS)
+                    if deadline is not None else None,
                 )
+                if not s1_result and self._last_attempt_status == "timeout":
+                    attempt_outcome = "timeout"
+                if s1_result:
+                    sanitized = self._post_process_ai_response(
+                        s1_result, raw_text, preserve_terminal=(task == "cleanup"),
+                        instruction=instruction,
+                    )
+                    if task == "cleanup" and sanitized == raw_text:
+                        sanitized = self._deterministic_cleanup(sanitized, instruction, level)
+                    else:
+                        sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
+                    safe_candidate = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
+                        raw_text, sanitized, task="cleanup", command_format=command_format,
+                    )
+                    fulfilled = safe_candidate and _fulfills_command(
+                        raw_text, sanitized, task=task, overrides=overrides,
+                        command_format=command_format,
+                    )
+                    if fulfilled:
+                        sanitized = self._apply_style_register(sanitized, instruction)
+                        log.info("[POLISH] Local S1 model cleaned successfully: '%s' -> '%s'", raw_text, sanitized)
+                        self._record_polish_latency(
+                            s1_engine.S1_MODEL_ID, s1_started, is_local=True,
+                        )
+                        self._notify_outcome(outcome_callback, "local_model")
+                        return _apply_dictionary_with_trace(sanitized, dictionary_trace)
+                    if task != "cleanup":
+                        attempt_outcome = "command_unfulfilled"
+            elif use_lfm:
+                lfm_started = time.perf_counter()
+                # Loading a native context and waiting for its first token can
+                # ignore the runtime timeout. Use the same bounded worker lane
+                # as exact adapters; late results never reach this dictation.
+                def local_fallback(timeout):
+                    return lfm_engine.polish_with_lfm(
+                        raw_text, instruction, timeout_seconds=timeout,
+                    )
+
+                lfm_result = self._run_bridge_with_timeout(
+                    local_fallback, min(local_model_budget, AI_POLISH_REQUEST_TIMEOUT_SECONDS),
+                    deadline=(float(deadline) - AI_POLISH_DETERMINISTIC_RESERVE_SECONDS)
+                    if deadline is not None else None,
+                )
+                if not lfm_result and self._last_attempt_status == "timeout":
+                    attempt_outcome = "timeout"
                 if lfm_result:
                     sanitized = self._post_process_ai_response(
                         lfm_result, raw_text, preserve_terminal=(task == "cleanup"),
                         instruction=instruction,
                     )
-                    sanitized = cleanup_text(sanitized, level)
+                    if task == "cleanup" and sanitized == raw_text:
+                        sanitized = self._deterministic_cleanup(sanitized, instruction, level)
+                    else:
+                        sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
                     safe_candidate = not _is_assistant_response(sanitized, raw_text) and _candidate_preserves_content(
                         raw_text, sanitized, task=task, allow_compression=allow_compression,
                         command_format=command_format,
@@ -1171,7 +1623,9 @@ class TextPolisher:
             instruction = ""
         style = instruction.lower()
         if "very_casual" in style or "lowercase" in style:
-            return text.lower().rstrip(".")
+            result = lowercase_prose_text(text)
+            tail = result.rsplit(None, 1)
+            return result if tail and is_protected_literal(tail[-1]) else result.rstrip(".")
         return text
 
     @staticmethod
@@ -1200,7 +1654,9 @@ class TextPolisher:
 
     @staticmethod
     def _deterministic_cleanup(raw_text: str, style_instruction: str, level: str, preserve_repetitions: bool = False) -> str:
-        cleaned = cleanup_text(raw_text, level, preserve_repetitions=preserve_repetitions)
+        cleaned = _cleanup_preserving_dictionary_inputs(
+            raw_text, level, preserve_repetitions=preserve_repetitions,
+        )
         # ``cleanup_none`` is an explicit verbatim preference. Dictionary
         # processing is applied by the caller, but local cleanup must not add
         # sentence case, punctuation, or a style transformation.
@@ -1209,10 +1665,11 @@ class TextPolisher:
         cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
         style = (style_instruction or "").lower()
         if "very_casual" in style or "lowercase" in style:
-            return cleaned.lower().rstrip(".")
+            result = lowercase_prose_text(cleaned)
+            return result if result and is_protected_literal(result.rsplit(None, 1)[-1]) else result.rstrip(".")
         if cleaned:
-            cleaned = cleaned[0].upper() + cleaned[1:]
-            if cleaned[-1] not in ".!?":
+            cleaned = sentence_case_text(cleaned)
+            if cleaned[-1] not in ".!?" and not is_protected_literal(cleaned):
                 cleaned += "."
         return cleaned
 
@@ -1557,7 +2014,8 @@ class TextPolisher:
                 if bridge_runnable and remaining >= AI_POLISH_MIN_PROVIDER_TIMEOUT_SECONDS:
                     try:
                         from voice_flow.lfm_engine import is_lfm_model_ref
-                        if is_lfm_model_ref(selected_video_model_ref):
+                        from voice_flow.s1_engine import is_s1_model_ref
+                        if is_lfm_model_ref(selected_video_model_ref) or is_s1_model_ref(selected_video_model_ref):
                             self._last_lfm_bridge_attempted = True
                     except Exception:
                         pass

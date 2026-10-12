@@ -82,6 +82,26 @@ class AudioArchive:
                 continue
         return removed
 
+    def clear_temporary_cache(self, now: float | None = None) -> dict[str, int]:
+        """Remove abandoned writes and expired recordings; retain recovery audio."""
+        now = time.time() if now is None else now
+        result = {"deleted": 0, "preserved": 0, "errors": 0}
+        for path in self.root.glob("*.wav"):
+            try:
+                if path.is_symlink() or path.resolve().parent != self.root:
+                    result["preserved"] += 1
+                    continue
+                age = now - path.stat().st_mtime
+                removable = age >= (3600 if path.name.startswith(".writing-") else AUDIO_RETENTION_SECONDS)
+                if removable:
+                    path.unlink()
+                    result["deleted"] += 1
+                else:
+                    result["preserved"] += 1
+            except OSError:
+                result["errors"] += 1
+        return result
+
     def purge_all(self) -> int:
         """Purge all audio files in archive to free disk space immediately."""
         count = 0

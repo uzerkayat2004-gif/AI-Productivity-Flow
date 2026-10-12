@@ -102,6 +102,22 @@ def test_spacing_only_correction_activates_through_saved_pipeline(writer):
     )
 
 
+def test_ordinary_spaced_phrase_cannot_auto_activate_as_a_brand(writer):
+    store, save = writer
+    for _ in range(3):
+        save(
+            "these details are linked in this document",
+            "These details are LinkedIn this document",
+            metadata=accepted_metadata(),
+        )
+
+    assert "LinkedIn" not in store.get_dictionary_words()
+    assert all(
+        row["wrong_text"].casefold() != "linked in"
+        for row in store.get_dictionary_corrections()
+    )
+
+
 @pytest.mark.parametrize("status,insertion,metadata", [
     ("paste_failed", "failed", accepted_metadata()),
     ("success", "ready_to_paste", accepted_metadata()),

@@ -13,11 +13,18 @@ import pytest
 from voice_flow.gui import desktop_launcher
 from voice_flow.main import VoiceFlowApp, main
 
+_REAL_FOCUS_EXISTING_WINDOW = desktop_launcher._focus_existing_window
+
 
 @pytest.fixture(autouse=True)
-def _never_start_live_backend(monkeypatch: pytest.MonkeyPatch):
-    """Desktop launcher tests must never spawn the user's live Voice Flow."""
+def _isolate_desktop_launcher(monkeypatch: pytest.MonkeyPatch):
+    """Never touch the user's live Voice Flow window or background services."""
+    from voice_flow.video_flow_engine import notebooklm
+
     monkeypatch.setattr(desktop_launcher, "ensure_backend_running", lambda: None)
+    monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
+    monkeypatch.setattr(notebooklm, "start_keepalive_daemon", lambda: False)
+    monkeypatch.setattr(notebooklm, "trigger_keepalive_now", lambda *args, **kwargs: False)
 
 
 def test_desktop_launcher_is_api_server_ready(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +83,7 @@ def test_desktop_launcher_does_not_bind_fallback_api_while_engine_is_cold(monkey
 
 
 def test_desktop_launcher_focus_existing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_launcher, "_focus_existing_window", _REAL_FOCUS_EXISTING_WINDOW)
     with patch("voice_flow.gui.desktop_launcher.sys.platform", "win32"):
         with patch("ctypes.windll.user32.FindWindowW", return_value=12345):
             with patch("ctypes.windll.user32.IsWindow", return_value=True):
@@ -87,6 +95,7 @@ def test_desktop_launcher_focus_existing(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_desktop_launcher_focus_existing_restores_minimized(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_launcher, "_focus_existing_window", _REAL_FOCUS_EXISTING_WINDOW)
     with patch("voice_flow.gui.desktop_launcher.sys.platform", "win32"):
         with patch("ctypes.windll.user32.FindWindowW", return_value=12345):
             with patch("ctypes.windll.user32.IsWindow", return_value=True):
@@ -100,6 +109,7 @@ def test_desktop_launcher_focus_existing_restores_minimized(monkeypatch: pytest.
 
 
 def test_desktop_launcher_focus_existing_stale_window_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_launcher, "_focus_existing_window", _REAL_FOCUS_EXISTING_WINDOW)
     with patch("voice_flow.gui.desktop_launcher.sys.platform", "win32"):
         with patch("ctypes.windll.user32.FindWindowW", return_value=12345):
             with patch("ctypes.windll.user32.IsWindow", return_value=True):

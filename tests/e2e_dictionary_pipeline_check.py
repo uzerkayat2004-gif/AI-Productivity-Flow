@@ -17,6 +17,8 @@ from voice_flow.transcriber import Transcriber
 from voice_flow.polisher import polisher
 
 TMP = tempfile.mkdtemp(prefix="vf_dict_e2e_")
+# Pin this deliberate test DB against runtime account synchronization.
+storage._custom_db = True
 storage.db_path = os.path.join(TMP, "voice_flow.db")
 storage._init_db()
 
@@ -79,11 +81,14 @@ result2 = t.transcribe(audio)
 prompt2 = t.model.calls[-1].get("initial_prompt")
 check("new term does not enter the acoustic prompt", prompt2 is None, repr(prompt2))
 
+assert storage.add_dictionary_entry("Kubernetes", "cube er netties")
 print("\n=== STAGE 3: polish pipeline applies dictionary post-processing ===")
 out1 = polisher.polish("we use voice flow daily", "smart_clean")
 check("snippet casing fix: 'voice flow' -> VoiceFlow", out1 == "We use VoiceFlow daily.", repr(out1))
 out2 = polisher.polish("open my path now", "smart_clean")
 check("snippet expansion: my path -> C:\\Users\\me\\file.txt", out2 == r"Open C:\Users\me\file.txt now.", repr(out2))
+heard_as = polisher.polish("open cube er netties now", "smart_clean")
+check("filler cleanup preserves literal heard-as input", heard_as == "Open Kubernetes now.", repr(heard_as))
 out3 = polisher.polish("voice flow ready", "smart_clean")
 check("ultra-short path (<=3 words) still applies dictionary", out3 == "VoiceFlow ready.", repr(out3))
 out4 = polisher.polish(out1, "smart_clean")
@@ -106,8 +111,8 @@ check("history retrievable", len(hist) >= 1 and hist[0]["polished_text"] == out1
 
 ins = storage.get_insights("all")
 check("insights computed", ins is not None and isinstance(ins, dict))
-check("dictionary term counted in insights", ins.get("total_dictionary_terms") == 3, f"terms={ins.get('total_dictionary_terms')}")
-check("auto-learning disabled by default (no Auto-Captured rows)",
+check("dictionary term counted in insights", ins.get("total_dictionary_terms") == 4, f"terms={ins.get('total_dictionary_terms')}")
+check("ordinary history does not add unqualified Auto-Captured rows",
       all(r["category"] != "Auto-Captured" for r in storage.get_dictionary_entries(include_auto=True)))
 
 print("\n=== STAGE 5: dictionary API contract (storage layer) ===")

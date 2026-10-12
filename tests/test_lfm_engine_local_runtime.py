@@ -87,7 +87,8 @@ def test_local_email_prompt_keeps_register_format_and_saved_preferences():
     assert "short sentences" in prompt
     assert "formal email" not in prompt
     assert r"\n" not in prompt
-    assert 'Example output:\n"Hello,\n\nPlease send the report.\n\nRegards,"' in prompt
+    assert "layout alone is insufficient" in prompt
+    assert "Use only dictated greetings" in prompt
 
 
 def test_local_prompt_generation_keeps_all_trusted_requirements():

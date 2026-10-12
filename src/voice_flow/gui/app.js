@@ -837,7 +837,20 @@ const VOICEFLOW_CHILD_PAGES = ["home", "insights", "dictionary", "style", "provi
 function toggleVoiceFlowMenu(event) {
   if (event) event.stopPropagation();
   const group = document.getElementById("voiceflow-nav-group");
-  if (group) group.classList.toggle("open");
+  const isChevron = event && event.target && event.target.classList.contains("nav-chevron");
+
+  if (isChevron && currentPageId === "home" && group) {
+    group.classList.toggle("open");
+    return;
+  }
+
+  if (group) group.classList.add("open");
+  switchPage("home", { userInitiated: true });
+  setTimeout(() => {
+    if (typeof startVoiceFlowGuide === "function") {
+      startVoiceFlowGuide();
+    }
+  }, 60);
 }
 
 function setVoiceFlowMenuOpen(open) {
@@ -859,7 +872,49 @@ function initNavigation() {
   navItems.forEach(item => {
     item.addEventListener("click", () => {
       const pageId = item.getAttribute("data-page");
-      switchPage(pageId);
+      const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
+      const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
+      const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+
+      if (isVoiceFlowFeature && !vfVoiceGuided) {
+        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
+        switchPage("home", { userInitiated: true });
+        setTimeout(() => {
+          if (typeof startVoiceFlowGuide === "function") {
+            startVoiceFlowGuide();
+          }
+        }, 60);
+        return;
+      }
+
+      const isSwitching = (currentPageId !== pageId);
+      switchPage(pageId, { userInitiated: true });
+
+      if (pageId === "videoflow") {
+        const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
+        if (!vfSeen) {
+          setTimeout(() => {
+            if (typeof startVideoFlowGuide === "function") {
+              startVideoFlowGuide();
+            }
+          }, 60);
+        }
+      } else if (pageId === "home" && !vfVoiceGuided) {
+        setTimeout(() => {
+          if (typeof startVoiceFlowGuide === "function") {
+            startVoiceFlowGuide();
+          }
+        }, 60);
+      } else if (pageId === "audioflow" && isSwitching) {
+        const afSeen = (onboardingFlag("vf_onboarding.af_guided") === "1");
+        if (!afSeen) {
+          setTimeout(() => {
+            if (typeof startAudioFlowGuide === "function") {
+              startAudioFlowGuide();
+            }
+          }, 60);
+        }
+      }
     });
   });
   // Start with the dropdown open when the landing page is one of its children.
@@ -967,12 +1022,20 @@ function resetAllSubViews() {
 }
 
 function switchPage(pageId, options = {}) {
+  const previousPageId = currentPageId;
   currentPageId = pageId;
   document.body.classList.toggle("flow-workspace-active", ["audioflow", "videoflow", "providers", "dictionary"].includes(pageId));
   document.querySelectorAll(".sidebar .nav-item[data-page]").forEach(nav => {
     nav.classList.toggle("active", nav.getAttribute("data-page") === pageId);
   });
   updateVoiceFlowParentState(pageId);
+
+  // Cleanly dismiss active guide for other pages when leaving without marking completed
+  if (!options.fromGuide && !options.fromWelcomeTour) {
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
+  }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
   resetAllSubViews();
@@ -6891,24 +6954,39 @@ const ONBOARDING_PAGE_MAP = {
 };
 
 const scene1Timeline = [
-  { start: 0.0, end: 4.2, text: "Welcome to AI Productivity Flow! We're thrilled to have you here." },
-  { start: 4.2, end: 11.0, text: "AI Productivity Flow is your completely free, 100% open-source personal productivity companion." },
-  { start: 11.0, end: 19.9, text: "Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy." },
-  { start: 19.9, end: 22.8, text: "Whether you want to generate visual explainer videos," },
-  { start: 22.8, end: 25.8, text: "listen to instant audio summaries of long articles," },
-  { start: 25.8, end: 29.5, text: "or dictate and polish text into any app effortlessly..." },
-  { start: 29.5, end: 34.8, text: "it's all built right here for you. In this quick tour, we'll walk you through how everything works," },
-  { start: 34.8, end: 40.5, text: "starting with our first feature: Video Flow. Let's dive right in!" }
+  {
+    "start": 0.4,
+    "end": 2.7,
+    "text": "Welcome to AI Productivity Flow!"
+  },
+  {
+    "start": 2.98,
+    "end": 6.73,
+    "text": "Your free open-source companion with complete privacy."
+  },
+  {
+    "start": 7.01,
+    "end": 12.43,
+    "text": "Turn ideas into high-speed action with explainer videos, audio summaries, and voice dictation."
+  }
 ];
 
 const scene2Timeline = [
-  { start: 0.0, end: 3.4, text: "Welcome to Video Flow, our first core feature." },
-  { start: 3.4, end: 9.15, text: "If you have a lengthy article, research paper, or complex notes that you want to understand visually," },
-  { start: 9.15, end: 14.2, text: "Video Flow is built for you. Simply paste your text or select an article," },
-  { start: 14.2, end: 20.0, text: "and Video Flow transforms it into an animated visual explainer with dynamic motion graphics," },
-  { start: 20.0, end: 26.35, text: "slide layouts, and natural audio narration. You can watch the full explainer right here on your screen," },
-  { start: 26.35, end: 30.8, text: "switch visual styles, or export your video in seconds." },
-  { start: 30.8, end: 35.6, text: "Next up, let's explore our second feature: Audio Flow!" }
+  {
+    "start": 0.4,
+    "end": 1.89,
+    "text": "Meet Video Flow!"
+  },
+  {
+    "start": 2.17,
+    "end": 6.05,
+    "text": "Transform articles or notes into animated explainer videos."
+  },
+  {
+    "start": 6.33,
+    "end": 12.86,
+    "text": "With motion graphics, smart layouts, and natural narration, turn any content into a video in seconds."
+  }
 ];
 
 function updateOnboardingScene2Subtitles(time) {
@@ -6942,12 +7020,21 @@ function updateScene2Video(isPlaying) {
 }
 
 const scene3Timeline = [
-  { start: 0.0, end: 2.7, text: "Welcome to Audio Flow, our second core feature." },
-  { start: 2.7, end: 8.0, text: "Imagine scrolling through Twitter or browsing a lengthy article that you do not have time to read." },
-  { start: 8.0, end: 15.9, text: "With Audio Flow, simply highlight the text or tap the summary shortcut, and an instant floating menu appears right over your content." },
-  { start: 15.9, end: 25.9, text: "Click Summary, and Audio Flow immediately generates a natural, source-grounded spoken summary with an interactive waveform player and dockable progress widget." },
-  { start: 25.9, end: 33.7, text: "You can adjust playback speeds, download the MP3, or keep listening while you continue working, without ever switching apps." },
-  { start: 33.7, end: 38.0, text: "Next up, let us discover our third feature: Voice Flow!" }
+  {
+    "start": 0.4,
+    "end": 2.37,
+    "text": "Meet Audio Flow!"
+  },
+  {
+    "start": 2.61,
+    "end": 6.5,
+    "text": "Highlight text anywhere on your screen to trigger the floating quick-action menu."
+  },
+  {
+    "start": 6.74,
+    "end": 13.12,
+    "text": "Generate instant spoken summaries with waveform playback, or download the MP3 on the go."
+  }
 ];
 
 function updateOnboardingScene3Subtitles(time) {
@@ -6981,10 +7068,21 @@ function updateScene3Video(isPlaying) {
 }
 
 const scene4Timeline = [
-  { start: 0.0, end: 2.86, text: "Welcome to Voice Flow, our third core feature." },
-  { start: 2.86, end: 9.45, text: "Now that you have full context from your article, you can post your thoughts or reply instantly by speaking." },
-  { start: 9.45, end: 20.92, text: "Simply speak naturally into any application, and Voice Flow transcribes and polishes your words directly into the active field in real time." },
-  { start: 20.92, end: 28.51, text: "Zero copy pasting, zero app switching. Next, let us connect with our community and get you started!" }
+  {
+    "start": 0.4,
+    "end": 2.06,
+    "text": "Meet Voice Flow!"
+  },
+  {
+    "start": 2.34,
+    "end": 9.34,
+    "text": "Speak naturally into any application and have your words transcribed and polished directly into the active field in real time."
+  },
+  {
+    "start": 9.62,
+    "end": 12.65,
+    "text": "Zero copy-pasting, zero app-switching."
+  }
 ];
 
 function updateOnboardingScene4Subtitles(time) {
@@ -7003,9 +7101,21 @@ function updateOnboardingScene4Subtitles(time) {
 }
 
 const scene5Timeline = [
-  { start: 0.0, end: 6.86, text: "Welcome to our community! AI Productivity Flow is 100% free and open source, built to supercharge your daily workflow." },
-  { start: 6.86, end: 14.73, text: "If you find this helpful, please star us on GitHub, share your feedback, and report any ideas or issues to shape future updates." },
-  { start: 14.73, end: 22.09, text: "Next, let us head into the workspace and configure your API keys and hotkeys. Click Get Started to begin!" }
+  {
+    "start": 0.4,
+    "end": 1.82,
+    "text": "Welcome to our community!"
+  },
+  {
+    "start": 2.1,
+    "end": 7.18,
+    "text": "Star us on GitHub, share your feedback, and let us shape the future together."
+  },
+  {
+    "start": 7.46,
+    "end": 10.87,
+    "text": "Click Get Started to configure your hotkeys and begin!"
+  }
 ];
 
 function updateOnboardingScene5Subtitles(time) {
@@ -7031,11 +7141,11 @@ function updateOnboardingScene5Subtitles(time) {
     c2.classList.remove("highlight-active");
     c3.classList.remove("highlight-active");
 
-    if (time >= 6.86 && time < 11.5) {
+    if (time >= 2.57 && time < 5.2) {
       c1.classList.add("highlight-active");
-    } else if (time >= 11.5 && time < 14.73) {
+    } else if (time >= 5.2 && time < 7.68) {
       c2.classList.add("highlight-active");
-    } else if (time >= 14.73 && time <= 22.09) {
+    } else if (time >= 7.68 && time <= 12.1) {
       c3.classList.add("highlight-active");
     }
   }
@@ -7067,11 +7177,11 @@ function updateScene1CardVideos(time, isNarrating) {
   // Identify active card based on narrator timestamps
   let activeCard = 0;
   if (isNarrating) {
-    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+    if (time >= 7.0 && time < 8.8) {
       activeCard = 1; // Video Flow
-    } else if (time >= 22.8 && time < 25.8) {
+    } else if (time >= 8.8 && time < 10.6) {
       activeCard = 2; // Audio Flow
-    } else if (time >= 25.8 && time < 29.5) {
+    } else if (time >= 10.6 && time <= 12.8) {
       activeCard = 3; // Voice Flow
     }
   }
@@ -7158,6 +7268,13 @@ function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
     }, 70);
   }
 
+  const isNarrating = typeof isNarratingOverride === "boolean"
+    ? isNarratingOverride
+    : (typeof onboardingAudioPlayer !== "undefined" &&
+       onboardingAudioPlayer &&
+       !onboardingAudioPlayer.paused &&
+       !onboardingNarrationPaused);
+
   // Dynamic visual card highlighting based on voiceover in Scene 1
   const c1 = document.getElementById("card-feature-1");
   const c2 = document.getElementById("card-feature-2");
@@ -7168,21 +7285,14 @@ function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
     c2.classList.remove("highlight-blue");
     c3.classList.remove("highlight-purple");
 
-    if ((time >= 19.9 && time < 22.8) || time >= 34.8) {
+    if ((isNarrating && time >= 7.0 && time < 8.8) || _hoveredScene1Card === 1) {
       c1.classList.add("highlight-orange");
-    } else if (time >= 22.8 && time < 25.8) {
+    } else if ((isNarrating && time >= 8.8 && time < 10.6) || _hoveredScene1Card === 2) {
       c2.classList.add("highlight-blue");
-    } else if (time >= 25.8 && time < 29.5) {
+    } else if ((isNarrating && time >= 10.6 && time <= 12.8) || _hoveredScene1Card === 3) {
       c3.classList.add("highlight-purple");
     }
   }
-
-  const isNarrating = typeof isNarratingOverride === "boolean"
-    ? isNarratingOverride
-    : (typeof onboardingAudioPlayer !== "undefined" &&
-       onboardingAudioPlayer &&
-       !onboardingAudioPlayer.paused &&
-       !onboardingNarrationPaused);
 
   updateScene1CardVideos(time, isNarrating);
 }
@@ -7273,21 +7383,18 @@ function setOnboardingFlag(key, value) {
 }
 
 async function maybeShowOnboarding() {
-  const v2Seen = onboardingFlag("vf_onboarding.v2_seen");
-  if (v2Seen === "1") {
-    const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
-    if (localFlag === "true" || localFlag === "1") return;
+  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
+  if (localFlag === "true" || localFlag === "1") return;
 
-    try {
-      const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
-      const data = await res.json();
-      if (data.success && data.value === true) {
-        setOnboardingFlag("hasViewedOnboarding", "true");
-        setOnboardingFlag("vf_onboarding.done", "1");
-        return;
-      }
-    } catch (e) {}
-  }
+  try {
+    const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
+    const data = await res.json();
+    if (data.success && data.value === true) {
+      setOnboardingFlag("hasViewedOnboarding", "true");
+      setOnboardingFlag("vf_onboarding.done", "1");
+      return;
+    }
+  } catch (e) {}
 
   // Display upgraded Scene 1 onboarding hero on user's desktop app
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
@@ -7316,6 +7423,34 @@ function renderOnboardingDots() {
 }
 
 
+let onboardingAutoMode = true; // Auto mode is active by default for Welcome Tour
+let _onboardingAutoAdvanceTimer = null;
+
+function updateOnboardingAutoModeUI() {
+  const prefixes = ["scene1", "scene2", "scene3", "scene4", "scene5"];
+  prefixes.forEach(prefix => {
+    const btn = document.getElementById(`${prefix}-auto-btn`);
+    const label = document.getElementById(`${prefix}-auto-label`);
+    if (btn) {
+      btn.classList.toggle("is-auto", onboardingAutoMode);
+      btn.classList.toggle("is-manual", !onboardingAutoMode);
+      btn.title = onboardingAutoMode ? "Auto Mode: ON (Click to switch to Manual)" : "Manual Mode: Click to switch to Auto";
+    }
+    if (label) {
+      label.textContent = onboardingAutoMode ? "Auto" : "Manual";
+    }
+  });
+}
+
+function toggleOnboardingAutoMode() {
+  onboardingAutoMode = !onboardingAutoMode;
+  if (_onboardingAutoAdvanceTimer) {
+    clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = null;
+  }
+  updateOnboardingAutoModeUI();
+}
+
 function renderOnboardingSlide() {
   const card = document.querySelector(".onboarding-card");
   if (card) {
@@ -7331,6 +7466,7 @@ function renderOnboardingSlide() {
     s.classList.toggle("active", slideIdx === onboardingSlide);
   });
   renderOnboardingDots();
+  updateOnboardingAutoModeUI();
   const player = document.getElementById("onboarding-player");
   if (player) player.style.display = (onboardingSlide >= 0 && onboardingSlide <= 4) ? "none" : "flex";
 
@@ -7401,7 +7537,7 @@ function renderOnboardingSlide() {
   // Auto-navigate app background to match current tour topic
   const targetPage = ONBOARDING_PAGE_MAP[onboardingSlide];
   if (targetPage && typeof switchPage === "function") {
-    switchPage(targetPage);
+    switchPage(targetPage, { fromWelcomeTour: true });
   }
 }
 
@@ -7581,6 +7717,14 @@ function speakOnboardingNarration() {
   player.addEventListener("ended", () => {
     if (onboardingAudioPlayer === player) {
       updateOnboardingNarrationUI(true);
+      if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
+        if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
+        _onboardingAutoAdvanceTimer = setTimeout(() => {
+          if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
+            nextOnboardingSlide();
+          }
+        }, 450);
+      }
     }
   });
   player.addEventListener("pause", () => {
@@ -7594,6 +7738,15 @@ function speakOnboardingNarration() {
       updateOnboardingNarrationUI(false);
     }
   });
+
+  if (onboardingAutoMode && targetSlide >= 0 && targetSlide < 4) {
+    if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = setTimeout(() => {
+      if (onboardingAutoMode && onboardingSlide === targetSlide && onboardingSlide < 4) {
+        nextOnboardingSlide();
+      }
+    }, 16000);
+  }
 
   const playPromise = player.play();
   if (playPromise !== undefined) {
@@ -7622,6 +7775,10 @@ function stopOnboardingNarration() {
   if (_onboardingNarrationTimer) {
     clearTimeout(_onboardingNarrationTimer);
     _onboardingNarrationTimer = null;
+  }
+  if (_onboardingAutoAdvanceTimer) {
+    clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = null;
   }
   if (onboardingAudioPlayer) {
     try {
@@ -7709,7 +7866,10 @@ function finishOnboarding(options) {
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
   setOnboardingFlag("vf_onboarding.done", "1");
   const overlay = document.getElementById("onboarding-overlay");
-  if (overlay) overlay.classList.add("hidden");
+  if (overlay) {
+    overlay.classList.add("hidden");
+    overlay.classList.remove("welcome-hero-mode");
+  }
 
   // Prompt for anonymous crash reporting consent if never set
   if (!localStorage.getItem("vf_crash_reporting_prompted")) {
@@ -7761,69 +7921,105 @@ const AUDIOFLOW_GUIDE_STEPS = [
     nextLabel: "Next: Gemini Setup →",
     audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 2.73, text: "Welcome inside Audio Flow!" },
-      { start: 2.68, end: 5.86, text: "Here, you have two powerful ways to listen." },
-      { start: 5.86, end: 11.13, text: "With Read mode on the left, you can hear any selected text read aloud word-for-word." },
-      { start: 11.13, end: 18.15, text: "You can choose from dozens of natural voices and adjust reading speeds from 0.75x up to 2x." },
-      { start: 18.15, end: 21.97, text: "On the right is Summary mode, powered by NotebookLM." },
-      { start: 21.97, end: 28.69, text: "It extracts key ideas from lengthy articles, and you can even listen in an engaging two-voice podcast format." },
-      { start: 28.69, end: 33.33, text: "Let's move to Step 2 to explore API keys and Gemini setup." }
+      {
+        "start": 0.4,
+        "end": 2.3,
+        "text": "Welcome to Audio Flow."
+      },
+      {
+        "start": 2.58,
+        "end": 8.14,
+        "text": "Use Read mode to hear any text word for word, with dozens of voices and speeds."
+      },
+      {
+        "start": 8.42,
+        "end": 14.47,
+        "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
+      }
     ]
   },
   {
     step: 2,
     counter: "STEP 2 OF 4 · GEMINI SETUP",
     title: "Gemini Setup & API Keys",
-    desc: "Connect your free Gemini key to unlock NotebookLM and custom AI models.",
+    desc: "Connect your Google account for NotebookLM, or add your Gemini API key for custom models.",
     targetId: "audio-detail-header-bar",
     secondaryTargetId: "audio-detail-connections-card",
     spotlightLabel: "Gemini API Key Setup",
     nextLabel: "Next: History & Downloads →",
     audioSrc: "assets/onboarding/af_guide_step2_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 3.41, text: "Step 2 is connecting your API keys." },
-      { start: 3.36, end: 9.16, text: "AI Productivity Flow includes Microsoft Edge voices completely free out of the box." },
-      { start: 9.16, end: 15.4, text: "To unlock Gemini AI, Deepgram, or OpenAI, click the Gemini card right here." },
-      { start: 15.4, end: 25.51, text: "Click 'Get API Key' to open Google AI Studio in one click, copy your free key, paste it in the field, and tap 'Test Connection' to verify it." },
-      { start: 25.51, end: 29.26, text: "All keys are stored and encrypted locally on your computer." },
-      { start: 29.26, end: 33.0, text: "Next, let's explore history and audio downloads." }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.35,
+            "text": "Step two connects your voice engines."
+      },
+      {
+            "start": 3.3,
+            "end": 5.86,
+            "text": "Free Edge voices are built in."
+      },
+      {
+            "start": 5.86,
+            "end": 10.12,
+            "text": "Connect your Google account for NotebookLM or add a Gemini key."
+      },
+      {
+            "start": 10.12,
+            "end": 13.4,
+            "text": "All credentials are encrypted and stored locally."
+      }
+]
   },
   {
     step: 3,
     counter: "STEP 3 OF 4 · SUMMARY HISTORY",
     title: "History & MP3 Downloads",
     desc: "Replay past waveforms and download MP3s with a single click.",
-    targetId: "af-history-panel",
+    targetId: "af-history-bar-summary",
     spotlightLabel: "Summary History & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/af_guide_step3_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 3.26, text: "Step 3 is your Audio Summary History." },
-      { start: 3.21, end: 7.77, text: "You can toggle this bar open or closed anytime to see your past work." },
-      { start: 7.77, end: 12.41, text: "Every summary you create is automatically saved in your offline library." },
-      { start: 12.41, end: 22.7, text: "You can search past notes, replay waveforms, and download the MP3 audio file with one click—perfect for listening on your phone during your commute or sharing with your team." },
-      { start: 22.7, end: 27.02, text: "Next, let's see how to use Audio Flow directly on your screen!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 3.24,
+            "text": "Step three is your Audio History."
+      },
+      {
+            "start": 3.19,
+            "end": 6.43,
+            "text": "Every summary is saved in your local library."
+      },
+      {
+            "start": 6.43,
+            "end": 14.11,
+            "text": "Toggle the sidebar anytime to search past notes, replay waveforms, and download MP3 files with one click."
+      }
+]
   },
   {
     step: 4,
     counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Twitter Shortcut",
-    desc: "",
+    desc: "Highlight text on screen to trigger the floating quick-action menu and player.",
     targetId: "af-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Twitter & Screen Shortcut",
     nextLabel: "Finish & Start Listening 🚀",
     audioSrc: "assets/onboarding/af_guide_step4_mixed.mp3",
     timeline: [
-      { start: 0.1, end: 6.11, text: "Finally, the true superpower of Audio Flow is that you never need to copy-paste or switch apps." },
-      { start: 6.06, end: 13.29, text: "Whenever you are reading an article on Twitter, browsing in Chrome, or reading a PDF, simply highlight any text." },
-      { start: 13.29, end: 17.38, text: "An instant floating quick-action menu appears right by your cursor." },
-      { start: 17.38, end: 24.86, text: "Click Summary or Read, and a floating player appears on your desktop with live waveforms and playback controls while you keep working." },
-      { start: 24.86, end: 27.52, text: "You're now ready to use Audio Flow." },
-      { start: 27.52, end: 29.98, text: "Click Get Started to explore!" }
-    ]
+      {
+            "start": 0.5,
+            "end": 5.26,
+            "text": "Finally, use Audio Flow anywhere on your desktop without switching apps."
+      },
+      {
+            "start": 5.21,
+            "end": 12.25,
+            "text": "Simply highlight text on your screen to trigger the floating quick-action menu and listen in the floating waveform player while you work."
+      }
+]
   }
 ];
 
@@ -7899,7 +8095,7 @@ function _afGuidePreventScrollEvent(e) {
 function _afGuidePreventKeyEvent(e) {
   if (_afGuideReleaseIfUnusable()) return;
   if (e.key === "Escape") {
-    stopAudioFlowGuide();
+    stopAudioFlowGuide(true);
     e.preventDefault();
     return;
   }
@@ -8236,6 +8432,12 @@ async function gotoAudioFlowGuideStep(stepIdx) {
   // Step 4 Action: Auto-play Twitter screen workflow video
   if (stepIdx === 4) {
     document.body.classList.remove("af-guide-step3-active");
+    const afCaption = document.getElementById("af-guide-sim-caption");
+    if (afCaption && typeof vfIsMacPlatform === "function") {
+      afCaption.textContent = vfIsMacPlatform()
+        ? "💡 Highlight any tweet or text across your Mac to trigger floating instant audio."
+        : "💡 Highlight any tweet or text across Windows to trigger floating instant audio.";
+    }
     const vid = document.getElementById("af-guide-real-demo-video");
     if (vid) {
       vid.currentTime = 0;
@@ -8295,7 +8497,7 @@ async function gotoAudioFlowGuideStep(stepIdx) {
 
 function nextAudioFlowGuideStep() {
   if (_currentAfGuideStep >= AUDIOFLOW_GUIDE_STEPS.length) {
-    stopAudioFlowGuide();
+    stopAudioFlowGuide(true);
     return;
   }
   gotoAudioFlowGuideStep(_currentAfGuideStep + 1);
@@ -8315,11 +8517,16 @@ function startAudioFlowGuide(options) {
     return;
   }
   if (typeof switchPage === "function") {
-    switchPage("audioflow");
+    switchPage("audioflow", { skipGuideTrigger: true, fromGuide: true });
   }
+  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
+  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
   // The guide replaces any still-visible welcome tour overlay.
   const obOverlay = document.getElementById("onboarding-overlay");
-  if (obOverlay) obOverlay.classList.add("hidden");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
 
   _afGuideForceZeroScroll();
 
@@ -8364,7 +8571,21 @@ function _onAfGuideResize() {
 }
 
 function stopAudioFlowGuide(options) {
-  const unusable = !!(options && options.unusable);
+  let unusable = false;
+  let markCompleted = false;
+  if (typeof options === "boolean") {
+    markCompleted = options;
+  } else if (options && typeof options === "object") {
+    unusable = !!options.unusable;
+    if (Object.prototype.hasOwnProperty.call(options, "markCompleted")) {
+      markCompleted = !!options.markCompleted;
+    } else {
+      markCompleted = !unusable;
+    }
+  } else {
+    // no-arg call (main): mark complete
+    markCompleted = true;
+  }
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
 
@@ -8413,8 +8634,1351 @@ function stopAudioFlowGuide(options) {
   if (!hasRealSummaries) {
     _cleanAfGuideDemoHistoryCard();
   }
-  // An unusable (unstyled) guide was never actually seen; keep it pending.
-  if (!unusable) setOnboardingFlag("vf_onboarding.af_guided", "1");
+  if (markCompleted && !unusable) {
+    setOnboardingFlag("vf_onboarding.af_guided", "1");
+  }
+}
+
+
+// ==========================================================================
+// VIDEO FLOW IN-APP GUIDANCE ENGINE
+// ==========================================================================
+
+const VIDEOFLOW_GUIDE_STEPS = [
+  {
+    step: 1,
+    counter: "STEP 1 OF 4 · CONTENT & FORMATS",
+    title: "Text to Video & Five Formats",
+    desc: "Drop any document or paste notes. Pick from five smart formats to generate explainer videos.",
+    targetId: "vf-source-card",
+    secondaryTargetId: "vf-presets-row",
+    spotlightLabel: "Content & Format Selector",
+    nextLabel: "Next: Choose Video Engine →",
+    audioSrc: "assets/onboarding/vf_guide_step1_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 2.74,
+            "text": "Welcome to Video Flow!"
+      },
+      {
+            "start": 2.69,
+            "end": 5.68,
+            "text": "Drop in any document or paste notes."
+      },
+      {
+            "start": 5.68,
+            "end": 14.79,
+            "text": "Choose from five smart formats\u2014Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic\u2014to generate videos in seconds."
+      }
+]
+  },
+  {
+    step: 2,
+    counter: "STEP 2 OF 4 · CHOOSE YOUR VIDEO ENGINE",
+    title: "Choose your video engine",
+    desc: "NotebookLM works with just your Google login; add an API key only if you want the built-in engine.",
+    targetId: "vf-engine-cards",
+    secondaryTargetId: "vf-nlm-account-card",
+    spotlightLabel: "Video Engine & API Providers",
+    nextLabel: "Next: Video Library →",
+    audioSrc: "assets/onboarding/vf_guide_step2_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 3.3,
+            "text": "Step two is choosing your AI engine."
+      },
+      {
+            "start": 3.25,
+            "end": 12.11,
+            "text": "NotebookLM works with just your Google login to generate animated slides, while Gemini and cloud API keys unlock our built-in video generator."
+      }
+]
+  },
+  {
+    step: 3,
+    counter: "STEP 3 OF 4 · LIBRARY & DOWNLOADS",
+    title: "Video Library & MP4 Downloads",
+    desc: "Browse generated videos, replay chapters, and download ready MP4s with one click.",
+    targetId: "vf-library-cards",
+    spotlightLabel: "Video Library & Downloads",
+    nextLabel: "Next: Screen Workflow →",
+    audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 3.28,
+            "text": "Step three is your Video Library."
+      },
+      {
+            "start": 3.23,
+            "end": 6.61,
+            "text": "Every video is saved in your local workspace."
+      },
+      {
+            "start": 6.61,
+            "end": 13.83,
+            "text": "Filter past projects, preview chapters, and download full HD MP4 files with a single click."
+      }
+]
+  },
+  {
+    step: 4,
+    counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
+    title: "Instant Screen & Shortcut Workflow",
+    desc: "Highlight text anywhere on screen to trigger background video generation.",
+    targetId: "vf-guide-screen-sim",
+    isSimulation: true,
+    spotlightLabel: "Screen & Windows Shortcut",
+    spotlightLabelMac: "Screen & Mac Shortcut",
+    nextLabel: "Finish & Start Creating 🚀",
+    audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
+    audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 4.47,
+            "text": "Finally, Video Flow works anywhere across Windows."
+      },
+      {
+            "start": 4.42,
+            "end": 11.13,
+            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
+      }
+],
+    timelineMac: [
+      {
+            "start": 0.5,
+            "end": 4.38,
+            "text": "Finally, Video Flow works anywhere across your Mac."
+      },
+      {
+            "start": 4.33,
+            "end": 11.04,
+            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
+      }
+]
+  }
+];
+
+let _currentVfGuideStep = 1;
+let _vfGuideAudioPlayer = null;
+let _vfGuideNarrationPaused = false;
+let _vfGuideSlideToken = 0;
+let _vfGuideTimer = null;
+
+function _vfGuideForceZeroScroll() {
+  if (_currentVfGuideStep === 1) return;
+  const mc = document.querySelector(".main-content");
+  if (mc && mc.scrollTop !== 0) mc.scrollTop = 0;
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
+  if (document.documentElement && document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
+  if (document.body && document.body.scrollTop !== 0) document.body.scrollTop = 0;
+}
+
+function _vfGuideBlockAppEvent(e) {
+  const guideCard = document.getElementById("vf-guide-card");
+  if (guideCard && guideCard.contains(e.target)) {
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _vfGuidePreventScrollEvent(e) {
+  _vfGuideForceZeroScroll();
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _vfGuidePreventKeyEvent(e) {
+  if (e.key === "Escape") {
+    stopVideoFlowGuide(true);
+    e.preventDefault();
+    return;
+  }
+  if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) {
+    e.preventDefault();
+    nextVideoFlowGuideStep();
+  } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
+    e.preventDefault();
+    prevVideoFlowGuideStep();
+  }
+}
+
+function updateVideoFlowGuideSubtitles(currentTime, stepIdx) {
+  const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+  if (!timeline) return;
+
+  const match = timeline.find(t => currentTime >= t.start && currentTime <= t.end);
+  const subEl = document.getElementById("vf-guide-subtitle-text");
+  if (!subEl) return;
+
+  if (match && subEl.textContent !== match.text) {
+    subEl.style.opacity = "0.4";
+    setTimeout(() => {
+      subEl.textContent = match.text;
+      subEl.style.opacity = "1";
+    }, 60);
+  }
+}
+
+function updateVideoFlowGuideAudioUI(paused) {
+  const btn = document.getElementById("vf-guide-audio-btn");
+  const icon = document.getElementById("vf-guide-audio-icon");
+  const text = document.getElementById("vf-guide-audio-text");
+  const wave = document.getElementById("vf-guide-wave-indicator");
+
+  if (btn) btn.classList.toggle("paused", paused);
+  if (icon) icon.textContent = paused ? "🔇" : "🔊";
+  if (text) text.textContent = paused ? "Paused" : "Voiceover";
+  if (wave) wave.classList.toggle("paused", paused);
+}
+
+function stopVideoFlowGuideAudio() {
+  _vfGuideSlideToken++;
+  if (_vfGuideAudioPlayer) {
+    _vfGuideAudioPlayer.pause();
+    _vfGuideAudioPlayer = null;
+  }
+  updateVideoFlowGuideAudioUI(true);
+}
+
+function playVideoFlowGuideNarration(stepIdx) {
+  stopVideoFlowGuideAudio();
+  if (_vfGuideNarrationPaused) return;
+
+  const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const audioSrc = (isMac && stepObj.audioSrcMac) ? stepObj.audioSrcMac : stepObj.audioSrc;
+  if (!audioSrc) return;
+
+  const token = ++_vfGuideSlideToken;
+  let audioPath = audioSrc;
+  try {
+    if (window.location && window.location.origin && window.location.origin !== "null") {
+      audioPath = `${window.location.origin}/${audioSrc}`;
+    }
+  } catch (e) {}
+
+  const player = new Audio(audioPath);
+  player.preload = "auto";
+  _vfGuideAudioPlayer = player;
+
+  player.addEventListener("timeupdate", () => {
+    if (_vfGuideAudioPlayer === player && _currentVfGuideStep === stepIdx) {
+      updateVideoFlowGuideSubtitles(player.currentTime, stepIdx);
+    }
+  });
+
+  player.addEventListener("ended", () => {
+    if (token === _vfGuideSlideToken && _currentVfGuideStep === stepIdx) {
+      updateVideoFlowGuideAudioUI(true);
+    }
+  });
+
+  const playPromise = player.play();
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      if (token !== _vfGuideSlideToken || _currentVfGuideStep !== stepIdx) {
+        player.pause();
+        return;
+      }
+      updateVideoFlowGuideAudioUI(false);
+    }).catch(err => {
+      if (token !== _vfGuideSlideToken || _currentVfGuideStep !== stepIdx) return;
+      console.warn("Autoplay gesture unlock required for guide audio:", err);
+      updateVideoFlowGuideAudioUI(true);
+    });
+  }
+}
+
+function toggleVideoFlowGuideAudio() {
+  if (!_vfGuideAudioPlayer) {
+    playVideoFlowGuideNarration(_currentVfGuideStep);
+    return;
+  }
+  if (_vfGuideAudioPlayer.paused) {
+    _vfGuideAudioPlayer.play().then(() => {
+      _vfGuideNarrationPaused = false;
+      updateVideoFlowGuideAudioUI(false);
+    }).catch(() => {});
+  } else {
+    _vfGuideAudioPlayer.pause();
+    _vfGuideNarrationPaused = true;
+    updateVideoFlowGuideAudioUI(true);
+  }
+}
+
+function positionVfGuideSpotlight(stepObj) {
+  _vfGuideForceZeroScroll();
+  const box = document.getElementById("vf-guide-spotlight-box");
+  const label = document.getElementById("vf-guide-spotlight-label");
+  if (!box) return;
+
+  if (label) {
+    const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+    const lbl = (isMac && stepObj.spotlightLabelMac) ? stepObj.spotlightLabelMac : stepObj.spotlightLabel;
+    label.textContent = lbl || "FEATURE SPOTLIGHT";
+  }
+
+  if (stepObj.isSimulation) {
+    box.style.display = "none";
+    return;
+  }
+
+  box.style.display = "block";
+  let target = document.getElementById(stepObj.targetId);
+  if (stepObj.step === 3) {
+    const sample = document.getElementById("vf-guide-sample-card");
+    if (sample) {
+      target = sample;
+    } else {
+      const firstCard = document.querySelector("#vf-library-cards .vf-library-card");
+      if (firstCard) target = firstCard;
+    }
+  }
+  if (!target) {
+    box.style.display = "none";
+    return;
+  }
+
+  let r = target.getBoundingClientRect();
+  let top = r.top;
+  let left = r.left;
+  let right = r.right;
+  let bottom = r.bottom;
+
+  if (stepObj.secondaryTargetId) {
+    const sec = document.getElementById(stepObj.secondaryTargetId);
+    if (sec) {
+      const r2 = sec.getBoundingClientRect();
+      top = Math.min(top, r2.top);
+      left = Math.min(left, r2.left);
+      right = Math.max(right, r2.right);
+      bottom = Math.max(bottom, r2.bottom);
+    }
+  }
+
+  if (stepObj.tertiaryTargetId) {
+    const tert = document.getElementById(stepObj.tertiaryTargetId);
+    if (tert) {
+      const r3 = tert.getBoundingClientRect();
+      top = Math.min(top, r3.top);
+      left = Math.min(left, r3.left);
+      right = Math.max(right, r3.right);
+      bottom = Math.max(bottom, r3.bottom);
+    }
+  }
+
+  const pad = 14;
+  box.style.top = `${Math.max(6, top - pad)}px`;
+  box.style.left = `${Math.max(6, left - pad)}px`;
+  box.style.width = `${Math.max(40, (right - left) + pad * 2)}px`;
+  box.style.height = `${Math.max(40, (bottom - top) + pad * 2)}px`;
+}
+
+function _injectVfGuideDemoVideoCard() {
+  const libraryGrid = document.getElementById("vf-library-grid");
+  const emptyState = document.getElementById("vf-history-empty");
+  if (!libraryGrid) return;
+  if (emptyState) emptyState.style.display = "none";
+  libraryGrid.style.display = "grid";
+  let cardsContainer = document.getElementById("vf-library-cards");
+  if (!cardsContainer) {
+    cardsContainer = document.createElement("div");
+    cardsContainer.id = "vf-library-cards";
+    cardsContainer.className = "flow-cards";
+    libraryGrid.appendChild(cardsContainer);
+  }
+  cardsContainer.style.display = "grid";
+  cardsContainer.innerHTML = `
+    <article class="flow-card vf-library-card flow-status-ready vf-guide-demo-card" id="vf-guide-sample-card">
+      <div class="flow-card-thumb">
+        <img src="assets/onboarding/vf_guide_sample_thumb.jpg" alt="Video thumbnail" class="vf-thumb-img" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;">
+        <span class="flow-card-status flow-card-status-ready">Ready</span>
+      </div>
+      <div class="flow-card-body">
+        <h3 class="flow-card-title">Autonomous AI Agents &amp; Reasoning Architecture</h3>
+        <div class="flow-card-meta">
+          <span>Today, 2:45 PM</span>
+          <span>· 2:45</span>
+          <span class="af-depth-pill" style="margin-left: 6px; font-size: 10px; font-weight: 700; background: var(--polish-well, #343530); padding: 2px 7px; border-radius: 4px;">Explainer</span>
+        </div>
+        <p class="flow-card-reason">Full 1080p HD explainer with animated chapters and neural voiceover. Ready to preview or export.</p>
+        <div class="flow-card-actions">
+          <button class="vf-icon-button" type="button" onclick="alert('Sample preview: Video playback')">▶ Play</button>
+          <button class="vf-icon-button vf-download-btn is-downloaded" type="button" onclick="alert('Sample preview: MP4 download')">↓ Download MP4</button>
+        </div>
+      </div>
+    </article>
+  `;
+
+  // Update counts to match the 1 ready sample video card shown
+  const count = document.getElementById("vf-history-count");
+  if (count) count.textContent = "1 video";
+  const filters = document.getElementById("vf-library-filters");
+  if (filters) {
+    const allBtn = filters.querySelector('[data-vf-filter="all"]');
+    if (allBtn) allBtn.textContent = "All (1)";
+    const readyBtn = filters.querySelector('[data-vf-filter="ready"]');
+    if (readyBtn) readyBtn.textContent = "Ready (1)";
+  }
+}
+
+function _cleanVfGuideDemoVideoCard() {
+  const sampleCard = document.getElementById("vf-guide-sample-card");
+  if (sampleCard) sampleCard.remove();
+  const demoCards = document.querySelectorAll(".vf-guide-demo-card");
+  demoCards.forEach(c => c.remove());
+  if (typeof renderVideoHistory === "function") {
+    renderVideoHistory();
+  }
+}
+
+async function gotoVideoFlowGuideStep(stepIdx) {
+  if (stepIdx < 1 || stepIdx > VIDEOFLOW_GUIDE_STEPS.length) return;
+  const prevStep = _currentVfGuideStep;
+  _currentVfGuideStep = stepIdx;
+  window._currentVfGuideStep = _currentVfGuideStep;
+  const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+
+  _vfGuideForceZeroScroll();
+
+  // Cleanup leaving Step 3: restore real library
+  if (prevStep === 3 && stepIdx !== 3) {
+    document.body.classList.remove("vf-guide-step3-active");
+    _cleanVfGuideDemoVideoCard();
+  }
+
+  // Cleanup leaving Step 4: pause demo video
+  if (prevStep === 4 && stepIdx !== 4) {
+    const vid = document.getElementById("vf-guide-real-demo-video");
+    if (vid) vid.pause();
+  }
+
+  // Step 1 & 2 Action: Ensure Create tab is visible, select NotebookLM
+  if (stepIdx === 1 || stepIdx === 2) {
+    document.body.classList.remove("vf-guide-step3-active");
+    if (typeof vfFlowShowTab === "function") {
+      vfFlowShowTab("create");
+    }
+    if (typeof selectVideoEngine === "function") {
+      selectVideoEngine("notebooklm");
+    }
+    if (stepIdx === 1) {
+      const fmt = document.getElementById("vf-format-section");
+      if (fmt) {
+        fmt.scrollIntoView({ behavior: "instant", block: "nearest" });
+      }
+    }
+  }
+
+  // Step 3 Action: Switch to library tab and show rich sample card if empty
+  if (stepIdx === 3) {
+    if (typeof vfFlowShowTab === "function") {
+      vfFlowShowTab("library");
+    }
+    document.body.classList.add("vf-guide-step3-active");
+    const hasRealVideos = typeof vfVideos !== "undefined" && Array.isArray(vfVideos) && vfVideos.length > 0;
+    if (!hasRealVideos) {
+      _injectVfGuideDemoVideoCard();
+    }
+    [80, 220, 500].forEach(ms => {
+      setTimeout(() => {
+        if (_currentVfGuideStep === 3) {
+          const s3 = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === 3);
+          if (s3) positionVfGuideSpotlight(s3);
+        }
+      }, ms);
+    });
+  }
+
+  // Step 4 Action: Auto-play desktop demo video
+  if (stepIdx === 4) {
+    document.body.classList.remove("vf-guide-step3-active");
+    if (typeof vfFlowShowTab === "function") {
+      vfFlowShowTab("create");
+    }
+    const vid = document.getElementById("vf-guide-real-demo-video");
+    if (vid) {
+      vid.currentTime = 0;
+      vid.play().catch(() => {});
+    }
+  }
+
+  // Step UI Layout Toggles
+  const card = document.getElementById("vf-guide-card");
+  const overlay = document.getElementById("videoflow-guide-overlay");
+  if (card) {
+    card.classList.toggle("is-step1", stepIdx === 1);
+    card.classList.toggle("is-step2", stepIdx === 2);
+    card.classList.toggle("is-step4", stepIdx === 4);
+    card.classList.toggle("is-step5", false);
+  }
+  if (overlay) {
+    overlay.classList.toggle("is-step4-active", stepIdx === 4);
+    overlay.classList.toggle("is-step5-active", false);
+  }
+
+  const counterEl = document.getElementById("vf-guide-step-counter");
+  const titleEl = document.getElementById("vf-guide-title");
+  const descEl = document.getElementById("vf-guide-desc");
+  const nextBtn = document.getElementById("vf-guide-btn-next");
+  const backBtn = document.getElementById("vf-guide-btn-back");
+  const simWidget = document.getElementById("vf-guide-screen-sim");
+  const subEl = document.getElementById("vf-guide-subtitle-text");
+
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const title = (isMac && stepObj.titleMac) ? stepObj.titleMac : stepObj.title;
+  const desc = (isMac && stepObj.descMac) ? stepObj.descMac : stepObj.desc;
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+
+  if (counterEl) counterEl.textContent = stepObj.counter;
+  if (titleEl) titleEl.textContent = title;
+  if (descEl) descEl.textContent = desc;
+  if (nextBtn) nextBtn.textContent = stepObj.nextLabel;
+  if (backBtn) backBtn.style.visibility = (stepIdx === 1) ? "hidden" : "visible";
+
+  if (simWidget) {
+    simWidget.style.display = stepObj.isSimulation ? "flex" : "none";
+  }
+
+  if (subEl && timeline && timeline[0]) {
+    subEl.textContent = timeline[0].text;
+  }
+
+  const dots = document.getElementById("vf-guide-dots");
+  if (dots) {
+    dots.innerHTML = VIDEOFLOW_GUIDE_STEPS.map(s =>
+      `<span class="${s.step === stepIdx ? "active" : ""}" onclick="gotoVideoFlowGuideStep(${s.step})"></span>`
+    ).join("");
+  }
+
+  setTimeout(() => {
+    _vfGuideForceZeroScroll();
+    positionVfGuideSpotlight(stepObj);
+  }, 60);
+
+  if (_vfGuideTimer) clearTimeout(_vfGuideTimer);
+  _vfGuideTimer = setTimeout(() => {
+    playVideoFlowGuideNarration(stepIdx);
+  }, 200);
+}
+
+function nextVideoFlowGuideStep() {
+  if (_currentVfGuideStep >= VIDEOFLOW_GUIDE_STEPS.length) {
+    stopVideoFlowGuide(true);
+    return;
+  }
+  gotoVideoFlowGuideStep(_currentVfGuideStep + 1);
+}
+
+function prevVideoFlowGuideStep() {
+  gotoVideoFlowGuideStep(Math.max(1, _currentVfGuideStep - 1));
+}
+
+function startVideoFlowGuide() {
+  if (typeof switchPage === "function") {
+    switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
+  }
+  const overlay = document.getElementById("videoflow-guide-overlay");
+  if (!overlay) return;
+
+  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+  if (typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
+  const obOverlay = document.getElementById("onboarding-overlay");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
+
+  _vfGuideForceZeroScroll();
+
+  document.body.classList.add("af-guide-active");
+  document.body.classList.add("vf-guide-active");
+
+  for (const ev of _afGuideEventTypes) {
+    window.addEventListener(ev, _vfGuideBlockAppEvent, { capture: true, passive: false });
+    document.addEventListener(ev, _vfGuideBlockAppEvent, { capture: true, passive: false });
+  }
+
+  window.addEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("touchmove", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("touchmove", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("scroll", _vfGuideForceZeroScroll, { capture: true, passive: false });
+  window.addEventListener("keydown", _vfGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.addEventListener("scroll", _vfGuideForceZeroScroll, { capture: true, passive: false });
+    mc.addEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  overlay.classList.remove("hidden");
+  gotoVideoFlowGuideStep(1);
+
+  window.addEventListener("resize", _onVfGuideResize);
+}
+
+function _onVfGuideResize() {
+  const overlay = document.getElementById("videoflow-guide-overlay");
+  if (overlay && !overlay.classList.contains("hidden")) {
+    _vfGuideForceZeroScroll();
+    const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === _currentVfGuideStep);
+    if (stepObj) positionVfGuideSpotlight(stepObj);
+  }
+}
+
+function stopVideoFlowGuide(markCompleted = false) {
+  stopVideoFlowGuideAudio();
+  window.removeEventListener("resize", _onVfGuideResize);
+
+  for (const ev of _afGuideEventTypes) {
+    window.removeEventListener(ev, _vfGuideBlockAppEvent, { capture: true, passive: false });
+    document.removeEventListener(ev, _vfGuideBlockAppEvent, { capture: true, passive: false });
+  }
+  window.removeEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("touchmove", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("touchmove", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("scroll", _vfGuideForceZeroScroll, { capture: true, passive: false });
+  window.removeEventListener("keydown", _vfGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.removeEventListener("scroll", _vfGuideForceZeroScroll, { capture: true, passive: false });
+    mc.removeEventListener("wheel", _vfGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  document.body.classList.remove("af-guide-active");
+  document.body.classList.remove("vf-guide-active");
+  document.body.classList.remove("vf-guide-step3-active");
+  document.body.classList.remove("vf-guide-step4-active");
+
+  const card = document.getElementById("vf-guide-card");
+  if (card) {
+    card.classList.remove("is-step1");
+    card.classList.remove("is-step2");
+    card.classList.remove("is-step4");
+    card.classList.remove("is-step5");
+  }
+
+  const overlay = document.getElementById("videoflow-guide-overlay");
+  if (overlay) {
+    overlay.classList.remove("is-step4-active");
+    overlay.classList.remove("is-step5-active");
+    overlay.classList.add("hidden");
+  }
+
+  const vid = document.getElementById("vf-guide-real-demo-video");
+  if (vid) vid.pause();
+
+  _cleanVfGuideDemoVideoCard();
+  if (markCompleted) {
+    setOnboardingFlag("vf_onboarding.vf_guided", "1");
+  }
+}
+
+// ==========================================================================
+// VOICE FLOW IN-APP GUIDANCE ENGINE
+// ==========================================================================
+
+const VOICEFLOW_GUIDE_STEPS = [
+  {
+    step: 1,
+    page: "home",
+    counter: "STEP 1 OF 4 · HOME & INSIGHTS",
+    title: "Real-Time Voice Dictation & Insights",
+    desc: "Speak naturally into any app. Voice Flow transcribes in real time and tracks your typing speed and streak.",
+    targetId: "voiceflow-metrics-banner",
+    secondaryTargetId: "history-search",
+    spotlightLabel: "Live Dictation & Workspace",
+    nextLabel: "Next: Dictionary & Styles →",
+    audioSrc: "assets/onboarding/voiceflow_guide_step1_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 2.66,
+            "text": "Welcome to Voice Flow!"
+      },
+      {
+            "start": 2.61,
+            "end": 7.46,
+            "text": "Speak naturally and have your words typed directly into any app in real time."
+      },
+      {
+            "start": 7.46,
+            "end": 13.69,
+            "text": "Your workspace tracks your dictation history, live typing speed in words per minute, and daily streaks."
+      }
+]
+  },
+  {
+    step: 2,
+    page: "dictionary",
+    counter: "STEP 2 OF 4 · DICTIONARY & STYLES",
+    title: "Custom Jargon, Styles & Commands",
+    desc: "Register custom terms that work with polishing on or off. Enable polishing to adapt tones and voice commands.",
+    targetId: "dict-teach-panel",
+    secondaryTargetId: "dictionary-search-input",
+    spotlightLabel: "Personal Dictionary & AI Styles",
+    nextLabel: "Next: Models & Providers →",
+    audioSrc: "assets/onboarding/voiceflow_guide_step2_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 4.75,
+            "text": "Step two combines your personal dictionary and AI styles."
+      },
+      {
+            "start": 4.7,
+            "end": 9.56,
+            "text": "Add custom names and jargon that work whether voice polishing is on or off."
+      },
+      {
+            "start": 9.56,
+            "end": 13.34,
+            "text": "Turn polishing on to tailor tones and voice commands."
+      }
+]
+  },
+  {
+    step: 3,
+    page: "providers",
+    counter: "STEP 3 OF 4 · AI MODELS & PROVIDERS",
+    title: "Offline Models & Cloud API Keys",
+    desc: "We recommend Nemotron for speech recognition and S1-mini by Superwhisper for polishing. Cloud APIs are optional.",
+    targetId: "exec-policy-model-picker-button",
+    secondaryTargetId: "vf-polish-model-picker-button",
+    spotlightLabel: "Speech & Polishing Providers",
+    nextLabel: "Next: Desktop Shortcut →",
+    audioSrc: "assets/onboarding/voiceflow_guide_step3_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 4.18,
+            "text": "Step three puts you in full control of your AI engines."
+      },
+      {
+            "start": 4.13,
+            "end": 13.4,
+            "text": "Run completely offline with Nemotron for speech recognition and S1-mini by Superwhisper for local grammar polishing, or plug in cloud keys anytime."
+      }
+]
+  },
+  {
+    step: 4,
+    page: "home",
+    counter: "STEP 4 OF 4 · GLOBAL SHORTCUT",
+    title: "Dictate Everywhere Across Windows",
+    titleMac: "Dictate Everywhere Across your Mac",
+    desc: "Trigger Voice Flow anywhere across Windows with a global shortcut—instant voice-to-text with zero copy-pasting.",
+    descMac: "Trigger Voice Flow anywhere across your Mac with Command + Option—instant voice-to-text with zero copy-pasting.",
+    targetId: "voiceflow-guide-screen-sim",
+    isSimulation: true,
+    spotlightLabel: "Global Screen Dictation Shortcut",
+    spotlightLabelMac: "Global Mac Dictation Shortcut",
+    nextLabel: "Finish & Start Dictating 🎙️",
+    audioSrc: "assets/onboarding/voiceflow_guide_step4_mixed.mp3",
+    audioSrcMac: "assets/onboarding/voiceflow_guide_step4_mac_mixed.mp3",
+    timeline: [
+      {
+            "start": 0.5,
+            "end": 3.96,
+            "text": "Finally, dictate anywhere across Windows."
+      },
+      {
+            "start": 3.91,
+            "end": 9.11,
+            "text": "Hold your Middle Mouse Click or press Control plus Windows to speak into any application."
+      },
+      {
+            "start": 9.11,
+            "end": 13.69,
+            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+      }
+],
+    timelineMac: [
+      {
+            "start": 0.5,
+            "end": 3.87,
+            "text": "Finally, dictate anywhere across your Mac."
+      },
+      {
+            "start": 3.82,
+            "end": 7.61,
+            "text": "Press Command plus Option to speak into any application."
+      },
+      {
+            "start": 7.61,
+            "end": 12.18,
+            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+      }
+]
+  }
+];
+
+let _currentVoiceFlowGuideStep = 1;
+let _voiceflowGuideAudioPlayer = null;
+let _voiceflowGuideNarrationPaused = false;
+let _voiceflowGuideSlideToken = 0;
+let _voiceflowGuideTimer = null;
+
+function _voiceflowGuideForceZeroScroll() {
+  const mc = document.querySelector(".main-content");
+  if (mc && mc.scrollTop !== 0) mc.scrollTop = 0;
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
+  if (document.documentElement && document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
+  if (document.body && document.body.scrollTop !== 0) document.body.scrollTop = 0;
+}
+
+function _voiceflowGuideBlockAppEvent(e) {
+  const guideCard = document.getElementById("voiceflow-guide-card");
+  if (guideCard && guideCard.contains(e.target)) {
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _voiceflowGuidePreventScrollEvent(e) {
+  _voiceflowGuideForceZeroScroll();
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof e.stopImmediatePropagation === "function") {
+    e.stopImmediatePropagation();
+  }
+  return false;
+}
+
+function _voiceflowGuidePreventKeyEvent(e) {
+  if (e.key === "Escape") {
+    stopVoiceFlowGuide(true);
+    e.preventDefault();
+    return;
+  }
+  if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) {
+    e.preventDefault();
+    nextVoiceFlowGuideStep();
+  } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
+    e.preventDefault();
+    prevVoiceFlowGuideStep();
+  }
+}
+
+function updateVoiceFlowGuideSubtitles(currentTime, stepIdx) {
+  const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+  if (!timeline) return;
+
+  const match = timeline.find(t => currentTime >= t.start && currentTime <= t.end);
+  const subEl = document.getElementById("voiceflow-guide-subtitle-text");
+  if (!subEl) return;
+
+  if (match && subEl.textContent !== match.text) {
+    subEl.style.opacity = "0.4";
+    setTimeout(() => {
+      subEl.textContent = match.text;
+      subEl.style.opacity = "1";
+    }, 60);
+  }
+}
+
+function updateVoiceFlowGuideAudioUI(paused) {
+  const btn = document.getElementById("voiceflow-guide-audio-btn");
+  const icon = document.getElementById("voiceflow-guide-audio-icon");
+  const text = document.getElementById("voiceflow-guide-audio-text");
+  const wave = document.getElementById("voiceflow-guide-wave-indicator");
+
+  if (btn) btn.classList.toggle("paused", paused);
+  if (icon) icon.textContent = paused ? "🔇" : "🔊";
+  if (text) text.textContent = paused ? "Paused" : "Voiceover";
+  if (wave) wave.classList.toggle("paused", paused);
+}
+
+function stopVoiceFlowGuideAudio() {
+  _voiceflowGuideSlideToken++;
+  if (_voiceflowGuideAudioPlayer) {
+    _voiceflowGuideAudioPlayer.pause();
+    _voiceflowGuideAudioPlayer = null;
+  }
+  updateVoiceFlowGuideAudioUI(true);
+}
+
+function playVoiceFlowGuideNarration(stepIdx) {
+  stopVoiceFlowGuideAudio();
+  if (_voiceflowGuideNarrationPaused) return;
+
+  const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const audioSrc = (isMac && stepObj.audioSrcMac) ? stepObj.audioSrcMac : stepObj.audioSrc;
+  if (!audioSrc) return;
+
+  const token = ++_voiceflowGuideSlideToken;
+  let audioPath = audioSrc;
+  try {
+    if (window.location && window.location.origin && window.location.origin !== "null") {
+      audioPath = `${window.location.origin}/${audioSrc}`;
+    }
+  } catch (e) {}
+
+  const player = new Audio(audioPath);
+  player.preload = "auto";
+  _voiceflowGuideAudioPlayer = player;
+
+  player.addEventListener("timeupdate", () => {
+    if (_voiceflowGuideAudioPlayer === player && _currentVoiceFlowGuideStep === stepIdx) {
+      updateVoiceFlowGuideSubtitles(player.currentTime, stepIdx);
+    }
+  });
+
+  player.addEventListener("ended", () => {
+    if (token === _voiceflowGuideSlideToken && _currentVoiceFlowGuideStep === stepIdx) {
+      updateVoiceFlowGuideAudioUI(true);
+    }
+  });
+
+  const playPromise = player.play();
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      if (token !== _voiceflowGuideSlideToken || _currentVoiceFlowGuideStep !== stepIdx) {
+        player.pause();
+        return;
+      }
+      updateVoiceFlowGuideAudioUI(false);
+    }).catch(err => {
+      if (token !== _voiceflowGuideSlideToken || _currentVoiceFlowGuideStep !== stepIdx) return;
+      console.warn("Autoplay gesture unlock required for guide audio:", err);
+      updateVoiceFlowGuideAudioUI(true);
+    });
+  }
+}
+
+function toggleVoiceFlowGuideAudio() {
+  if (!_voiceflowGuideAudioPlayer) {
+    playVoiceFlowGuideNarration(_currentVoiceFlowGuideStep);
+    return;
+  }
+  if (_voiceflowGuideAudioPlayer.paused) {
+    _voiceflowGuideAudioPlayer.play().then(() => {
+      _voiceflowGuideNarrationPaused = false;
+      updateVoiceFlowGuideAudioUI(false);
+    }).catch(() => {});
+  } else {
+    _voiceflowGuideAudioPlayer.pause();
+    _voiceflowGuideNarrationPaused = true;
+    updateVoiceFlowGuideAudioUI(true);
+  }
+}
+
+function positionVoiceFlowGuideSpotlight(stepObj) {
+  _voiceflowGuideForceZeroScroll();
+  const box = document.getElementById("voiceflow-guide-spotlight-box");
+  const label = document.getElementById("voiceflow-guide-spotlight-label");
+  if (!box) return;
+
+  if (label) {
+    const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+    const lbl = (isMac && stepObj.spotlightLabelMac) ? stepObj.spotlightLabelMac : stepObj.spotlightLabel;
+    label.textContent = lbl || "FEATURE SPOTLIGHT";
+  }
+
+  if (stepObj.isSimulation) {
+    box.style.display = "none";
+    return;
+  }
+
+  box.style.display = "block";
+  let target = document.getElementById(stepObj.targetId);
+  if (!target) {
+    box.style.display = "none";
+    return;
+  }
+
+  let r = target.getBoundingClientRect();
+  let top = r.top;
+  let left = r.left;
+  let right = r.right;
+  let bottom = r.bottom;
+
+  if (stepObj.secondaryTargetId) {
+    const sec = document.getElementById(stepObj.secondaryTargetId);
+    if (sec) {
+      const r2 = sec.getBoundingClientRect();
+      top = Math.min(top, r2.top);
+      left = Math.min(left, r2.left);
+      right = Math.max(right, r2.right);
+      bottom = Math.max(bottom, r2.bottom);
+    }
+  }
+
+  if (stepObj.tertiaryTargetId) {
+    const ter = document.getElementById(stepObj.tertiaryTargetId);
+    if (ter) {
+      const r3 = ter.getBoundingClientRect();
+      top = Math.min(top, r3.top);
+      left = Math.min(left, r3.left);
+      right = Math.max(right, r3.right);
+      bottom = Math.max(bottom, r3.bottom);
+    }
+  }
+
+  const pad = 14;
+  box.style.top = `${Math.max(6, top - pad)}px`;
+  box.style.left = `${Math.max(6, left - pad)}px`;
+  box.style.width = `${Math.max(40, (right - left) + pad * 2)}px`;
+  box.style.height = `${Math.max(40, (bottom - top) + pad * 2)}px`;
+}
+
+function _injectVoiceFlowGuideDemoCard() {
+  const container = document.getElementById("dictations-list");
+  if (!container) return;
+  container.innerHTML = `
+    <div class="dictation-card voiceflow-guide-demo-card" id="voiceflow-guide-sample-card" style="border-left: 3px solid var(--accent, #6366f1); animation: none; margin-bottom: 12px;">
+      <div class="dictation-header">
+        <span class="dictation-time"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Today, 10:45 AM</span>
+        <span class="dictation-app"><svg class="lucide" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg> Google Chrome</span>
+        <span class="dictation-wpm-pill" style="margin-left: auto; font-size: 11px; font-weight: 700; background: rgba(99, 102, 241, 0.15); color: var(--accent, #6366f1); padding: 2px 8px; border-radius: 999px;">148 WPM · Fast</span>
+      </div>
+      <div class="dictation-body">
+        <div class="dictation-text" style="font-size: 14px; line-height: 1.5; color: var(--text-main);">
+          "Deep learning models are transforming how we interact with technology and voice agents. Everything typed here was spoken naturally with zero lag."
+        </div>
+        <div class="history-meta-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11px;">
+          <span class="meta-tag meta-polish" style="background: rgba(34, 197, 94, 0.12); color: #22c55e; padding: 2px 7px; border-radius: 4px; font-weight: 600;">AI Polished</span>
+          <span class="meta-tag meta-style" style="background: rgba(234, 179, 8, 0.12); color: #eab308; padding: 2px 7px; border-radius: 4px; font-weight: 600;">Style: Concise</span>
+        </div>
+      </div>
+      <div class="dictation-actions">
+        <button type="button" class="action-btn" onclick="alert('Sample preview: Text copied to clipboard')"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg> Copy</button>
+        <button type="button" class="action-btn" onclick="alert('Sample preview: Dictation pinned to top')"><svg class="lucide" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg> Pin</button>
+      </div>
+    </div>
+  `;
+}
+
+function _cleanVoiceFlowGuideDemoCard() {
+  const sampleCard = document.getElementById("voiceflow-guide-sample-card");
+  if (sampleCard) sampleCard.remove();
+  const demoCards = document.querySelectorAll(".voiceflow-guide-demo-card");
+  demoCards.forEach(c => c.remove());
+  if (typeof renderHistoryFeed === "function") {
+    renderHistoryFeed(allHistoryRecords);
+  }
+}
+
+function turnOnPolishingFromVoiceFlowGuide() {
+  const toggle = document.getElementById("toggle-polishing");
+  if (toggle) {
+    toggle.checked = true;
+  }
+  if (typeof togglePolishingSetting === "function") {
+    togglePolishingSetting(true);
+  }
+  const btn = document.getElementById("voiceflow-guide-polish-action-btn");
+  if (btn) {
+    btn.textContent = "Polishing enabled ✓";
+    btn.disabled = true;
+    btn.style.opacity = "0.75";
+    btn.style.cursor = "default";
+  }
+}
+
+function gotoVoiceFlowGuideStep(stepIdx) {
+  _voiceflowGuideForceZeroScroll();
+  const prevStep = _currentVoiceFlowGuideStep;
+  _currentVoiceFlowGuideStep = stepIdx;
+  const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
+  if (!stepObj) return;
+
+  // Handle automated page navigation
+  if (stepObj.page && typeof switchPage === "function" && currentPageId !== stepObj.page) {
+    switchPage(stepObj.page, { skipGuideTrigger: true, fromGuide: true });
+  }
+
+  // Cleanup leaving Step 1: restore real history
+  if (prevStep === 1 && stepIdx !== 1) {
+    _cleanVoiceFlowGuideDemoCard();
+  }
+
+  // Step 1 Action: show sample dictation card if new user has zero dictations
+  if (stepIdx === 1) {
+    const hasRealDictations = typeof allHistoryRecords !== "undefined" && Array.isArray(allHistoryRecords) && allHistoryRecords.length > 0;
+    if (!hasRealDictations) {
+      _injectVoiceFlowGuideDemoCard();
+    }
+  }
+
+  const counter = document.getElementById("voiceflow-guide-step-counter");
+  const title = document.getElementById("voiceflow-guide-title");
+  const desc = document.getElementById("voiceflow-guide-desc");
+  const subEl = document.getElementById("voiceflow-guide-subtitle-text");
+  const nextBtn = document.getElementById("voiceflow-guide-btn-next");
+  const backBtn = document.getElementById("voiceflow-guide-btn-back");
+  const card = document.getElementById("voiceflow-guide-card");
+  const overlay = document.getElementById("voiceflow-guide-overlay");
+
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  const stepTitle = (isMac && stepObj.titleMac) ? stepObj.titleMac : stepObj.title;
+  const stepDesc = (isMac && stepObj.descMac) ? stepObj.descMac : stepObj.desc;
+  const timeline = (isMac && stepObj.timelineMac) ? stepObj.timelineMac : stepObj.timeline;
+
+  if (counter) counter.textContent = stepObj.counter;
+  if (title) title.textContent = stepTitle;
+  if (desc) desc.textContent = stepDesc;
+  if (nextBtn) nextBtn.textContent = stepObj.nextLabel || "Next →";
+
+  const simBadge = document.getElementById("voiceflow-guide-sim-badge");
+  if (simBadge) {
+    simBadge.textContent = isMac ? "Mac Voice Dictation" : "Windows Voice Dictation";
+  }
+
+  if (backBtn) {
+    backBtn.disabled = (stepIdx === 1);
+    backBtn.style.opacity = (stepIdx === 1) ? "0.38" : "1";
+    backBtn.style.cursor = (stepIdx === 1) ? "not-allowed" : "pointer";
+  }
+
+  const dots = document.querySelectorAll("#voiceflow-guide-dots span");
+  dots.forEach((dot, idx) => {
+    dot.classList.toggle("active", idx + 1 === stepIdx);
+  });
+
+  if (subEl && timeline && timeline.length > 0) {
+    subEl.textContent = timeline[0].text;
+    subEl.style.opacity = "1";
+  }
+
+  if (stepIdx >= 2 && stepIdx <= 3) {
+    setVoiceFlowMenuOpen(true);
+  }
+
+  const simWrap = document.getElementById("voiceflow-guide-screen-sim");
+  const simVid = document.getElementById("voiceflow-guide-real-demo-video");
+
+  if (stepObj.isSimulation) {
+    if (card) {
+      card.classList.add("is-step4");
+      card.classList.add("is-step6");
+    }
+    if (overlay) {
+      overlay.classList.add("is-step4-active");
+      overlay.classList.add("is-step6-active");
+    }
+    if (simWrap) simWrap.style.display = "block";
+    if (simVid) {
+      try {
+        simVid.currentTime = 0;
+        const playP = simVid.play();
+        if (playP && typeof playP.catch === "function") playP.catch(() => {});
+      } catch (_) {}
+    }
+  } else {
+    if (card) {
+      card.classList.remove("is-step4");
+      card.classList.remove("is-step6");
+    }
+    if (overlay) {
+      overlay.classList.remove("is-step4-active");
+      overlay.classList.remove("is-step6-active");
+    }
+    if (simWrap) simWrap.style.display = "none";
+    if (simVid) {
+      try { simVid.pause(); } catch (_) {}
+    }
+  }
+
+  if (card) {
+    card.classList.toggle("is-step3", stepIdx === 3);
+  }
+
+  const polishActionWrap = document.getElementById("voiceflow-guide-polish-action-wrap");
+  const polishActionBtn = document.getElementById("voiceflow-guide-polish-action-btn");
+  if (polishActionWrap) {
+    if (stepIdx === 2 || stepIdx === 4) {
+      const toggle = document.getElementById("toggle-polishing");
+      let isPolishOn = toggle ? toggle.checked : true;
+      if (typeof polishingConfirmedState === "boolean") {
+        isPolishOn = polishingConfirmedState;
+      } else {
+        try {
+          const cached = localStorage.getItem("vf_polishing_enabled");
+          if (cached !== null) isPolishOn = (cached === "true");
+        } catch (_) {}
+      }
+      if (!isPolishOn) {
+        polishActionWrap.style.display = "block";
+        if (polishActionBtn) {
+          polishActionBtn.textContent = "Turn on polishing";
+          polishActionBtn.disabled = false;
+          polishActionBtn.style.opacity = "1";
+          polishActionBtn.style.cursor = "pointer";
+        }
+      } else {
+        polishActionWrap.style.display = "none";
+      }
+    } else {
+      polishActionWrap.style.display = "none";
+    }
+  }
+
+  positionVoiceFlowGuideSpotlight(stepObj);
+  [60, 180, 400].forEach(ms => {
+    setTimeout(() => {
+      if (_currentVoiceFlowGuideStep === stepIdx) {
+        _voiceflowGuideForceZeroScroll();
+        positionVoiceFlowGuideSpotlight(stepObj);
+      }
+    }, ms);
+  });
+
+  if (_voiceflowGuideTimer) clearTimeout(_voiceflowGuideTimer);
+  _voiceflowGuideTimer = setTimeout(() => {
+    playVoiceFlowGuideNarration(stepIdx);
+  }, 200);
+}
+
+function nextVoiceFlowGuideStep() {
+  if (_currentVoiceFlowGuideStep >= VOICEFLOW_GUIDE_STEPS.length) {
+    stopVoiceFlowGuide(true);
+    return;
+  }
+  gotoVoiceFlowGuideStep(_currentVoiceFlowGuideStep + 1);
+}
+
+function prevVoiceFlowGuideStep() {
+  gotoVoiceFlowGuideStep(Math.max(1, _currentVoiceFlowGuideStep - 1));
+}
+
+function startVoiceFlowGuide() {
+  if (typeof switchPage === "function") {
+    switchPage("home", { skipGuideTrigger: true, fromGuide: true });
+  }
+  const overlay = document.getElementById("voiceflow-guide-overlay");
+  if (!overlay) return;
+
+  if (typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
+  if (typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
+  const obOverlay = document.getElementById("onboarding-overlay");
+  if (obOverlay) {
+    obOverlay.classList.add("hidden");
+    obOverlay.classList.remove("welcome-hero-mode");
+  }
+
+  _voiceflowGuideForceZeroScroll();
+
+  document.body.classList.add("af-guide-active");
+  document.body.classList.add("voiceflow-guide-active");
+
+  for (const ev of _afGuideEventTypes) {
+    window.addEventListener(ev, _voiceflowGuideBlockAppEvent, { capture: true, passive: false });
+    document.addEventListener(ev, _voiceflowGuideBlockAppEvent, { capture: true, passive: false });
+  }
+
+  window.addEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("touchmove", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  document.addEventListener("touchmove", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  window.addEventListener("scroll", _voiceflowGuideForceZeroScroll, { capture: true, passive: false });
+  window.addEventListener("keydown", _voiceflowGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.addEventListener("scroll", _voiceflowGuideForceZeroScroll, { capture: true, passive: false });
+    mc.addEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  overlay.classList.remove("hidden");
+  gotoVoiceFlowGuideStep(1);
+
+  window.addEventListener("resize", _onVoiceFlowGuideResize);
+}
+
+function _onVoiceFlowGuideResize() {
+  const overlay = document.getElementById("voiceflow-guide-overlay");
+  if (overlay && !overlay.classList.contains("hidden")) {
+    _voiceflowGuideForceZeroScroll();
+    const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === _currentVoiceFlowGuideStep);
+    if (stepObj) positionVoiceFlowGuideSpotlight(stepObj);
+  }
+}
+
+function stopVoiceFlowGuide(markCompleted = false) {
+  stopVoiceFlowGuideAudio();
+  window.removeEventListener("resize", _onVoiceFlowGuideResize);
+
+  for (const ev of _afGuideEventTypes) {
+    window.removeEventListener(ev, _voiceflowGuideBlockAppEvent, { capture: true, passive: false });
+    document.removeEventListener(ev, _voiceflowGuideBlockAppEvent, { capture: true, passive: false });
+  }
+  window.removeEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("touchmove", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  document.removeEventListener("touchmove", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  window.removeEventListener("scroll", _voiceflowGuideForceZeroScroll, { capture: true, passive: false });
+  window.removeEventListener("keydown", _voiceflowGuidePreventKeyEvent, { capture: true });
+
+  const mc = document.querySelector(".main-content");
+  if (mc) {
+    mc.removeEventListener("scroll", _voiceflowGuideForceZeroScroll, { capture: true, passive: false });
+    mc.removeEventListener("wheel", _voiceflowGuidePreventScrollEvent, { capture: true, passive: false });
+  }
+
+  document.body.classList.remove("af-guide-active");
+  document.body.classList.remove("voiceflow-guide-active");
+
+  const card = document.getElementById("voiceflow-guide-card");
+  if (card) {
+    card.classList.remove("is-step4");
+    card.classList.remove("is-step5");
+    card.classList.remove("is-step6");
+  }
+
+  const overlay = document.getElementById("voiceflow-guide-overlay");
+  if (overlay) {
+    overlay.classList.remove("is-step4-active");
+    overlay.classList.remove("is-step6-active");
+    overlay.classList.add("hidden");
+  }
+
+  const polishActionWrap = document.getElementById("voiceflow-guide-polish-action-wrap");
+  if (polishActionWrap) polishActionWrap.style.display = "none";
+
+  const vid = document.getElementById("voiceflow-guide-real-demo-video");
+  if (vid) vid.pause();
+
+  _cleanVoiceFlowGuideDemoCard();
+  lastHistoryHash = "";
+  if (typeof loadHome === "function") {
+    loadHome();
+  }
+
+  if (markCompleted) {
+    setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
+  }
 }
 
 function replayOnboarding() {
@@ -9787,6 +11351,9 @@ function formatDmLanguageCapsule(langStr) {
 function getDmUserFriendlyDescription(m) {
   const isPolish = m.category === "voice_polishing" || String(m.tag || "").toLowerCase().includes("polish");
   if (isPolish) {
+    if (String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) {
+      return "S1-mini by Superwhisper is a specialized speech transcript normalizer fine-tuned from Qwen3-0.6B. It removes fillers and stutters, seamlessly resolves self-corrections (e.g. 'Friday, no wait, Thursday' -> 'Thursday'), fixes punctuation and capitalization, and normalizes spoken numbers, dates, currency, and emails. English only. Never rewrites or changes your meaning.";
+    }
     return "Ultra-fast voice cleanup assistant. It automatically removes speech fillers like 'um', 'uh', repeated words, and pauses from your voice dictation before pasting clean text into your apps.";
   }
   if (m.is_multilingual) {
@@ -10041,7 +11608,7 @@ function renderDownloadableModelDetail(modelId) {
           <div class="dm-feature-icon-row">
             <span>⚡</span> <span>Instant Speed</span>
           </div>
-          <div class="dm-feature-desc">Real-time local streaming with zero internet lag or API rate limits.</div>
+          <div class="dm-feature-desc">${isPolish ? 'Cleans text in about a second, no API limits.' : 'Real-time local streaming with zero internet lag or API rate limits.'}</div>
         </div>
         <div class="dm-feature-card">
           <div class="dm-feature-icon-row">
@@ -10056,6 +11623,13 @@ function renderDownloadableModelDetail(modelId) {
           <div class="dm-feature-desc">Works anywhere, including offline, airplane mode, or spotty networks.</div>
         </div>
       </div>
+
+      ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `
+        <div class="dm-credit-line" style="margin-top: 14px; padding: 10px 14px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: var(--polish-ink);">Attribution: <strong style="color: #c084fc;">S1-mini by Superwhisper · Apache 2.0</strong></span>
+          <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; text-decoration: underline; font-weight: 600;">Hugging Face ↗</a>
+        </div>
+      ` : ""}
 
       <div class="dm-lang-section">
         <div class="dm-lang-header">
@@ -10133,6 +11707,7 @@ function renderDownloadableModelDetail(modelId) {
             <div class="dm-advanced-content">
               <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
               <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+              ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `<div><strong>Credit:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">S1-mini by Superwhisper · Apache 2.0</a></div>` : ""}
               ${m.local_path ? `<div><strong>Local Path:</strong> <code style="word-break: break-all; font-size: 10.5px;">${escapeHtml(m.local_path)}</code></div>` : ""}
             </div>
           </details>
@@ -10170,6 +11745,7 @@ function renderDownloadableModelDetail(modelId) {
             <div class="dm-advanced-content">
               <div><strong>Format:</strong> ${escapeHtml(m.format || "Local GGUF")}</div>
               <div><strong>Hugging Face:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">View Source Repository ↗</a></div>
+              ${(String(m.id || "").includes("s1-mini") || String(m.name || "").includes("S1-mini")) ? `<div><strong>Credit:</strong> <a href="${escapeHtml(m.repo_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--polish-accent); text-decoration: underline;">S1-mini by Superwhisper · Apache 2.0</a></div>` : ""}
             </div>
           </details>
         </div>
@@ -11611,6 +13187,15 @@ if (document.readyState === "loading") {
 // =============================================================================
 window.vfPlatformInfo = null;
 
+function vfIsMacPlatform() {
+  if (window.vfPlatformInfo && typeof window.vfPlatformInfo.is_macos === "boolean") {
+    return window.vfPlatformInfo.is_macos;
+  }
+  return (typeof navigator !== "undefined" && navigator.platform && navigator.platform.toUpperCase().includes("MAC")) ||
+         (typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toUpperCase().includes("MAC"));
+}
+window.vfIsMacPlatform = vfIsMacPlatform;
+
 async function initPlatformAdaptation() {
   try {
     const res = await fetch("/api/platform/info");
@@ -11714,6 +13299,20 @@ async function initPlatformAdaptation() {
       if (hotkeyHint) {
         hotkeyHint.innerHTML = "Click <b>Record Any Key</b>, then press any single key (e.g. F8, Space) or combination (Cmd+Opt, Option+Space, Cmd+Shift+D).";
       }
+    }
+
+    // 7. Audio Flow screen-sim caption adaptation
+    const afCaption = document.getElementById("af-guide-sim-caption");
+    if (afCaption) {
+      afCaption.textContent = isMac
+        ? "💡 Highlight any tweet or text across your Mac to trigger floating instant audio."
+        : "💡 Highlight any tweet or text across Windows to trigger floating instant audio.";
+    }
+
+    // 8. Voice Flow screen-sim badge adaptation
+    const vfBadge = document.getElementById("voiceflow-guide-sim-badge");
+    if (vfBadge) {
+      vfBadge.textContent = isMac ? "Mac Voice Dictation" : "Windows Voice Dictation";
     }
   } catch (err) {
     console.debug("[PLATFORM] Platform adaptation check skipped:", err);

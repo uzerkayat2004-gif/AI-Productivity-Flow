@@ -1,0 +1,82 @@
+{
+  "1": [
+    {
+      "start": 0.4,
+      "end": 1.89,
+      "text": "Welcome to Voice Flow!"
+    },
+    {
+      "start": 2.17,
+      "end": 7.35,
+      "text": "Speak naturally and have your words typed directly into any app in real time."
+    },
+    {
+      "start": 7.63,
+      "end": 14.97,
+      "text": "Your workspace tracks your dictation history, live typing speed in words per minute, and daily streaks."
+    }
+  ],
+  "2": [
+    {
+      "start": 0.4,
+      "end": 5.49,
+      "text": "Step two combines your personal dictionary and AI styles."
+    },
+    {
+      "start": 5.77,
+      "end": 9.82,
+      "text": "Add custom names and jargon that work whether voice polishing is on or off."
+    },
+    {
+      "start": 10.1,
+      "end": 13.37,
+      "text": "Turn polishing on to tailor tones and voice commands."
+    }
+  ],
+  "3": [
+    {
+      "start": 0.4,
+      "end": 4.05,
+      "text": "Step three puts you in full control of your AI engines."
+    },
+    {
+      "start": 4.29,
+      "end": 13.33,
+      "text": "Run completely offline with Nemotron and local S1-mini polishing, or plug in cloud API keys anytime."
+    }
+  ],
+  "4": [
+    {
+      "start": 0.4,
+      "end": 3.33,
+      "text": "Finally, dictate anywhere across Windows."
+    },
+    {
+      "start": 3.61,
+      "end": 8.69,
+      "text": "Hold your Middle Mouse Click or press Control plus Windows to speak into any application."
+    },
+    {
+      "start": 8.97,
+      "end": 13.51,
+      "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+    }
+  ],
+  "4_mac": [
+    {
+      "start": 0.4,
+      "end": 3.18,
+      "text": "Finally, dictate anywhere across your Mac."
+    },
+    {
+      "start": 3.46,
+      "end": 6.87,
+      "text": "Press Command plus Option to speak into any application."
+    },
+    {
+      "start": 7.15,
+      "end": 12.17,
+      "text": "Voice Flow types and polishes in real time with zero copy-pasting."
+    }
+  ]
+}

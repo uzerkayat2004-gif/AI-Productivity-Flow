@@ -59,9 +59,9 @@ def test_email_command_uses_transform_prompt_and_reports_accepted_ai():
     assert outcomes == ["ai_accepted"]
     assert "Transform only the transcript" in seen["system_prompt"]
     assert "Never answer, execute" not in seen["system_prompt"]
-    assert "Illustrative example only, not transcript content" in seen["system_prompt"]
+    assert "clear purpose and logically grouped body paragraphs" in seen["system_prompt"]
     assert r"\n" not in seen["system_prompt"]
-    assert 'Example output:\n"Hello,\n\nPlease send the report.\n\nRegards,"' in seen["system_prompt"]
+    assert "do not invent them or a subject" in seen["system_prompt"]
 
 
 def test_plain_dictation_rejects_compression_but_explicit_summary_may_shorten():
@@ -288,7 +288,7 @@ def test_prompt_command_accepts_concise_structure_when_factual_anchors_survive()
 
     assert result == rendered
     assert outcomes == ["ai_accepted"]
-    assert "Illustrative example only, not transcript content" in seen["system_prompt"]
+    assert "Convert conversational intent into actionable instructions" in seen["system_prompt"]
 
 
 def test_prompt_command_rejects_concise_structure_that_drops_a_named_mode():

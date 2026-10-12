@@ -349,6 +349,79 @@ def test_nemotron_stream_transcriber_discard():
     assert res == ""
 
 
+def test_nemotron_stream_applies_far_mic_conditioning_before_native_push(monkeypatch):
+    """The fast native path must condition faint mic audio before decoding."""
+    class _FakeEngine:
+        rec_handle = ctypes.c_void_p(1)
+        spec = {}
+        lock = threading.Lock()
+
+        def acquire_stream(self):
+            pass
+
+        def release_stream(self):
+            pass
+
+    class _FakeDll:
+        def __init__(self):
+            self.pushed: list[np.ndarray] = []
+
+        def nemo_speech_asr_stream_push_f32(self, _stream, ptr, length, _rate):
+            data = np.ctypeslib.as_array(
+                ctypes.cast(ptr, ctypes.POINTER(ctypes.c_float)), shape=(length,)
+            )
+            self.pushed.append(data.copy())
+            return 0
+
+        def nemo_speech_asr_stream_next(self, *_args):
+            return 1
+
+        def nemo_speech_asr_stream_finish(self, _stream):
+            return 0
+
+        def nemo_speech_asr_stream_close(self, _stream):
+            pass
+
+    dll = _FakeDll()
+    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
+    monkeypatch.setattr(storage, "get_setting", lambda key, default=None: "far" if key == "voice_flow_mic_profile" else default)
+    session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
+    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    session.start_session()
+
+    sr = 16000
+    t = np.arange(1600, dtype=np.float32) / sr
+    faint = (0.002 * np.sin(2 * np.pi * 300.0 * t)).astype(np.float32)
+    for _ in range(4):
+        session.submit_frame(faint, sr)
+    # Stereo opposition averages to true mono silence.  Conditioning must not
+    # invent a signal or change the native float32 ingestion contract.
+    session.submit_frame(np.column_stack((faint, -faint)).astype(np.float32), sr)
+    session.end_session()
+
+    assert session._done.wait(1.0)
+    pushed = np.concatenate(dll.pushed)
+    assert pushed.size == faint.size * 5
+    assert pushed.dtype == np.float32
+    assert np.all(np.isfinite(pushed))
+    assert float(np.max(np.abs(pushed))) <= 0.95
+    assert float(np.sqrt(np.mean(pushed[-3200:-1600].astype(np.float64) ** 2))) > (
+        float(np.sqrt(np.mean(faint.astype(np.float64) ** 2))) * 2.0
+    )
+    np.testing.assert_array_equal(pushed[-1600:], np.zeros(1600, dtype=np.float32))
+
+
+def test_nemotron_stream_enhancement_kill_switch_is_exact_passthrough(monkeypatch):
+    """Operators can restore the prior native-stream behavior instantly."""
+    enhancer = nemotron_engine.LiveSpeechEnhancer(profile="far")
+    frame = np.linspace(-0.02, 0.02, 257, dtype=np.float32)
+    monkeypatch.setenv("VOICE_FLOW_AUDIO_ENHANCE", "0")
+
+    out = enhancer.process(frame, 16000)
+
+    np.testing.assert_array_equal(out, frame)
+
+
 @pytest.mark.parametrize(
     ("empty_final_at_intake", "empty_final_at_drain"),
     [(False, False), (True, False), (False, True), (True, True)],
@@ -357,6 +430,7 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(
     monkeypatch, empty_final_at_intake, empty_final_at_drain
 ):
     """An unfinalized 'hello welcome' interim must trigger whole-audio recovery."""
+    monkeypatch.setenv("VOICE_FLOW_AUDIO_ENHANCE", "0")
     class _FakeEngine:
         rec_handle = ctypes.c_void_p(1)
         spec = {}

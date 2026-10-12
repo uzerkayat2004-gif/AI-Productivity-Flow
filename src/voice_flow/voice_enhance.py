@@ -52,6 +52,130 @@ _PROFILES: dict[str, dict] = {
     "normal": {"highpass_hz": 80, "gain_ceiling": 12.0, "gate_strength": 2.0, "gate_floor": 0.05, "vad_threshold": 0.20, "target_rms_db": -16.0},
 }
 
+# Streaming ASR cannot use the whole-buffer spectral gate or look-ahead AGC:
+# doing so would either add release latency or make every block independent.
+# These deliberately conservative caps lift faint speech while leaving the
+# native decoder plenty of headroom and without turning true silence into hiss.
+_LIVE_PROFILES: dict[str, dict[str, float]] = {
+    "whisper": {"target_rms": 0.08, "gain_ceiling": 16.0},
+    "far": {"target_rms": 0.08, "gain_ceiling": 20.0},
+    "noisy": {"target_rms": 0.04, "gain_ceiling": 2.0},
+    "normal": {"target_rms": 0.06, "gain_ceiling": 4.0},
+}
+
+
+def _enhancement_disabled() -> bool:
+    return os.environ.get("VOICE_FLOW_AUDIO_ENHANCE", "").strip().lower() in {"0", "false", "no", "off"}
+
+
+class LiveSpeechEnhancer:
+    """Causal, stateful conditioning for the low-latency native ASR path.
+
+    Only filter and gain state are retained, so memory stays constant across a
+    recording.  The recorder's raw archive is separate; callers pass a copy to
+    this object immediately before decoder ingestion.
+    """
+
+    def __init__(self, profile: str = "auto") -> None:
+        requested = str(profile or "auto").strip().lower()
+        self.profile = requested if requested in (*_PROFILES, "off") else "auto"
+        self._sample_rate = 0
+        self._highpass_hz = 0.0
+        self._sos: np.ndarray | None = None
+        self._filter_state: np.ndarray | None = None
+        self._gain = 1.0
+
+    def _resolved_profile(self, audio: np.ndarray, sr: int) -> str:
+        if self.profile != "auto":
+            return self.profile
+        return _auto_profile(audio, sr)
+
+    def _filter(self, audio: np.ndarray, sr: int, highpass_hz: float) -> np.ndarray:
+        if sig is None or audio.size < 2:
+            return audio
+        if self._sample_rate != sr or self._highpass_hz != highpass_hz or self._sos is None:
+            self._sample_rate = sr
+            self._highpass_hz = highpass_hz
+            self._sos = sig.butter(
+                2,
+                min(highpass_hz, sr / 2 - 100),
+                btype="highpass",
+                fs=sr,
+                output="sos",
+            )
+            self._filter_state = np.zeros((self._sos.shape[0], 2), dtype=np.float64)
+        filtered, self._filter_state = sig.sosfilt(self._sos, audio, zi=self._filter_state)
+        return np.asarray(filtered, dtype=np.float32)
+
+    def process(self, frame: np.ndarray | None, sr: int) -> np.ndarray:
+        """Return one conditioned block with unchanged length and finite float32 samples."""
+        if frame is None:
+            return np.empty(0, dtype=np.float32)
+        if frame.size == 0:
+            return np.asarray(frame, dtype=np.float32).reshape(-1)
+        if _enhancement_disabled() or self.profile == "off":
+            return frame
+
+        try:
+            audio = np.nan_to_num(
+                np.asarray(frame, dtype=np.float32).reshape(-1),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+            sample_rate = max(1000, int(sr))
+            resolved = self._resolved_profile(audio, sample_rate)
+            batch_cfg = _PROFILES.get(resolved, _PROFILES["normal"])
+            live_cfg = _LIVE_PROFILES.get(resolved, _LIVE_PROFILES["normal"])
+            # Auto can legitimately classify adjacent blocks differently.  A
+            # stable 80 Hz cutoff prevents those gain decisions from resetting
+            # causal filter state at each block boundary.
+            highpass_hz = float(batch_cfg["highpass_hz"]) if self.profile != "auto" else 80.0
+            out = self._filter(audio, sample_rate, highpass_hz)
+
+            # Advance the causal filter state through exact digital silence,
+            # but do not expose or amplify its numerical ring-down as audio.
+            if not np.any(audio):
+                self._gain = 1.0
+                return np.zeros_like(out, dtype=np.float32)
+
+            rms = float(np.sqrt(np.mean(out.astype(np.float64) ** 2)))
+            peak = float(np.max(np.abs(out)))
+            crossings = float(np.mean(np.signbit(out[1:]) != np.signbit(out[:-1]))) if out.size > 1 else 0.0
+            looks_like_low_broadband_noise = rms < 0.003 and crossings > 0.30
+            if peak < _NEAR_SILENCE or rms < (_NEAR_SILENCE * 0.5) or looks_like_low_broadband_noise:
+                desired_gain = 1.0
+            else:
+                desired_gain = float(
+                    np.clip(live_cfg["target_rms"] / max(rms, 1e-8), 1.0, live_cfg["gain_ceiling"])
+                )
+
+            # A close voice immediately after distant speech must not inherit
+            # a large block-wide gain.  Reserve limiter headroom from the
+            # measured peak, then ramp from that safe level within the block.
+            safe_peak_gain = 0.80 / max(peak, 1e-8)
+            desired_gain = min(desired_gain, safe_peak_gain)
+            start_gain = min(self._gain, safe_peak_gain)
+            duration = out.size / sample_rate
+            # Raise quiet speech over a few blocks, but shed gain immediately
+            # when a close voice or transient arrives so the limiter does not
+            # flatten healthy speech after a quiet passage.
+            time_constant = 0.08 if desired_gain > start_gain else 0.01
+            smoothing = float(np.exp(-duration / max(time_constant, 1e-3)))
+            self._gain = smoothing * start_gain + (1.0 - smoothing) * desired_gain
+            gain_ramp = np.linspace(start_gain, self._gain, out.size, dtype=np.float32)
+            conditioned = _soft_knee_limiter(out * gain_ramp, threshold=0.85, ceiling=0.95)
+            conditioned = np.nan_to_num(conditioned, nan=0.0, posinf=0.95, neginf=-0.95)
+            return np.clip(conditioned, np.float32(-0.95), np.float32(0.95)).astype(np.float32, copy=False)
+        except Exception:
+            log.exception("[ENHANCE] live conditioning failed; using unenhanced frame")
+            return np.nan_to_num(
+                np.asarray(frame, dtype=np.float32).reshape(-1),
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+
 
 def _window_rms(audio: np.ndarray, sr: int = 16000, window_ms: int = 50) -> np.ndarray:
     """RMS of consecutive non-overlapping ~50 ms windows."""
@@ -115,7 +239,17 @@ def _spectral_gate(audio: np.ndarray, sr: int, strength: float, floor: float) ->
     try:
         nperseg = 512
         noverlap = nperseg - 160  # ~10 ms hop at 16 kHz
-        _, _, stft = sig.stft(audio, fs=sr, nperseg=nperseg, noverlap=noverlap, padded=False)
+        # Complete the final overlap frame so inverse STFT reconstructs real
+        # terminal samples.  We trim the reconstructed padding below, keeping
+        # exactly the original duration without replacing the tail with zeros.
+        _, _, stft = sig.stft(
+            audio,
+            fs=sr,
+            nperseg=nperseg,
+            noverlap=noverlap,
+            boundary="zeros",
+            padded=True,
+        )
         # NaN/Inf quarantine BEFORE the ratio reconstruction: a non-finite
         # stft bin would poison whole output frames through istft (NaNs do not
         # raise — they surface downstream as a silent/garbled buffer).
@@ -139,10 +273,10 @@ def _spectral_gate(audio: np.ndarray, sr: int, strength: float, floor: float) ->
         # compute than exp(i*angle()) and no wrap-around risk.
         _, gated = sig.istft(gated_mag * (stft / np.maximum(mag, 1e-12)), fs=sr, nperseg=nperseg, noverlap=noverlap)
         if gated.size < audio.size:
-            # istft output can come up short (length='auto' drops samples that
-            # do not fit whole overlap frames); zero-pad so the enhanced buffer
-            # keeps the input's sample count and every word boundary stays put.
-            gated = np.pad(gated, (0, audio.size - gated.size))
+            # Completed STFT frames should always cover the source.  If a
+            # backend/version still returns short output, fail open: padding
+            # would replace genuine terminal speech with invented silence.
+            return audio
         elif gated.size > audio.size:
             gated = gated[:audio.size]
         return gated.astype(np.float32)
@@ -290,7 +424,8 @@ def enhance_for_stt(audio: np.ndarray, sr: int = 16000, profile: str = "auto") -
     """
     if audio is None or audio.size == 0:
         return audio, "off"
-    if os.environ.get("VOICE_FLOW_AUDIO_ENHANCE", "").strip().lower() in {"0", "false", "no", "off"}:
+    requested_profile = str(profile or "auto").strip().lower()
+    if _enhancement_disabled() or requested_profile == "off":
         return audio, "off"
 
     try:
@@ -299,7 +434,7 @@ def enhance_for_stt(audio: np.ndarray, sr: int = 16000, profile: str = "auto") -
         if stats["peak"] < _NEAR_SILENCE:
             return audio, "silence"
 
-        resolved = profile if profile in _PROFILES else _auto_profile(audio, sr)
+        resolved = requested_profile if requested_profile in _PROFILES else _auto_profile(audio, sr)
         cfg = _PROFILES.get(resolved, _PROFILES["normal"])
 
         out = _highpass(audio, sr, cfg["highpass_hz"])

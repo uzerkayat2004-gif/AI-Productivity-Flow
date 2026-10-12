@@ -435,10 +435,11 @@ def test_api_clear_audio_cache_endpoint(test_server) -> None:
     status, headers, body = _post(f"{base_url}/api/storage/clear-audio-cache", {})
     assert status == 200
     assert body["success"] is True
-    assert body["deleted_count"] == 3
-    assert not wav1.exists()
-    assert not wav2.exists()
-    assert not wav3.exists()
+    assert body["deleted_count"] == 0
+    assert body["preserved"] == 3
+    assert wav1.exists()
+    assert wav2.exists()
+    assert wav3.exists()
 
 
 def test_api_voice_flow_polish_speed_mode_and_model(test_server) -> None:
@@ -487,9 +488,9 @@ def test_api_overlay_controls(test_server) -> None:
     mock_overlay.hide.assert_called_once()
 
     # 3. Dock
-    status, _, body = _post(f"{base_url}/api/overlay/dock", {"dock": "top"})
+    status, _, body = _post(f"{base_url}/api/overlay/dock", {"dock": "bottom"})
     assert status == 200
-    mock_overlay.set_dock.assert_called_once_with("top")
+    mock_overlay.set_dock.assert_called_once_with("bottom")
 
     api_server.register_runtime_controller(None)
 
@@ -498,6 +499,7 @@ def test_api_settings_update_triggers_autostart(test_server, monkeypatch: pytest
     base_url = test_server["base_url"]
     autostart_calls = []
     monkeypatch.setattr(installer, "set_autostart", lambda en: (autostart_calls.append(en), True)[1])
+    monkeypatch.setattr(api_server, "get_launch_at_login", lambda: NativeResult(False))
 
     # POST /api/settings/update with autostart_enabled = False
     status, _, body = _post(f"{base_url}/api/settings/update", {"key": "autostart_enabled", "value": False})
@@ -522,7 +524,8 @@ def test_api_clear_audio_cache_empty(test_server) -> None:
     assert body["deleted_count"] == 0
 
 
-def test_api_show_in_taskbar_setting_persistence_and_defaults(test_server) -> None:
+def test_api_show_in_taskbar_setting_persistence_and_defaults(test_server, monkeypatch) -> None:
+    monkeypatch.setattr("voice_flow.gui.desktop_launcher._apply_taskbar_visibility", lambda *args: True)
     base_url = test_server["base_url"]
     storage = test_server["storage"]
 

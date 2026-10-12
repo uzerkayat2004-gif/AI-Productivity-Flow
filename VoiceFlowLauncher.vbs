@@ -9,6 +9,7 @@ WshShell.CurrentDirectory = strSrc
 WshShell.Environment("PROCESS")("PYTHONPATH") = strSrc & ";" & strSitePkgs
 WshShell.Environment("PROCESS")("VIRTUAL_ENV") = strVenv
 WshShell.Environment("PROCESS")("__PYVENV_LAUNCHER__") = strVenv & "\Scripts\pythonw.exe"
+WshShell.Environment("PROCESS")("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") = "--autoplay-policy=no-user-gesture-required"
 
 ' Find genuine GUI pythonw.exe (subsystem 2, zero console window)
 strPython = ""
