@@ -111,7 +111,7 @@ def lowercase_prose_text(text: str) -> str:
 
 
 _DICTATED_EMAIL_SALUTATION_RE = re.compile(
-    r"^\s*(?P<salutation>(?:(?:dear|hi|hello)\s+[A-Za-z][A-Za-z .'-]{0,50}|(?!(?:please|tomorrow|however|therefore|first|second|finally|yes|no)\b)[A-Z][A-Za-z'-]{1,40})),[ \t]+(?P<body>\S[\s\S]*?)\s*$",
+    r"^\s*(?P<salutation>(?:(?:dear|hi|hello|hey)\s+[A-Za-z][A-Za-z .'-]{0,50}|(?!(?:please|tomorrow|however|therefore|first|second|finally|yes|no)\b)[A-Z][A-Za-z'-]{1,40})),[ \t]+(?P<body>\S[\s\S]*?)\s*$",
     re.IGNORECASE,
 )
 _UNPUNCTUATED_EMAIL_SALUTATION_RE = re.compile(
@@ -221,6 +221,42 @@ def format_dictated_email(text: str) -> str | None:
         closing = signoff.group('closing')
         result += f"\n\n{closing[:1].upper() + closing[1:]},\n{signoff.group('sender')}"
     return result
+
+
+# Speech recognition often hears a leading "Hey <Name>," as "He <Name>,".
+# Only 1-3 name words, then a comma, and never a reporting verb ("He said,").
+_MISHEARD_HEY_RE = re.compile(
+    r"^\s*He\s+(?P<name>(?!(?:said|says|told|tells|asked|asks|wrote|writes|thinks|thought|is|was|will|would|has|had|and|also|then|just|never|always)\b)"
+    r"[A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,2}),[ \t]+(?=\S)",
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
+
+
+def format_email_command_fallback(text: str) -> str | None:
+    """Local layout for an explicit email command whose AI pass failed.
+
+    Uses only words the user dictated: never adds a greeting, subject,
+    sign-off or sender. Order of attempts:
+    1. an explicit dictated salutation (``format_dictated_email``);
+    2. the same after repairing a leading misheard "He <Name>," -> "Hey";
+    3. with no salutation, sentence-boundary paragraphs (needs 2+ sentences).
+    """
+    if not text or not text.strip():
+        return None
+    layout = format_dictated_email(text)
+    if layout is not None:
+        return layout
+    repaired = _MISHEARD_HEY_RE.sub(lambda m: f"Hey {m.group('name')}, ", text, count=1)
+    if repaired != text:
+        layout = format_dictated_email(repaired)
+        if layout is not None:
+            return layout
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()]
+    if len(sentences) < 2:
+        return None
+    # Group into short paragraphs of at most two sentences each.
+    paragraphs = [" ".join(sentences[i:i + 2]) for i in range(0, len(sentences), 2)]
+    return "\n\n".join(paragraphs)
 
 
 def collapse_echo_repeats(text: str) -> str:

@@ -198,3 +198,42 @@ def test_global_standing_instruction_is_delivered():
     assert "Never use emoji." in eff.instruction
     # S1 still declines what it cannot honour.
     assert not s1_engine.s1_can_handle(effective=eff, text="hello there", task=eff.task)
+
+
+# ---------------------------------------------------------------- email command fallback
+USER_EMAIL = ("He robot, I am emailing you this exec message because from two days I'm facing so many "
+              "problems with grobot that its usage is not good so can you guys please look into this matter "
+              "why my usage is not proper and all and can you fix my problems.")
+
+
+def test_users_misheard_greeting_becomes_email_layout():
+    from voice_flow.text_processing import format_email_command_fallback
+    out = format_email_command_fallback(USER_EMAIL)
+    assert out.startswith("Hey robot,\n\nI am emailing you")
+    assert out.rstrip().endswith("fix my problems.")
+    assert _fulfills_command(USER_EMAIL, out, task="rewrite", overrides={}, command_format="email")
+
+
+@pytest.mark.parametrize("source,start", [
+    ("Hey robot, please check my usage.", "Hey robot,\n\n"),
+    ("Hi team, the build is green.", "Hi team,\n\n"),
+    ("Hello Grok Bot, can you fix this.", "Hello Grok Bot,\n\n"),
+])
+def test_greetings_with_hey_and_multiword_names(source, start):
+    from voice_flow.text_processing import format_email_command_fallback
+    assert format_email_command_fallback(source).startswith(start)
+
+
+def test_no_greeting_email_splits_sentences_without_inventing_words():
+    from voice_flow.text_processing import format_email_command_fallback
+    src = "The invoice is paid. Please confirm the receipt. Thanks for the quick turnaround."
+    out = format_email_command_fallback(src)
+    assert out == "The invoice is paid. Please confirm the receipt.\n\nThanks for the quick turnaround."
+    assert format_email_command_fallback("Just one long sentence about the report") is None
+
+
+def test_he_said_is_never_turned_into_a_greeting():
+    from voice_flow.text_processing import format_dictated_email, format_email_command_fallback, cleanup_text
+    assert format_email_command_fallback("He said, the build is broken") is None
+    assert format_dictated_email("He robot, hi") is None  # strict helper unchanged
+    assert "Hey" not in cleanup_text("He said, the build is broken", "cleanup_medium")

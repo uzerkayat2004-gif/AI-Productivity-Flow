@@ -44,7 +44,7 @@ from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher, AI_POLISH_DETERMINISTIC_RESERVE_SECONDS
 from voice_flow.storage import storage
 from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, smart_format, split_press_enter
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
@@ -1891,7 +1891,7 @@ class VoiceFlowApp:
             )
             effective_format = getattr(effective, "format", None) if effective is not None else None
             if can_use_local_structure and effective_format == "email" and supported_email_overrides:
-                locally_formatted = format_dictated_email(polished)
+                locally_formatted = format_email_command_fallback(polished)
                 if locally_formatted is not None:
                     # The content and layout are already fixed above; apply
                     # only the user's selected deterministic register so this
