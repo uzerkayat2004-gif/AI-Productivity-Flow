@@ -85,7 +85,7 @@ def test_offline_request_uses_pinned_native_context_abi_and_boost(monkeypatch):
     assert text == "decoded"
     assert dll.context_count == 1
     assert dll.phrases == ["OpenAI", "Kubernetes"]
-    assert dll.boost == 3.0
+    assert dll.boost == nemotron_engine.NEMOTRON_CONTEXT_BOOST
 
 
 def test_stream_request_keeps_utf8_buffers_alive_for_native_stream(monkeypatch):
@@ -100,7 +100,7 @@ def test_stream_request_keeps_utf8_buffers_alive_for_native_stream(monkeypatch):
 
     assert dll.context_count == 1
     assert dll.phrases == ["Ada Lovelace", "Éclair"]
-    assert dll.boost == 3.0
+    assert dll.boost == nemotron_engine.NEMOTRON_CONTEXT_BOOST
     assert len(session._speech_context_refs) == 3
     context = session._speech_context_refs[0][0]
     assert context.phrases[1].decode("utf-8") == "Éclair"

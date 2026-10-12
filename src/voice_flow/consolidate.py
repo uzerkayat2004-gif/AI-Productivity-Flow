@@ -37,17 +37,13 @@ log = logging.getLogger(__name__)
 # INSERT OR IGNORE so existing primary keys are never overwritten.
 MERGE_TABLES = (
     "history",
-    "dictionary",
     "api_keys",
     "settings",
     "provider_connections",
     "provider_settings",
     "provider_models",
-    "dictionary_corrections",
     "snippets",
-    "dictionary_keys",
     "snippet_keys",
-    "correction_keys",
     "migration_conflicts",
     "tts_models",
     "audio_provider_connections",
@@ -58,8 +54,6 @@ MERGE_TABLES = (
     "video_flow_provider_models",
     "video_flow_provider_settings",
     "video_flow_animation_history",
-    "dictionary_replacements",
-    "dictionary_learning_candidates",
     "custom_transforms",
     "transform_writing_examples",
     "transform_history",
@@ -68,11 +62,20 @@ MERGE_TABLES = (
     "video_flow_jobs",
     "combos",
     "oauth_connections",
-    "lexicon_candidates",
     "google_auth_kv",
     "audio_provider_settings",
     "audio_summary_history",
 )
+
+# The user dictionary is never merged across databases: the rebuilt
+# dictionary was cleared on purpose, and merging old sibling databases
+# (acc_primary, the legacy default DB) silently restored the deleted words.
+DICTIONARY_TABLES = frozenset({
+    "dictionary", "dictionary_keys", "dictionary_corrections", "correction_keys",
+    "dictionary_replacements", "dictionary_learning_candidates", "lexicon_candidates",
+    "lexicon_candidate_observations",
+})
+assert not DICTIONARY_TABLES & set(MERGE_TABLES)
 
 CONSOLIDATION_MARKER_KEY = "db_consolidation_v1"
 

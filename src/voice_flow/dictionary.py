@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from difflib import SequenceMatcher
 
-from voice_flow.dictionary_rules import is_ordinary, normalize
+from voice_flow.dictionary_rules import is_ordinary, normalize, term_problem
 from voice_flow.storage import storage
 
 log = logging.getLogger(__name__)
@@ -364,6 +364,10 @@ class DictionaryEngine:
                     rules.append(_Rule(trigger, expansion, SNIPPET))
             canonical: dict[str, str] = {}
             for word in words:
+                # Legacy rows saved before validation (Hey, Here, Voice Flow)
+                # are ignored even if they are still stored somewhere.
+                if term_problem(word):
+                    continue
                 key = normalize(word)
                 if key and key not in canonical:
                     canonical[key] = word
@@ -531,10 +535,16 @@ class DictionaryEngine:
                 score = _similar(span, term)
                 if best is None or score > best[0]:
                     best = (score, start, end)
-        if best is None or best[0] < 0.8 or len(term) < 4:
+        if best is None or best[0] < 0.85 or len(term) < 5:
             return text
         _, start, end = best
         span = text[start:end]
+        # Never turn ordinary words into a name ("give" -> GitHub,
+        # "tweet" -> Twitter), and require the same first letter.
+        if is_ordinary(span) or any(is_ordinary(part) for part in span.split()):
+            return text
+        if span[:1].casefold() != term[:1].casefold():
+            return text
         suffix = ""
         match = re.search(r"(['\u2019]s|s['\u2019])$", span)
         if match and not term.casefold().endswith(match.group(0).casefold()):

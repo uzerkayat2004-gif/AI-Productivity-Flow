@@ -689,7 +689,7 @@ class StorageEngine:
         self._migrate_audio_summary_history()
         self._seed_default_models()
         self._seed_tts_models()
-        self._migrate_dictionary_rebuild_v1()
+        self._migrate_dictionary_rebuild()
         try:
             self.sync_media_to_history()
         except Exception:
@@ -1524,7 +1524,9 @@ class StorageEngine:
 
     # --- Dictionary API ---
 
-    DICTIONARY_REBUILD_KEY = "dictionary_rebuild_v1"
+    # v2: v1 ran, but database consolidation then merged the old words back
+    # from sibling databases. Clear (with a fresh backup) once more.
+    DICTIONARY_REBUILD_KEY = "dictionary_rebuild_v2"
     _DICTIONARY_REBUILD_TABLES = (
         "dictionary",
         "dictionary_keys",
@@ -1538,7 +1540,7 @@ class StorageEngine:
         "dictionary_ignored_terms",
     )
 
-    def _migrate_dictionary_rebuild_v1(self) -> str | None:
+    def _migrate_dictionary_rebuild(self) -> str | None:
         """Clear the old dictionary once, after saving a JSON backup.
 
         The previous dictionary auto-learned rewrites from polished text and

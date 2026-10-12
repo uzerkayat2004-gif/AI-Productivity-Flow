@@ -142,6 +142,9 @@ class _RecognitionOptions(ctypes.Structure):
     ]
 
 
+NEMOTRON_CONTEXT_BOOST = 1.0
+
+
 def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
     """Build a per-request native phrase boost and retain all backing memory.
 
@@ -174,7 +177,9 @@ def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
     contexts[0].size = ctypes.sizeof(_SpeechContext)
     contexts[0].phrases = phrase_array
     contexts[0].phrase_count = len(encoded_phrases)
-    contexts[0].boost = 3.0
+    # A gentle boost: 3.0 made the recognizer hear saved names in ordinary
+    # speech ("give me the great tweet" -> "GitHub Great Twitter").
+    contexts[0].boost = NEMOTRON_CONTEXT_BOOST
     return contexts, (contexts, phrase_array, encoded_phrases)
 
 

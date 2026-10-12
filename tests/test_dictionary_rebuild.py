@@ -355,3 +355,59 @@ def test_suggestion_endpoints_and_storage_are_gone(store):
     assert not hasattr(store, "set_lexicon_candidate_state")
     source = Path(__file__).resolve().parents[1].joinpath("src/voice_flow/gui/api_server.py").read_text(encoding="utf-8")
     assert "/api/dictionary/suggestions" not in source
+
+
+# -- Regressions from the laptop (12 Oct) ------------------------------------
+
+@pytest.mark.parametrize("raw", [
+    "give me the great tweet",
+    "what the heck are you doing give me the great tweet",
+    "give me the proper tweet",
+])
+def test_ordinary_words_are_never_mapped_to_saved_names(store, raw):
+    assert store.add_dictionary_entry("GitHub")
+    assert store.add_dictionary_entry("Twitter")
+    engine = DictionaryEngine(store)
+    assert engine.apply_dictionary_post_processing(raw) == raw
+    polished = raw.capitalize() + "."
+    assert engine.guard_polished_output(raw, polished) == polished
+    # Even if the source named them, ordinary words in the output are never re-mapped.
+    assert engine.guard_polished_output("github and twitter", "Give me the great tweet.") == "Give me the great tweet."
+
+
+def test_legacy_ordinary_rows_are_ignored_by_the_engine(store):
+    with store._get_conn_ctx() as conn:
+        for word in ("Hey", "Here", "Voice Flow", "GitHub"):
+            conn.execute("INSERT INTO dictionary (word, category, created_at) VALUES (?, 'Personal', 'x')", (word,))
+        conn.commit()
+    store._touch_lexicon() if hasattr(store, "_touch_lexicon") else None
+    engine = DictionaryEngine(store)
+    assert engine.apply_dictionary_post_processing("hey here voice flow github") == "hey here voice flow GitHub"
+    assert engine.get_stt_hint_terms() == ["GitHub"]
+
+
+def test_consolidation_never_merges_dictionary_tables():
+    from voice_flow import consolidate
+
+    assert not consolidate.DICTIONARY_TABLES & set(consolidate.MERGE_TABLES)
+    assert "snippets" in consolidate.MERGE_TABLES and "history" in consolidate.MERGE_TABLES
+
+
+def test_v2_reset_runs_after_a_v1_reset(tmp_path):
+    db = tmp_path / "voice-flow.db"
+    first = StorageEngine(str(db))
+    with first._get_conn_ctx() as conn:
+        conn.execute("INSERT INTO dictionary (word, category, created_at) VALUES ('GitHub', 'Personal', 'x')")
+        conn.execute("DELETE FROM settings WHERE key = ?", (StorageEngine.DICTIONARY_REBUILD_KEY,))
+        conn.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('dictionary_rebuild_v1', 'true', 'x')")
+        conn.commit()
+    again = StorageEngine(str(db))
+    assert again.get_dictionary_words(include_auto=True) == []
+    assert StorageEngine.DICTIONARY_REBUILD_KEY == "dictionary_rebuild_v2"
+
+
+def test_nemotron_boost_is_gentle():
+    from voice_flow import nemotron_engine
+
+    contexts, _ = nemotron_engine._make_speech_context(["GitHub"])
+    assert contexts[0].boost <= 1.5

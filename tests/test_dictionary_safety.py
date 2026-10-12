@@ -126,7 +126,7 @@ def test_dictionary_processing_is_idempotent(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = _DictionarySource(["VoiceFlow"])
+    source = _DictionarySource(["GrokBot"])
     monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_entries", source.entries)
     monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_revision", lambda: source.revision)
     # Hermetic: isolate corrections snapshot too (live learned data must not leak).
@@ -144,7 +144,7 @@ def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.
     )
     engine = DictionaryEngine()
 
-    assert engine.apply_dictionary_post_processing("voiceflow") == "VoiceFlow"
+    assert engine.apply_dictionary_post_processing("grokbot") == "GrokBot"
     source.words.append("NewTerm")
     source.revision += 1
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
