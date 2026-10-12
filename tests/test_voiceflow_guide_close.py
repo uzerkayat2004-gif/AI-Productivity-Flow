@@ -10,9 +10,9 @@ APP_JS = ROOT / "src" / "voice_flow" / "gui" / "app.js"
 def test_voiceflow_guide_close_cleans_demo_card_unconditionally() -> None:
     """stopVoiceFlowGuide must unconditionally clean demo cards and refresh real history."""
     content = APP_JS.read_text(encoding="utf-8")
-    assert "function stopVoiceFlowGuide()" in content
+    assert "function stopVoiceFlowGuide(" in content
 
-    stop_fn = content[content.index("function stopVoiceFlowGuide()"):content.index("function replayOnboarding()")]
+    stop_fn = content[content.index("function stopVoiceFlowGuide("):content.index("function replayOnboarding()")]
     # Verify demo card cleanup is not gated by !hasRealDictations
     assert "_cleanVoiceFlowGuideDemoCard();" in stop_fn
     assert "if (!hasRealDictations) {\n    _cleanVoiceFlowGuideDemoCard();\n  }" not in stop_fn

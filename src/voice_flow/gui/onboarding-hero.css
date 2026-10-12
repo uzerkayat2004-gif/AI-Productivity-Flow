@@ -1018,7 +1018,8 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
 
 /* 13b. Unified Bottom Row Controls: Auto/Manual Mode and Skip Tour Badges */
 .scene1-skip-badge {
-  position: static !important;
+  position: relative !important;
+  z-index: 50 !important;
   top: auto !important;
   right: auto !important;
   height: 48px !important;
@@ -1062,7 +1063,8 @@ html[data-theme="dark"] .s1-theme-ic .sun { display: block !important; }
 }
 
 .scene1-auto-badge {
-  position: static !important;
+  position: relative !important;
+  z-index: 50 !important;
   top: auto !important;
   right: auto !important;
   height: 48px !important;

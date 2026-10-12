@@ -839,18 +839,29 @@ function toggleVoiceFlowMenu(event) {
   const group = document.getElementById("voiceflow-nav-group");
   const isChevron = event && event.target && event.target.classList.contains("nav-chevron");
 
-  if (isChevron && currentPageId === "home" && group) {
+  if (isChevron && group) {
     group.classList.toggle("open");
     return;
   }
 
   if (group) group.classList.add("open");
-  switchPage("home", { userInitiated: true });
-  setTimeout(() => {
-    if (typeof startVoiceFlowGuide === "function") {
-      startVoiceFlowGuide();
-    }
-  }, 60);
+
+  const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+  const isFirstTime = !vfVoiceGuided && !isExistingUserOrOnboardingDone();
+
+  if (isFirstTime) {
+    switchPage("home", { userInitiated: true });
+    setTimeout(() => {
+      if (typeof startVoiceFlowGuide === "function") {
+        startVoiceFlowGuide();
+      }
+    }, 60);
+    return;
+  }
+
+  if (currentPageId !== "home" && !VOICEFLOW_CHILD_PAGES.includes(currentPageId)) {
+    switchPage("home", { userInitiated: true });
+  }
 }
 
 function setVoiceFlowMenuOpen(open) {
@@ -867,6 +878,14 @@ function updateVoiceFlowParentState(pageId) {
   if (isChild) setVoiceFlowMenuOpen(true);
 }
 
+function isExistingUserOrOnboardingDone() {
+  const localDone = onboardingFlag("hasViewedOnboarding") === "true" || onboardingFlag("vf_onboarding.done") === "1";
+  const afGuided = onboardingFlag("vf_onboarding.af_guided") === "1";
+  const vfGuided = onboardingFlag("vf_onboarding.vf_guided") === "1";
+  const voiceGuided = onboardingFlag("vf_onboarding.vf_voice_guided") === "1";
+  return localDone || (afGuided && vfGuided && voiceGuided);
+}
+
 function initNavigation() {
   const navItems = document.querySelectorAll(".sidebar .nav-item[data-page]");
   navItems.forEach(item => {
@@ -875,9 +894,10 @@ function initNavigation() {
       const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
       const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
       const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+      const isFirstTime = !isExistingUserOrOnboardingDone();
 
-      if (isVoiceFlowFeature && !vfVoiceGuided) {
-        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
+      if (isVoiceFlowFeature && !vfVoiceGuided && isFirstTime) {
+        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide once
         switchPage("home", { userInitiated: true });
         setTimeout(() => {
           if (typeof startVoiceFlowGuide === "function") {
@@ -889,6 +909,10 @@ function initNavigation() {
 
       const isSwitching = (currentPageId !== pageId);
       switchPage(pageId, { userInitiated: true });
+
+      if (!isFirstTime) {
+        return;
+      }
 
       if (pageId === "videoflow") {
         const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
@@ -7398,13 +7422,6 @@ async function maybeShowOnboarding() {
 
   // Display upgraded Scene 1 onboarding hero on user's desktop app
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
-  setOnboardingFlag("hasViewedOnboarding", "true");
-  setOnboardingFlag("vf_onboarding.done", "1");
-  fetch("/api/settings/update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: "has_viewed_onboarding", value: true }),
-  }).catch(() => {});
 
   const overlay = document.getElementById("onboarding-overlay");
   if (!overlay) return;
@@ -7865,6 +7882,12 @@ function finishOnboarding(options) {
   const source = document.getElementById("onboarding-source");
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
   setOnboardingFlag("vf_onboarding.done", "1");
+  setOnboardingFlag("hasViewedOnboarding", "true");
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "has_viewed_onboarding", value: true }),
+  }).catch(() => {});
   const overlay = document.getElementById("onboarding-overlay");
   if (overlay) {
     overlay.classList.add("hidden");
@@ -8508,6 +8531,7 @@ function prevAudioFlowGuideStep() {
 }
 
 function startAudioFlowGuide(options) {
+  setOnboardingFlag("vf_onboarding.af_guided", "1");
   const overlay = document.getElementById("audioflow-guide-overlay");
   if (!overlay) return;
   // Probe the guide stylesheet before locking anything: an unstyled overlay
@@ -8570,12 +8594,10 @@ function _onAfGuideResize() {
   }
 }
 
-function stopAudioFlowGuide(options) {
+function stopAudioFlowGuide(markCompleted = false) {
   let unusable = false;
-  let markCompleted = false;
-  if (typeof options === "boolean") {
-    markCompleted = options;
-  } else if (options && typeof options === "object") {
+  if (typeof markCompleted === "object" && markCompleted !== null) {
+    const options = markCompleted;
     unusable = !!options.unusable;
     if (Object.prototype.hasOwnProperty.call(options, "markCompleted")) {
       markCompleted = !!options.markCompleted;
@@ -8583,8 +8605,7 @@ function stopAudioFlowGuide(options) {
       markCompleted = !unusable;
     }
   } else {
-    // no-arg call (main): mark complete
-    markCompleted = true;
+    markCompleted = Boolean(markCompleted);
   }
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
@@ -9193,6 +9214,7 @@ function prevVideoFlowGuideStep() {
 }
 
 function startVideoFlowGuide() {
+  setOnboardingFlag("vf_onboarding.vf_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -9874,6 +9896,7 @@ function prevVoiceFlowGuideStep() {
 }
 
 function startVoiceFlowGuide() {
+  setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("home", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -9984,6 +10007,14 @@ function stopVoiceFlowGuide(markCompleted = false) {
 function replayOnboarding() {
   setOnboardingFlag("vf_onboarding.done", "");
   setOnboardingFlag("hasViewedOnboarding", "");
+  setOnboardingFlag("vf_onboarding.af_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_voice_guided", "");
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "has_viewed_onboarding", value: false }),
+  }).catch(() => {});
   if (typeof closeSettings === "function") closeSettings();
   onboardingSlide = 0;
   renderOnboardingSlide();
