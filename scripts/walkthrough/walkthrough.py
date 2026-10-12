@@ -390,6 +390,59 @@ def main() -> int:
         lock_click(page, "guide Finish (step 4)", ".af-guide-btn-next", win=win, wait=3.0,
                    check=lambda p, s: (p.evaluate("!document.body.classList.contains('af-guide-active')"), "guide finished"))
         page.evaluate("() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
+
+        # ---- The other feature guides: first visit to Video Flow / Voice Flow auto-starts them.
+        def drive_guide(name, nav_sel, prefix, max_steps=8):
+            cnt = lambda p: p.evaluate(f"(document.getElementById('{prefix}-guide-step-counter')||{{}}).textContent || ''")
+            active = lambda p: p.evaluate("document.body.classList.contains('af-guide-active')")
+            lock_click(page, f"{name}: sidebar click (first visit)", nav_sel, win=win, wait=3.0,
+                       check=lambda p, s: (active(p), f"guide active={active(p)} counter={cnt(p)!r}"))
+            card = page.evaluate(f"""() => {{ const c=document.getElementById('{prefix}-guide-card'); if (!c) return null;
+              const r=c.getBoundingClientRect(); const s=getComputedStyle(c);
+              return {{w: Math.round(r.width), h: Math.round(r.height), pos: s.position, bg: s.backgroundColor}}; }}""")
+            record(f"{name}: guide card styled and visible", "ok" if card and card["w"] > 200 and card["pos"] != "static" else "fail",
+                   f"card={card} counter={cnt(page)!r}", native_shot(f"{prefix}-guide-step-1"))
+            for i in range(1, max_steps + 1):
+                if not active(page):
+                    break
+                before = cnt(page)
+                lock_click(page, f"{name}: Next from {before[:28]!r}", f"#{prefix}-guide-btn-next", win=win, wait=3.0,
+                           check=lambda p, s, before=before: (cnt(p) != before or not active(p), f"counter {before!r} -> {cnt(p)!r}"))
+            done = not active(page)
+            record(f"{name}: guide finishes and releases the app", "ok" if done else "fail", f"active={not done}",
+                   native_shot(f"{prefix}-guide-finished"))
+            if not done:
+                page.evaluate(f"try {{ stop{'Video' if prefix == 'vf' else 'Voice'}FlowGuide(true); }} catch(e){{}}")
+
+        drive_guide("Video Flow guide", ".sidebar .nav-item[data-page=videoflow]", "vf")
+        drive_guide("Voice Flow guide", ".sidebar .nav-item[data-page=home]", "voiceflow")
+
+        # ---- Onboarding media: every voiceover the tour and guides reference must load and decode.
+        media = page.evaluate("""async () => {
+          const srcs = new Set();
+          for (const k of ['AUDIOFLOW_GUIDE_STEPS','VIDEOFLOW_GUIDE_STEPS','VOICEFLOW_GUIDE_STEPS']) {
+            let arr = []; try { arr = eval(k) || []; } catch (e) {}
+            for (const s of arr) { if (s.audioSrc) srcs.add(s.audioSrc); if (s.audioSrcMac) srcs.add(s.audioSrcMac); }
+          }
+          for (let i = 0; i < 6; i++) srcs.add(`assets/onboarding/slide_${i}.mp3`);
+          document.querySelectorAll('audio[src],video[src],source[src]').forEach(e => srcs.add(e.getAttribute('src')));
+          const out = [];
+          for (const src of srcs) {
+            const r = {src, status: null, bytes: null, duration: null};
+            try { const res = await fetch(src); r.status = res.status; r.bytes = (await res.arrayBuffer()).byteLength; } catch (e) { r.status = String(e); }
+            if (/\\.(mp3|mp4)$/.test(src)) {
+              r.duration = await new Promise(ok => { const a = document.createElement(/mp4$/.test(src) ? 'video' : 'audio');
+                a.preload = 'metadata'; a.muted = true; const t = setTimeout(() => ok('timeout'), 8000);
+                a.onloadedmetadata = () => { clearTimeout(t); ok(Math.round(a.duration * 10) / 10); };
+                a.onerror = () => { clearTimeout(t); ok('decode-error'); }; a.src = src; });
+            }
+            out.push(r);
+          }
+          return out; }""")
+        bad = [m for m in media if m["status"] != 200 or not isinstance(m["duration"], (int, float)) and m["duration"] is not None]
+        record("onboarding media load + decode", "fail" if bad else "ok",
+               f"{len(media)} files, bad={bad} all={[(m['src'].split('/')[-1], m['status'], m['duration']) for m in media]}")
+
         lock_click(page, "after finishing guide: sidebar click Video Flow", ".sidebar .nav-item[data-page=videoflow]",
                    win=win, check=lambda p, s: (s["page"] == "videoflow", f"page={s['page']}"))
         lock_click(page, "after finishing guide: sidebar click Settings", ".sidebar .nav-item[onclick*=openSettings]", win=win,
@@ -412,6 +465,22 @@ def main() -> int:
         page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         page.wait_for_timeout(800)
         step(page, "main app after onboarding", wait=1.5)
+
+        # ---- Welcome Tour Auto mode: replay and do nothing; slides should advance on their own.
+        page.evaluate("replayOnboarding()")
+        page.wait_for_timeout(1500)
+        auto_on = page.evaluate("typeof onboardingAutoMode === 'undefined' ? null : onboardingAutoMode")
+        seen = []
+        for t in range(9):
+            seen.append(page.evaluate("typeof onboardingSlide === 'undefined' ? null : onboardingSlide"))
+            if t in (0, 4, 8):
+                native_shot(f"tour-auto-{t*10}s")
+            page.wait_for_timeout(10000)
+        advanced = len(set(x for x in seen if x is not None)) > 1
+        record("Welcome Tour Auto mode advances by itself", "ok" if advanced else "fail",
+               f"autoMode={auto_on} slide every 10s={seen}", shot(page, "tour-auto-after-90s"))
+        page.evaluate("try { finishOnboarding({ skipped: true }); } catch(e){}")
+        page.wait_for_timeout(1000)
 
         # Replay from the sidebar + Skip Tour, as a user would (native + WebKit)
         lock_click(page, "replay tour (sidebar 'Welcome Tour')", ".sidebar .nav-item[onclick*=replayOnboarding]", win=win,
