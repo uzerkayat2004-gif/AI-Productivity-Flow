@@ -381,8 +381,8 @@ def test_raw_decoder_and_finalizer_apply_a_correction_chain_only_once(
     )
 
     assert raw == "first"
-    assert result == "second."
-    assert trace == [{"from": "First", "to": "second"}]
+    assert result == "Second."  # one chain step, then normal sentence casing
+    assert trace == [{"from": "first", "to": "second"}]
 
 
 def test_polish_mode_normalization_uses_the_three_persisted_policy_values() -> None:

@@ -25,6 +25,9 @@ import logging
 import os
 import re
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
+from difflib import SequenceMatcher
 
 from voice_flow.dictionary_rules import is_ordinary, normalize
 from voice_flow.storage import storage
@@ -142,17 +145,41 @@ def _compile(rules: tuple[_Rule, ...]) -> re.Pattern[str] | None:
     return re.compile("|".join(f"({_rule_regex(rule)})" for rule in usable), re.IGNORECASE)
 
 
+# Set while text that already had one dictionary pass is processed again
+# (after a polisher, template, or command rewrite). A Replacement whose heard
+# phrase is itself another rule's output is then skipped, so a chain such as
+# first -> second, second -> third never runs twice.
+_ALREADY_APPLIED: ContextVar[bool] = ContextVar("vf_dictionary_already_applied", default=False)
+
+
+@contextmanager
+def already_applied():
+    token = _ALREADY_APPLIED.set(True)
+    try:
+        yield
+    finally:
+        _ALREADY_APPLIED.reset(token)
+
+
 def _apply(text: str, rules: tuple[_Rule, ...], pattern: re.Pattern[str] | None,
            trace: list[dict[str, str]] | None = None) -> str:
     """One left-to-right pass outside protected spans; no cascading."""
     if not text or pattern is None:
         return text
+    outputs = {
+        rule.replacement.casefold() for rule in rules if rule.kind != SNIPPET
+    } if _ALREADY_APPLIED.get() else set()
 
     def replace(match: re.Match[str]) -> str:
         index = match.lastindex or 0
         rule = rules[index - 1] if 0 < index <= len(rules) else None
         original = match.group(0)
         if rule is None:
+            return original
+        if rule.kind == REPLACEMENT and _ALREADY_APPLIED.get() and original.casefold() in outputs:
+            return original
+        if rule.kind != WORD and _inside_existing_target(match, rule.replacement):
+            # "grok" -> "Grok Bot" must not turn "Grok Bot" into "Grok Bot Bot".
             return original
         if trace is not None and original != rule.replacement:
             trace.append({"from": original, "to": rule.replacement})
@@ -166,6 +193,37 @@ def _apply(text: str, rules: tuple[_Rule, ...], pattern: re.Pattern[str] | None,
         cursor = protected.end()
     out.append(pattern.sub(replace, text[cursor:]))
     return "".join(out)
+
+
+def _inside_existing_target(match: re.Match[str], target: str) -> bool:
+    if not target:
+        return False
+    haystack = match.string
+    folded_target = target.casefold()
+    start = max(0, match.start() - len(target))
+    window = haystack[start:match.end() + len(target)].casefold()
+    offset = 0
+    while True:
+        found = window.find(folded_target, offset)
+        if found < 0:
+            return False
+        abs_start = start + found
+        abs_end = abs_start + len(target)
+        whole = abs_start == match.start() and abs_end == match.end()
+        if abs_start <= match.start() and match.end() <= abs_end and not whole:
+            return True
+        offset = found + 1
+
+
+_TOKEN_RE = re.compile(r"[^\W_]+(?:['\u2019.\-+#][^\W_]+)*[+#]*", re.UNICODE)
+
+
+def _similar(a: str, b: str) -> float:
+    a2 = re.sub(r"[\W_]+", "", a.casefold())
+    b2 = re.sub(r"[\W_]+", "", b.casefold())
+    if not a2 or not b2:
+        return 0.0
+    return SequenceMatcher(None, a2, b2).ratio()
 
 
 def _ordered(rules: list[_Rule]) -> tuple[_Rule, ...]:
@@ -348,12 +406,26 @@ class DictionaryEngine:
 
     # -- the one deterministic pass ---------------------------------------
 
-    def apply_dictionary_post_processing(self, text: str, trace: list[dict[str, str]] | None = None) -> str:
-        """Fix Word spellings, apply Replacements, expand Shortcuts. One pass."""
+    def apply_dictionary_post_processing(
+        self,
+        text: str,
+        trace: list[dict[str, str]] | None = None,
+        include_snippets: bool = True,
+    ) -> str:
+        """Fix Word spellings, apply Replacements, expand Shortcuts. One pass.
+
+        ``include_snippets=False`` is used before an AI polish: names are
+        corrected so the model sees them, while shortcut expansions are left
+        for the final pass so no model can rewrite them.
+        """
         if not text:
             return text
         self._ensure_loaded()
-        result = _apply(text, self._rules, self._pattern, trace)
+        if include_snippets:
+            result = _apply(text, self._rules, self._pattern, trace)
+        else:
+            rules = tuple(rule for rule in self._rules if rule.kind != SNIPPET)
+            result = _apply(text, rules, _compile(rules), trace)
         if result != text:
             log.info("Applied dictionary rules to dictated text")
         return result
@@ -364,6 +436,111 @@ class DictionaryEngine:
             return text
         self._ensure_loaded()
         return _apply(text, self._spelling_rules, self._spelling_pattern)
+
+    # -- protection around any polisher ------------------------------------
+
+    def _protected_targets(self) -> list[str]:
+        self._ensure_loaded()
+        return [rule.trigger for rule in self._spelling_rules]
+
+    def terms_in(self, text: str) -> list[str]:
+        """Protected Words / Replacement targets that occur in ``text``."""
+        if not text:
+            return []
+        found: list[str] = []
+        for term in self._protected_targets():
+            pattern = r"(?<!\w)" + re.escape(term).replace(r"\ ", r"\s+") + r"(?!\w)"
+            if re.search(pattern, text, re.IGNORECASE):
+                found.append(term)
+        return found
+
+    def preferred_spellings_note(self, text: str) -> str:
+        """Model-agnostic prompt note listing only the terms in this text.
+
+        Any prompt-based polisher (cloud, LFM, a future fine-tuned model) can
+        append it. It lists only names already present, so a model is never
+        invited to insert an unspoken name. S1's trained control line is not
+        changed; see docs/dictionary.md for the training-data note.
+        """
+        try:
+            terms = self.terms_in(text)
+        except Exception:
+            return ""
+        if not terms:
+            return ""
+        return (
+            "Keep these names exactly as spelled: " + ", ".join(terms[:40]) + "."
+        )
+
+    def guard_polished_output(self, source: str, output: str) -> str:
+        """Make any polisher's output keep the user's dictionary words.
+
+        1. Re-apply Words and Replacements (never shortcuts) to the output.
+        2. Restore exact Word spelling.
+        3. For a Word that was in ``source`` but the model re-spelled
+           (Kubernetis, Kuber Netes), replace the closest near-miss span.
+        Deterministic, idempotent, and a no-op for an empty dictionary.
+        """
+        if not output or not source:
+            return output
+        original = output
+        try:
+            self._ensure_loaded()
+            if not self._spelling_rules and not self._rules:
+                return output
+            prepared = self.apply_dictionary_post_processing(source, include_snippets=False)
+            expected = self.terms_in(prepared)
+            # Shortcut expansions are pasted literally: hide them from the guard.
+            shielded: dict[str, str] = {}
+            for index, (_, expansion) in enumerate(sorted(self.snippets, key=lambda item: -len(item[1]))):
+                if expansion and expansion in output:
+                    token = f"\u27e6VF_SNIPPET_{index}\u27e7"
+                    shielded[token] = expansion
+                    output = output.replace(expansion, token)
+            with already_applied():
+                result = self._guard_text(output, expected)
+            for token, expansion in shielded.items():
+                result = result.replace(token, expansion)
+            return result
+        except Exception:
+            log.exception("Dictionary guard failed; keeping polished text")
+            return original
+
+    def _guard_text(self, output: str, expected: list[str]) -> str:
+        result = self.apply_dictionary_post_processing(output, include_snippets=False)
+        result = self.restore_dictionary_spelling(result)
+        for term in expected:
+            if term not in self.terms_in(result):
+                result = self._repair_near_miss(result, term)
+        return result
+
+    @staticmethod
+    def _repair_near_miss(text: str, term: str) -> str:
+        tokens = list(_TOKEN_RE.finditer(text))
+        if not tokens:
+            return text
+        width = max(1, len(term.split()))
+        best: tuple[float, int, int] | None = None
+        for size in {width, width + 1, max(1, width - 1)}:
+            for i in range(0, len(tokens) - size + 1):
+                start = tokens[i].start()
+                end = tokens[i + size - 1].end()
+                span = text[start:end]
+                if _PROTECTED_RE.search(span):
+                    continue
+                score = _similar(span, term)
+                if best is None or score > best[0]:
+                    best = (score, start, end)
+        if best is None or best[0] < 0.8 or len(term) < 4:
+            return text
+        _, start, end = best
+        span = text[start:end]
+        suffix = ""
+        match = re.search(r"(['\u2019]s|s['\u2019])$", span)
+        if match and not term.casefold().endswith(match.group(0).casefold()):
+            suffix = match.group(0)
+        log.info("Dictionary guard restored a re-spelled term")
+        return text[:start] + term + suffix + text[end:]
 
     def mask_rule_inputs_for_cleanup(self, text: str) -> tuple[str, dict[str, str]]:
         """Shield exact rule inputs from filler cleanup until the final pass."""

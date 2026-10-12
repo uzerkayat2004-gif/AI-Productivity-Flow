@@ -3874,45 +3874,7 @@ class StorageEngine:
     # -- learned vocabulary candidates (spec SS34-37) --------------------
 
 
-    def get_lexicon_suggestions(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Candidates with enough evidence to suggest (spec SS37: only
-        'suggested' rows surface; raw candidates stay internal)."""
-        with self._get_conn_ctx() as conn:
-            rows = conn.execute(
-                "SELECT id, term, variant, evidence, state, source, created_at, updated_at "
-                "FROM lexicon_candidates WHERE state = 'suggested' "
-                "ORDER BY evidence DESC, updated_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
 
-    def set_lexicon_candidate_state(self, candidate_id: int, state: str) -> bool:
-        """User decision on a suggestion: active (adds to dictionary), ignored."""
-        if state not in ("active", "ignored", "candidate"):
-            return False
-        import datetime as _dt
-
-        now = _dt.datetime.now().isoformat(timespec="seconds")
-        try:
-            with self._get_conn_ctx() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute("SELECT term, variant, state FROM lexicon_candidates WHERE id = ?", (candidate_id,)).fetchone()
-                if row is None:
-                    return False
-                if state == "active" and not self._add_dictionary_entry_conn(
-                    conn, str(row["term"]), str(row["variant"] or ""), now
-                ):
-                    conn.rollback()
-                    return False
-                conn.execute(
-                    "UPDATE lexicon_candidates SET state = ?, updated_at = ? WHERE id = ?",
-                    (state, now, candidate_id),
-                )
-                self._touch_lexicon(conn)
-            return True
-        except (sqlite3.IntegrityError, sqlite3.OperationalError, ValueError):
-            log.exception("Could not approve lexicon candidate %r", candidate_id)
-            return False
 
     def update_dictionary_word(self, old_word: str, new_word: str) -> bool:
         """Rename/replace a dictionary term in place (inline chip editing).

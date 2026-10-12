@@ -1653,7 +1653,20 @@ class VoiceFlowApp:
 
         threading.Thread(target=_write, args=(), kwargs={}, daemon=True).start()
 
-    def _finalize_text(
+    def _finalize_text(self, raw_action_text: str, *args: Any, **kwargs: Any) -> str:
+        """Finalize on every route, then guard the user's dictionary words.
+
+        Email/bullet templates, local command rewrites, and style formatting
+        run after the polisher, so the guard runs once more on the pasted text.
+        """
+        result = self._finalize_text_routes(raw_action_text, *args, **kwargs)
+        guard = getattr(dictionary_engine, "guard_polished_output", None)
+        if guard is None or not isinstance(result, str) or not result:
+            return result
+        guarded = guard(raw_action_text, result)
+        return guarded if isinstance(guarded, str) else result
+
+    def _finalize_text_routes(
         self,
         raw_action_text: str,
         session: Any,
@@ -2479,7 +2492,7 @@ class VoiceFlowApp:
                 raise RuntimeError("No text was transcribed")
             # Retried history deliberately uses the stored style-independent
             # recovery path: it never focuses or pastes into the current app.
-            text = smart_format(dictionary_engine.apply_dictionary_post_processing(cleanup_text(raw, "cleanup_light")), "smart_clean")
+            text = dictionary_engine.restore_dictionary_spelling(smart_format(dictionary_engine.apply_dictionary_post_processing(cleanup_text(raw, "cleanup_light")), "smart_clean"))
             self._history_update(record_id, raw_text=raw, polished_text=text, status="success", error_message=None, insertion_status="not_attempted")
             self.last_successful_transcript = text
             self._overlay_call("show_done", text)

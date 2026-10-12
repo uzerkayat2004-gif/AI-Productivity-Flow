@@ -59,3 +59,13 @@ Research for AI Productivity Flow (Voice Flow), 12 Oct 2026.
 - **Ordinary words** are refused as Words in any casing (a "IT" entry would rewrite every "it").
 - **Shortcuts** stay their own table and feature; they still expand in the same pass.
 - **Upgrade**: existing dictionary rows, replacements and learning candidates are written to `dictionary-backup-before-rebuild-<time>.json` in the data folder, then cleared once.
+
+## Protection around every polisher (all models, polish on or off)
+
+1. **Before polish**: Words and Replacements are applied to the transcript (shortcuts are not), so every model sees the correct spelling and no model can rewrite a shortcut expansion.
+2. **Prompt note (model-agnostic)**: `dictionary_engine.preferred_spellings_note(text)` lists only the user's names present in this dictation ("Keep these names exactly as spelled: ..."). Cloud polishing and LFM append it. **S1 is unchanged**: its trained control line and system prompt are not touched.
+3. **After polish** (`TextPolisher.polish`) and **after templates/command rewrites/style** (`VoiceFlowApp._finalize_text`): `guard_polished_output` re-applies Words/Replacements, restores exact spelling, and repairs a re-spelled Word (Kubernetis, Kuber Netes -> Kubernetes) when a span is at least 80% similar. It never inserts a name that was not spoken. Shortcut expansions are shielded and pasted literally.
+4. **No chains across passes**: once text has had a dictionary pass, a Replacement whose heard phrase is another rule's output is skipped (first -> second, second -> third runs once).
+
+### Training-data note for S1 / a future fine-tuned Qwen
+Add an optional, separate field (not in the legacy control line), e.g. a `names:` line after the control line, listing only the dictionary names present in the input, with targets that keep those names verbatim. Include negatives where the list names a term that is absent and the target does not add it. Until then the post-polish guard is the protection for S1.

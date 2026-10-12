@@ -262,7 +262,7 @@ def test_actual_off_release_path_with_warm_native_stream_is_fast(monkeypatch):
     print("warm_stream_metrics=" + repr(result))
     assert result["native_frame_pushes"] == 32
     assert result["fallback_calls"] == 0
-    assert result["dictionary_calls"] == 1
+    assert result["dictionary_calls"] == 2  # names before polish + shortcuts after
     assert result["processing_metadata"]["polish"]["outcome"] == "disabled"
     assert result["processing_metadata"]["command"]["status"] == "disabled"
     assert result["lease_actions"] == [("release_after_idle", m.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)]
@@ -273,7 +273,7 @@ def test_actual_off_release_path_recovers_incomplete_stream_with_full_buffer(mon
     result = replay(monkeypatch, incomplete=True)
     print("incomplete_stream_metrics=" + repr(result))
     assert result["fallback_calls"] == 1
-    assert result["dictionary_calls"] == 1
+    assert result["dictionary_calls"] == 2  # names before polish + shortcuts after
     assert result["lease_actions"] == [("release_after_idle", m.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)]
     assert result["release_to_paste_ms"] < 1000, result
 

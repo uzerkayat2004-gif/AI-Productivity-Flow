@@ -172,6 +172,17 @@ def _local_system_prompt(instruction: str) -> str:
     return prompt
 
 
+def _dictionary_note(user_text: str) -> str:
+    """Preferred spellings for names in this text (empty when none)."""
+    try:
+        from voice_flow.dictionary import dictionary_engine
+
+        note = dictionary_engine.preferred_spellings_note(user_text)
+    except Exception:
+        return ""
+    return f" {note}" if note else ""
+
+
 def _build_local_messages(user_text: str, instruction: str, request_policy: str | None) -> list[dict[str, str]]:
     """Frame ordinary dictation as editing data instead of a chat request.
 
@@ -184,7 +195,7 @@ def _build_local_messages(user_text: str, instruction: str, request_policy: str 
     ))
     if not plain_cleanup or transformed_format:
         return [
-            {"role": "system", "content": _local_system_prompt(instruction)},
+            {"role": "system", "content": _local_system_prompt(instruction) + _dictionary_note(user_text)},
             {"role": "user", "content": user_text},
         ]
     policy = (
@@ -201,7 +212,7 @@ def _build_local_messages(user_text: str, instruction: str, request_policy: str 
         "Input: i cannot open the door\n"
         "Output: I cannot open the door.\n"
         "Edit only the next input; retain its question or statement. Return no input or output labels."
-    )
+    ) + _dictionary_note(user_text)
     return [
         {"role": "system", "content": policy},
         {"role": "user", "content": f"Input: {user_text}\nOutput:"},

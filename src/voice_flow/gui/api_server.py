@@ -1367,11 +1367,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Audio is unavailable"}, 404)
         elif path == "/api/dictionary/corrections":
             self.send_json_response(storage.get_dictionary_corrections())
-        elif path == "/api/dictionary/suggestions":
-            try:
-                self.send_json_response(storage.get_lexicon_suggestions(20))
-            except Exception as exc:
-                self.send_json_response({"success": False, "error": str(exc)}, 500)
         elif path == "/api/insights":
             _sync_active_storage()
             params = urllib.parse.parse_qs(parsed.query)
@@ -6006,19 +6001,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": True})
             except Exception as e:
                 self.send_json_response({"success": False, "error": str(e)}, 500)
-
-        elif path == "/api/dictionary/suggestions/decide":
-            try:
-                cid = int(data.get("id"))
-            except (TypeError, ValueError):
-                self.send_json_response({"success": False, "error": "Invalid suggestion id"}, 400)
-                return
-            state = str(data.get("state") or "").strip().lower()
-            if state not in ("active", "ignored"):
-                self.send_json_response({"success": False, "error": "state must be active or ignored"}, 400)
-                return
-            ok = storage.set_lexicon_candidate_state(cid, state)
-            self.send_json_response({"success": bool(ok)}, 200 if ok else 409)
 
         elif path == "/api/dictionary/ignore":
             word = data.get("word")

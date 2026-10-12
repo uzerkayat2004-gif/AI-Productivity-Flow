@@ -74,7 +74,7 @@ def test_filler_inside_exact_heard_as_survives_cleanup_until_final_dictionary_pa
 
     assert result == "Open Kubernetes now."
     assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]
-    assert provider_inputs == ([raw] if enabled else [])
+    assert provider_inputs == (["open Kubernetes now"] if enabled else [])  # models see the corrected name
 
     unrelated_trace: list[dict[str, str]] = []
     unrelated = "open cube netties now"
@@ -87,7 +87,7 @@ def test_filler_inside_exact_heard_as_survives_cleanup_until_final_dictionary_pa
 
     assert unrelated_result == "Open cube netties now."
     assert unrelated_trace == []
-    assert provider_inputs == ([raw, unrelated] if enabled else [])
+    assert provider_inputs == (["open Kubernetes now", unrelated] if enabled else [])
 
 
 def test_cleanup_masking_keeps_dictionary_inputs_inside_protected_spans(tmp_path, monkeypatch):
@@ -121,7 +121,7 @@ def test_cleanup_masking_keeps_dictionary_inputs_inside_protected_spans(tmp_path
         "Kubernetes `cube er netties` "
         "https://example.test/cube-er-netties cube.er.netties@example.test."
     )
-    assert trace == [{"from": "Cube er netties", "to": "Kubernetes"}]
+    assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]  # recorded on the raw text, before polish
 
 
 def test_hints_use_local_store_and_only_canonical_terms_and_correction_targets(tmp_path, monkeypatch):

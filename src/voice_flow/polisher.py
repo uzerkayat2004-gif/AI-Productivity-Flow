@@ -922,21 +922,12 @@ def _command_system_prompt(
 
 
 def _preferred_spellings_line(text: str) -> str:
-    """Tell the AI polisher the user's dictionary spellings, never forcing them.
-
-    Only the user's own names/terms are listed. The model is told to use them
-    when the speaker said that word, so it cannot insert unspoken names.
-    """
+    """Model-agnostic note naming the user's terms present in ``text``."""
     try:
-        terms = dictionary_engine.get_preferred_spellings(limit=40)
+        note = dictionary_engine.preferred_spellings_note(text)
     except Exception:
         return ""
-    if not terms or not text:
-        return ""
-    return (
-        "Preferred spellings (use exactly these spellings only where the speaker said the word; "
-        "never add them otherwise): " + ", ".join(terms) + "\n"
-    )
+    return f"{note}\n" if note else ""
 
 
 def _apply_dictionary_safely(
@@ -1101,6 +1092,48 @@ class TextPolisher:
         self._rate_limited_keys.pop(cooldown_id, None)
 
     def polish(
+        self,
+        raw_text: str,
+        style_instruction: Any = "",
+        cleanup_level: str | None = None,
+        force_ai: bool = False,
+        deadline: float | None = None,
+        model_ref: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Polish on every route, then guard the user's dictionary words.
+
+        Words and Replacements are applied before the model sees the text
+        (shortcuts are not, so no model rewrites an expansion), and the
+        output of every route (cloud, S1, LFM, deterministic, commands) is
+        passed through ``dictionary_engine.guard_polished_output``.
+        """
+        if not raw_text or not raw_text.strip():
+            return ""
+        prepared = raw_text
+        try:
+            prepared = dictionary_engine.apply_dictionary_post_processing(
+                raw_text, kwargs.get("dictionary_trace") if isinstance(kwargs.get("dictionary_trace"), list) else None,
+                include_snippets=False,
+            )
+        except TypeError:
+            prepared = raw_text  # legacy test adapters
+        except Exception:
+            log.exception("Dictionary pre-pass failed; polishing the raw text")
+            prepared = raw_text
+        from voice_flow.dictionary import already_applied
+
+        with already_applied():
+            result = self._polish_routes(
+                prepared, style_instruction, cleanup_level, force_ai, deadline, model_ref, **kwargs,
+            )
+        guard = getattr(dictionary_engine, "guard_polished_output", None)
+        if guard is None or not isinstance(result, str) or not result:
+            return result
+        guarded = guard(prepared, result)
+        return guarded if isinstance(guarded, str) else result
+
+    def _polish_routes(
         self,
         raw_text: str,
         style_instruction: Any = "",
