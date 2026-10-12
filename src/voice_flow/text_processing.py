@@ -229,6 +229,13 @@ _MISHEARD_HEY_RE = re.compile(
     r"^\s*He\s+(?P<name>(?!(?:said|says|told|tells|asked|asks|wrote|writes|thinks|thought|is|was|will|would|has|had|and|also|then|just|never|always)\b)"
     r"[A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,2}),[ \t]+(?=\S)",
 )
+# Unpunctuated "Hey/He <name words> I have ..." at the very start of an
+# email command: the greeting ends where a first-person/request body begins.
+_UNPUNCTUATED_HEY_RE = re.compile(
+    r"^\s*(?:Hey|He)\s+(?P<name>(?!(?:said|says|told|tells|asked|asks|wrote|writes|thinks|thought|is|was|will|would|has|had|and|also|then|just|never|always|i|we)\b)"
+    r"[A-Za-z][A-Za-z'-]*(?:[ \t]+(?!(?:i|we|please|can|could|would)\b)[A-Za-z][A-Za-z'-]*){0,2})"
+    r"[ \t]+(?P<body>(?:I|I'm|I've|We|we|please|Please|can|Can|could|Could)\b[\s\S]+?)\s*$",
+)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])")
 
 
@@ -249,6 +256,12 @@ def format_email_command_fallback(text: str) -> str | None:
     repaired = _MISHEARD_HEY_RE.sub(lambda m: f"Hey {m.group('name')}, ", text, count=1)
     if repaired != text:
         layout = format_dictated_email(repaired)
+        if layout is not None:
+            return layout
+    unpunctuated = _UNPUNCTUATED_HEY_RE.match(text)
+    if unpunctuated:
+        body = unpunctuated.group("body")
+        layout = format_dictated_email(f"Hey {unpunctuated.group('name')}, {body[:1].upper() + body[1:]}")
         if layout is not None:
             return layout
     sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text.strip()) if s.strip()]

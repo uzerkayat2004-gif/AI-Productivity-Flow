@@ -237,3 +237,56 @@ def test_he_said_is_never_turned_into_a_greeting():
     assert format_email_command_fallback("He said, the build is broken") is None
     assert format_dictated_email("He robot, hi") is None  # strict helper unchanged
     assert "Hey" not in cleanup_text("He said, the build is broken", "cleanup_medium")
+
+
+# ---------------------------------------------------------------- wake mishearings
+USER_WHY_SLOW = ("He console team I have been using cursor from three days I have just purchased cursor pro "
+                 "subscription three days ago and right now I am using it with like third party models "
+                 "can you guys look into this matter and can you help me with this problem "
+                 "hey why slow make this as a good email?")
+
+
+def test_why_slow_trailing_email_command_is_detected():
+    from voice_flow.voice_commands import detect_voice_command
+    d = detect_voice_command(USER_WHY_SLOW)
+    assert d.command is not None and d.command.format == "email"
+    assert "why slow" not in d.content.lower() and "make this" not in d.content.lower()
+    assert d.content.rstrip().endswith("problem")
+
+
+@pytest.mark.parametrize("phrase", ["hey why slow", "hey voice slow", "hey boys flow", "ok voice flo", "hey nice flow"])
+def test_wake_mishearings_with_command(phrase):
+    from voice_flow.voice_commands import detect_voice_command
+    d = detect_voice_command(f"please check the report today {phrase} make this an email")
+    assert d.command is not None and d.command.format == "email"
+
+
+@pytest.mark.parametrize("text", [
+    "why slow is the app today",
+    "hey why slow is the app today",
+    "hey why slow the app is",
+    "the boys flow through the hall",
+    "hey nice flow on that track",
+    "it feels like a voice slow motion clip",
+])
+def test_wake_mishearings_without_command_stay_dictation(text):
+    from voice_flow.voice_commands import detect_voice_command
+    d = detect_voice_command(text)
+    assert d.command is None
+    assert d.content == text
+
+
+def test_why_slow_email_reaches_email_layout():
+    from voice_flow.voice_commands import detect_voice_command
+    from voice_flow.text_processing import format_email_command_fallback
+    content = detect_voice_command(USER_WHY_SLOW).content
+    cleaned = content.strip().rstrip("?") + "."
+    out = format_email_command_fallback(cleaned)
+    assert out is not None and out.startswith("Hey console team,\n\n")
+    assert _fulfills_command(cleaned, out, task="rewrite", overrides={}, command_format="email")
+
+
+def test_unpunctuated_he_greeting_never_matches_reported_speech():
+    from voice_flow.text_processing import format_email_command_fallback
+    assert format_email_command_fallback("He said I should send it") is None
+    assert format_email_command_fallback("He team I have an update.").startswith("Hey team,\n\nI have")
