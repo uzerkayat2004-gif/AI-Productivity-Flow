@@ -132,6 +132,7 @@ def build():
                 "assertions": fix_annotations(a["assertions"]), "note": a.get("note")}
         reason = None
         overridden = []
+        adopted_bt = False
         if not v:
             reason = "unreviewed"
         elif v["verdict"] == "reject":
@@ -151,7 +152,9 @@ def build():
                 bt = c.get("better_target")
                 strip = lambda t: SO_PREFIX.sub("", t.replace("\n\nSo ", "\n\n").replace("\n\nSo, ", "\n\n")).strip().lower()
                 if bt and strip(bt) == strip(target):
-                    # Second reviewer only restored S1's own leading interjection (policy); use its target.
+                    # Second reviewer approved the first reviewer's fix and only restored S1's own leading
+                    # interjection (policy); its better_target is adopted and recorded (Phase 3A reconciliation).
+                    adopted_bt = True
                     target = bt
                     origin = "s1_verbatim" if bt == a["s1_output"] else "s1_corrected"
                 else:
@@ -168,7 +171,9 @@ def build():
                               "source": "synthetic transcripts written for this dataset; targets from superwhisper/s1-mini GGUF"},
                "review": {"status": "accepted", "reviewer": "independent-agent:NATIVE", "verdict": v["verdict"],
                           "notes": v.get("reason"), "autocheck_flags_reviewed_as_false_positive": overridden,
-                          "confirmed_by_second_reviewer": bool(confirm and confirm.get(nid, {}).get("verdict") == "accept") if origin == "s1_corrected" else None,
+                          "confirmed_by_second_reviewer": (bool(confirm and confirm.get(nid, {}).get("verdict") == "accept") or adopted_bt) if origin == "s1_corrected" else None,
+                          "second_review": ({"verdict": confirm.get(nid, {}).get("verdict"), "reason": confirm.get(nid, {}).get("reason"),
+                                             "better_target_adopted": adopted_bt} if (confirm and nid in confirm) else None),
                           "heightened": K.heightened_flags({"request": {"transcript": a["transcript"]}})}}
         acc.append(rec)
     # Leakage guard: drop rehearsal rows that near-duplicate the common corpus or the frozen held-out set.
