@@ -48,7 +48,6 @@ from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, f
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
-from voice_flow.correction_learning import extract_correction_pairs
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
 # Hide console window on Windows immediately so the application runs silently in the background
@@ -526,6 +525,15 @@ def _command_only_processing_metadata(
     }
 
 
+def _dictionary_bias_terms() -> list[str]:
+    """The user's dictionary names/terms for streaming recognizer biasing."""
+    try:
+        return list(dictionary_engine.get_stt_hint_terms(limit=50))
+    except Exception as exc:
+        log.debug("Dictionary bias terms unavailable: %s", exc)
+        return []
+
+
 class VoiceFlowApp:
     """Core Coordinator for Voice Flow Dictation System."""
 
@@ -609,14 +617,6 @@ class VoiceFlowApp:
         # Voice Flow command layer: a scope="next" command ("make what I say
         # next an email") waits here for the following dictation.
         self._pending_command = None
-        # Learned-vocabulary bridge: old Auto-Captured words become approvable
-        # suggestions once; Voice Flow sound-alike corrections get seeded.
-        try:
-            migrated = storage.migrate_learned_vocabulary()
-            if migrated:
-                log.info("[LEARNING] promoted %d auto-captured terms to suggestions", migrated)
-        except Exception:
-            log.exception("[LEARNING] vocabulary migration failed")
         self._selection_generation = 0
 
         # Start NotebookLM background keepalive & silent session auto-refresh daemon
@@ -1017,13 +1017,13 @@ class VoiceFlowApp:
         if not self._streaming_stt_enabled():
             return
         if str(model_ref or "").lower().startswith("deepgram/flux-"):
-            self._stream_stt = FluxStreamTranscriber()
+            self._stream_stt = FluxStreamTranscriber(vocabulary=_dictionary_bias_terms())
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif str(model_ref or "").lower().startswith("deepgram/nova-3"):
-            self._stream_stt = NovaStreamTranscriber()
+            self._stream_stt = NovaStreamTranscriber(vocabulary=_dictionary_bias_terms())
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif is_nemotron_model(model_ref):
-            self._stream_stt = NemotronStreamTranscriber()
+            self._stream_stt = NemotronStreamTranscriber(vocabulary=_dictionary_bias_terms())
             self.audio.on_audio_frame = self._stream_stt.submit_frame
         elif isinstance(self._stream_stt, (FluxStreamTranscriber, NovaStreamTranscriber, NemotronStreamTranscriber)):
             self._stream_stt = StreamTranscriber(self.transcriber)
@@ -1645,28 +1645,9 @@ class VoiceFlowApp:
                     error_message=error_message, insertion_status=insertion_status,
                     processing_metadata=processing_metadata,
                 )
-                # Count corrections against the saved, successfully delivered
-                # dictation. Rewrites and commands are not spelling evidence.
-                metadata = processing_metadata if isinstance(processing_metadata, dict) else {}
-                polish = metadata.get("polish") or {}
-                command = metadata.get("command") or {}
-                record_id = getattr(record, "id", None)
-                if (
-                    status == "success"
-                    and insertion_status == "pasted"
-                    and isinstance(record_id, int)
-                    and record_id > 0
-                    and isinstance(polish, dict)
-                    and polish.get("outcome") in {"ai_accepted", "local_model"}
-                    and isinstance(command, dict)
-                    and command.get("status") == "not_detected"
-                    and not command.get("label")
-                ):
-                    try:
-                        for term, variant in extract_correction_pairs(raw_text, polished_text):
-                            storage.record_lexicon_candidate(term, variant, history_id=record_id)
-                    except Exception:
-                        log.exception("[LEARNING] correction capture failed")
+                # The dictionary never learns from dictation: polished text is
+                # not a correction, so nothing is recorded here.
+                del record
             except Exception as exc:
                 log.warning("Could not persist dictation history: %s", exc)
 

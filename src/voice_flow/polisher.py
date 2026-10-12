@@ -921,6 +921,24 @@ def _command_system_prompt(
     return prompt
 
 
+def _preferred_spellings_line(text: str) -> str:
+    """Tell the AI polisher the user's dictionary spellings, never forcing them.
+
+    Only the user's own names/terms are listed. The model is told to use them
+    when the speaker said that word, so it cannot insert unspoken names.
+    """
+    try:
+        terms = dictionary_engine.get_preferred_spellings(limit=40)
+    except Exception:
+        return ""
+    if not terms or not text:
+        return ""
+    return (
+        "Preferred spellings (use exactly these spellings only where the speaker said the word; "
+        "never add them otherwise): " + ", ".join(terms) + "\n"
+    )
+
+
 def _apply_dictionary_safely(
     text: str, trace: list[dict[str, str]] | None = None,
 ) -> str:
@@ -1834,6 +1852,7 @@ class TextPolisher:
         instruction = style_instruction
         user_content = (
             f"Style instruction: {instruction}\n"
+            f"{_preferred_spellings_line(raw_text)}"
             f"<input_transcript>\n{raw_text}\n</input_transcript>"
         )
         if not isinstance(api_keys, dict):

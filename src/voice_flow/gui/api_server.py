@@ -6038,6 +6038,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Dictionary word must be a non-empty string."}, 400)
             elif not isinstance(heard_as, str) or len(word_value.strip()) > 120 or len(heard_as.strip()) > 120:
                 self.send_json_response({"success": False, "error": "Word and heard-as spelling must be text under 120 characters."}, 400)
+            elif storage.dictionary_entry_problem(word_value, heard_as):
+                self.send_json_response({"success": False, "error": storage.dictionary_entry_problem(word_value, heard_as)}, 400)
             else:
                 success = storage.add_dictionary_entry(word_value, heard_as.strip())
                 if not success:
@@ -6062,7 +6064,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
 
                 if not success:
 
-                    self.send_json_response({"success": False, "error": "Dictionary entry was not found or the new term is invalid."}, 404)
+                    from voice_flow.dictionary_rules import term_problem
+                    self.send_json_response({"success": False, "error": term_problem(str(new_word)) or "Dictionary entry was not found or the new term is invalid."}, 404)
 
                 else:
 

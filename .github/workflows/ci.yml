@@ -52,6 +52,11 @@ jobs:
         run: |
           pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_keyboard_listener.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py tests/test_mac_launch_fixes.py tests/test_af_guide_styles.py tests/test_overlay_macos.py tests/test_runtime_guard_socket_permissions.py -v --timeout=60
 
+      - name: Run dictionary tests
+        run: |
+          pytest tests/test_dictionary_rebuild.py tests/test_dictionary_safety.py tests/test_dictionary_snippets.py tests/test_dictionary_stt_integration.py tests/test_nemotron_dictionary_context.py tests/test_dictionary_user_controls.py -v --timeout=120
+          node --test tests/test_dictionary_user_controls.cjs
+
       - name: Run test data isolation & crash reporting (Sentry) tests
         run: |
           pytest tests/test_data_dir_isolation.py tests/test_crash_reporting.py -v --timeout=120
@@ -100,6 +105,11 @@ jobs:
       - name: Run macOS GUI regression tests
         run: |
           pytest tests/test_macos_hotkeys_and_launcher.py tests/test_macos_keyboard_listener.py tests/test_macos_app_identity.py tests/test_macos_cf_dictionary.py tests/test_native_macos_launcher.py tests/test_local_server_loopback.py tests/test_narova_headless_network_policy.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py tests/test_mac_launch_fixes.py tests/test_af_guide_styles.py tests/test_overlay_macos.py tests/test_runtime_guard_socket_permissions.py -v --timeout=60
+
+      - name: Run dictionary tests
+        run: |
+          pytest tests/test_dictionary_rebuild.py tests/test_dictionary_safety.py tests/test_dictionary_snippets.py tests/test_dictionary_stt_integration.py tests/test_nemotron_dictionary_context.py tests/test_dictionary_user_controls.py -v --timeout=120
+          node --test tests/test_dictionary_user_controls.cjs
 
       - name: Run test data isolation & crash reporting (Sentry) tests
         run: |
