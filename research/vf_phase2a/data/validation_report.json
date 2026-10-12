@@ -1,0 +1,52 @@
+{
+ "heldout": {
+  "count": 200,
+  "problems": {},
+  "slices": {
+   "cleanup_ordinary": 22,
+   "facts_numbers_negation": 18,
+   "corrections_vs_alternatives": 16,
+   "email": 17,
+   "messages": 12,
+   "prompt": 10,
+   "question_no_answer": 10,
+   "nl_instruction": 12,
+   "multi_constraint": 11,
+   "followup_edit": 13,
+   "summary": 11,
+   "smart_formatting": 12,
+   "no_markdown": 8,
+   "style_rules": 10,
+   "unsupported_boundary": 8,
+   "host_integration": 10
+  }
+ },
+ "pilot": {
+  "count": 153,
+  "problems": {},
+  "slices": {
+   "cleanup_ordinary": 19,
+   "facts_numbers_negation": 12,
+   "corrections_vs_alternatives": 12,
+   "email": 15,
+   "messages": 10,
+   "prompt": 9,
+   "question_no_answer": 6,
+   "nl_instruction": 10,
+   "multi_constraint": 9,
+   "followup_edit": 11,
+   "summary": 9,
+   "smart_formatting": 8,
+   "no_markdown": 4,
+   "style_rules": 5,
+   "dev_custom_style": 5,
+   "unsupported_boundary": 5,
+   "host_integration": 4
+  }
+ },
+ "near_dup_within_heldout": [],
+ "near_dup_within_pilot": [],
+ "near_dup_cross": [],
+ "pilot_uses_heldout_names": [],
+ "scenario_overlap": []
+}

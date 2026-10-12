@@ -35,18 +35,26 @@ _APOS_CONTRACTIONS = {
 }
 _APOS_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in _APOS_CONTRACTIONS) + r")(?![\w])", re.IGNORECASE)
 
-# Self-correction cues.  "sorry" only counts when it is not an apology.
+# Self-correction cues.  Strong cues always mark a repair.  Weak cues ("sorry",
+# "i mean", a bare "no") only count when the repair repeats a word from just
+# before the cue or substitutes a value of the same kind (number, weekday);
+# otherwise they are ordinary words ("I'm sorry", "can't make it, sorry").
 _CORRECTION_CUE_RE = re.compile(
-    r"(?:,\s*)?\b(?:no\s+wait|wait\s+no|no\s+no|i\s+mean|or\s+rather|make\s+that|scratch\s+that|"
-    r"actually\s+no|(?<!\bi'm\s)(?<!\bim\s)(?<!\bam\s)(?<!\bso\s)(?<!\bvery\s)(?<!\breally\s)sorry)\b\s*,?\s*",
+    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait|wait\s+no|"
+    r"no\s+no|or\s+rather|make\s+that|scratch\s+that|actually\s+no)\b\s*,?\s*"
+    r"|(?:,\s*)?\b(?P<weak>sorry|i\s+mean|no)\b\s*,?\s*",
     re.IGNORECASE,
 )
+_APOLOGY_BEFORE_RE = re.compile(r"\b(?:i'?m|i\s+am|we'?re|we\s+are|you'?re|they'?re|so|very|really|truly|terribly|"
+                                r"am|are|is|was|say|feel|deeply)\s*$", re.IGNORECASE)
 _QUOTED_RE = re.compile(r"\"[^\"]*\"|“[^”]*”|(?<!\w)'[^']{2,}'(?!\w)")
 _WEEKDAYS = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|tonight"
 _NUMBER_WORDS = (
     "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     "sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|"
-    "thousand|lakh|lakhs|crore|crores|million|billion"
+    "thousand|lakh|lakhs|crore|crores|million|billion|first|second|third|fourth|fifth|sixth|seventh|eighth|"
+    "ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|"
+    "twentieth|thirtieth"
 )
 _NUMERIC_TOKEN_RE = re.compile(rf"^(?:\d[\d,.:]*|{_NUMBER_WORDS})$", re.IGNORECASE)
 _WORD_RE = re.compile(r"\S+")
@@ -97,28 +105,45 @@ def resolve_corrections(text: str) -> tuple[str, list[str]]:
     3. Otherwise remove the single word before the cue ("rahul no wait priya").
     """
     removed: list[str] = []
-    for _ in range(6):
+    search_from = 0
+    for _ in range(12):
         # Quoted speech is reproduced verbatim: corrections inside quotes are
         # part of the quote, not edits by the speaker.
         masked = _QUOTED_RE.sub(lambda q: " " * len(q.group(0)), text)
-        m = _CORRECTION_CUE_RE.search(masked)
+        m = _CORRECTION_CUE_RE.search(masked, search_from)
         if not m:
             break
+        weak = m.group("weak") is not None
+        if weak and m.group("weak").lower() == "sorry" and _APOLOGY_BEFORE_RE.search(text[:m.start()]):
+            search_from = m.end()
+            continue
         before = text[:m.start()].rstrip(" ,")
         after = text[m.end():]
         before_words = before.split()
         after_words = after.split()
         if not before_words or not after_words:
+            if weak:
+                search_from = m.end()
+                continue
             text = (before + " " + after).strip()
             continue
         window = before_words[-8:]
         offset = len(before_words) - len(window)
         cut = None
         lowered_window = [w.strip(",.").lower() for w in window]
-        for probe in [w.strip(",.").lower() for w in after_words[:2]]:
+        stop = {"the", "a", "an", "to", "it", "and", "for", "of", "in", "on", "at", "is", "are", "was", "be", "we",
+                "i", "you", "they", "he", "she", "that", "this", "with", "but", "or", "so", "will", "can", "my",
+                "our", "your", "not", "now", "just"}
+        # Weak cues only look three words back; strong cues eight.
+        reach = 3 if weak else 8
+        first_word = after_words[0].strip(",.").lower()
+        n_probe = 2 if (not weak or first_word in {"dont", "don't", "do", "not", "never", "please", "just"}) else 1
+        for probe in [w.strip(",.").lower() for w in after_words[:n_probe]]:
             probe = expand_contractions(probe).split()[-1] if probe else probe
-            if probe in lowered_window and probe not in {"the", "a", "an", "to", "it", "and"}:
-                cut = offset + max(i for i, w in enumerate(lowered_window) if w == probe)
+            cands = [i for i in range(max(0, len(lowered_window) - reach), len(lowered_window))
+                     if lowered_window[i] == probe]
+            if cands and probe not in stop:
+                cut = offset + max(cands)
                 break
         if cut is None:
             first = after_words[0].strip(",.").lower()
@@ -144,11 +169,16 @@ def resolve_corrections(text: str) -> tuple[str, list[str]]:
                         cut = -1
                         break
         if cut == -1:
+            search_from = 0
             continue
         if cut is None:
+            if weak:
+                search_from = m.end()
+                continue
             cut = len(before_words) - 1
         removed.append(" ".join(before_words[cut:]))
         text = " ".join(before_words[:cut] + after_words)
+        search_from = 0
     return text, removed
 
 
@@ -172,15 +202,75 @@ _SCALES = {"hundred": 100, "thousand": 1000, "lakh": 100000, "lakhs": 100000, "c
            "crores": 10000000, "million": 1000000, "billion": 1000000000}
 
 
-def _words_to_number(words: list[str]) -> int | None:
-    total, current, seen = 0, 0, False
-    for w in words:
+_ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9,
+    "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
+    "sixteenth": 16, "seventeenth": 17, "eighteenth": 18, "nineteenth": 19, "twentieth": 20, "thirtieth": 30,
+}
+
+
+def _segment_numbers(words: list[str]) -> list[int | float]:
+    """Greedy left-to-right parse of a run of number words into values.
+
+    "twenty one" -> [21]; "two one" -> [2, 1]; "three hundred and five" ->
+    [305]; "twenty third" -> [23]; "three point five" -> [3.5].
+    """
+    values: list = []
+    total, current, last = 0, 0, None  # last: kind of previous token
+    i = 0
+
+    def flush():
+        nonlocal total, current, last
+        if last is not None:
+            values.append(total + current)
+        total, current, last = 0, 0, None
+
+    while i < len(words):
+        w = words[i]
         if w == "and":
+            if last != "scale":
+                flush()
+            i += 1
             continue
-        if w in _SMALL:
-            current += _SMALL[w]
-        elif w in _TENS:
+        if w == "point" and last in ("unit", "tens", "teen") and i + 1 < len(words):
+            digits = []
+            j = i + 1
+            while j < len(words) and words[j] in _SMALL and _SMALL[words[j]] < 10:
+                digits.append(str(_SMALL[words[j]]))
+                j += 1
+            if digits:
+                values.append(float(f"{total + current}.{''.join(digits)}"))
+                total, current, last = 0, 0, None
+                i = j
+                continue
+        if w in _ORDINALS:
+            v = _ORDINALS[w]
+            if last == "tens" and v < 10:
+                current += v
+            else:
+                flush()
+                current = v
+            last = "ord"
+            flush()
+            i += 1
+            continue
+        if w in _TENS:
+            if last in ("unit", "tens", "teen", "ord"):
+                flush()
             current += _TENS[w]
+            last = "tens"
+        elif w in _SMALL:
+            v = _SMALL[w]
+            if v >= 10:
+                if last in ("unit", "tens", "teen"):
+                    flush()
+                current += v
+                last = "teen"
+            else:
+                if last in ("unit", "teen") or (last == "tens" and current % 10):
+                    flush()
+                current += v
+                last = "unit"
         elif w in _SCALES:
             scale = _SCALES[w]
             if scale == 100:
@@ -188,19 +278,26 @@ def _words_to_number(words: list[str]) -> int | None:
             else:
                 total += max(current, 1) * scale
                 current = 0
+            last = "scale"
         else:
-            return None
-        seen = True
-    return total + current if seen else None
+            flush()
+        i += 1
+    flush()
+    return values
+
+
+def _words_to_number(words: list[str]) -> int | None:
+    vals = _segment_numbers(words)
+    return vals[0] if len(vals) == 1 and isinstance(vals[0], int) else None
 
 
 _NUM_WORD_RUN = re.compile(
-    rf"\b(?:{_NUMBER_WORDS})(?:[\s-]+(?:and[\s-]+)?(?:{_NUMBER_WORDS}))*\b", re.IGNORECASE)
+    rf"\b(?:{_NUMBER_WORDS})(?:[\s-]+(?:(?:and|point)[\s-]+)?(?:{_NUMBER_WORDS}))*\b", re.IGNORECASE)
 
 
 def _price_compound(words: list[str]) -> int | None:
     """'nine ninety nine' -> 999, 'twenty nine ninety nine' -> 2999 (spoken prices)."""
-    if len(words) < 2 or any(w in _SCALES or w == "and" for w in words):
+    if len(words) < 2 or any(w in _SCALES or w in ("and", "point") or w in _ORDINALS for w in words):
         return None
     for split in range(1, len(words)):
         head, tail = words[:split], words[split:]
@@ -212,38 +309,68 @@ def _price_compound(words: list[str]) -> int | None:
     return None
 
 
-def number_values(text: str) -> list[set[int | float]]:
+def number_values(text: str) -> list[set]:
     """Each spoken or written number as a set of acceptable canonical values."""
     out: list[set] = []
-    consumed = re.sub(r"(?<=\d),(?=\d)", "", text or "")
-    for m in re.finditer(r"(?<![\w.])\d+(?:\.\d+)?(?![\w])", consumed):
+    t = text or ""
+    consumed = re.sub(r"(?<=\d),(?=\d)", "", t)
+    for m in re.finditer(r"(?<![\d.])\d+(?:\.\d+)?(?![\d])", consumed):
         v = float(m.group(0))
         out.append({int(v) if v.is_integer() else v})
-    for m in _NUM_WORD_RUN.finditer(text or ""):
+    runs = list(_NUM_WORD_RUN.finditer(t))
+    for idx, m in enumerate(runs):
         words = [w.lower() for w in re.split(r"[\s-]+", m.group(0)) if w]
-        plain = _words_to_number(words)
-        options: set = set()
-        if plain is not None:
-            options.add(plain)
+        before = t[max(0, m.start() - 12):m.start()].lower()
+        if words == ["one"] and not re.search(r"\b(?:at|from|to|of|by|until|till|before|after|instead of|room|gate|floor)\s+$", before):
+            continue  # pronoun "one" ("the next one") is not a number
+        if words == ["second"] and not re.search(r"\bthe\s+$", before):
+            continue  # "second" as a time unit or adverb; "the second (of May)" is a date
+        segs = _segment_numbers(words)
+        digit_seq = len(words) >= 2 and all(w in _SMALL and _SMALL[w] < 10 for w in words)
         compound = _price_compound(words)
-        if compound is not None:
-            options.add(compound)
-        if words and all(w in _SMALL or w in _TENS for w in words):
-            # "five thirty" may be a time (5:30) or two numbers.
-            parts = [_words_to_number([w]) for w in words]
-            if len(words) == 2 and words[1] in _TENS | {"fifteen": 0, "forty": 0}:
-                options.add(float(f"{parts[0]}.{parts[1]:02d}"))
-        if words in (["one"],):
-            continue  # "one" is too often a pronoun ("the next one")
-        if options:
+        # "five or six thousand": the scale distributes over the first value.
+        follow = t[m.end():m.end() + 8].lower()
+        shared_scale = None
+        if re.match(r"\s+(?:or|to)\s+", follow) and idx + 1 < len(runs):
+            nxt = [w.lower() for w in re.split(r"[\s-]+", runs[idx + 1].group(0)) if w]
+            if nxt and nxt[-1] in _SCALES and len(segs) == 1 and isinstance(segs[0], int) and segs[0] < 100:
+                shared_scale = segs[0] * _SCALES[nxt[-1]]
+        if digit_seq:
+            joined = int("".join(str(_SMALL[w]) for w in words))
+            options = {joined}
+            if len(words) == 2:
+                options |= set(segs)  # "two one" may be 2-1
+            if compound is not None:
+                options.add(compound)
             out.append(options)
+            continue
+        if len(segs) == 1:
+            options = {segs[0]}
+            if compound is not None:
+                options.add(compound)
+            if shared_scale:
+                options.add(shared_scale)
+            if len(words) == 2 and words[0] in _SMALL and words[1] in _TENS and _SMALL[words[0]] < 13:
+                options.add(float(f"{_SMALL[words[0]]}.{_TENS[words[1]]:02d}"))  # "six thirty" -> 6:30
+            out.append(options)
+        else:
+            if compound is not None:
+                out.append({compound} | set(segs[:1]))
+                continue
+            # a time like "three fifteen" or "eleven forty"
+            if len(segs) == 2 and "and" not in words and all(isinstance(x, int) for x in segs) \
+                    and segs[0] <= 12 and 10 <= segs[1] < 60:
+                out.append({float(f"{segs[0]}.{segs[1]:02d}"), segs[0]})
+                continue
+            for v in segs:
+                out.append({v})
     return out
 
 
 def _output_numbers(text: str) -> list[int | float]:
     vals: list = []
     t = re.sub(r"(?<=\d),(?=\d)", "", text or "")
-    for m in re.finditer(r"(?<![\w.])(\d+)(?::(\d{2}))?(?:\.(\d+))?(?![\w])", t):
+    for m in re.finditer(r"(?<![\d.])(\d+)(?::(\d{2}))?(?:\.(\d+))?(?![\d])", t):
         if m.group(2):
             vals.append(float(f"{int(m.group(1))}.{m.group(2)}"))
             vals.append(int(m.group(1)))
@@ -315,10 +442,9 @@ def check_output(
             if not any(out_counter.get(o) for o in options):
                 failures.append(f"number_missing:{sorted(options, key=str)[0]}")
     allowed = set().union(*src_nums, *auth_nums) if (src_nums or auth_nums) else set()
-    list_markers = set()
-    if fmt in ("numbered", "numbered_list"):
-        list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", out)}
-    for m in re.finditer(r"(?<![\w.:])(\d+)(?![\w:])", re.sub(r"(?<=\d),(?=\d)", "", out)):
+    # Line-start list markers ("1. ", "2) ") are layout, not facts.
+    list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", out)}
+    for m in re.finditer(r"(?<![\d.:])(\d+)(?![\d:])", re.sub(r"(?<=\d),(?=\d)", "", out)):
         v = int(m.group(1))
         if v in list_markers or allow_number_change:
             continue
@@ -351,8 +477,24 @@ def check_output(
     if task == "cleanup" and re.search(r"\?|\bquestion mark\b", source or "") and "?" not in out:
         failures.append("question_lost")
 
-    if task == "summarize" and len(out.split()) > 0.8 * max(1, len(src_canon.split())):
-        failures.append("summary_not_compressed")
+    # No compression ratio is enforced for summaries (a ratio forces factual
+    # loss); a summary only must not be longer than what it summarises.
+    if task == "summarize" and len(out.split()) > len(src_canon.split()) + 3:
+        failures.append("summary_longer_than_source")
+
+    # Email sign-off: a name after a closing must come from Sender or the
+    # transcript; nothing may promise action the speaker did not promise.
+    closing = re.search(r"(?im)^(?:best|regards|best regards|kind regards|thanks|thank you|cheers|sincerely|warmly),?\s*\n+\s*([^\n]+)\s*$", out)
+    if closing:
+        name = closing.group(1).strip().strip(".")
+        known = " ".join(x for x in (source or "", sender or "", authorised) if x).lower()
+        if name and name.lower() not in known:
+            failures.append(f"invented_signoff:{name}")
+    commit_re = re.compile(r"\b(?:i(?:'ll| will)|we(?:'ll| will)|i promise|we promise|guarantee[ds]?|i'm going to|we're going to|"
+                           r"i will follow up|happy to help|feel free to reach out|let me know if you have any questions)\b", re.I)
+    src_text = expand_contractions((source or "") + " " + authorised).lower()
+    if commit_re.search(out) and not re.search(r"\b(?:will|promise|guarantee|going to|follow up|let me know|reach out|happy to)\b|'ll\b", src_text):
+        failures.append("invented_commitment")
 
     return CheckResult(ok=not failures, failures=failures)
 

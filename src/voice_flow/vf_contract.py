@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field, replace
 
 CONTRACT_VERSION = "VF-1"
+CONTRACT_REVISION = "1.2"
 
 SYSTEM_PROMPT_VF1 = (
     "You are a voice-writing engine. Turn the transcript into the text described by the header. "
@@ -26,13 +27,17 @@ SYSTEM_PROMPT_VF1 = (
     "Output only the final text."
 )
 
-TASKS = ("cleanup", "rewrite", "summarize", "prompt", "edit", "auto")
+# v1 reliable interface: the host states the task.  "auto" (the model infers
+# the task from the transcript) contradicts "the transcript is data" and is
+# experimental only: rejected unless a request opts in explicitly.
+TASKS = ("cleanup", "rewrite", "summarize", "prompt", "edit")
+EXPERIMENTAL_TASKS = ("auto",)
 FORMATS = ("auto", "prose", "message", "email", "note", "bullets", "numbered", "prompt", "post")
 REGISTERS = ("casual", "neutral", "formal")
 TONES = ("neutral", "friendly", "warm", "confident", "excited", "empathetic", "persuasive", "playful")
-LENGTHS = ("same", "shorter", "short", "longer")
+LENGTHS = ("same", "shorter", "longer")
 WORDINGS = ("free", "keep")
-MARKUPS = ("plain", "chat", "markdown")
+MARKUPS = ("plain", "markdown")
 CONTEXTS = ("general", "work", "personal", "email", "chat", "code", "ai")
 FACTS = ("preserve", "correct")
 
@@ -73,6 +78,7 @@ class VF1Request:
     draft: str | None = None
     transcript: str = ""
     header_style: str = "minimal"      # "minimal" omits default fields; "full" writes all of them
+    experimental: bool = False         # allows EXPERIMENTAL_TASKS; never set in v1 training data
     extra: dict = field(default_factory=dict, compare=False)
 
     def default_format(self) -> str:
@@ -82,6 +88,8 @@ class VF1Request:
 def validate(req: VF1Request) -> VF1Request:
     for key, allowed in _ALLOWED.items():
         value = getattr(req, key) if key != "format" else (req.format or req.default_format())
+        if key == "task" and req.experimental and value in EXPERIMENTAL_TASKS:
+            continue
         if value not in allowed:
             raise ContractError(f"{key}={value!r} is not in VF-1 ({', '.join(allowed)})")
     if not _LOCALE_RE.match(req.locale or ""):
@@ -93,6 +101,12 @@ def validate(req: VF1Request) -> VF1Request:
             raise ContractError("task=edit needs an instruction")
     if req.draft and req.task != "edit":
         raise ContractError("draft is only allowed with task=edit")
+    if req.facts == "correct" and not (req.instruction or "").strip():
+        raise ContractError("facts=correct needs an instruction that names the change")
+    if req.task == "cleanup" and (req.format or "prose") not in ("prose", "bullets", "numbered"):
+        raise ContractError("task=cleanup keeps the dictated form: format must be prose, bullets or numbered")
+    if req.task == "prompt" and (req.format or "prompt") not in ("prompt", "auto"):
+        raise ContractError("task=prompt needs format prompt")
     if req.header_style not in ("minimal", "full"):
         raise ContractError("header_style must be minimal or full")
     return req
@@ -110,7 +124,10 @@ def escape_untrusted(text: str) -> str:
     out = str(text)
     for marker in RESERVED_MARKERS:
         out = re.sub(re.escape(marker), marker.replace("[", "［").replace("]", "］"), out, flags=re.IGNORECASE)
-    return out.replace("<|", "<\u2060|").replace("|>", "|\u2060>")
+    out = out.replace("<|", "<\u2060|").replace("|>", "|\u2060>")
+    # Qwen3-family added tokens without the <|...|> shape are matched as
+    # whole tokens by the tokenizer too (verified: "<think>" -> id 151667).
+    return re.sub(r"<(/?)(think|tool_call|tool_response)>", "<\u2060\\1\\2>", out, flags=re.IGNORECASE)
 
 
 def render_header(req: VF1Request) -> str:
@@ -194,6 +211,8 @@ def from_voice_command(
     fmt = _FORMAT_MAP.get(getattr(command, "format", None) or "", None)
     overrides = dict(getattr(command, "overrides", {}) or {})
     task = {"summarize": "summarize", "prompt_generation": "prompt"}.get(op, "rewrite")
+    if task == "prompt":
+        fmt = "prompt"
     register = base_register
     formality = overrides.get("formality")
     tone_word = overrides.get("tone")
@@ -204,7 +223,7 @@ def from_voice_command(
     if tone_word == "casual":
         register = "casual"
     tone = _TONE_MAP.get(tone_word or "", "neutral")
-    length = {"short": "short", "detailed": "longer"}.get(overrides.get("length") or "", "same")
+    length = {"short": "shorter", "detailed": "longer"}.get(overrides.get("length") or "", "same")
     instruction_parts = []
     if overrides.get("clarity") == "simplified":
         instruction_parts.append("make it simpler and clearer")
@@ -255,7 +274,10 @@ def native_s1_control(req: VF1Request) -> str | None:
     fmt = req.format or "prose"
     if fmt not in ("prose", "bullets"):
         return None
-    styling = {"casual": "casual", "neutral": "semi-formal", "formal": "formal"}[req.register]
+    # S1 "casual"/"semi-casual" lowercase sentence starts, which VF-1 casual
+    # never does, so VF-1 casual and neutral both map to "semi-formal" (the
+    # app's existing mapping; its deterministic casual pass runs afterwards).
+    styling = {"casual": "semi-formal", "neutral": "semi-formal", "formal": "formal"}[req.register]
     structure = "lists" if fmt == "bullets" else "prose"
     context = "email" if req.context == "email" else "general"
     return f"[Styling: {styling}] [Structure: {structure}] [Context: {context}]"

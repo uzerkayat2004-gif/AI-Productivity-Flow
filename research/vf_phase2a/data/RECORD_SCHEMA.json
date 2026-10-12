@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VF-1 rev 1.2 dataset record (held-out and training)",
+  "type": "object",
+  "required": ["id", "split", "slice", "contract_revision", "scenario_id", "request", "target", "assertions", "provenance"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^(HE|PT|PN)-[0-9]{3}$"},
+    "split": {"enum": ["heldout", "train", "train_pending"]},
+    "slice": {"enum": ["cleanup_ordinary", "facts_numbers_negation", "corrections_vs_alternatives", "email", "messages",
+                       "prompt", "question_no_answer", "nl_instruction", "multi_constraint", "followup_edit", "summary",
+                       "smart_formatting", "no_markdown", "style_rules", "unsupported_boundary", "host_integration",
+                       "dev_custom_style", "s1_native"]},
+    "contract_revision": {"const": "1.2"},
+    "scenario_id": {"type": "string"},
+    "request": {
+      "description": "Fields of voice_flow.vf_contract.VF1Request (non-default only); s1_native rows use native_control + transcript",
+      "type": "object",
+      "properties": {
+        "task": {"enum": ["cleanup", "rewrite", "summarize", "prompt", "edit"]},
+        "format": {"enum": ["auto", "prose", "message", "email", "note", "bullets", "numbered", "prompt", "post"]},
+        "register": {"enum": ["casual", "neutral", "formal"]},
+        "tone": {"enum": ["neutral", "friendly", "warm", "confident", "excited", "empathetic", "persuasive", "playful"]},
+        "length": {"enum": ["same", "shorter", "longer"]},
+        "wording": {"enum": ["free", "keep"]},
+        "markup": {"enum": ["plain", "markdown"]},
+        "context": {"enum": ["general", "work", "personal", "email", "chat", "code", "ai"]},
+        "facts": {"enum": ["preserve", "correct"]},
+        "locale": {"type": "string", "pattern": "^[a-z]{2,3}(-[a-z0-9]{2,8})*$"},
+        "sender": {"type": "string"},
+        "recipient": {"type": "string"},
+        "rules": {"type": "array", "items": {"type": "string"}},
+        "instruction": {"type": "string"},
+        "draft": {"type": "string"},
+        "transcript": {"type": "string"},
+        "header_style": {"enum": ["minimal", "full"]},
+        "native_control": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "target": {"type": "string", "minLength": 1},
+    "assertions": {
+      "type": "object",
+      "required": ["behavior", "no_markdown"],
+      "properties": {
+        "behavior": {"enum": ["transform", "not_answer", "cleanup_only"]},
+        "no_markdown": {"type": "boolean"},
+        "must_include": {"type": "array", "items": {"type": "string"}},
+        "must_include_one_of": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "must_not_include": {"type": "array", "items": {"type": "string"}},
+        "numbers": {"type": "array", "items": {"type": "string"}},
+        "numbers_one_of": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "min_negations": {"type": "integer", "minimum": 0},
+        "ends_with_question": {"type": "boolean"},
+        "format": {"enum": ["prose", "bullets", "numbered", "email", "message", "post", "prompt", "note"]},
+        "max_words": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "host": {
+      "type": "object",
+      "required": ["activation", "utterance", "expected"],
+      "properties": {
+        "activation": {"type": "object"},
+        "utterance": {"type": "string"},
+        "expected": {"type": "object", "required": ["command", "content", "fields"]}
+      }
+    },
+    "checker_waivers": {"type": "array", "items": {"type": "string"}},
+    "note": {"type": "string"},
+    "provenance": {
+      "type": "object",
+      "required": ["author", "method", "teacher", "uses_s1_output", "reviewed"],
+      "properties": {
+        "author": {"type": "string"},
+        "method": {"enum": ["hand-written", "hand-written-placeholder", "teacher", "teacher+edited", "s1-base-greedy"]},
+        "teacher": {"type": ["string", "null"]},
+        "uses_s1_output": {"type": "boolean"},
+        "reviewed": {"type": "boolean"},
+        "pending": {"type": "string"}
+      }
+    }
+  },
+  "additionalProperties": false
+}

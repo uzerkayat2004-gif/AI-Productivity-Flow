@@ -109,7 +109,7 @@ def test_already_separated_instruction_without_wake_phrase():
     assert cmd.constraints == ("without hashtags",)
     assert parse_instruction("the quarterly numbers look good") is None
     req = from_voice_command(cmd, "we launched today")
-    assert (req.task, req.format, req.tone, req.length) == ("rewrite", "email", "friendly", "short")
+    assert (req.task, req.format, req.tone, req.length) == ("rewrite", "email", "friendly", "shorter")
     assert req.instruction == "without hashtags"
 
 
@@ -316,7 +316,10 @@ def test_vf1_followup_edit_requires_supplied_draft():
         render_user(VF1Request(task="rewrite", draft="old", transcript="x"))
 
 
-@pytest.mark.parametrize("bad", [dict(task="translate"), dict(format="html"), dict(tone="angry"), dict(locale="EN_US")])
+@pytest.mark.parametrize("bad", [dict(task="translate"), dict(task="auto"), dict(format="html"), dict(tone="angry"),
+                                 dict(locale="EN_US"), dict(length="short"), dict(markup="chat"),
+                                 dict(facts="correct"), dict(task="cleanup", format="email"),
+                                 dict(task="prompt", format="email")])
 def test_vf1_rejects_values_outside_contract(bad):
     with pytest.raises(ContractError):
         render_user(VF1Request(transcript="x", **bad))
@@ -325,7 +328,7 @@ def test_vf1_rejects_values_outside_contract(bad):
 def test_vf1_mapping_from_parsed_command():
     cases = {
         "hey voice flow, make this a short friendly email. the build is green":
-            dict(task="rewrite", format="email", tone="friendly", length="short", context="email"),
+            dict(task="rewrite", format="email", tone="friendly", length="shorter", context="email"),
         "hey voice flow, make this a prompt. build a todo app": dict(task="prompt", format="prompt"),
         "hey voice flow, keep my wording. so the release is friday": dict(task="cleanup", wording="keep"),
         "hey voice flow, make it less formal. please find attached": dict(task="rewrite", register="casual"),
@@ -500,3 +503,7 @@ def test_s1_native_prompt_unchanged():
         "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     )
     assert "\u200b" not in prompt
+
+
+def test_auto_task_is_experimental_only():
+    render_user(VF1Request(task="auto", experimental=True, transcript="x"))
