@@ -94,7 +94,10 @@ def test_user_example_routes_through_one_mocked_s1_cleanup_then_local_prompt(mon
     assert s1_calls[0][2]["task"] == "cleanup"
     pool.assert_not_called()
     assert outcomes == ["local_rewrite"]
-    assert attempt_outcomes == ["local_model"]
+    # Phase 1.1: S1 only ran its cleanup pass for a prompt command, so that
+    # attempt is reported as not fulfilling the command; the local prompt
+    # rewrite then completes it (final outcome above is unchanged).
+    assert attempt_outcomes == ["command_unfulfilled"]
     assert result == EXPECTED_PROMPT
 
 
