@@ -36,8 +36,8 @@ from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandle
 import sounddevice as sd
 
 from voice_flow.config import config
-log = logging.getLogger(__name__)
 from voice_flow.dictionary import dictionary_engine, generated_spaced_aliases
+from voice_flow.vocabulary_learning import is_ordinary_spoken_phrase
 from voice_flow.provider_registry import get_all_provider_specs, get_provider_spec
 from voice_flow.provider_validation import validate_provider_key
 from voice_flow.storage import storage
@@ -87,6 +87,12 @@ PROTECTED_SETTING_KEYS = {
     "voice_flow_polish_model",
 }
 SAFE_JOB_ID_REGEX = re.compile(r"^[A-Za-z0-9_\-]+$")
+log = logging.getLogger(__name__)
+
+
+def _ordinary_dictionary_phrase(value: str) -> bool:
+    """Ordinary speech is not a dictionary word or a mishearing."""
+    return is_ordinary_spoken_phrase(value)
 
 
 def _polishing_enabled() -> bool:
@@ -6024,6 +6030,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": False, "error": "Dictionary word must be a non-empty string."}, 400)
             elif not isinstance(heard_as, str) or len(word_value.strip()) > 120 or len(heard_as.strip()) > 120:
                 self.send_json_response({"success": False, "error": "Word and heard-as spelling must be text under 120 characters."}, 400)
+            elif _ordinary_dictionary_phrase(word_value):
+                self.send_json_response({"success": False, "error": "Ordinary words stay as you say them. Add a name, product, or technical term."}, 400)
+            elif heard_as.strip() and _ordinary_dictionary_phrase(heard_as):
+                self.send_json_response({"success": False, "error": "That heard-as phrase is normal speech. Enter the misheard name, not a normal sentence."}, 400)
             else:
                 success = storage.add_dictionary_entry(word_value, heard_as.strip())
                 if not success:
@@ -6075,6 +6085,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             correct = str(data.get("correct_text") or "").strip()
             if not wrong or not correct:
                 self.send_json_response({"success": False, "error": "wrong_text and correct_text are required."}, 400)
+            elif _ordinary_dictionary_phrase(wrong):
+                self.send_json_response({"success": False, "error": "That heard-as phrase is normal speech. Enter the misheard name, not a normal sentence."}, 400)
             else:
                 try:
                     c = storage.add_dictionary_correction(wrong, correct)
@@ -6089,6 +6101,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             correct = str(data.get("correct_text") or "").strip()
             if not cid or not wrong or not correct:
                 self.send_json_response({"success": False, "error": "id, wrong_text, and correct_text are required."}, 400)
+            elif _ordinary_dictionary_phrase(wrong):
+                self.send_json_response({"success": False, "error": "That heard-as phrase is normal speech. Enter the misheard name, not a normal sentence."}, 400)
             else:
                 try:
                     c = storage.update_dictionary_correction(int(cid), wrong, correct)

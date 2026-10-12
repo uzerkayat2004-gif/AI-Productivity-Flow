@@ -45,7 +45,6 @@ from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, f
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
-from voice_flow.correction_learning import extract_correction_pairs
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
 # Hide console window on Windows immediately so the application runs silently in the background
@@ -1595,34 +1594,16 @@ class VoiceFlowApp:
                     audio_path = None
                 app_title = getattr(session, "app_title", "General App") or (session.get("app_title") if isinstance(session, dict) else "General App")
                 category = getattr(session, "app_category", "smart_clean") or (session.get("category") if isinstance(session, dict) else "smart_clean")
-                record = storage.add_dictation(
+                storage.add_dictation(
                     raw_text, polished_text, app_title, duration, category,
                     status=status, audio_path=audio_path,
                     error_message=error_message, insertion_status=insertion_status,
                     processing_metadata=processing_metadata,
                 )
-                # Count corrections against the saved, successfully delivered
-                # dictation. Rewrites and commands are not spelling evidence.
-                metadata = processing_metadata if isinstance(processing_metadata, dict) else {}
-                polish = metadata.get("polish") or {}
-                command = metadata.get("command") or {}
-                record_id = getattr(record, "id", None)
-                if (
-                    status == "success"
-                    and insertion_status == "pasted"
-                    and isinstance(record_id, int)
-                    and record_id > 0
-                    and isinstance(polish, dict)
-                    and polish.get("outcome") in {"ai_accepted", "local_model"}
-                    and isinstance(command, dict)
-                    and command.get("status") == "not_detected"
-                    and not command.get("label")
-                ):
-                    try:
-                        for term, variant in extract_correction_pairs(raw_text, polished_text):
-                            storage.record_lexicon_candidate(term, variant, history_id=record_id)
-                    except Exception:
-                        log.exception("[LEARNING] correction capture failed")
+                # Polishing rewrites grammar. That difference is not a mishearing,
+                # so it must not become a dictionary correction. Distinctive names
+                # are learned from the raw transcript inside add_dictation.
+                # Explicit heard-as phrases are the only word substitutions.
             except Exception as exc:
                 log.warning("Could not persist dictation history: %s", exc)
 

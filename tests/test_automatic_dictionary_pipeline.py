@@ -62,32 +62,26 @@ def test_repeated_raw_word_activates_without_opening_dictionary(writer, polishin
     assert store.get_lexicon_suggestions() == []
 
 
-def test_correction_capture_follows_saved_history_and_passes_its_id(writer, monkeypatch):
+def test_polish_rewrite_is_not_learned_as_a_dictionary_correction(writer, monkeypatch):
     store, save = writer
     seen = []
-
-    def capture(term, variant, *, history_id):
-        with store._get_conn_ctx() as conn:
-            row = conn.execute("SELECT raw_text, polished_text FROM history WHERE id = ?", (history_id,)).fetchone()
-        assert row is not None, "Learning ran before persistence"
-        seen.append((term, variant, history_id))
-
-    monkeypatch.setattr(store, "record_lexicon_candidate", capture)
+    monkeypatch.setattr(store, "record_lexicon_candidate", lambda *a, **kw: seen.append((a, kw)))
     save("we use land graph for routing", "We use LangGraph for routing", metadata=accepted_metadata())
-    assert len(seen) == 1
-    assert seen[0][:2] == ("LangGraph", "land graph")
+    assert seen == []
+    assert "LangGraph" not in store.get_dictionary_words()
 
 
-def test_three_successful_corrections_activate_word_and_rule_without_ui(writer):
+def test_polish_differences_do_not_replace_later_dictation(writer):
     store, save = writer
     engine = DictionaryEngine(StorageEngine(store.db_path))
     for _ in range(3):
         save("we use land graph for routing", "We use LangGraph for routing", metadata=accepted_metadata())
-    assert "LangGraph" in engine.get_stt_hint_terms()
-    assert engine.apply_dictionary_post_processing("use land graph for routing") == "use LangGraph for routing"
+    sentence = "use land graph for routing"
+    assert engine.apply_dictionary_post_processing(sentence) == sentence
+    assert "LangGraph" not in store.get_dictionary_words()
 
 
-def test_spacing_only_correction_activates_through_saved_pipeline(writer):
+def test_spacing_only_polish_does_not_create_a_replacement(writer):
     store, save = writer
     for _ in range(3):
         save(
@@ -95,11 +89,8 @@ def test_spacing_only_correction_activates_through_saved_pipeline(writer):
             "We use OpenAI for transcription",
             metadata=accepted_metadata(),
         )
-    assert "OpenAI" in store.get_dictionary_words()
-    assert any(
-        row["wrong_text"] == "open ai" and row["correct_text"] == "OpenAI"
-        for row in store.get_dictionary_corrections()
-    )
+    assert "OpenAI" not in store.get_dictionary_words()
+    assert store.get_dictionary_corrections() == []
 
 
 @pytest.mark.parametrize("status,insertion,metadata", [

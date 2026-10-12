@@ -688,6 +688,7 @@ class TestLearnedVocabularyStorage(unittest.TestCase):
         st.save_setting("history_vocab_seeded_v5", False)
         st.save_setting("lexicon_migration_v2", False)
         st.save_setting("dictionary_user_reset_v1", False)
+        st.save_setting("dictionary_user_reset_v2", False)
         promoted = st.migrate_learned_vocabulary()
         self.assertEqual(promoted, 1)
         self.assertEqual(st.get_lexicon_suggestions(), [])

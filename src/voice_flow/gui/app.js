@@ -2564,7 +2564,7 @@ function renderDictionaryFilteredChips() {
         <span class="dict-empty-icon" aria-hidden="true">${DICT_EMPTY_SVG}</span>
         <div>
           <div class="dict-empty-title">Your dictionary is empty</div>
-          <p class="dict-empty-sub">Flow learns useful words as you dictate. You can also add a word above.</p>
+          <p class="dict-empty-sub">Add a name or technical term. Flow spells that word your way and leaves your other words alone.</p>
         </div>
       </div>
       `;
@@ -2710,7 +2710,7 @@ async function addDictionaryWordFromInput() {
     inputEl.value = "";
     if (heardAsEl) heardAsEl.value = "";
     setDictionaryAddError(null);
-    showToast(`“${word}” saved — Flow will hear it next time.`, "✅");
+    showToast(`“${word}” saved. Flow will spell it this way and leave your other words alone.`, "✅");
     loadDictionary();
   } catch (err) {
     console.error("Error adding dictionary word:", err);

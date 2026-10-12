@@ -3888,7 +3888,7 @@ class StorageEngine:
             with self._lexicon_lock:
                 with self._get_conn_ctx() as conn:
                     conn.execute("BEGIN IMMEDIATE")
-                    if self._read_setting(conn, "dictionary_user_reset_v1") is True:
+                    if self._read_setting(conn, "dictionary_user_reset_v2") is True:
                         return 0
                     tables = {
                         row[0]
@@ -3905,7 +3905,7 @@ class StorageEngine:
                         if table not in tables:
                             continue
                         removed += int(conn.execute(f"DELETE FROM {table}").rowcount or 0)
-                    for key in ("dictionary_user_reset_v1", "history_vocab_seeded_v5"):
+                    for key in ("dictionary_user_reset_v1", "dictionary_user_reset_v2", "history_vocab_seeded_v5"):
                         conn.execute(
                             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
                             (key, "true", now),
@@ -3919,7 +3919,7 @@ class StorageEngine:
     def auto_seed_history_vocabulary(self) -> int:
         """Auto-activate qualified raw terms from a bounded successful-history scan."""
         try:
-            if self.get_setting("dictionary_user_reset_v1", False):
+            if self.get_setting("dictionary_user_reset_v1", False) or self.get_setting("dictionary_user_reset_v2", False):
                 return 0
             if self.get_setting("history_vocab_seeded_v5", False):
                 return 0
@@ -4583,7 +4583,7 @@ class StorageEngine:
         Personal rows are left alone.
         """
         try:
-            if self.get_setting("dictionary_user_reset_v1", False):
+            if self.get_setting("dictionary_user_reset_v1", False) or self.get_setting("dictionary_user_reset_v2", False):
                 return 0
             if self.get_setting("lexicon_migration_v2", False):
                 return 0

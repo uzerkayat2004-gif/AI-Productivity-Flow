@@ -1,8 +1,10 @@
-"""Vocabulary biasing and explicit correction rules for dictation.
+"""Personal dictionary for speech-to-text.
 
-The dictionary is deliberately conservative: users' saved terms get their exact
-casing when actually spoken, and corrections run only for phrases the user
-explicitly configured.  Snippets live in :mod:`voice_flow.snippets`.
+A saved word restores only its own spelling (Kubernetes, Ada, OpenAI). An
+explicit heard-as phrase replaces only that mishearing (hyper cube →
+HyperKube). Ordinary speech is never rewritten, and a polishing pass is never
+turned into a dictionary rule. Shortcuts live in their own table and are not
+applied here.
 """
 
 from __future__ import annotations
@@ -159,13 +161,13 @@ def _letters_only(value: str) -> str:
 def _dictionary_rule_would_rewrite_ordinary_speech(rule: _Rule) -> bool:
     """Whether this rule would replace words the speaker actually said.
 
-    Snippets stay. A heard-as phrase stays when it is not normal speech
-    ("hyper cube"). Same-letter names and technical spellings stay
-    ("Kubernetes", "Ada", "OpenAI"). Ordinary words and ordinary phrases
-    ("meeting", "report", "hey there", "send the report") do not.
+    Shortcuts are not dictionary rules. A heard-as phrase is kept when it is
+    not normal speech ("hyper cube"). Same-letter names and technical
+    spellings stay ("Kubernetes", "Ada", "OpenAI"). Ordinary words and
+    ordinary phrases ("meeting", "report", "hey there") do not.
     """
     if rule.snippet:
-        return False
+        return True
     return is_ordinary_spoken_phrase(rule.trigger)
 
 
@@ -327,7 +329,11 @@ class DictionaryEngine:
         getter = getattr(self.store, "get_dictionary_entries", None)
         if getter is not None:
             try:
-                words = [str(row["word"]) for row in getter(include_auto=False)]
+                try:
+                    rows = getter(include_auto=False, include_snippets=False)
+                except TypeError:
+                    rows = getter(include_auto=False)
+                words = [str(row["word"]) for row in rows]
                 loaded = True
             except Exception as exc:
                 last_error = exc
@@ -350,7 +356,11 @@ class DictionaryEngine:
             fallback = getattr(self.store, "get_dictionary_words", None)
             if fallback is not None:
                 try:
-                    words = [str(w) for w in fallback(include_snippets=True)]
+                    try:
+                        loaded_words = fallback(include_snippets=False)
+                    except TypeError:
+                        loaded_words = fallback()
+                    words = [str(w) for w in loaded_words]
                     loaded = True
                 except Exception as exc:
                     last_error = exc
@@ -360,19 +370,6 @@ class DictionaryEngine:
             # dictionary or abort dictation startup.
             raise last_error
 
-        # Include custom snippets formatted as "trigger -> expansion" in active vocabulary
-        snippet_getter = getattr(self.store, "get_snippets", None)
-        if snippet_getter is not None:
-            try:
-                for s in snippet_getter():
-                    t = (s.get("trigger") or "").strip()
-                    e = (s.get("expansion") or "").strip()
-                    if t and e:
-                        formatted = f"{t} -> {e}"
-                        if formatted not in words:
-                            words.append(formatted)
-            except Exception as exc:
-                log.debug("Could not load dictionary snippets: %s", exc)
         return words
 
     def _load_corrections(self) -> list[dict]:

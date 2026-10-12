@@ -9,10 +9,12 @@ from voice_flow.storage import StorageEngine
 def test_saved_dictionary_text_is_cleared_once_and_history_does_not_restore_it(tmp_path: Path) -> None:
     store = StorageEngine(str(tmp_path / "dictionary-reset.db"))
     assert store.get_setting("dictionary_user_reset_v1") is True
+    assert store.get_setting("dictionary_user_reset_v2") is True
     assert store.get_dictionary_words() == []
 
     with store._get_conn_ctx() as conn:
         conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v1'")
+        conn.execute("DELETE FROM settings WHERE key = 'dictionary_user_reset_v2'")
         now = "2026-10-10T12:00:00"
         for word in ("Meeting", "Report"):
             cursor = conn.execute(
@@ -50,6 +52,7 @@ def test_saved_dictionary_text_is_cleared_once_and_history_does_not_restore_it(t
         assert conn.execute("SELECT raw_text FROM history").fetchone()["raw_text"] == "keep this history"
     assert [row["trigger"] for row in store.get_snippets()] == ["sig"]
     assert store.get_setting("dictionary_user_reset_v1") is True
+    assert store.get_setting("dictionary_user_reset_v2") is True
     assert store.get_setting("history_vocab_seeded_v5") is True
 
     with store._get_conn_ctx() as conn:

@@ -90,7 +90,8 @@ def test_generated_alias_is_one_pass_and_explicit_correction_wins(monkeypatch: p
     assert engine.apply_dictionary_post_processing("hyper kube") == "CustomKube"
 
 
-def test_snippet_uses_trigger_length_and_does_not_cascade(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shortcuts_are_not_dictionary_rewrites(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shortcut expansion is not a dictionary rule and must not change speech."""
     engine = _engine(monkeypatch, [
         "a -> this is a long expansion",
         "a b -> PHRASE",
@@ -98,14 +99,14 @@ def test_snippet_uses_trigger_length_and_does_not_cascade(monkeypatch: pytest.Mo
         "bar -> baz",
     ])
 
-    assert engine.apply_dictionary_post_processing("a b") == "PHRASE"
-    assert engine.apply_dictionary_post_processing("foo") == "bar"
+    assert engine.apply_dictionary_post_processing("a b") == "a b"
+    assert engine.apply_dictionary_post_processing("foo") == "foo"
 
 
-def test_snippet_expansion_inserts_backslashes_literally(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_shortcut_expansion_does_not_rewrite_a_path(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = _engine(monkeypatch, [r"my path -> C:\Users\me\file.txt"])
 
-    assert engine.apply_dictionary_post_processing("open my path") == r"open C:\Users\me\file.txt"
+    assert engine.apply_dictionary_post_processing("open my path") == "open my path"
 
 
 def test_empty_snippet_expansion_cannot_delete_text(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,9 +116,10 @@ def test_empty_snippet_expansion_cannot_delete_text(monkeypatch: pytest.MonkeyPa
 
 
 def test_dictionary_processing_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = _engine(monkeypatch, ["myemail -> me@example.com", "VoiceFlow"])
+    engine = _engine(monkeypatch, ["VoiceFlow"])
 
-    once = engine.apply_dictionary_post_processing("voiceflow myemail")
+    once = engine.apply_dictionary_post_processing("voiceflow")
+    assert once == "VoiceFlow"
     assert engine.apply_dictionary_post_processing(once) == once
 
 
