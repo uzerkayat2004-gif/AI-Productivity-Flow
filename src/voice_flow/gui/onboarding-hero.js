@@ -8,6 +8,7 @@
   function buildRibbons(id = "s1-ribbons") {
     const svg = document.getElementById(id);
     if (!svg || svg.childElementCount) return;
+    try {
     const frag = document.createDocumentFragment();
     const add = (d, cls) => {
       const p = document.createElementNS(NS, "path");
@@ -34,6 +35,9 @@
       frag.childNodes[frag.childNodes.length - 4].style.opacity = a;
     }
     svg.appendChild(frag);
+    } catch (error) {
+      // Decorative SVGs must never prevent stage or caption initialization.
+    }
   }
 
   function fitStage() {
@@ -60,35 +64,52 @@
     });
   }
 
-  // Caption clock fallback: only if no narration audio player is created (e.g. offline audio fallback)
-  let clockT = 0, lastTick = 0;
-  function tick(now) {
+  // app.js owns narration and its timeupdate subtitles. This clock only
+  // supplies Scene 1 captions while its narration is unavailable/nonplaying.
+  let clockT = 0, lastTick = 0, captionFrame = null, observedPlayer = null;
+  const audioEvents = ["playing", "pause", "ended", "error", "waiting", "canplay"];
+  function audioPlayer() {
+    return typeof onboardingAudioPlayer !== "undefined" ? onboardingAudioPlayer : null;
+  }
+  function scene1Visible() {
     const overlay = document.getElementById("onboarding-overlay");
-    const visible = overlay && !overlay.classList.contains("hidden") && overlay.classList.contains("welcome-hero-mode");
-    if (visible) {
-      let hasAudioPlayer = false;
-      try {
-        // eslint-disable-next-line no-undef
-        hasAudioPlayer = typeof onboardingAudioPlayer !== "undefined" && onboardingAudioPlayer !== null;
-      } catch (e) { /* ignore */ }
-
-      if (hasAudioPlayer) {
-        // The HTML Audio player drives all timeupdate events directly
-        lastTick = now;
-        requestAnimationFrame(tick);
-        return;
-      }
-
-      const dt = lastTick ? (now - lastTick) / 1000 : 0;
-      clockT = (clockT + dt) % 40.5;
-      if (typeof updateOnboardingScene1Subtitles === "function") {
-        updateOnboardingScene1Subtitles(clockT, false);
-      }
-    } else {
-      clockT = 0;
+    const stage = document.getElementById("s1-stage");
+    const slide = stage && stage.closest(".onboarding-slide");
+    return !document.hidden && overlay && !overlay.classList.contains("hidden") &&
+      overlay.classList.contains("welcome-hero-mode") && slide && slide.classList.contains("active");
+  }
+  function needsCaptionClock() {
+    const player = audioPlayer();
+    return scene1Visible() && (!player || player.paused || player.ended || player.error || player.readyState < 3);
+  }
+  function syncCaptionClock() {
+    const player = audioPlayer();
+    if (player !== observedPlayer) {
+      if (observedPlayer) audioEvents.forEach(event => observedPlayer.removeEventListener(event, syncCaptionClock));
+      observedPlayer = player;
+      if (player) audioEvents.forEach(event => player.addEventListener(event, syncCaptionClock));
     }
+    if (!needsCaptionClock()) {
+      if (captionFrame !== null) cancelAnimationFrame(captionFrame);
+      captionFrame = null;
+      lastTick = 0;
+      if (!scene1Visible()) clockT = 0;
+      return;
+    }
+    if (captionFrame === null) {
+      // Resume fallback from the narration position after a playback failure.
+      if (player && Number.isFinite(player.currentTime)) clockT = player.currentTime;
+      captionFrame = requestAnimationFrame(tick);
+    }
+  }
+  function tick(now) {
+    captionFrame = null;
+    if (!needsCaptionClock()) { syncCaptionClock(); return; }
+    const dt = lastTick ? (now - lastTick) / 1000 : 0;
+    clockT = (clockT + dt) % 40.5;
     lastTick = now;
-    requestAnimationFrame(tick);
+    if (typeof updateOnboardingScene1Subtitles === "function") updateOnboardingScene1Subtitles(clockT, false);
+    captionFrame = requestAnimationFrame(tick);
   }
 
   function init() {
@@ -106,8 +127,9 @@
     window.addEventListener("resize", fitStage);
     new MutationObserver(syncThemeLabel).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const overlay = document.getElementById("onboarding-overlay");
-    if (overlay) new MutationObserver(() => requestAnimationFrame(fitStage)).observe(overlay, { attributes: true, attributeFilter: ["class"] });
-    requestAnimationFrame(tick);
+    if (overlay) new MutationObserver(() => { fitStage(); syncCaptionClock(); }).observe(overlay, { attributes: true, subtree: true, attributeFilter: ["class"] });
+    document.addEventListener("visibilitychange", syncCaptionClock);
+    syncCaptionClock();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

@@ -20,6 +20,9 @@ from typing import Any
 from pathlib import Path
 import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
+from voice_flow.platform.macos_app import configure_macos_app
+
+configure_macos_app("engine", apply_policy=False)
 
 if sys.stdout is None:
     class DummyWriter:
@@ -3481,7 +3484,8 @@ class VoiceFlowApp:
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
         log.info(" - System-wide floating bar active on your screen")
-        log.info(" - Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak")
+        from voice_flow.hotkeys import platform_input_defaults
+        log.info(" - %s", platform_input_defaults()["ready_line"])
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 
@@ -3539,10 +3543,19 @@ _ENGINE_MUTEX_HANDLE = None
 def main() -> None:
     if "--test-crash-reporting" in sys.argv:
         from voice_flow._version import VERSION
-        from voice_flow.crash_reporting import is_crash_reporting_enabled, capture_test_crash_report
+        from voice_flow.crash_reporting import (
+            capture_test_crash_report,
+            is_crash_reporting_enabled,
+            is_sending_suppressed,
+        )
         if is_crash_reporting_enabled():
             success = capture_test_crash_report()
-            if success:
+            if success and is_sending_suppressed():
+                print(
+                    f"Test crash report from AI Productivity Flow v{VERSION} was not sent "
+                    "(no-send mode: CI or VOICE_FLOW_CRASH_REPORTS_NO_SEND is set)."
+                )
+            elif success:
                 print(f"Test crash report from AI Productivity Flow v{VERSION} sent successfully.")
             else:
                 print("Failed to send test crash report.")

@@ -187,7 +187,8 @@ class AudioRecorder:
                     log.warning("[AUDIO] %s", self.last_device_error)
                     return False
                 if selected_info is None:
-                    self.last_device_error = "Selected microphone unavailable. Reconnect it or choose Windows default."
+                    default_label = "System default" if __import__("sys").platform == "darwin" else "Windows default"
+                    self.last_device_error = f"Selected microphone unavailable. Reconnect it or choose {default_label}."
                     log.warning("[AUDIO] %s", self.last_device_error)
                     return False
                 target_device = selected_info["index"]

@@ -220,6 +220,8 @@ def _safe_environment() -> dict[str, str]:
     managed_python = Path.home() / ".narova" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     environment["NAROVA_PYTHON"] = str(managed_python if managed_python.is_file() else Path(sys.executable))
     environment["PYTHONIOENCODING"] = "utf-8"
+    # Headless app renders must never restart a separate Studio preview server.
+    environment["NAROVA_HEADLESS_APP"] = "1"
     # Installed app: the private python hosts narova_tts (no managed venv is
     # created) and the bundled hyperframes tree replaces npx resolution.
     # narova_tts and the narova CLI resolve ffmpeg via PATH, so the private

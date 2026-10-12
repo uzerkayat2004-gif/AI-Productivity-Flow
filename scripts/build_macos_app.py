@@ -88,6 +88,37 @@ exec "$PYTHON" -m voice_flow.main "$@"
         pass
 
 
+def create_native_launcher(target_arch: str | None = None) -> None:
+    """Compile the outer executable without initializing or linking AppKit."""
+    if sys.platform != "darwin":
+        raise RuntimeError("Native macOS application builds require a macOS host with clang.")
+    clang = shutil.which("clang")
+    if not clang:
+        raise RuntimeError("Native macOS application builds require clang (Xcode command line tools).")
+    library = RESOURCES_DIR / "runtime" / "python" / "lib" / "libpython3.11.dylib"
+    if not library.is_file():
+        raise RuntimeError("Bundled libpython3.11.dylib is required before compiling the native launcher.")
+    source = REPO_ROOT / "scripts" / "native_macos_launcher.c"
+    if not source.is_file():
+        raise RuntimeError("Native macOS launcher source is missing.")
+    arch = target_arch or platform.machine().lower()
+    arch = "arm64" if arch in ("arm64", "aarch64") else arch
+    if arch not in ("arm64", "x86_64"):
+        raise RuntimeError(f"Unsupported macOS launcher architecture: {arch}")
+    launcher = MACOS_DIR / "ai-productivity-flow-launcher"
+    # Compile into a separate file: a compiler failure cannot leave the shell
+    # scaffold looking like a successfully compiled distributable executable.
+    candidate = launcher.with_name(launcher.name + ".native")
+    subprocess.run([
+        clang, "-arch", arch, "-mmacosx-version-min=12.0",
+        "-Wall", "-Wextra", "-Werror", str(source), "-o", str(candidate),
+    ], check=True)
+    if not candidate.is_file() or candidate.read_bytes()[:4] != b"\xcf\xfa\xed\xfe":
+        raise RuntimeError("clang did not produce a native 64-bit Mach-O launcher.")
+    candidate.chmod(0o755)
+    candidate.replace(launcher)
+
+
 def create_app_icon() -> None:
     ico_path = SRC_DIR / "gui" / "assets" / "icon.ico"
     out_icns = RESOURCES_DIR / "AppIcon.icns"
@@ -110,6 +141,14 @@ def copy_resources() -> None:
         dst_src,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.pyd"),
     )
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.bundle_code2video import copy_code2video
+
+    vendor_src = REPO_ROOT / "third_party" / "code2video"
+    if vendor_src.is_dir():
+        copy_code2video(vendor_src, RESOURCES_DIR / "third_party" / "code2video")
+        print(f"Bundled Code2Video into {RESOURCES_DIR / 'third_party' / 'code2video'}")
 
 
 def sanitize_runtime_libraries(runtime_dir: Path) -> None:
@@ -237,9 +276,10 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         else:
             packages = [
                 "faster-whisper", "sounddevice", "numpy", "scipy", "pynput",
-                "pyperclip", "pyautogui", "pywebview", "pystray", "pillow",
+                "pyperclip", "pyautogui", "pywebview", "pyobjc-core",
+                "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit", "pystray", "pillow",
                 "psutil", "edge-tts", "pypdf", "websockets", "requests",
-                "cryptography", "sentry-sdk>=2.0.0"
+                "cryptography", "sentry-sdk>=2.0.0", "openai>=1.40.0,<3"
             ]
             subprocess.run([str(python_bin), "-m", "pip", "install", *packages], check=True)
     else:
@@ -510,6 +550,9 @@ def main() -> None:
         create_dmg(BUNDLE_DIR, dmg_path, bg_img)
         return
 
+    if args.bundle_runtime and sys.platform != "darwin":
+        raise RuntimeError("Native macOS application builds require a macOS host with clang.")
+
     print(f"Building {APP_NAME}.app (v{VERSION})...")
     if BUNDLE_DIR.exists():
         shutil.rmtree(BUNDLE_DIR)
@@ -517,10 +560,14 @@ def main() -> None:
     RESOURCES_DIR.mkdir(parents=True, exist_ok=True)
     create_info_plist()
     create_launcher_script()
+    if not args.bundle_runtime:
+        print("Resource-only development scaffold: launcher requires a separately supplied runtime; "
+              "use --bundle-runtime on macOS for a native distributable app.")
     create_app_icon()
     copy_resources()
     if args.bundle_runtime:
         bundle_runtime_dependencies(target_arch=args.target_arch)
+        create_native_launcher(target_arch=args.target_arch)
 
     sign_app_bundle(BUNDLE_DIR)
 

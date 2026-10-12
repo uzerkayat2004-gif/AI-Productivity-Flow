@@ -26,7 +26,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-asyncio pytest-timeout cryptography
+          pip install pytest pytest-asyncio pytest-timeout cryptography pillow
 
       - name: Verify Git Tag Matches Canonical Version
         shell: pwsh
@@ -47,6 +47,10 @@ jobs:
       - name: Run Platform & Core Feature Tests
         run: |
           pytest tests/test_platform_layer.py tests/test_runtime_compatibility.py tests/test_runtime_guard_socket_permissions.py tests/test_account_auth.py tests/test_audio_video_download_and_player_fixes.py tests/test_text_processing.py -v --timeout=60
+
+      - name: Run macOS GUI regression tests
+        run: |
+          pytest tests/test_macos_hotkeys_and_launcher.py tests/test_mac_smoke_artifacts.py tests/test_gui_local_assets.py tests/test_macos_code2video_bundle.py -v --timeout=60
 
       - name: Verify License and Third-Party Notices
         shell: pwsh

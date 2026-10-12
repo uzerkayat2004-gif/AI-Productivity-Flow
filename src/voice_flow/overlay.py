@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import queue
 import sys
 import threading
 import time
@@ -105,21 +106,11 @@ class FloatingOverlayBar:
     """Always-on-top, non-activating floating pill bar that mirrors Wispr Flow's UI."""
 
     def _is_theme_dark(self) -> bool:
-        # Color descriptors share a bounded snapshot instead of issuing a
-        # SQLite read per color on the Tk thread. No extra idle timer is needed.
-        token = (id(storage), getattr(storage, "db_path", None))
-        now = time.monotonic()
-        if (getattr(self, "_theme_cache_token", None) == token
-                and now < getattr(self, "_theme_cache_until", 0.0)):
-            return self._theme_cache_dark
         try:
-            dark = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
+            from voice_flow.storage import storage
+            return str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
         except Exception:
-            dark = False
-        self._theme_cache_token = token
-        self._theme_cache_dark = dark
-        self._theme_cache_until = now + 1.0
-        return dark
+            return False
 
     # Colors — "Sunrise" design system with dark studio mode support matching studio-polish & design-system tokens
     ORANGE = _ThemeColor("#FF6A00", "#e6b092")        # Warm secondary peach accent (--polish-accent)
@@ -257,6 +248,13 @@ class FloatingOverlayBar:
         self._proximity_after_id = None
         self._main_thread_id: int | None = None
         self._mainloop_running: bool = False
+        # macOS: Tk 9 timers registered from a non-Tk thread never fire (the
+        # bundled _tkinter runs Tcl in non-threaded mode, so root.after() from
+        # a hotkey/API thread lands in that thread's own notifier). Work from
+        # other threads is queued here and drained by a main-thread pump.
+        self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
+        self._ui_pump_after_id = None
+        self._mac_repaint_done: bool = False
 
     def set_visible(self, visible: bool) -> bool:
         """Runtime hook for the Hub; hiding the bar deliberately leaves hotkeys live."""
@@ -266,10 +264,9 @@ class FloatingOverlayBar:
             if not self.win:
                 return
             if self.visible:
-                if self.state == "HIDDEN":
-                    self.state = "READY"
-                self._bring_to_top()
-                self._draw()
+                if self.state != "HIDDEN":
+                    self._bring_to_top()
+                    self._draw()
             else:
                 self._animation_generation += 1
                 self.win.withdraw()
@@ -329,7 +326,6 @@ class FloatingOverlayBar:
 
     def reset_position(self) -> None:
         """Explicitly reset floating bar to the default dock position and bring to front."""
-        self.visible = True
         self._user_pos = None
         self._persist_position()
 
@@ -338,8 +334,6 @@ class FloatingOverlayBar:
                 self._create_window()
                 if not self.win:
                     return
-            if self.state == "HIDDEN":
-                self.state = "READY"
             self._position_window()
             self._bring_to_top()
             self._draw()
@@ -396,6 +390,10 @@ class FloatingOverlayBar:
                 if hasattr(self.canvas, "config"):
                     self.canvas.config(width=self.width, height=self.height)
                 self._position_window()
+                if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
+                    # Tk 9 Aqua leaves a freshly enlarged bar unpainted (black)
+                    # until its geometry changes again; repaint right after.
+                    self._schedule_mac_repaint(delay_ms=30)
 
     def _drawn_width(self) -> int:
         """Width the bar was last drawn at (current on-screen geometry)."""
@@ -410,7 +408,9 @@ class FloatingOverlayBar:
         """Create and initialize the Tkinter toplevel overlay and canvas."""
         cur_tid = threading.get_ident()
         if getattr(self, "_main_thread_id", None) is not None and cur_tid != self._main_thread_id:
-            if self.root is not None and getattr(self, "_mainloop_running", False):
+            if sys.platform == "darwin":
+                self._ui_queue.put(self._create_window)
+            elif self.root is not None and getattr(self, "_mainloop_running", False):
                 try:
                     self.root.after(0, self._create_window)
                 except Exception:
@@ -420,6 +420,8 @@ class FloatingOverlayBar:
         _enable_dpi_awareness()
         if self.root is None:
             self.root = tk.Tk()
+            from voice_flow.platform.macos_app import configure_macos_app
+            configure_macos_app("engine")
             self._main_thread_id = cur_tid
             self.root.withdraw()
             try:
@@ -442,6 +444,9 @@ class FloatingOverlayBar:
                 pass
 
         self.win = tk.Toplevel(self.root)
+        self._mac_nswindow = None
+        self._mac_shape_key = None
+        self._mac_canvas_bg = None
         if hasattr(self.win, "withdraw"):
             self.win.withdraw()
         if hasattr(self.win, "overrideredirect"):
@@ -461,9 +466,16 @@ class FloatingOverlayBar:
                 pass
 
         self._trans_color = "#010101"
+        if sys.platform == "darwin":
+            # Aqua has no -transparentcolor, so #010101 showed as a black frame
+            # around the rounded corners (and Tk 9 paints systemTransparent
+            # canvas backgrounds black too). The Mac bar instead fills its
+            # canvas with the pill's border colour and is clipped to the pill
+            # shape by a rounded Core Animation mask (see _mac_update_shape).
+            self._trans_color = self.BORDER_REST
         if hasattr(self.win, "config"):
             self.win.config(bg=self._trans_color)
-        if hasattr(self.win, "attributes"):
+        if hasattr(self.win, "attributes") and sys.platform != "darwin":
             try:
                 self.win.attributes("-transparentcolor", self._trans_color)
             except Exception:
@@ -501,6 +513,8 @@ class FloatingOverlayBar:
         self._bring_to_top()
         self._draw()
         self._schedule_proximity_poll()
+        if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
+            self._schedule_mac_repaint()  # recreated bar (restart/refresh)
 
     def _init_tk(self) -> None:
         self._create_window()
@@ -523,10 +537,172 @@ class FloatingOverlayBar:
             self._draw()
         if self.root:
             self._mainloop_running = True
+            if sys.platform == "darwin":
+                self._schedule_ui_pump()
+                self._schedule_mac_repaint()
             try:
                 self.root.mainloop()
             finally:
                 self._mainloop_running = False
+
+    # ------------------------------------------------------------------
+    # macOS (Tk 9 / Aqua) helpers. Windows never reaches these.
+    # ------------------------------------------------------------------
+    UI_PUMP_INTERVAL_MS = 25
+
+    MAC_DOCK_GAP = 12
+
+    def _mac_visible_area(self) -> tuple[int, int, int, int] | None:
+        """(left, top, right, bottom) of the main screen minus Dock and menu bar, in Tk coords.
+
+        Cocoa frames are bottom-left based on the primary (menu bar) screen; Tk
+        is top-left, so y is flipped against that screen's height. Returns None
+        off macOS or when AppKit is unavailable, so callers keep their old maths."""
+        if sys.platform != "darwin":
+            return None
+        try:
+            from AppKit import NSScreen
+            screens = NSScreen.screens()
+            main = NSScreen.mainScreen()
+            if main is None or not screens:
+                return None
+            primary_h = float(screens[0].frame().size.height)
+            vis = main.visibleFrame()
+            left = int(round(vis.origin.x))
+            right = int(round(vis.origin.x + vis.size.width))
+            top = int(round(primary_h - (vis.origin.y + vis.size.height)))
+            bottom = int(round(primary_h - vis.origin.y))
+            if right - left < 100 or bottom - top < 100:
+                return None
+            return left, top, right, bottom
+        except Exception:
+            return None
+
+    def _mac_find_nswindow(self):
+        """Locate the NSWindow backing the bar (Tk gives no direct handle)."""
+        cached = getattr(self, "_mac_nswindow", None)
+        if cached is not None:
+            return cached
+        try:
+            from AppKit import NSApplication
+        except Exception:
+            return None
+        try:
+            want_w, want_h = int(self.width), int(self.height)
+            want_x = int(self.win.winfo_x()) if hasattr(self.win, "winfo_x") else None
+            best = None
+            for nswin in NSApplication.sharedApplication().windows():
+                frame = nswin.frame()
+                if abs(frame.size.width - want_w) > 1 or abs(frame.size.height - want_h) > 1:
+                    continue
+                if want_x is not None and abs(frame.origin.x - want_x) > 2:
+                    continue
+                best = nswin
+                break
+            self._mac_nswindow = best
+            return best
+        except Exception:
+            return None
+
+    def _mac_update_shape(self, radius: float, fill: str) -> None:
+        """Clip the bar window to its rounded pill shape on macOS.
+
+        Without this the square window corners around the rounded pill show
+        as a dark frame. The canvas background is set to the pill's border
+        colour so the 1px canvas margin blends into the outline."""
+        canvas = self.canvas
+        if canvas is not None and hasattr(canvas, "config") and getattr(self, "_mac_canvas_bg", None) != fill:
+            try:
+                canvas.config(bg=fill)
+                self.win.config(bg=fill)
+                self._mac_canvas_bg = fill
+            except Exception:
+                pass
+        key = (id(self.win), int(self.width), int(self.height), float(radius))
+        if getattr(self, "_mac_shape_key", None) == key:
+            return
+        nswin = self._mac_find_nswindow()
+        if nswin is None:
+            return
+        try:
+            from AppKit import NSColor
+
+            nswin.setOpaque_(False)
+            nswin.setBackgroundColor_(NSColor.clearColor())
+            nswin.setHasShadow_(False)
+            view = nswin.contentView()
+            view.setWantsLayer_(True)
+            layer = view.layer()
+            layer.setCornerRadius_(float(radius))
+            layer.setMasksToBounds_(True)
+            self._mac_shape_key = key
+        except Exception:
+            self._mac_nswindow = None
+
+    def _schedule_ui_pump(self) -> None:
+        if self.root is None:
+            return
+        try:
+            self._ui_pump_after_id = self.root.after(self.UI_PUMP_INTERVAL_MS, self._pump_ui_queue)
+        except Exception:
+            self._ui_pump_after_id = None
+
+    def _pump_ui_queue(self, max_items: int = 200) -> None:
+        """Run queued cross-thread UI work on the Tk main thread."""
+        self._ui_pump_after_id = None
+        for _ in range(max_items):
+            try:
+                func = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                func()
+            except Exception:
+                pass
+        if getattr(self, "_mainloop_running", False):
+            self._schedule_ui_pump()
+
+    def _schedule_mac_repaint(self, delay_ms: int = 350) -> None:
+        if self.root is None or getattr(self, "_mac_repaint_pending", False):
+            return  # coalesce bursts of resizes into one repaint
+        try:
+            self.root.after(delay_ms, self._mac_force_repaint)
+            self._mac_repaint_pending = True
+        except Exception:
+            pass
+
+    def _mac_force_repaint(self) -> None:
+        """Work around Tk 9 Aqua never painting the first small toplevel.
+
+        The bar is the first window Tk maps; until its geometry changes, Aqua
+        shows the default light window background instead of the canvas (the
+        "white floating bar"). A one-pixel resize after mapping, followed by a
+        full redraw, makes Tk paint the canvas reliably."""
+        self._mac_repaint_pending = False
+        win = self.win
+        if win is None:
+            return
+        try:
+            if hasattr(win, "winfo_ismapped") and not win.winfo_ismapped():
+                if not self.visible or self.state == "HIDDEN":
+                    return  # repaint once the bar is shown again
+            if hasattr(win, "geometry"):
+                x, y = self._current_xy()
+                win.geometry(f"{self.width + 1}x{self.height}+{x}+{y}")
+                if hasattr(win, "update_idletasks"):
+                    win.update_idletasks()
+            self._mac_repaint_done = True
+        except Exception:
+            pass
+        self._position_window()
+        self._last_draw_sig = None  # bypass the redraw throttle
+        self._draw()
+
+    def _current_xy(self) -> tuple[int, int]:
+        try:
+            return int(self.win.winfo_x()), int(self.win.winfo_y())
+        except Exception:
+            return 0, 0
 
     def _on_map(self, _event: tk.Event) -> None:
         self._apply_win32_styles()
@@ -597,6 +773,12 @@ class FloatingOverlayBar:
             max_x = screen_w
         if screen_h is not None and max_y == 0:
             max_y = screen_h
+        if sys.platform == "darwin":
+            # Keep a dragged/saved bar out from under the Dock and menu bar.
+            area = self._mac_visible_area()
+            if area is not None:
+                min_y = max(min_y, area[1])
+                max_y = min(max_y, area[3])
         clamped_x = max(min_x, min(x, max_x - self.width))
         clamped_y = max(min_y, min(y, max_y - self.height))
         return clamped_x, clamped_y
@@ -613,12 +795,22 @@ class FloatingOverlayBar:
             x, y = self._clamp_to_screen(target_x, target_y, screen_w, screen_h)
         elif getattr(self, "dock", "bottom") == "left":
             x, y = 8, (screen_h - self.height) // 2
+            area = self._mac_visible_area()
+            if area is not None:
+                x = area[0] + 8
         elif getattr(self, "dock", "bottom") == "right":
             x, y = screen_w - self.width - 8, (screen_h - self.height) // 2
+            area = self._mac_visible_area()
+            if area is not None:
+                x = area[2] - self.width - 8
         else:
             x = (screen_w - self.width) // 2
             margin = getattr(config, "bar_bottom_margin", 60)
             y = screen_h - self.height - margin
+            # macOS: the Dock can be taller than the margin; sit above it.
+            area = self._mac_visible_area()
+            if area is not None:
+                y = min(y, area[3] - self.height - self.MAC_DOCK_GAP)
         if hasattr(self.win, "geometry"):
             self._suppress_leave_until = time.monotonic() + 0.15
             self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
@@ -706,12 +898,13 @@ class FloatingOverlayBar:
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
         cur_tid = threading.get_ident()
-        if getattr(self, "_main_thread_id", None) == cur_tid:
-            try:
-                func()
-            except Exception:
-                pass
-            return
+        if sys.platform == "darwin":
+            main_tid = getattr(self, "_main_thread_id", None)
+            if main_tid is not None and cur_tid != main_tid:
+                # Never touch Tk from a background thread on macOS: the pump
+                # on the Tk thread drains this queue (also before mainloop).
+                self._ui_queue.put(func)
+                return
         if self.root is not None and getattr(self, "_mainloop_running", False):
             try:
                 self.root.after(0, func)
@@ -726,10 +919,7 @@ class FloatingOverlayBar:
 
     def refresh(self) -> None:
         """Thread-safe redraw request: routes _draw through the UI loop."""
-        def _do():
-            self._theme_cache_until = 0.0
-            self._draw()
-        self._run_on_ui(_do)
+        self._run_on_ui(self._draw)
 
     def set_selected_text(self, text: str, timeout_ms: int = 15000) -> None:
         """Keep selected text available for the next Video Flow launch.
@@ -904,9 +1094,7 @@ class FloatingOverlayBar:
 
     def _summary_row_metrics(self) -> tuple[int, int, int]:
         count = len(self._summary_rows())
-        fg_h = self._foreground_size()[1]
-        top_gap = 4 if fg_h > 0 else 0
-        row_height, gap = 26, 2
+        top_gap, row_height, gap = 4, 26, 2
         if count:
             screen_height = 768
             for widget in (self.win, self.root):
@@ -915,7 +1103,7 @@ class FloatingOverlayBar:
                     break
                 except Exception:
                     pass
-            available = screen_height - fg_h - top_gap
+            available = screen_height - self._foreground_size()[1] - top_gap
             if count * row_height + (count - 1) * gap > available:
                 row_height = max(12, min(26, (available - count + 1) // count))
                 gap = 1
@@ -1054,7 +1242,7 @@ class FloatingOverlayBar:
                 if top <= y < bottom:
                     if x >= w - self.GRIP_W:
                         return "grip"
-                    if x >= w - self.GRIP_W - 19:
+                    if x >= w - self.GRIP_W - 25:
                         return f"summary_cancel:{index}" if row.get("status") == "processing" else f"summary_dismiss:{index}"
                     if row.get("status") in ("ready", "failed"):
                         return f"summary_activate:{index}"
@@ -1265,8 +1453,9 @@ class FloatingOverlayBar:
     def _on_drag(self, event: tk.Event) -> None:
         dx = event.x - self.drag_x
         dy = event.y - self.drag_y
-        # Strictly require press to have originated in the 6-dot grip zone
-        if getattr(self, "_press_zone", None) != "grip":
+        dist = math.hypot(event.x - getattr(self, "_press_start_x", event.x), event.y - getattr(self, "_press_start_y", event.y))
+        # Only start dragging if user pressed the dedicated grip strip OR intentionally dragged > 6px
+        if getattr(self, "_press_zone", None) != "grip" and dist < 6.0 and not getattr(self, "_is_dragging", False):
             return
 
         self._is_dragging = True
@@ -1547,10 +1736,6 @@ class FloatingOverlayBar:
                 or (self.width == self.ready_actions_width and getattr(self, "_last_drawn_width", 0) != self.width)
             ):
                 return self.ready_actions_width, self.hover_height
-            if self._summary_rows():
-                # When background jobs are running and bar is not hovered / text-selected,
-                # foreground collapses to 0 so only the clean job rows are displayed (no 48x10 dark notch).
-                return self.video_progress_width, 0
             return self.idle_width, self.idle_height
         if self.state == "RECORDING":
             return self.recording_width, self.hover_height
@@ -1648,12 +1833,16 @@ class FloatingOverlayBar:
             and not getattr(self, "_selection_expanded", False)
             and not rows
         )
+        if sys.platform == "darwin" and self.win is not None:
+            radius = min(flow_height / 2, 14 if is_rest else 16)
+            self._mac_update_shape(radius, self.BORDER_REST if is_rest else self.BORDER)
+
         if self.state in ("PROCESSING", "READING", "SUMMARIZING", "GENERATING_AUDIO", "ERROR"):
             self._draw_working_shell(flow_width, flow_height)
         elif not is_rest and self.state != "READY":
             self._draw_pill(1, 1, flow_width - 1, flow_height - 1, min(flow_height / 2, 16), self.WHITE, self.BORDER)
 
-        if self.state == "READY" and flow_height > 0:
+        if self.state == "READY":
             self._draw_ready(flow_width, flow_height)
         elif self.state == "RECORDING":
             self._draw_recording(flow_width, flow_height)
@@ -1670,8 +1859,7 @@ class FloatingOverlayBar:
         elif self.state == "ERROR":
             self._draw_error(flow_width, flow_height)
 
-        if flow_height > 0:
-            self._draw_grip(flow_width, flow_height)
+        self._draw_grip(flow_width, flow_height)
         self._draw_summary_rows(w)
 
         self._last_draw_at = now
@@ -1734,87 +1922,32 @@ class FloatingOverlayBar:
         c = self.canvas
         for index, (top, bottom, row) in enumerate(self._summary_row_geometry()):
             self._draw_pill(1, top, w - 1, bottom, 12, self.WHITE, self.BORDER)
-            kind = str(row.get("kind") or "")
-            status = str(row.get("status") or "")
+            kind = str(row["kind"])
+            status = str(row["status"])
             job_id = str(row.get("job_id") or "")
             cancel_zone = f"summary_cancel:{index}"
-            dismiss_zone = f"summary_dismiss:{index}"
             ready_zone = f"summary_activate:{index}"
             cy = (top + bottom) / 2
-            strip_mid = w - self.GRIP_W / 2
-            cx_cancel = w - self.GRIP_W - 10
-
             if status == "processing":
-                raw_title = str(row.get("title") or ("Video Flow" if kind == "video" else "Audio Flow"))
+                title = str(row.get("title") or ("Video Flow" if kind == "video" else "Audio Flow"))
                 progress = max(0, min(100, int(row.get("progress") or 0)))
                 stage = str(row.get("stage") or "Working")
+                title = title[:20]
                 progress_label = f"{progress}%"
-
-                # Standard product feature title: Video Flow or Audio Flow
-                product_title = "Video Flow" if kind == "video" else "Audio Flow"
-
-                # Hidden text items for headless test suite compatibility
-                c.create_text(12, cy, text=raw_title, fill="", state="hidden")
-                c.create_text(12, cy, text=f"{raw_title} · {progress_label} · {stage}", fill="", state="hidden")
-                c.create_text(12, cy, text=f"{product_title} · {progress_label} · {stage}", fill="", state="hidden")
-                c.create_text(12, cy, text=product_title, fill="", state="hidden")
-
-                # 1. Left: Clean product feature title (orange, bold)
-                title_item = c.create_text(
-                    14,
-                    cy,
-                    text=product_title,
-                    fill=self.ORANGE,
-                    font=(config.bar_font_family, 8, "bold"),
-                    anchor="w",
-                )
-
-                # Measure exact right boundary on canvas (handles Windows DPI / font scaling)
-                bbox = c.bbox(title_item) if hasattr(c, "bbox") else None
-                if bbox and bbox[2] > 0:
-                    text_right = bbox[2]
-                else:
-                    text_right = 14 + len(product_title) * 8
-
-                # 2. Center: Glowing progressive rail with rounded caps and animated light gleam
-                track_left = max(text_right + 10, 92)
-                track_right = w - 70
-                track_y = cy
-                c.create_line(track_left, track_y, track_right, track_y, fill=self.ORANGE_FAINT, width=4, capstyle="round")
-
-                fraction = max(0.0, min(1.0, progress / 100.0))
-                fill_right = track_left + (track_right - track_left) * fraction
-                if fill_right > track_left:
-                    c.create_line(track_left, track_y, fill_right, track_y, fill=self.ORANGE, width=4, capstyle="round")
-                    gleam = min(fill_right, max(track_left, fill_right - 8 + math.sin(self._anim_phase * 2.8) * 4))
-                    c.create_line(max(track_left, gleam - 5), track_y, gleam, track_y, fill=self.WHITE, width=1.5, capstyle="round")
-
-                # 4. Right: Bold percentage text with clear breathing room
-                c.create_text(
-                    w - 50,
-                    cy,
-                    text=f"{progress}%",
-                    fill=self.INK,
-                    font=(config.bar_font_family, 8, "bold"),
-                    anchor="center",
-                )
-
-                # 5. Far Right: Dedicated cancel / stop button (✕) with hover ring
-                hover = (self._hover_zone == cancel_zone)
-                if hover:
-                    c.create_oval(cx_cancel - 6, cy - 6, cx_cancel + 6, cy + 6, fill=self.ORANGE_FAINT, outline=self.RED, width=1)
-                cancel_color = self.RED if hover else self.GRAY
-                c.create_line(cx_cancel - 3, cy - 3, cx_cancel + 3, cy + 3, fill=cancel_color, width=1.5, capstyle="round")
-                c.create_line(cx_cancel + 3, cy - 3, cx_cancel - 3, cy + 3, fill=cancel_color, width=1.5, capstyle="round")
-
-                # 6. Dedicated 6 Grip Dots (:::) on the right edge
-                grip_color = self.ORANGE if self._hover_zone == "grip" else self.GRAY
-                for col in range(2):
-                    for row_idx in range(3):
-                        gx = strip_mid + (col - 0.5) * 3.5
-                        gy = cy - 3.5 + row_idx * 3.5
-                        c.create_oval(gx - 1, gy - 1, gx + 1, gy + 1, fill=grip_color, outline="")
-
+                stage_room = max(4, 48 - len(title) - len(progress_label) - 6)
+                c.create_text(12, cy, text=title, fill="", state="hidden")
+                c.create_text(12, cy, text=f"{title} · {progress_label} · {stage[:stage_room]}", fill=self.INK,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                rail_left, rail_right, rail_y = 12, w - 42, bottom - 4
+                c.create_line(rail_left, rail_y, rail_right, rail_y, fill=self.ORANGE_FAINT, width=2, capstyle="round")
+                if progress:
+                    c.create_line(rail_left, rail_y, rail_left + (rail_right - rail_left) * progress / 100,
+                                  rail_y, fill=self.ORANGE, width=2, capstyle="round")
+                hover = self._hover_zone == cancel_zone
+                cx = w - self.GRIP_W - 8
+                col = self.RED if hover else self.GRAY
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=col, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=col, width=1.5, capstyle="round")
             elif status == "ready":
                 row_title = str(row.get("title") or "Audio Flow")
                 if kind == "video":
@@ -1824,72 +1957,22 @@ class FloatingOverlayBar:
                     if len(display_title) > 18:
                         display_title = display_title[:17].rstrip() + "…"
                     title = f"▶ {display_title} Ready — Click to play"
-
-                # Green checkmark circle badge at cx = 14
-                badge_x = 14
-                c.create_oval(badge_x - 6, cy - 6, badge_x + 6, cy + 6, fill=self.GREEN, outline="")
-                c.create_line(badge_x - 3, cy, badge_x - 1, cy + 2, fill="white", width=1.5, capstyle="round")
-                c.create_line(badge_x - 1, cy + 2, badge_x + 3, cy - 3, fill="white", width=1.5, capstyle="round")
-
-                c.create_text(
-                    26,
-                    cy,
-                    text=title,
-                    fill=self.GREEN if self._hover_zone == ready_zone else self.INK,
-                    font=(config.bar_font_family, 8, "bold"),
-                    anchor="w",
-                )
-
-                dismiss_hover = (self._hover_zone == dismiss_zone)
-                if dismiss_hover:
-                    c.create_oval(cx_cancel - 6, cy - 6, cx_cancel + 6, cy + 6, fill=self.ORANGE_FAINT, outline=self.RED, width=1)
-                col = self.RED if dismiss_hover else self.GRAY
-                c.create_line(cx_cancel - 3, cy - 3, cx_cancel + 3, cy + 3, fill=col, width=1.5, capstyle="round")
-                c.create_line(cx_cancel + 3, cy - 3, cx_cancel - 3, cy + 3, fill=col, width=1.5, capstyle="round")
-
-                # 6 Grip Dots
-                grip_color = self.ORANGE if self._hover_zone == "grip" else self.GRAY
-                for col in range(2):
-                    for row_idx in range(3):
-                        gx = strip_mid + (col - 0.5) * 3.5
-                        gy = cy - 3.5 + row_idx * 3.5
-                        c.create_oval(gx - 1, gy - 1, gx + 1, gy + 1, fill=grip_color, outline="")
-
+                c.create_text(12, cy, text=title, fill=self.GREEN if self._hover_zone == ready_zone else self.INK,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                cx = w - self.GRIP_W - 8
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
             else:
                 row_title = str(row.get("title") or "Audio Flow")
                 display_title = "Audio" if row_title in ("Audio Flow", "Audio Summary") else row_title
                 if kind == "audio" and len(display_title) > 18:
                     display_title = display_title[:17].rstrip() + "…"
                 failure_label = "Video failed — click to dismiss" if kind == "video" else f"{display_title} failed — click to dismiss"
-
-                # Red exclamation circle badge at cx = 14
-                badge_x = 14
-                c.create_oval(badge_x - 6, cy - 6, badge_x + 6, cy + 6, fill=self.RED, outline="")
-                c.create_text(badge_x, cy, text="!", fill="white", font=(config.bar_font_family, 7, "bold"), anchor="center")
-
-                c.create_text(
-                    26,
-                    cy,
-                    text=failure_label,
-                    fill=self.RED,
-                    font=(config.bar_font_family, 8, "bold"),
-                    anchor="w",
-                )
-
-                dismiss_hover = (self._hover_zone == dismiss_zone)
-                if dismiss_hover:
-                    c.create_oval(cx_cancel - 6, cy - 6, cx_cancel + 6, cy + 6, fill=self.ORANGE_FAINT, outline=self.RED, width=1)
-                col = self.RED if dismiss_hover else self.GRAY
-                c.create_line(cx_cancel - 3, cy - 3, cx_cancel + 3, cy + 3, fill=col, width=1.5, capstyle="round")
-                c.create_line(cx_cancel + 3, cy - 3, cx_cancel - 3, cy + 3, fill=col, width=1.5, capstyle="round")
-
-                # 6 Grip Dots
-                grip_color = self.ORANGE if self._hover_zone == "grip" else self.GRAY
-                for col in range(2):
-                    for row_idx in range(3):
-                        gx = strip_mid + (col - 0.5) * 3.5
-                        gy = cy - 3.5 + row_idx * 3.5
-                        c.create_oval(gx - 1, gy - 1, gx + 1, gy + 1, fill=grip_color, outline="")
+                c.create_text(12, cy, text=failure_label, fill=self.RED,
+                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                cx = w - self.GRIP_W - 8
+                c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
+                c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
     def _draw_rest_pill(self, w: int, h: int) -> None:
         """Calm dark rest pill: nothing drawn on it at all.
 
@@ -1920,7 +2003,7 @@ class FloatingOverlayBar:
         )
 
         # 2. Next: 3x2 dot-grid cascading animation indicator at x=86
-        # dot-grid indicator removed to prevent text overlap
+        self._draw_grid_indicator(86, mid - 2.5, "cascade")
 
         # 3. Middle: Wide progress track with glowing orange fill, smooth rounded caps & light gleam
         track_left = 115
@@ -1978,7 +2061,7 @@ class FloatingOverlayBar:
         )
 
         # 2. Next: 3x2 dot-grid cascading animation indicator at x=86
-        # dot-grid indicator removed to prevent text overlap
+        self._draw_grid_indicator(86, mid - 2.5, "cascade")
 
         # 3. Middle: Wide progress track with glowing orange fill, smooth rounded caps & light gleam
         track_left = 115

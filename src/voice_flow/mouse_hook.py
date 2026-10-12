@@ -14,7 +14,6 @@ from __future__ import annotations
 from voice_flow.hotkey_config import shortcut_capture_active
 
 import ctypes
-from contextlib import contextmanager
 from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
 import queue
@@ -140,10 +139,7 @@ class Win32MouseHook:
 
         # State tracking
         self._is_recording = False
-        self._control_epoch = 0
-        self._control_context = threading.local()
         self._mbutton_press_time: float = 0.0
-        self._mbutton_is_down: bool = False
         self._is_left_down: bool = False
         self._selection_epoch: int = 0
         self._callback_error_count = 0
@@ -220,16 +216,8 @@ class Win32MouseHook:
 
     def set_recording_state(self, recording: bool) -> None:
         """Synchronize current recording state."""
-        self._set_recording_state_if_current(recording)
-
-    def _set_recording_state_if_current(self, recording: bool) -> bool:
-        """Reject feedback from a callback superseded by a newer gesture."""
         with self._lock:
-            epoch = getattr(self._control_context, "epoch", None)
-            if epoch is not None and epoch != self._control_epoch:
-                return False
             self._is_recording = recording
-            return True
 
     def refresh_trigger_mode(self, force: bool = False) -> None:
         """Refresh the cached trigger mode from storage (call OFF the hook thread).
@@ -262,10 +250,6 @@ class Win32MouseHook:
 
     def _install_hook(self) -> bool:
         """Install WH_MOUSE_LL hook with a 64-bit-safe module handle."""
-        # A reinstalled hook cannot safely pair future releases with a DOWN
-        # observed by the previous hook generation.
-        self._mbutton_is_down = False
-        self._mbutton_press_time = 0.0
         self._capture_middle_passthrough = False
         try:
             def _low_level_mouse_proc(nCode: int, wParam: int, lParam: int) -> int:
@@ -276,22 +260,16 @@ class Win32MouseHook:
 
                         # Middle button down / double-click
                         if msg in (WM_MBUTTONDOWN, WM_NCMBUTTONDOWN, WM_MBUTTONDBLCLK, WM_NCMBUTTONDBLCLK):
+                            # Capture leases let the physical middle-button pair pass through.
                             if shortcut_capture_active():
                                 self._capture_middle_passthrough = True
-                                self._mbutton_is_down = False
                                 self._mbutton_press_time = 0.0
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             if not getattr(self, "_enabled", True) or self._trigger_mode == "disabled":
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             now = time.time()
-                            # Toggle modes debounce rapid transitions. PTT must
-                            # accept a fresh press after its matched release;
-                            # duplicate DOWN chatter is filtered below.
-                            if self._trigger_mode != "ptt_only" and now - getattr(self, "_last_transition_time", 0.0) < 0.26:
-                                return 1
-                            # A second DOWN without a matching UP is contact
-                            # chatter, not a new toggle gesture.
-                            if self._mbutton_is_down:
+                            # Contact chatter debounce: ignore down messages within 260ms of previous transition
+                            if now - getattr(self, "_last_transition_time", 0.0) < 0.26:
                                 return 1
 
                             dictation_mode = self._trigger_mode
@@ -301,7 +279,6 @@ class Win32MouseHook:
                             # a thread.  CPython state assignments are atomic
                             # under the GIL; worker callbacks reconcile state.
                             self._is_left_down = False
-                            self._mbutton_is_down = True
                             self._mbutton_press_time = now
                             if dictation_mode == "ptt_only":
                                 # Strict Push-to-Talk: pressing down always starts recording
@@ -334,26 +311,17 @@ class Win32MouseHook:
 
                         # Middle button up
                         elif msg in (WM_MBUTTONUP, WM_NCMBUTTONUP):
+                            # Preserve the paired release even if the capture lease expired.
                             if getattr(self, "_capture_middle_passthrough", False):
                                 self._capture_middle_passthrough = False
-                                self._mbutton_is_down = False
                                 self._mbutton_press_time = 0.0
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
                             if not getattr(self, "_enabled", True) or self._trigger_mode == "disabled":
-                                self._mbutton_is_down = False
-                                self._mbutton_press_time = 0.0
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
-                            # Windows can deliver duplicate or delayed release
-                            # messages.  Only a release paired with an accepted
-                            # DOWN may complete push-to-talk or hybrid capture.
-                            if not self._mbutton_is_down:
-                                return 1
                             dictation_mode = self._trigger_mode
 
                             now = time.time()
                             press_dur = now - self._mbutton_press_time
-                            self._mbutton_is_down = False
-                            self._mbutton_press_time = 0.0
                             # For PTT only or Hybrid: release stops recording if held
                             if dictation_mode == "ptt_only":
                                 if self._is_recording:
@@ -606,11 +574,6 @@ class Win32MouseHook:
         queue is full.  Starts are refused under overload, undoing their
         optimistic hook-side recording state so the next press can retry.
         """
-        if fn in (self._safe_on_start, self._safe_on_finish, self._safe_on_cancel):
-            # Hook-side intent can advance while an earlier callback blocks.
-            # Only its own generation may reconcile that optimistic state.
-            self._control_epoch += 1
-            args = (self._control_epoch,)
         try:
             self._control_queue.put_nowait((fn, args))
             return True
@@ -666,17 +629,8 @@ class Win32MouseHook:
         self._worker_thread = None
         self._selection_worker_thread = None
 
-    @contextmanager
-    def _callback_scope(self, epoch: int | None):
-        previous = getattr(self._control_context, "epoch", None)
-        self._control_context.epoch = epoch
-        try:
-            yield
-        finally:
-            self._control_context.epoch = previous
-
-    def _safe_on_start(self, epoch: int | None = None) -> None:
-        with self._action_lock, self._callback_scope(epoch):
+    def _safe_on_start(self) -> None:
+        with self._action_lock:
             try:
                 started = self._on_start()
                 if started is False:
@@ -685,35 +639,31 @@ class Win32MouseHook:
                     # coordinator. Clear it on a failed start or the next
                     # middle-click takes the finish branch and the trigger looks dead.
                     with self._lock:
-                        if epoch is None or epoch == self._control_epoch:
-                            self._is_recording = False
+                        self._is_recording = False
             except Exception as e:
                 log.error("[MOUSE HOOK] Error in on_start: %s", e)
                 with self._lock:
-                    if epoch is None or epoch == self._control_epoch:
-                        self._is_recording = False
+                    self._is_recording = False
 
-    def _safe_on_finish(self, epoch: int | None = None) -> None:
-        with self._action_lock, self._callback_scope(epoch):
+    def _safe_on_finish(self) -> None:
+        with self._action_lock:
             try:
                 self._on_finish()
             except Exception as e:
                 log.error("[MOUSE HOOK] Error in on_finish: %s", e)
             finally:
                 with self._lock:
-                    if epoch is None or epoch == self._control_epoch:
-                        self._is_recording = False
+                    self._is_recording = False
 
-    def _safe_on_cancel(self, epoch: int | None = None) -> None:
-        with self._action_lock, self._callback_scope(epoch):
+    def _safe_on_cancel(self) -> None:
+        with self._action_lock:
             try:
                 self._on_cancel()
             except Exception as e:
                 log.error("[MOUSE HOOK] Error in on_cancel: %s", e)
             finally:
                 with self._lock:
-                    if epoch is None or epoch == self._control_epoch:
-                        self._is_recording = False
+                    self._is_recording = False
 
     def _safe_on_mouse_release(
         self, x: int, y: int, dist: float, start_x: int, start_y: int, selection_epoch: int | None = None

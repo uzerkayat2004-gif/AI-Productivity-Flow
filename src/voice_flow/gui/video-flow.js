@@ -27,6 +27,8 @@ let vfxConnTestStatus = {};
 // NotebookLM Integration State
 let vfSelectedEngine = "notebooklm";
 let vfSelectedFormat = "auto";
+// NotebookLM visual style; "auto" until the user picks one (generateVideoFlow reads it).
+let vfSelectedStyle = "auto";
 // The browser must never paint a saved cookie as Connected.  A connection is
 // only confirmed after the backend has completed an online NotebookLM probe.
 let vfNlmAuthStatus = {

@@ -1,0 +1,110 @@
+name: macOS full walkthrough
+
+# Manual QA: installs a macOS build and drives it end to end (welcome tour,
+# Audio Flow guide, every page, Settings, dialogs, floating bar incl. a
+# Dock-overlap check, simulated dictation), then uploads screenshots + logs.
+# Results are informational: the job only fails if the app cannot be installed.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to test: "tag:<release tag>" (e.g. tag:v1.0.2-rc5) or "ci-run:<CI run id>" (DMG artifact of a CI run)'
+        required: true
+      os:
+        description: "macOS runners"
+        type: choice
+        default: macos-15
+        options: [macos-15, macos-14, both]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  walkthrough:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'both' && '["macos-15","macos-14"]' || format('["{0}"]', inputs.os)) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          mkdir -p out
+          sw_vers | tee out/system.txt
+          system_profiler SPDisplaysDataType | tee -a out/system.txt || true
+
+      - name: Download and install the app under test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          # "tag:<release tag>" or "ci-run:<run id>" (the DMG artifact built by a CI run).
+          TARGET=$(printf '%s' "$TARGET" | tr -d '[:space:]')
+          case "$TARGET" in
+            ci-run:*)
+              RUN="${TARGET#ci-run:}"
+              gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n AI-Productivity-Flow-macOS -D dl
+              mv dl/AI-Productivity-Flow-macOS.dmg app.dmg ;;
+            tag:*)
+              TAG="${TARGET#tag:}"
+              curl -fL -o app.dmg "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/AI-Productivity-Flow-macOS.dmg" ;;
+            *)
+              echo "::error::target must be tag:<tag> or ci-run:<run id>, got '$TARGET'"; exit 1 ;;
+          esac
+          hdiutil attach app.dmg -nobrowse -mountpoint /Volumes/APF
+          APP=$(find /Volumes/APF -maxdepth 2 -name "*.app" | head -1)
+          cp -R "$APP" /Applications/
+          APP_PATH="/Applications/$(basename "$APP")"
+          xattr -dr com.apple.quarantine "$APP_PATH" || true
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          echo "$TARGET $APP_PATH" | tee out/install.txt
+          shasum -a 256 app.dmg | tee -a out/install.txt
+
+      - name: Set up driver Python (separate from the app's bundled runtime)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright WebKit and helpers
+        run: |
+          python -m pip install playwright pillow
+          python -m playwright install webkit
+          swiftc scripts/walkthrough/apf_native.swift -o out/apf-native
+
+      - name: Launch app
+        run: |
+          EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
+          "$APP_PATH/Contents/MacOS/$EXE" > out/app-stdout.txt 2> out/app-stderr.txt &
+          echo "APP_PID=$!" >> $GITHUB_ENV
+          sleep 20
+          screencapture -x out/launch-20s.png || true
+
+      - name: Walk through the app
+        run: python scripts/walkthrough/walkthrough.py out out/apf-native
+
+      - name: Collect logs and crash reports
+        if: always()
+        run: |
+          # Native stack of every app process: shows whether the engine's main
+          # thread is sitting in the Tk event loop (floating bar) or stuck.
+          for pid in $(pgrep -f "AI Productivity Flow.app" || true); do
+            ps -o pid,ppid,command -p "$pid" | cut -c1-200 >> out/processes.txt
+            sample "$pid" 2 -file "out/sample-$pid.txt" >/dev/null 2>&1 || true
+          done
+          pgrep -fl "AI Productivity Flow.app" | tee out/alive.txt || echo "app EXITED" | tee out/alive.txt
+          mkdir -p out/logs out/crash
+          find "$HOME/.voice_flow" -maxdepth 3 \( -name "*.log" -o -name "*.txt" \) -size -5M -exec cp {} out/logs/ \; 2>/dev/null || true
+          ls -la "$HOME/.voice_flow" > out/logs/data-dir-listing.txt 2>&1 || true
+          cp ~/Library/Logs/DiagnosticReports/* out/crash/ 2>/dev/null || true
+          pkill -f "AI Productivity Flow.app/Contents" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-walkthrough-${{ matrix.os }}
+          path: out/

@@ -239,7 +239,22 @@ class _CFDictionaryValueCallBacks(ctypes.Structure):
 
 def cf_dictionary(pairs: list[tuple[int, int]]) -> int:
     """Build a CFDictionaryRef from (key, value) raw pointers."""
-    if not pairs:
+    if not pairs or any(not key or not value for key, value in pairs):
+        # AX calls CFGetTypeID on option values: never pass NULL CF objects.
+        return 0
+    core_foundation = _cf()
+    if core_foundation is None:
+        return 0
+    try:
+        key_callbacks = _CFDictionaryKeyCallBacks.in_dll(
+            core_foundation, "kCFTypeDictionaryKeyCallBacks"
+        )
+        value_callbacks = _CFDictionaryValueCallBacks.in_dll(
+            core_foundation, "kCFTypeDictionaryValueCallBacks"
+        )
+    except (ValueError, AttributeError, OSError):
+        # Without CF object equality and ownership, this is not a CF dictionary
+        # that framework clients can safely consume.
         return 0
     fn = _loader.symbol("CoreFoundation", "CFDictionaryCreate")
     if fn is None:
@@ -255,8 +270,12 @@ def cf_dictionary(pairs: list[tuple[int, int]]) -> int:
     ]
     keys = (ctypes.c_void_p * len(pairs))(*[ctypes.c_void_p(k) for k, _ in pairs])
     values = (ctypes.c_void_p * len(pairs))(*[ctypes.c_void_p(v) for _, v in pairs])
-    # NULL callbacks == pointer-equality/no-retain, correct for constant keys.
-    return fn(None, keys, values, len(pairs), None, None) or 0
+    # CFString keys must compare by content, not pointer identity. The CFType
+    # callbacks also retain keys/values for the lifetime of the dictionary.
+    return fn(
+        None, keys, values, len(pairs),
+        ctypes.byref(key_callbacks), ctypes.byref(value_callbacks),
+    ) or 0
 
 
 # ---------------------------------------------------------------------------

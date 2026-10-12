@@ -17,5 +17,5 @@
   HyperFrames receives them through the engine's environment (PATH entry of
   the private ffmpeg dir is NOT set system-wide; narova's synth/build
   commands inherit the engine env which includes the runtime bin dir via
-  the runner command environment — see FILES_CHANGED narova_runner).
+  the runner command environment — see `narova_runner.py`).
 - Output contract unchanged: 1920x1080 H.264/AAC/yuv420p/faststart.

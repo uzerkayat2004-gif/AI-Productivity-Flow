@@ -23,6 +23,8 @@ def guarded_probe(monkeypatch):
     probe = MagicMock()
     factory = MagicMock(return_value=probe)
     probe.__enter__.return_value = probe
+    probe.connect_ex.return_value = 0  # a live owner accepts connections
+    monkeypatch.setattr(runtime_guard, "_PORT_SETTLE_SECONDS", 0.0)
     monkeypatch.setattr(runtime_guard.socket, "socket", factory)
     return probe, factory, terminate
 
@@ -44,7 +46,8 @@ def test_denied_inspection_occupied_or_indeterminate_port_is_protected(guarded_p
     probe.bind.side_effect = error
     assert runtime_guard.prepare_runtime_port(port=43210).status == "occupied"
     terminate.assert_not_called()
-    probe.__exit__.assert_called_once()
+    # Every probe socket is closed (EADDRINUSE adds one liveness probe).
+    assert probe.__exit__.call_count == probe.__enter__.call_count >= 1
 
 
 def test_missing_listener_pid_uses_protected_probe(monkeypatch, guarded_probe):

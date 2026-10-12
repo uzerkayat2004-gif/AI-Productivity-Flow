@@ -49,15 +49,30 @@ if "--autoplay-policy=no-user-gesture-required" not in _wv2_args:
         f"{_wv2_args} --autoplay-policy=no-user-gesture-required".strip()
     )
 
-webview = None  # type: ignore[assignment]
+from voice_flow.platform.macos_app import configure_macos_app
+from voice_flow.paths import data_dir as _data_dir
 
-if not os.environ.get("CI"):
+# main imports this module for focus helpers; only the executable entry point
+# owns the regular desktop role. Set its identity before webview can load Cocoa.
+if __name__ == "__main__":
+    configure_macos_app("desktop")
+
+webview = None  # type: ignore[assignment]
+_WEBVIEW_IMPORT_FAILED = False
+
+def _should_import_webview() -> bool:
+    """Keep headless CI imports light, except for the macOS native GUI smoke test."""
+    return sys.platform == "darwin" or not os.environ.get("CI")
+
+
+if _should_import_webview():
     try:
         import webview
     except Exception:  # missing desktop dependency falls back to browser launcher
+        _WEBVIEW_IMPORT_FAILED = True
         import traceback
         try:
-            crash_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_crash.log"
+            crash_path = _data_dir() / "gui_crash.log"
             crash_path.parent.mkdir(parents=True, exist_ok=True)
             crash_path.write_text(
                 "desktop_launcher optional import failure:\n" + traceback.format_exc(), encoding="utf-8"
@@ -86,7 +101,7 @@ if sys.stdout is None:
     sys.stdout = DummyWriter()
     sys.stderr = DummyWriter()
 
-_launcher_log_path = Path(os.path.expanduser("~")) / ".voice_flow" / "gui_launcher.log"
+_launcher_log_path = _data_dir() / "gui_launcher.log"
 
 try:
     from voice_flow.crash_reporting import init_crash_reporting
@@ -105,6 +120,13 @@ def _launcher_log(message: str) -> None:
             f.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
     except Exception:
         pass
+
+
+if _WEBVIEW_IMPORT_FAILED and sys.platform == "darwin":
+    _launcher_log(
+        "pywebview import failed; ensure pyobjc-core, pyobjc-framework-Cocoa, "
+        "and pyobjc-framework-WebKit are installed."
+    )
 
 
 try:
@@ -505,6 +527,7 @@ def _fallback_to_browser(url: str, on_quit_callback=None, keep_alive: bool = Tru
 
 def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) -> None:
     """Launch API server, system auto-startup configuration, and native desktop window."""
+    configure_macos_app("desktop")
     # Configure auto-startup based on user setting (default enabled on first launch)
     try:
         from voice_flow.storage import storage
@@ -616,6 +639,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             pass
 
     if webview is None:
+        _launcher_log("Native window backend unavailable; using the system browser.")
         _fallback_to_browser(url, on_quit_callback, keep_alive=True)
         return
 
@@ -676,9 +700,9 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
 
         # Start pywebview loop with custom icon
         if ico_path:
-            webview.start(icon=ico_path)
+            webview.start(icon=ico_path, http_server=False)
         else:
-            webview.start()
+            webview.start(http_server=False)
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
         _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)

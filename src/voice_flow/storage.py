@@ -3453,18 +3453,30 @@ class StorageEngine:
 
     def get_hotkey_settings(self) -> dict[str, Any]:
         """Retrieve current user-configurable hotkey and trigger settings."""
+        from voice_flow.hotkeys import platform_input_defaults
+
+        defaults = platform_input_defaults()
         label_map = {
             "ctrl_win": "Ctrl+Win",
+            "cmd_option": "Cmd+Option",
             "single_ctrl": "Single Ctrl",
             "double_ctrl": "Double Ctrl",
             "alt_space": "Alt+Space",
             "alt_tab": "Alt+Tab",
             "middle_click": "Middle Mouse Button",
         }
-        trigger = str(self.get_setting("hotkey_trigger", "ctrl_win") or "ctrl_win")
+        trigger = str(
+            self.get_setting("hotkey_trigger", defaults["hotkey_trigger"])
+            or defaults["hotkey_trigger"]
+        )
         custom_key = str(self.get_setting("custom_hotkey", "Alt+Space") or "Alt+Space")
         trigger_mode = str(self.get_setting("dictation_trigger_mode", "hybrid") or "hybrid")
-        middle_enabled = bool(self.get_setting("middle_click_enabled", True))
+        middle_enabled = bool(
+            self.get_setting(
+                "middle_click_enabled",
+                defaults["middle_click_enabled"],
+            )
+        )
         ctrl_enabled = bool(self.get_setting("ctrl_key_dictation_enabled", trigger in ("single_ctrl", "double_ctrl")))
         saved_ptt = self.get_setting("push_to_talk_shortcut")
         if saved_ptt:
@@ -3472,7 +3484,7 @@ class StorageEngine:
         elif trigger == "custom":
             ptt_label = custom_key
         else:
-            ptt_label = label_map.get(trigger, "Ctrl+Win")
+            ptt_label = label_map.get(trigger, defaults["push_to_talk_shortcut"])
         custom_trigger_type = str(self.get_setting("custom_trigger_type", "hold") or "hold").lower().strip()
         if trigger == "custom":
             from voice_flow.hotkey_config import parse_hotkey_string
@@ -3497,7 +3509,7 @@ class StorageEngine:
         data = dict(data)
         from voice_flow.hotkey_config import parse_hotkey_string
         allowed = {
-            "hotkey_trigger": {"ctrl_win", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"},
+            "hotkey_trigger": {"ctrl_win", "cmd_option", "single_ctrl", "double_ctrl", "alt_space", "alt_tab", "middle_click", "custom"},
             "dictation_trigger_mode": {"hybrid", "ptt_only", "toggle_only", "disabled"},
             "custom_trigger_type": {"hold", "toggle", "double_tap", "mouse_button"},
         }
@@ -3513,7 +3525,7 @@ class StorageEngine:
         for key in ("custom_hotkey", "push_to_talk_shortcut"):
             if key not in data:
                 continue
-            if key == "push_to_talk_shortcut" and str(data[key]).lower() in {"single ctrl", "double ctrl", "middle mouse button", "middle_click"}:
+            if key == "push_to_talk_shortcut" and str(data[key]).lower() in {"cmd+option", "command+option", "single ctrl", "double ctrl", "middle mouse button", "middle_click"}:
                 continue
             parsed = parse_hotkey_string(data[key])
             if not parsed["valid"]:
@@ -3525,7 +3537,12 @@ class StorageEngine:
                 data["custom_trigger_type"] = "double_tap"
 
         effective_custom = data.get("custom_hotkey", self.get_setting("custom_hotkey", "Alt+Space"))
-        effective_trigger = data.get("hotkey_trigger", self.get_setting("hotkey_trigger", "ctrl_win"))
+        from voice_flow.hotkeys import platform_input_defaults
+        defaults = platform_input_defaults()
+        effective_trigger = data.get(
+            "hotkey_trigger",
+            self.get_setting("hotkey_trigger", defaults["hotkey_trigger"]),
+        )
         if effective_trigger == "custom" and parse_hotkey_string(effective_custom)["is_double"]:
             if data.get("custom_trigger_type", "double_tap") != "double_tap":
                 raise ValueError("A double-tap shortcut must use Double tap behavior.")
@@ -3537,6 +3554,7 @@ class StorageEngine:
 
         label_map = {
             "ctrl_win": "Ctrl+Win",
+            "cmd_option": "Cmd+Option",
             "single_ctrl": "Single Ctrl",
             "double_ctrl": "Double Ctrl",
             "alt_space": "Alt+Space",
@@ -3547,6 +3565,8 @@ class StorageEngine:
         reverse_label_map.update({
             "ctrl+win": "ctrl_win",
             "win+ctrl": "ctrl_win",
+            "cmd+option": "cmd_option",
+            "command+option": "cmd_option",
             "single ctrl": "single_ctrl",
             "double ctrl": "double_ctrl",
             "alt+space": "alt_space",
