@@ -40,7 +40,7 @@ _APOS_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in _APOS_CONTRACTIONS
 # before the cue or substitutes a value of the same kind (number, weekday);
 # otherwise they are ordinary words ("I'm sorry", "can't make it, sorry").
 _CORRECTION_CUE_RE = re.compile(
-    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait|wait\s+no|"
+    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|no,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait|wait\s+no|"
     r"no\s+no|or\s+rather|make\s+that|scratch\s+that|actually\s+no)\b\s*,?\s*"
     r"|(?:,\s*)?\b(?P<weak>sorry|i\s+mean|no)\b\s*,?\s*",
     re.IGNORECASE,
@@ -374,6 +374,7 @@ def _output_numbers(text: str) -> list[int | float]:
         if m.group(2):
             vals.append(float(f"{int(m.group(1))}.{m.group(2)}"))
             vals.append(int(m.group(1)))
+            vals.append(int(m.group(2)))
         else:
             vals.append(float(m.group(0)) if m.group(3) else int(m.group(1)))
     for sets in number_values(re.sub(r"\d", " ", text or "")):

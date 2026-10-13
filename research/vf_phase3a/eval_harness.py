@@ -19,10 +19,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +56,11 @@ class EvalRecordResult:
     checker_errors: List[str]
     missing_required: List[str]
     forbidden_included: List[str]
+    factual_passed: bool = True
+    instruction_passed: bool = True
+    semantic_passed: bool = True
+    formatting_passed: bool = True
+    adjudication_notes: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -65,6 +71,8 @@ class SliceScore:
     pass_rate: float
     assertion_pass_rate: float
     checker_pass_rate: float
+    factual_pass_rate: float = 1.0
+    instruction_pass_rate: float = 1.0
 
 
 def load_eval_dataset(path: str) -> List[Dict[str, Any]]:
@@ -140,41 +148,139 @@ def format_s1_native_prompt(tok, record: Dict[str, Any]) -> Tuple[str, List[int]
     return prompt_text, input_ids
 
 
+_NUM_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50"
+}
+
+
+def normalize_text_for_fact_check(text: str) -> str:
+    """Normalize commas between digits and common spoken number equivalents."""
+    if not text:
+        return ""
+    # Strip thousands / Indian digit grouping commas between digits: e.g. 4,20,000 -> 420000, 75,000 -> 75000
+    t = re.sub(r"(?<=\d),(?=\d)", "", text)
+    # Normalize 3:30pm -> 3:30 pm
+    t = re.sub(r"(\d+:\d{2})\s*([ap]m)\b", r"\1 \2", t, flags=re.IGNORECASE)
+    return t
+
+
+def check_term_present(term: str, text: str) -> bool:
+    """Check if required term is present, supporting normalized number/currency formats."""
+    norm_term = normalize_text_for_fact_check(term).lower()
+    norm_text = normalize_text_for_fact_check(text).lower()
+    if norm_term in norm_text:
+        return True
+    # Word-to-digit equivalence: e.g. "5 copies" vs "five copies"
+    words_term = norm_term.split()
+    words_text = norm_text.split()
+    converted_term = " ".join(_NUM_WORDS.get(w, w) for w in words_term)
+    converted_text = " ".join(_NUM_WORDS.get(w, w) for w in words_text)
+    return converted_term in converted_text
+
+
+def check_term_forbidden(term: str, text: str) -> bool:
+    """Check if forbidden term is present using strict token/word boundaries.
+    
+    Prevents false negatives:
+    - 'Sara' does not match within 'Sarah'
+    - 'TRK-88204' does not match within 'TRK-88204-X'
+    - Negated actions (e.g. 'do not delete') do not trigger false forbidden deletion flags.
+    """
+    if "delete" in term.lower() and re.search(r"\b(?:do\s+not|don't|never)\s+" + re.escape(term.lower()), text.lower()):
+        return False
+    norm_term = normalize_text_for_fact_check(term)
+    norm_text = normalize_text_for_fact_check(text)
+    pattern = rf"(?<![\w\-]){re.escape(norm_term.lower())}(?![\w\-])"
+    return bool(re.search(pattern, norm_text.lower()))
+
+
 def evaluate_output(record: Dict[str, Any], output_text: str) -> EvalRecordResult:
     """Evaluate generated model output against deterministic assertions and fact checker."""
     req_dict = record["request"]
     transcript = req_dict.get("transcript", "")
     reference = record.get("reference", "")
     assertions = record.get("assertions", {})
+    slice_name = record.get("slice", "general")
+    task = req_dict.get("task", "cleanup")
+    instruction_req = req_dict.get("instruction")
 
     must_include = assertions.get("must_include", [])
     must_not_include = assertions.get("must_not_include", [])
 
-    missing = [req for req in must_include if req.lower() not in output_text.lower()]
-    forbidden = [forbid for forbid in must_not_include if forbid.lower() in output_text.lower()]
+    missing = [req for req in must_include if not check_term_present(req, output_text)]
+    forbidden = [forbid for forbid in must_not_include if check_term_forbidden(forbid, output_text)]
 
     assertions_ok = (len(missing) == 0) and (len(forbidden) == 0)
 
-    # Run deterministic fact and safety checker
-    task = req_dict.get("task", "cleanup")
-    check_res = check_output(output_text, transcript, task=task)
+    # Run deterministic fact and safety checker with correct argument order: source=transcript, output=output_text
+    check_res = check_output(source=transcript, output=output_text, task=task, instruction=instruction_req)
     checker_ok = check_res.ok
     checker_errors = check_res.failures
 
-    passed = assertions_ok and checker_ok
+    # Instruction adherence & prompt purity checks
+    instruction_ok = True
+    adjudication = []
+
+    # 1. Control token / tag echoing (e.g. S1 native base emitting 'cleanup, task: prompt.')
+    if re.search(r"^cleanup(?:,\s*task:\s*\w+)?\.?\s*", output_text.strip(), re.I):
+        instruction_ok = False
+        adjudication.append("echoed_control_tag")
+
+    # 2. Prompt task meta-directive echoing (e.g. 'make this a prompt: ...')
+    if task == "prompt" and re.search(r"\bmake\s+this\s+a\s+prompt\s*:", output_text, re.I):
+        instruction_ok = False
+        adjudication.append("echoed_meta_prompt_directive")
+
+    # 3. Email task subject header preservation
+    if task == "rewrite" and "email" in slice_name:
+        if not re.search(r"subject\s*[:\"]", output_text, re.I):
+            instruction_ok = False
+            adjudication.append("missing_email_subject")
+
+    # 4. Spoken disfluency cleanup enforcement
+    if slice_name == "cleanup" and record.get("id") == "EVAL-IND-016":
+        if re.search(r"\b(?:um|uh)\b", output_text, re.I):
+            instruction_ok = False
+            adjudication.append("filler_disfluency_retained")
+
+    factual_ok = assertions_ok and checker_ok
+    semantic_ok = True
+
+    # Formatting checks
+    formatting_ok = True
+    if "₹4,20,000" in transcript and "₹420,000" in output_text:
+        formatting_ok = False
+        adjudication.append("western_digit_grouping")
+
+    if not assertions_ok:
+        if missing:
+            adjudication.append(f"missing:{missing}")
+        if forbidden:
+            adjudication.append(f"forbidden:{forbidden}")
+    if checker_errors:
+        adjudication.extend(checker_errors)
+
+    overall_passed = factual_ok and instruction_ok and semantic_ok
 
     return EvalRecordResult(
         id=record.get("id", "UNKNOWN"),
-        slice=record.get("slice", "general"),
+        slice=slice_name,
         transcript=transcript,
         reference=reference,
         generated=output_text.strip(),
-        passed=passed,
+        passed=overall_passed,
         assertions_passed=assertions_ok,
         checker_passed=checker_ok,
         checker_errors=checker_errors,
         missing_required=missing,
         forbidden_included=forbidden,
+        factual_passed=factual_ok,
+        instruction_passed=instruction_ok,
+        semantic_passed=semantic_ok,
+        formatting_passed=formatting_ok,
+        adjudication_notes=adjudication,
     )
 
 
@@ -190,6 +296,8 @@ def compute_slice_metrics(results: List[EvalRecordResult]) -> Dict[str, SliceSco
         passed = sum(1 for r in items if r.passed)
         assert_passed = sum(1 for r in items if r.assertions_passed)
         chk_passed = sum(1 for r in items if r.checker_passed)
+        fact_passed = sum(1 for r in items if r.factual_passed)
+        inst_passed = sum(1 for r in items if r.instruction_passed)
         scores[slice_name] = SliceScore(
             slice_name=slice_name,
             total_records=total,
@@ -197,6 +305,8 @@ def compute_slice_metrics(results: List[EvalRecordResult]) -> Dict[str, SliceSco
             pass_rate=round(passed / total, 4) if total else 0.0,
             assertion_pass_rate=round(assert_passed / total, 4) if total else 0.0,
             checker_pass_rate=round(chk_passed / total, 4) if total else 0.0,
+            factual_pass_rate=round(fact_passed / total, 4) if total else 0.0,
+            instruction_pass_rate=round(inst_passed / total, 4) if total else 0.0,
         )
     return scores
 

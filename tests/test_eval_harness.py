@@ -189,3 +189,146 @@ def test_full_evaluation_harness_with_mock_generator(eval_dataset_path):
     assert "Voice Flow Stage 3B: Model Comparison Matrix" in cmp_md
     assert "S1 Native Generator" in cmp_md
     assert "Baseline Generator" in cmp_md
+
+
+def test_currency_indian_grouping_equivalence():
+    rec = {
+        "id": "EVAL-IND-001",
+        "slice": "currency",
+        "request": {"transcript": "please send an invoice for ₹4,20,000 to the client", "task": "cleanup"},
+        "reference": "Please send an invoice for ₹4,20,000 to the client.",
+        "assertions": {"must_include": ["₹4,20,000"], "must_not_include": ["1420000", "4200000"]},
+    }
+    # Western grouping output has identical numerical value
+    res = evaluate_output(rec, "Please send an invoice for ₹420,000 to the client.")
+    assert res.factual_passed is True
+    assert res.passed is True
+    assert res.formatting_passed is False  # formatting flagged but fact passed
+
+
+def test_critical_numerical_failure():
+    rec = {
+        "id": "EVAL-IND-024",
+        "slice": "currency",
+        "request": {"transcript": "the consulting fee is ₹15,00,000 payable in three equal installments", "task": "cleanup"},
+        "reference": "The consulting fee is ₹15,00,000 payable in three equal installments.",
+        "assertions": {"must_include": ["₹15,00,000"], "must_not_include": ["15000000"]},
+    }
+    # 15,000,000 is 10x larger (15M vs 1.5M) -> critical factual failure
+    res_10x = evaluate_output(rec, "The consulting fee is ₹15,000,000 payable in three equal installments.")
+    assert res_10x.factual_passed is False
+    assert res_10x.passed is False
+
+    # 15,000 is 100x smaller -> critical factual failure
+    res_100x = evaluate_output(rec, "the consulting fee is ₹15,000, payable in three equal installments")
+    assert res_100x.factual_passed is False
+    assert res_100x.passed is False
+
+
+def test_proper_noun_word_boundary_matching():
+    rec = {
+        "id": "EVAL-IND-006",
+        "slice": "names_ids",
+        "request": {"transcript": "contact Dr. Sarah Jenkins regarding patient record PR-94821", "task": "cleanup"},
+        "reference": "Contact Dr. Sarah Jenkins regarding patient record PR-94821.",
+        "assertions": {"must_include": ["Dr. Sarah Jenkins", "PR-94821"], "must_not_include": ["PR-94820", "Sara"]},
+    }
+    # 'Sara' must not match inside 'Sarah'
+    res = evaluate_output(rec, "Contact Dr. Sarah Jenkins regarding patient record PR-94821.")
+    assert res.factual_passed is True
+    assert res.passed is True
+    assert len(res.forbidden_included) == 0
+
+    # True misspelling 'Sara' should fail
+    res_bad = evaluate_output(rec, "Contact Dr. Sara Jenkins regarding patient record PR-94821.")
+    assert res_bad.factual_passed is False
+    assert "Sara" in res_bad.forbidden_included
+
+
+def test_identifier_token_boundary_matching():
+    rec = {
+        "id": "EVAL-IND-007",
+        "slice": "names_ids",
+        "request": {"transcript": "check the status of shipment tracking number TRK-88204-X", "task": "cleanup"},
+        "reference": "Check the status of shipment tracking number TRK-88204-X.",
+        "assertions": {"must_include": ["TRK-88204-X"], "must_not_include": ["TRK-88204"]},
+    }
+    # 'TRK-88204' must not match inside 'TRK-88204-X'
+    res = evaluate_output(rec, "Check the status of shipment tracking number TRK-88204-X.")
+    assert res.factual_passed is True
+    assert res.passed is True
+    assert len(res.forbidden_included) == 0
+
+    # Standalone truncated ID without suffix must fail
+    res_bad = evaluate_output(rec, "Check the status of shipment tracking number TRK-88204.")
+    assert res_bad.factual_passed is False
+    assert "TRK-88204" in res_bad.forbidden_included
+
+
+def test_number_word_to_digit_equivalence():
+    rec = {
+        "id": "EVAL-IND-008",
+        "slice": "self_correction",
+        "request": {"transcript": "send three no make that five copies to the audit committee", "task": "cleanup"},
+        "reference": "Send 5 copies to the audit committee.",
+        "assertions": {"must_include": ["5 copies"], "must_not_include": ["3 copies", "three copies"]},
+    }
+    # 'five copies' is factually equivalent to '5 copies'
+    res = evaluate_output(rec, "Send five copies to the audit committee.")
+    assert res.factual_passed is True
+    assert res.passed is True
+
+
+def test_time_formatting_normalization():
+    rec = {
+        "id": "EVAL-IND-004",
+        "slice": "dates_times",
+        "request": {"transcript": "reschedule the quarterly planning to Wednesday October 14th at 3:30 PM", "task": "cleanup"},
+        "reference": "Reschedule the quarterly planning to Wednesday, October 14th at 3:30 PM.",
+        "assertions": {"must_include": ["Wednesday", "October 14", "3:30 PM"], "must_not_include": ["Thursday", "Tuesday"]},
+    }
+    # '3:30pm' is factually equivalent to '3:30 PM'
+    res = evaluate_output(rec, "Reschedule the quarterly planning to Wednesday October 14 at 3:30pm.")
+    assert res.factual_passed is True
+    assert res.passed is True
+
+
+def test_prompt_meta_directive_echo_detection():
+    rec = {
+        "id": "EVAL-IND-020",
+        "slice": "prompt",
+        "request": {"transcript": "make this a prompt: write a Python function to parse JSON with error handling and retry logic", "task": "prompt"},
+        "reference": "Write a Python function to parse JSON with error handling and retry logic.",
+        "assertions": {"must_include": ["Python", "JSON", "error handling"], "must_not_include": ["def parse_json", "import json"]},
+    }
+    # Clean output passes
+    res_clean = evaluate_output(rec, "Write a Python function to parse JSON with error handling and retry logic.")
+    assert res_clean.instruction_passed is True
+    assert res_clean.passed is True
+
+    # Echoed meta-directive fails instruction following
+    res_echo = evaluate_output(rec, "make this a prompt: write a Python function to parse JSON with error handling and retry logic")
+    assert res_echo.instruction_passed is False
+    assert res_echo.passed is False
+    assert "echoed_meta_prompt_directive" in res_echo.adjudication_notes
+
+
+def test_control_tag_echo_detection():
+    rec = {
+        "id": "EVAL-IND-013",
+        "slice": "negation",
+        "request": {"transcript": "do not delete the production database records under any circumstances", "task": "cleanup"},
+        "reference": "Do not delete the production database records under any circumstances.",
+        "assertions": {"must_include": ["not delete", "under any circumstances"], "must_not_include": ["delete the production database records under any circumstances"]},
+    }
+    # Clean output passes
+    res_clean = evaluate_output(rec, "Do not delete the production database records under any circumstances.")
+    assert res_clean.instruction_passed is True
+    assert res_clean.passed is True
+
+    # Output prepended with S1 control tag fails instruction following
+    res_tag = evaluate_output(rec, "Cleanup. Do not delete the production database records under any circumstances.")
+    assert res_tag.instruction_passed is False
+    assert res_tag.passed is False
+    assert "echoed_control_tag" in res_tag.adjudication_notes
+
