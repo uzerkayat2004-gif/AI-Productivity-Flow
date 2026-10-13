@@ -56,10 +56,10 @@ def test_exact_terms_are_boundary_safe_and_do_not_fuzzy_replace(monkeypatch: pyt
 
 
 def test_explicit_term_preserves_casing_only_for_exact_match(monkeypatch: pytest.MonkeyPatch) -> None:
-    engine = _engine(monkeypatch, ["VoiceFlow"])
+    engine = _engine(monkeypatch, ["GrokBot"])
 
-    assert engine.apply_dictionary_post_processing("voiceflow is ready") == "VoiceFlow is ready"
-    assert engine.apply_dictionary_post_processing("voiceflows is ready") == "voiceflows is ready"
+    assert engine.apply_dictionary_post_processing("grokbot is ready") == "GrokBot is ready"
+    assert engine.apply_dictionary_post_processing("grokbots is ready") == "GrokBots is ready"
 
 
 def test_joined_explicit_term_recognizes_its_safe_spoken_space_form(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,7 +126,7 @@ def test_dictionary_processing_is_idempotent(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = _DictionarySource(["VoiceFlow"])
+    source = _DictionarySource(["GrokBot"])
     monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_entries", source.entries)
     monkeypatch.setattr("voice_flow.dictionary.storage.get_dictionary_revision", lambda: source.revision)
     # Hermetic: isolate corrections snapshot too (live learned data must not leak).
@@ -144,7 +144,7 @@ def test_dictionary_refreshes_when_storage_revision_changes(monkeypatch: pytest.
     )
     engine = DictionaryEngine()
 
-    assert engine.apply_dictionary_post_processing("voiceflow") == "VoiceFlow"
+    assert engine.apply_dictionary_post_processing("grokbot") == "GrokBot"
     source.words.append("NewTerm")
     source.revision += 1
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
@@ -156,10 +156,10 @@ def test_dictionary_cache_is_scoped_to_the_storage_database(tmp_path) -> None:
     second_path = tmp_path / "second" / "voice_flow.db"
     first = StorageEngine(str(first_path), custom_db=True)
     second = StorageEngine(str(second_path), custom_db=True)
-    assert first.add_dictionary_word("Voice")
+    assert first.add_dictionary_word("Zorblax")
 
     engine = DictionaryEngine(first)
-    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "Zorblax"
     first_revision = first.get_dictionary_revision()
 
     # switch_account touches the destination lexicon. A fresh destination and
@@ -168,7 +168,7 @@ def test_dictionary_cache_is_scoped_to_the_storage_database(tmp_path) -> None:
     first.switch_account(str(second_path))
     assert first.get_dictionary_revision() == first_revision
     assert first.get_dictionary_entries() == []
-    assert engine.apply_dictionary_post_processing("voice") == "voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "zorblax"
 
 
 def test_dictionary_revision_poll_is_fresh_and_read_only(tmp_path, monkeypatch) -> None:
@@ -228,19 +228,19 @@ def test_global_dictionary_repoints_before_using_cached_rules(tmp_path, monkeypa
     account_path = tmp_path / "account" / "voice_flow.db"
     store = StorageEngine(str(default_path))
     StorageEngine(str(account_path), custom_db=True)
-    assert store.add_dictionary_word("Voice")
+    assert store.add_dictionary_word("Zorblax")
     store.is_global_singleton = True
     monkeypatch.setattr(
         "voice_flow.storage.resolve_active_db_path", lambda: str(default_path)
     )
     engine = DictionaryEngine(store)
-    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "Zorblax"
 
     monkeypatch.setattr(
         "voice_flow.storage.resolve_active_db_path", lambda: str(account_path)
     )
 
-    assert engine.apply_dictionary_post_processing("voice") == "voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "zorblax"
     assert store.db_path == str(account_path)
 
 
@@ -408,12 +408,12 @@ def test_failed_reload_after_database_switch_drops_previous_account_rules(
     second_path = tmp_path / "second" / "voice_flow.db"
     store = StorageEngine(str(first_path), custom_db=True)
     second = StorageEngine(str(second_path), custom_db=True)
-    assert store.add_dictionary_word("Voice")
+    assert store.add_dictionary_word("Zorblax")
     assert store.add_dictionary_word("FirstOnly")
     assert second.add_dictionary_word("NewTerm")
     engine = DictionaryEngine(store)
     old_revision = store.get_dictionary_revision()
-    assert engine.apply_dictionary_post_processing("voice") == "Voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "Zorblax"
 
     unavailable = False
     original_entries = store.get_dictionary_entries
@@ -436,7 +436,7 @@ def test_failed_reload_after_database_switch_drops_previous_account_rules(
     unavailable = True
     store.switch_account(str(second_path))
     assert store.get_dictionary_revision() == old_revision
-    assert engine.apply_dictionary_post_processing("voice") == "voice"
+    assert engine.apply_dictionary_post_processing("zorblax") == "zorblax"
 
     unavailable = False
     assert engine.apply_dictionary_post_processing("newterm") == "NewTerm"
@@ -462,31 +462,10 @@ def test_filler_noise_never_reaches_stt_prompt_or_hints(monkeypatch: pytest.Monk
     assert "kubernetes" in hint_keys
 
 
-def test_correction_extraction_rejects_filler_and_greeting_noise() -> None:
-    """'uh hey' heard 18x for 'Hey' must never become a suggestion candidate."""
-    from voice_flow.correction_learning import extract_correction_pairs
-
-    assert extract_correction_pairs("uh hey lets go", "Hey lets go") == []
-    assert extract_correction_pairs("uh hey are you there", "Hey are you there") == []
-    assert extract_correction_pairs("hear is the plan", "Here is the plan") == []
 
 
-def test_correction_extraction_still_catches_real_names_after_case_shift() -> None:
-    """Sentence-initial capitalization must not hide multi-token mishearings."""
-    from voice_flow.correction_learning import extract_correction_pairs
-
-    assert ("Joey", "joe ee") in extract_correction_pairs("call joe ee now", "Call Joey now")
-    assert ("LangGraph", "land graph") in extract_correction_pairs(
-        "we will use land graph for routing", "We will use LangGraph for routing"
-    )
 
 
-def test_correction_extraction_requires_distinct_context_for_multitoken_variants() -> None:
-    """Duplicated filler ('hey hey') is one content token, not evidence."""
-    from voice_flow.correction_learning import extract_correction_pairs
-
-    pairs = extract_correction_pairs("we discussed hey hey yesterday", "We discussed HeyHey yesterday")
-    assert all(variant.casefold() != "hey hey" for _, variant in pairs)
 
 
 def test_local_whisper_returns_raw_text_without_dictionary_prompt_or_rewrite(monkeypatch: pytest.MonkeyPatch) -> None:

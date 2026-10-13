@@ -97,9 +97,9 @@ def test_dictionary_edits_refresh_an_existing_engine_and_protect_urls(tmp_path):
     store = StorageEngine(str(tmp_path / "dictionary.db"))
     engine = DictionaryEngine(store)
 
-    assert store.add_dictionary_word("VoiceFlow")
-    assert engine.apply_dictionary_post_processing("voiceflow is ready") == "VoiceFlow is ready"
-    assert engine.apply_dictionary_post_processing("visit https://voiceflow.example") == "visit https://voiceflow.example"
+    assert store.add_dictionary_word("GrokBot")
+    assert engine.apply_dictionary_post_processing("grokbot is ready") == "GrokBot is ready"
+    assert engine.apply_dictionary_post_processing("visit https://grokbot.example") == "visit https://grokbot.example"
     assert store.add_dictionary_correction("acme", "AcmeAPI")
     assert engine.apply_dictionary_post_processing("acme is ready") == "AcmeAPI is ready"
     # Explicit corrections must obey the same protected-content boundary as
@@ -114,9 +114,9 @@ def test_dictionary_mutation_response_keeps_the_same_snippet_snapshot_as_get(voi
     base_url, store = voice_api
     store.add_snippet("addr", "42 Galaxy Way")
 
-    status, changed = _request(f"{base_url}/api/dictionary/add", {"word": "VoiceFlow"})
+    status, changed = _request(f"{base_url}/api/dictionary/add", {"word": "GrokBot"})
     assert status == 200
-    assert changed["words"] == ["VoiceFlow", "addr -> 42 Galaxy Way"]
+    assert changed["words"] == ["GrokBot", "addr -> 42 Galaxy Way"]
     _, snapshot = _request(f"{base_url}/api/dictionary")
     assert changed["words"] == snapshot
 

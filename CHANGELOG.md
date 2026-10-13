@@ -3,6 +3,16 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Dictionary rebuilt
+- **Words and Replacements, nothing else**: A saved Word (a name or special term such as Kubernetes) is sent to the speech recognizer as a bias term, given to the cloud polisher as a preferred spelling, and afterwards fixes only its own spelling, keeping plural and possessive endings. A Replacement ("Heard as") swaps only the exact misheard phrase the user wrote.
+- **No automatic learning**: The dictionary no longer learns from dictation or from polished text. The learning modules were removed.
+- **Same result with polishing on or off**: One deterministic pass; links, emails, and code are never changed.
+- **Ordinary and built-in words refused**: Words like "meeting" or "hey", and the "Voice Flow" wake phrase, cannot be saved as dictionary words.
+- **Recognizer biasing**: Nemotron speech context, faster-whisper hotwords, Deepgram keyterms, and cloud prompts now receive the user's terms.
+- **One-time reset**: On first start the old dictionary rows, replacements, and learning data are saved to `dictionary-backup-before-rebuild-<time>.json` in the data folder and cleared. Shortcuts, history, settings, and keys are unchanged.
+
 ## 1.0.2 - 2026-10-09
 
 ### Standalone Runtime & macOS App Enhancements
