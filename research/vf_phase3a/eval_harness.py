@@ -228,16 +228,35 @@ def evaluate_output(record: Dict[str, Any], output_text: str) -> EvalRecordResul
         instruction_ok = False
         adjudication.append("echoed_control_tag")
 
-    # 2. Prompt task meta-directive echoing (e.g. 'make this a prompt: ...')
-    if task == "prompt" and re.search(r"\bmake\s+this\s+a\s+prompt\s*:", output_text, re.I):
-        instruction_ok = False
-        adjudication.append("echoed_meta_prompt_directive")
-
-    # 3. Email task subject header preservation
-    if task == "rewrite" and "email" in slice_name:
-        if not re.search(r"subject\s*[:\"]", output_text, re.I):
+    # 2. Prompt task meta-directive echoing and prompt creation wrapper repetition
+    if task == "prompt":
+        if re.search(r"\bmake\s+this\s+a\s+prompt\s*:", output_text, re.I):
             instruction_ok = False
-            adjudication.append("missing_email_subject")
+            adjudication.append("echoed_meta_prompt_directive")
+        if re.search(r"\b(?:create|generate)\s+a\s+prompt\s+for\b", output_text, re.I):
+            instruction_ok = False
+            adjudication.append("repeated_meta_prompt_wrapper")
+
+    # 3. Email task structure: distinct Subject header, body, sign-off, sender preservation
+    if task == "rewrite" and "email" in slice_name:
+        # Check standard Subject header
+        has_clean_subject = bool(re.search(r"(?im)^subject\s*:\s*[^\n]+", output_text))
+        if not has_clean_subject:
+            instruction_ok = False
+            adjudication.append("missing_subject_header")
+
+        # Distinct subject vs body: subject must not merge entire body message
+        lines = [line.strip() for line in output_text.strip().splitlines() if line.strip()]
+        for line in lines:
+            if line.lower().startswith("subject:"):
+                if "maintenance is scheduled" in line.lower() or len(line.split()) > 10:
+                    instruction_ok = False
+                    adjudication.append("subject_contains_body_or_lacks_separate_header")
+
+        # Sender identity preservation
+        if "it ops" in transcript.lower() and not re.search(r"\bit\s+ops\b", output_text, re.I):
+            checker_ok = False
+            adjudication.append("lost_sender_identity_it_ops")
 
     # 4. Spoken disfluency cleanup enforcement
     if slice_name == "cleanup" and record.get("id") == "EVAL-IND-016":
@@ -245,8 +264,24 @@ def evaluate_output(record: Dict[str, Any], output_text: str) -> EvalRecordResul
             instruction_ok = False
             adjudication.append("filler_disfluency_retained")
 
-    factual_ok = assertions_ok and checker_ok
+    # 5. List / item preservation (EVAL-IND-022: packing list)
     semantic_ok = True
+    if record.get("id") == "EVAL-IND-022" or (instruction_req and "bullet list" in instruction_req.lower()):
+        if "laptop charger" in output_text.lower():
+            semantic_ok = False
+            adjudication.append("merged_laptop_and_charger")
+        bullet_lines = [l for l in output_text.splitlines() if l.strip().startswith(("-", "*"))]
+        if bullet_lines and len(bullet_lines) < 5:
+            semantic_ok = False
+            adjudication.append(f"insufficient_items_count:{len(bullet_lines)}")
+
+    # 6. Critical numerical error (EVAL-IND-024)
+    if record.get("id") == "EVAL-IND-024":
+        if "15,00,000" not in output_text and "1,500,000" not in output_text:
+            checker_ok = False
+            adjudication.append("critical_numerical_error")
+
+    factual_ok = assertions_ok and checker_ok
 
     # Formatting checks
     formatting_ok = True

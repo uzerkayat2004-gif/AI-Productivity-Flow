@@ -333,8 +333,98 @@ def test_control_tag_echo_detection():
     assert "echoed_control_tag" in res_tag.adjudication_notes
 
 
+def test_email_structure_and_sender_identity_enforcement():
+    """EVAL-IND-019: require distinct Subject header, body, sign-off, and preservation of sender identity 'IT Ops'."""
+    rec = {
+        "id": "EVAL-IND-019",
+        "slice": "email",
+        "request": {
+            "transcript": "email subject deployment notice please be advised system maintenance is scheduled for midnight thanks it ops",
+            "task": "rewrite",
+            "instruction": "format as email",
+        },
+        "reference": "Subject: Deployment Notice\n\nPlease be advised system maintenance is scheduled for midnight.\n\nThanks,\nIT Ops",
+        "assertions": {"must_include": ["Subject:", "maintenance", "midnight"], "must_not_include": []},
+    }
+    # Canonical correct email passes
+    res_clean = evaluate_output(
+        rec,
+        "Subject: Deployment Notice\n\nPlease be advised system maintenance is scheduled for midnight.\n\nThanks,\nIT Ops"
+    )
+    assert res_clean.passed is True
+    assert res_clean.factual_passed is True
+    assert res_clean.instruction_passed is True
+
+    # Truncated sender ('Ops' instead of 'IT Ops') fails factual preservation
+    res_lost_sender = evaluate_output(
+        rec,
+        "Subject: Deployment Notice\n\nPlease be advised, System maintenance is scheduled for midnight.\n\nThanks,\nOps"
+    )
+    assert res_lost_sender.passed is False
+    assert "lost_sender_identity_it_ops" in res_lost_sender.adjudication_notes
+
+    # Subject containing entire body notice fails instruction structure
+    res_subject_body = evaluate_output(
+        rec,
+        "Subject: Deployment notice, please be advised system maintenance is scheduled for midnight.\n\nThanks it ops."
+    )
+    assert res_subject_body.passed is False
+    assert "subject_contains_body_or_lacks_separate_header" in res_subject_body.adjudication_notes
+
+
+def test_prompt_generation_meta_wrapper_rejection():
+    """EVAL-IND-021: prompt-generation tasks must produce the actual usable prompt, not repeat 'create a prompt for...'."""
+    rec = {
+        "id": "EVAL-IND-021",
+        "slice": "prompt",
+        "request": {
+            "transcript": "create a prompt for generating unit tests for an authentication middleware service",
+            "task": "prompt",
+        },
+        "reference": "Generate unit tests for an authentication middleware service.",
+        "assertions": {"must_include": ["unit tests", "authentication middleware"], "must_not_include": ["test_auth", "import unittest"]},
+    }
+    # Usable prompt passes
+    res_clean = evaluate_output(rec, "Generate unit tests for an authentication middleware service.")
+    assert res_clean.passed is True
+    assert res_clean.instruction_passed is True
+
+    # Repetition of 'create a prompt for...' fails instruction following
+    res_meta = evaluate_output(rec, "Create a prompt for generating unit tests for an authentication middleware service.")
+    assert res_meta.passed is False
+    assert res_meta.instruction_passed is False
+    assert "repeated_meta_prompt_wrapper" in res_meta.adjudication_notes
+
+
+def test_packing_list_item_preservation_and_merging_rejection():
+    """EVAL-IND-022: ensure all five packing-list items remain separate; merging Laptop and Charger is a content-preservation failure."""
+    rec = {
+        "id": "EVAL-IND-022",
+        "slice": "instruction",
+        "request": {
+            "transcript": "items to pack laptop charger passport water bottle notepad",
+            "task": "rewrite",
+            "instruction": "bullet list",
+        },
+        "reference": "- Laptop\n- Charger\n- Passport\n- Water bottle\n- Notepad",
+        "assertions": {"must_include": ["-", "Laptop", "Passport"], "must_not_include": []},
+    }
+    # 5 separate bullet items pass
+    clean_list = "Items to pack:\n- Laptop\n- Charger\n- Passport\n- Water bottle\n- Notepad"
+    res_clean = evaluate_output(rec, clean_list)
+    assert res_clean.passed is True
+    assert res_clean.semantic_passed is True
+
+    # Merging 'Laptop charger' into 4 items fails content preservation
+    merged_list = "Items to pack:\n- Laptop charger\n- Passport\n- Water bottle\n- Notepad"
+    res_merged = evaluate_output(rec, merged_list)
+    assert res_merged.passed is False
+    assert res_merged.semantic_passed is False
+    assert "merged_laptop_and_charger" in res_merged.adjudication_notes
+
+
 def test_evaluation_report_consistency_against_raw_generations():
-    """Regression test ensuring report overall totals never disagree with individual case results or raw generations."""
+    """Regression test ensuring report overall totals match deterministic case-by-case rubric results."""
     import json
     eval_defs_path = os.path.join(
         os.path.dirname(__file__), "..", "research", "vf_phase3a", "synthetic_fixtures", "independent_eval_set.jsonl"
@@ -349,10 +439,14 @@ def test_evaluation_report_consistency_against_raw_generations():
     eval_defs = load_eval_dataset(eval_defs_path)
     assert len(eval_defs) == 25, f"Expected 25 evaluation definitions, got {len(eval_defs)}"
 
+    # Reconciled strict rubric pass counts derived deterministically from the 75 raw generations:
+    # V1 (Native Base): 15/25 (60.0%)
+    # V2 (VF-1 Base): 19/25 (76.0%)
+    # V3 (LoRA Adapter): 20/25 (80.0%)
     expected_reconciled_totals = {
         "1. S1-mini Native (Base)": 15,
-        "2. S1-mini VF-1 (Base)": 21,
-        "3. S1-mini VF-1 (LoRA Adapter)": 23,
+        "2. S1-mini VF-1 (Base)": 19,
+        "3. S1-mini VF-1 (LoRA Adapter)": 20,
     }
 
     for item in data.get("comparison", []):
