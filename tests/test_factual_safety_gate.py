@@ -100,3 +100,71 @@ def test_safety_gate_accepts_spoken_self_correction():
     assert decision.accepted is True
     assert decision.source_preserved is False
     assert decision.final_text == candidate
+
+
+def test_safety_gate_accepts_written_vs_spoken_numbers():
+    """Safety gate accepts spoken number words converted to digits without false rejection."""
+    transcript = "we expect twenty no thirty attendees at the conference workshop"
+    candidate = "We expect 30 attendees at the conference workshop."
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is True
+    assert decision.source_preserved is False
+    assert decision.final_text == candidate
+
+
+def test_safety_gate_accepts_dates_times_formatting():
+    """Safety gate accepts date and time formatting normalizations."""
+    transcript = "reschedule the quarterly planning to Wednesday October 14th at 3:30 PM"
+    candidate = "Reschedule the quarterly planning to Wednesday, October 14th at 3:30 PM."
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is True
+    assert decision.source_preserved is False
+    assert decision.final_text == candidate
+
+
+def test_safety_gate_accepts_genuine_alternatives():
+    """Safety gate accepts genuine alternatives (either/or) without forcing collapse."""
+    transcript = "the audit committee can meet on either Tuesday morning or Thursday afternoon"
+    candidate = "The audit committee can meet on either Tuesday morning or Thursday afternoon."
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is True
+    assert decision.source_preserved is False
+    assert decision.final_text == candidate
+
+
+def test_safety_gate_execution_on_stage3b_actual_model_outputs():
+    """Test safety gate on all 75 authentic GPU-generated model outputs from Stage 3B."""
+    import json
+    import os
+
+    vault_json = r"D:\apf_restricted_data_vault\s1_stage3b_experiment_artifacts\eval_report.json"
+    if not os.path.exists(vault_json):
+        pytest.skip("Stage 3B evaluation report not found in vault")
+
+    with open(vault_json, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for item in data.get("comparison", []):
+        cand_name = item.get("candidate")
+        records = item.get("records", [])
+
+        for rec in records:
+            cid = rec["id"]
+            transcript = rec["transcript"]
+            generated = rec["generated"]
+
+            decision = validate_and_gate_output(transcript, generated)
+
+            if cid == "EVAL-IND-024":
+                # Critical numerical corruption: must be REJECTED across all 3 models with fallback to transcript
+                assert decision.accepted is False, f"EVAL-IND-024 should be rejected for {cand_name}"
+                assert decision.source_preserved is True
+                assert decision.final_text == transcript
+            elif cid in ("EVAL-IND-001", "EVAL-IND-002", "EVAL-IND-003", "EVAL-IND-004", "EVAL-IND-005", "EVAL-IND-025"):
+                # Clean factual cases must be ACCEPTED without false rejection
+                assert decision.accepted is True, f"False rejection on {cid} for {cand_name}: {decision.rejection_reasons}"
+                assert decision.source_preserved is False
+                assert decision.final_text == generated
