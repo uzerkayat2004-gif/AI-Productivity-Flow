@@ -8554,7 +8554,6 @@ function prevAudioFlowGuideStep() {
 }
 
 function startAudioFlowGuide(options) {
-  setOnboardingFlag("vf_onboarding.af_guided", "1");
   const overlay = document.getElementById("audioflow-guide-overlay");
   if (!overlay) return;
   // Probe the guide stylesheet before locking anything: an unstyled overlay
@@ -8563,6 +8562,10 @@ function startAudioFlowGuide(options) {
     console.warn("[Audio Flow guide] Guide styles are missing; not starting the guide.");
     return;
   }
+  // Mark the guide as seen once it actually starts, so switching features
+  // never replays it. If the card turns out to be invisible, the unusable
+  // release path clears this again so the guide stays pending.
+  setOnboardingFlag("vf_onboarding.af_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("audioflow", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -8680,6 +8683,9 @@ function stopAudioFlowGuide(markCompleted = false) {
   }
   if (markCompleted && !unusable) {
     setOnboardingFlag("vf_onboarding.af_guided", "1");
+  } else if (unusable) {
+    // The user never saw the guide: keep it pending for a later visit.
+    setOnboardingFlag("vf_onboarding.af_guided", "");
   }
 }
 

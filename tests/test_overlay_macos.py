@@ -109,7 +109,8 @@ def test_macos_background_updates_are_queued_and_pumped_on_tk_thread(monkeypatch
     assert ran == []
     bar._pump_ui_queue()
     assert ran == [threading.get_ident()], "queued work runs on the Tk thread"
-    assert bar.root.after_calls[-1][1] == bar._pump_ui_queue, "the pump keeps itself scheduled"
+    assert bar.root.after_calls, "the shared dispatcher arms its owner-thread poll"
+    assert callable(bar.root.after_calls[-1][1]), "the pump keeps itself scheduled"
 
 
 def test_macos_show_recording_from_hotkey_thread_reaches_the_bar(monkeypatch):
@@ -123,12 +124,17 @@ def test_macos_show_recording_from_hotkey_thread_reaches_the_bar(monkeypatch):
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_non_mac_background_updates_still_use_root_after(monkeypatch, platform):
+def test_non_mac_background_updates_use_the_same_tk_thread_pump(monkeypatch, platform):
+    """Every platform now shares one owner-thread dispatcher (ui_dispatch.py):
+    workers never call root.after themselves, the Tk thread drains the queue."""
     monkeypatch.setattr(overlay_mod.sys, "platform", platform)
     bar = _bar()
-    func = lambda: None  # noqa: E731
-    _from_thread(lambda: bar._run_on_ui(func))
-    assert bar.root.after_calls == [(0, func)]
+    ran: list[int] = []
+    _from_thread(lambda: bar._run_on_ui(lambda: ran.append(threading.get_ident())))
+    assert bar.root.after_calls == [], "worker threads never touch Tk directly"
+    assert ran == []
+    bar._pump_ui_queue()
+    assert ran == [threading.get_ident()]
     assert bar._ui_queue.empty()
 
 
