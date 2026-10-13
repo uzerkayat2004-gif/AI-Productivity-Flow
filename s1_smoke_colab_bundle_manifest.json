@@ -1,0 +1,61 @@
+{
+  "bundle_file": "s1_smoke_colab_bundle.zip",
+  "sha256": "9ac75c564a6e0f0d2150f71041a84a52381482790737476e759765fdecd81593",
+  "size_bytes": 31498,
+  "files_count": 13,
+  "source_commit": "35e38fc+",
+  "manifest": {
+    "src/voice_flow/vf_contract.py": {
+      "size": 12908,
+      "sha256": "77134454e5dffadefb8c21252c20d9d59fb333fd34ce13ddcd1b390132feb761"
+    },
+    "research/vf_phase2a/scripts/vf_render.py": {
+      "size": 2838,
+      "sha256": "1349ad4b02f030a1b0242f8a4274fb542bed80c5a3cc3d0f1b00777b68c1f3d4"
+    },
+    "research/vf_phase2b/scripts/p2b_render.py": {
+      "size": 5170,
+      "sha256": "a93ad38588d19ee224df0f335d1d95a0b99b7c7db333e494c284031cc1ab36a9"
+    },
+    "research/vf_phase3a/S1_LORA_TRAINER.py": {
+      "size": 41164,
+      "sha256": "b7555c23597af016288d8ce71d436c04d1f893389f16ad16b2ef7419db691306"
+    },
+    "research/vf_phase3a/S1_COLAB_SMOKE_TEST.ipynb": {
+      "size": 11681,
+      "sha256": "f9ba790d525089a748349fe688365bf2f46bac10fa0e34b696b58f174f29edb8"
+    },
+    "research/vf_phase3a/requirements.txt": {
+      "size": 215,
+      "sha256": "583e5528c3a72ddf50aa7eb1472ecb20b21b4608b5723e4c92bb883da921dee9"
+    },
+    "research/vf_phase3a/GATES_TEMPLATE.json": {
+      "size": 395,
+      "sha256": "f3b624bdcd081fe2b973113fd253bb6c74a64ea189d9daea6fe57672dbdd3cfb"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_corpus.jsonl": {
+      "size": 14572,
+      "sha256": "89df6983c146883dba801f71288783a549b4bb65ff9a24a30725d8f7f9069056"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_rehearsal.jsonl": {
+      "size": 5712,
+      "sha256": "5644e948a3fd8e6083c82a02e2467b86fd51d9bcb016c2e879f029a2caea3080"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_heldout.jsonl": {
+      "size": 245,
+      "sha256": "f622ca8579008f2fea79b1660fdacd1f0c710fb8bd16ac37ba4dd7446af6a7a8"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_manifest.json": {
+      "size": 689,
+      "sha256": "cee5cbf55347322162be2da41ff2aee6cbb3946cee43a98564174fb1f989d7c8"
+    },
+    "research/vf_phase3a/synthetic_fixtures/gates_synthetic_smoke.json": {
+      "size": 901,
+      "sha256": "34a3b104f54085b55323e25b8cec366514ebbc405eaff5679d820873753611e1"
+    },
+    "scripts/fetch_tokenizers.py": {
+      "size": 7594,
+      "sha256": "3bdd3714baefb48175491c29134ee6251bbf97fe51d5d47efa0b2b4d8ab0e230"
+    }
+  }
+}

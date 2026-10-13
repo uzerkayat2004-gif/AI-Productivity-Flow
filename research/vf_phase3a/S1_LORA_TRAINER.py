@@ -413,10 +413,17 @@ def env_info():
     return info
 
 
-def pick_precision():
+def pick_precision(choice: str = "auto"):
     import torch
     if not torch.cuda.is_available():
         return "fp32", torch.float32, None
+    if choice == "fp16":
+        return "fp16", torch.float16, torch.float16
+    if choice == "bf16":
+        return "bf16", torch.bfloat16, torch.bfloat16
+    if choice == "fp32":
+        return "fp32", torch.float32, None
+    # auto: T4 defaults to fp16, Ampere+ defaults to bf16
     if torch.cuda.is_bf16_supported():
         return "bf16", torch.bfloat16, torch.bfloat16
     return "fp16", torch.float16, torch.float16
@@ -727,7 +734,7 @@ def mode_train(a):
         raise SystemExit(f"Render problems: {probs}")
     val = [r for r in corpus if r["split"] == "validation"]
     val_ex, _ = build_examples(R, tok, val, prof["max_len"])
-    pname, wdtype, amp = pick_precision()
+    pname, wdtype, amp = pick_precision(getattr(a, "precision", "auto"))
     model = AutoModelForCausalLM.from_pretrained(BASE_REPO, revision=BASE_REVISION, torch_dtype=wdtype).cuda()
     model.config.use_cache = False
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -815,6 +822,8 @@ def main():
     t.add_argument("--gates", required=True, help="Path to gates.json (required)")
     t.add_argument("--profile", choices=["tiny", "smoke", "full"], default="tiny")
     t.add_argument("--out", required=True, help="Output directory for adapter and logs")
+    t.add_argument("--precision", choices=["auto", "fp16", "bf16", "fp32"], default="auto",
+                   help="Precision setting (auto defaults to fp16 on T4, bf16 on Ampere+)")
     t.add_argument("--seed", type=int, default=20261012)
     t.add_argument("--max-steps", type=int, default=None)
 

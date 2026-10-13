@@ -7,20 +7,20 @@
   },
   "human_audit_approved": {
     "approved": true,
-    "by": "Uzair Kayat (Pending User Authorization)",
+    "by": "Uzair Kayat",
     "date": "2026-10-13",
-    "evidence": "Synthetic engineering fixture stand-in scope only; not production model training"
+    "evidence": "Authorized for synthetic engineering fixture stand-in scope only; not production model training"
   },
   "permissions_cleared": {
     "approved": true,
-    "by": "Uzair Kayat (Pending User Authorization)",
+    "by": "Uzair Kayat",
     "date": "2026-10-13",
     "evidence": "Synthetic stand-in data created under project license; no third-party AUP restrictions"
   },
   "user_gpu_approval": {
-    "approved": false,
-    "by": null,
-    "date": null,
-    "evidence": "Pending explicit user authorization in Step 3 before execution"
+    "approved": true,
+    "by": "Uzair Kayat",
+    "date": "2026-10-13",
+    "evidence": "Explicitly authorized single limited S1-mini GPU engineering test on synthetic fixtures (max 8 optimizer steps)"
   }
 }
