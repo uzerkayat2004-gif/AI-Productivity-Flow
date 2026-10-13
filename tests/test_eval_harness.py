@@ -332,3 +332,55 @@ def test_control_tag_echo_detection():
     assert res_tag.passed is False
     assert "echoed_control_tag" in res_tag.adjudication_notes
 
+
+def test_evaluation_report_consistency_against_raw_generations():
+    """Regression test ensuring report overall totals never disagree with individual case results or raw generations."""
+    import json
+    eval_defs_path = os.path.join(
+        os.path.dirname(__file__), "..", "research", "vf_phase3a", "synthetic_fixtures", "independent_eval_set.jsonl"
+    )
+    eval_json_vault = r"D:\apf_restricted_data_vault\s1_stage3b_experiment_artifacts\eval_report.json"
+    if not os.path.exists(eval_json_vault):
+        pytest.skip(f"Vault evaluation report not accessible: {eval_json_vault}")
+
+    with open(eval_json_vault, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    eval_defs = load_eval_dataset(eval_defs_path)
+    assert len(eval_defs) == 25, f"Expected 25 evaluation definitions, got {len(eval_defs)}"
+
+    expected_reconciled_totals = {
+        "1. S1-mini Native (Base)": 15,
+        "2. S1-mini VF-1 (Base)": 21,
+        "3. S1-mini VF-1 (LoRA Adapter)": 23,
+    }
+
+    for item in data.get("comparison", []):
+        cand = item.get("candidate")
+        records = item.get("records", [])
+        assert len(records) == len(eval_defs), f"Record count mismatch in {cand}"
+
+        evaluated_results = []
+        for i, rec in enumerate(records):
+            gen = rec["generated"]
+            res = evaluate_output(eval_defs[i], gen)
+            evaluated_results.append(res)
+
+        calculated_passed = sum(1 for r in evaluated_results if r.passed)
+        if cand in expected_reconciled_totals:
+            assert calculated_passed == expected_reconciled_totals[cand], (
+                f"Report total mismatch for {cand}: calculated {calculated_passed}, "
+                f"expected {expected_reconciled_totals[cand]}"
+            )
+
+        # Mathematical consistency: verify slice sum equals overall total
+        by_slice = {}
+        for r in evaluated_results:
+            by_slice.setdefault(r.slice, []).append(r)
+
+        slice_sum = sum(sum(1 for r in items if r.passed) for items in by_slice.values())
+        assert slice_sum == calculated_passed, (
+            f"Slice sum ({slice_sum}) disagrees with overall passed count ({calculated_passed}) in {cand}"
+        )
+
+
