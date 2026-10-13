@@ -1,9 +1,9 @@
 {
   "bundle_file": "s1_smoke_colab_bundle.zip",
-  "sha256": "9ac75c564a6e0f0d2150f71041a84a52381482790737476e759765fdecd81593",
-  "size_bytes": 31498,
+  "sha256": "09697b25d367eebf5e64b6aaea45a6ce142c730f021a163392ac06da306f9ca7",
+  "size_bytes": 31507,
   "files_count": 13,
-  "source_commit": "35e38fc+",
+  "source_commit": "06708bc",
   "manifest": {
     "src/voice_flow/vf_contract.py": {
       "size": 12908,
@@ -22,8 +22,8 @@
       "sha256": "b7555c23597af016288d8ce71d436c04d1f893389f16ad16b2ef7419db691306"
     },
     "research/vf_phase3a/S1_COLAB_SMOKE_TEST.ipynb": {
-      "size": 11681,
-      "sha256": "f9ba790d525089a748349fe688365bf2f46bac10fa0e34b696b58f174f29edb8"
+      "size": 11698,
+      "sha256": "0bd7f5c7de6165ffa8ff3dca17e959b8b8fa57f430153432be71bb99814bd96c"
     },
     "research/vf_phase3a/requirements.txt": {
       "size": 215,
