@@ -442,6 +442,9 @@ def main():
     parser.add_argument("--base-model", default="superwhisper/s1-mini", help="Hugging Face repo id")
     parser.add_argument("--revision", default="88f6b15896c73bbb13a3b596e0afe8ea0d5150b4", help="Pinned commit")
     parser.add_argument("--adapter", default=None, help="Path to LoRA adapter directory")
+    parser.add_argument("--qwen-model", default="Qwen/Qwen3-0.6B", help="Hugging Face repo or local path for Qwen3-0.6B")
+    parser.add_argument("--qwen-revision", default="main", help="Git revision for Qwen3-0.6B")
+    parser.add_argument("--eval-qwen", action="store_true", help="Include genuine Qwen3-0.6B base model in evaluation")
     parser.add_argument("--out", default="eval_report.json", help="Output path for JSON report")
     parser.add_argument("--out-md", default=None, help="Output path for Markdown summary")
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
@@ -459,7 +462,7 @@ def main():
         torch_dtype=(torch.float16 if dev == "cuda" else torch.float32),
     ).to(dev).eval()
 
-    def make_generator(model):
+    def make_generator(model, model_tok=tok):
         def _gen(prompt_text: str, input_ids: List[int]) -> str:
             ids = torch.tensor([input_ids], device=dev)
             with torch.no_grad():
@@ -473,7 +476,7 @@ def main():
                     pad_token_id=151643,
                 )
             gen = out[0, ids.shape[1]:].tolist()
-            text = tok.decode([t for t in gen if t not in (151645, 151643)], skip_special_tokens=False)
+            text = model_tok.decode([t for t in gen if t not in (151645, 151643)], skip_special_tokens=False)
             return text
         return _gen
 
@@ -484,7 +487,7 @@ def main():
     s1_res = run_evaluation_on_generator(
         dataset_path=args.dataset,
         tokenizer=tok,
-        generate_fn=make_generator(base),
+        generate_fn=make_generator(base, tok),
         candidate_name="1. S1-mini Native (Base)",
         prompt_mode="s1_native",
     )
@@ -495,7 +498,7 @@ def main():
     base_vf1_res = run_evaluation_on_generator(
         dataset_path=args.dataset,
         tokenizer=tok,
-        generate_fn=make_generator(base),
+        generate_fn=make_generator(base, tok),
         candidate_name="2. S1-mini VF-1 (Base)",
         prompt_mode="vf1",
     )
@@ -510,11 +513,30 @@ def main():
         lora_vf1_res = run_evaluation_on_generator(
             dataset_path=args.dataset,
             tokenizer=tok,
-            generate_fn=make_generator(adapted_model),
+            generate_fn=make_generator(adapted_model, tok),
             candidate_name="3. S1-mini VF-1 (LoRA Adapter)",
             prompt_mode="vf1",
         )
         summaries.append(lora_vf1_res)
+
+    # 4. Variant 4: Genuine Qwen3-0.6B Base Model (if requested)
+    if args.eval_qwen:
+        print(f"[*] Loading genuine Qwen3-0.6B base model '{args.qwen_model}' @ revision '{args.qwen_revision}' on {dev}...")
+        qwen_tok = AutoTokenizer.from_pretrained(args.qwen_model, revision=args.qwen_revision)
+        qwen_base = AutoModelForCausalLM.from_pretrained(
+            args.qwen_model,
+            revision=args.qwen_revision,
+            torch_dtype=(torch.float16 if dev == "cuda" else torch.float32),
+        ).to(dev).eval()
+        print("[*] Evaluating Variant 4: Qwen3-0.6B VF-1 (Base)...")
+        qwen_res = run_evaluation_on_generator(
+            dataset_path=args.dataset,
+            tokenizer=qwen_tok,
+            generate_fn=make_generator(qwen_base, qwen_tok),
+            candidate_name="4. Qwen3-0.6B VF-1 (Base)",
+            prompt_mode="vf1",
+        )
+        summaries.append(qwen_res)
 
     # Output reports
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

@@ -46,11 +46,35 @@ def test_load_eval_dataset(eval_dataset_path):
     assert "currency" in slices
     assert "dates_times" in slices
     assert "names_ids" in slices
-    assert "self_correction"
+    assert "self_correction" in slices
     assert "genuine_alternatives" in slices
     assert "negation" in slices
     assert "email" in slices
     assert "prompt" in slices
+
+
+def test_load_expanded_eval_dataset():
+    """Verify that the 50-record expanded evaluation dataset loads cleanly and adheres to schema."""
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "research", "vf_phase3a", "synthetic_fixtures", "independent_eval_expanded.jsonl"
+    )
+    assert os.path.exists(path), f"Expanded evaluation dataset missing: {path}"
+    records = load_eval_dataset(path)
+    assert len(records) == 50
+    slices = {r["slice"] for r in records}
+    expected_slices = {
+        "currency", "numbers_percentages", "dates_times", "names_ids", "contacts_urls",
+        "self_correction", "genuine_alternatives", "negation_conditions", "email",
+        "prompt", "structured_notes", "lists_preservation", "format_not_answer"
+    }
+    assert expected_slices.issubset(slices)
+    for r in records:
+        assert r["id"].startswith("EVAL-EXP-")
+        assert "transcript" in r["request"]
+        assert "reference" in r
+        assert "assertions" in r
+        assert isinstance(r["assertions"].get("must_include", []), list)
+        assert isinstance(r["assertions"].get("must_not_include", []), list)
 
 
 def test_format_vf1_prompt():
@@ -189,6 +213,25 @@ def test_full_evaluation_harness_with_mock_generator(eval_dataset_path):
     assert "Voice Flow Stage 3B: Model Comparison Matrix" in cmp_md
     assert "S1 Native Generator" in cmp_md
     assert "Baseline Generator" in cmp_md
+
+
+def test_expanded_evaluation_with_mock_generator():
+    """Verify evaluation execution across the 50 expanded records."""
+    tok = DummyTokenizer()
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "research", "vf_phase3a", "synthetic_fixtures", "independent_eval_expanded.jsonl"
+    )
+    summary = run_evaluation_on_generator(
+        dataset_path=path,
+        tokenizer=tok,
+        generate_fn=lambda prompt, ids: "Cleaned transcript text.",
+        candidate_name="Expanded Mock Generator",
+        prompt_mode="vf1",
+    )
+    assert summary["total_records"] == 50
+    assert len(summary["slice_metrics"]) == 13
+    assert "contacts_urls" in summary["slice_metrics"]
+    assert "structured_notes" in summary["slice_metrics"]
 
 
 def test_currency_indian_grouping_equivalence():
