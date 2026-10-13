@@ -310,6 +310,12 @@ def s1_can_handle(
         return False
 
     # 2. Command attribute checks
+    # Free-text constraints ("without hashtags") cannot be expressed in S1's
+    # native control line; routing them to S1 would silently drop them.
+    if getattr(command, "constraints", ()):
+        return False
+    if getattr(command, "operation", None) == "unsupported":
+        return False
     if getattr(command, "persistent_change", False):
         return False
     if getattr(command, "ambiguous", False):
@@ -687,6 +693,17 @@ def normalization_preserves_content(
     """Run the shared fidelity guard after narrow S1 normalization equivalences."""
     try:
         from voice_flow.polisher import _candidate_preserves_content
+        from voice_flow.vf_checks import expand_contractions, normalize_source_for_guard
+
+        # Apply the edits a correct cleanup is expected to make (fillers,
+        # repeats, self-corrections, "dont" -> "do not", spoken price
+        # compounds) before comparing, so valid normalisations are not
+        # rejected (A16).  Number, negation, literal and retention checks
+        # below still run on the result.
+        source = normalize_source_for_guard(source, candidate)
+        candidate = expand_contractions(candidate)
+        if not re.search(r"\w", source):
+            return not re.search(r"\w", candidate or "")
 
         stutter_normalized_source = _collapse_repeated_half_quantity_prefix(source)
         has_stutter_equivalence = stutter_normalized_source != source

@@ -48,6 +48,7 @@ from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, f
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
+from voice_flow.activation import DEFAULT_ACTIVATION, activation_from_settings
 from voice_flow.correction_learning import extract_correction_pairs
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
@@ -2139,9 +2140,31 @@ class VoiceFlowApp:
                     # Deterministic wake-phrase command detection. The raw
                     # transcript is first repaired for known mis-hearings.
                     try:
-                        detection = detect_voice_command(dictionary_engine.repair_wake_term(raw_transcript))
-                        command_content = detection.content or ""
+                        activation = activation_from_settings(storage.get_setting)
+                        # The Voice Flow ASR repair only applies to the default
+                        # wake phrase; a custom assistant name is matched as
+                        # configured.
+                        detect_input = (
+                            dictionary_engine.repair_wake_term(raw_transcript)
+                            if activation.legacy_voice_flow else raw_transcript
+                        )
+                        # Default identity keeps the historical single-argument call.
+                        detection = (
+                            detect_voice_command(detect_input)
+                            if activation == DEFAULT_ACTIVATION
+                            else detect_voice_command(detect_input, activation)
+                        )
                         command = detection.command
+                        # With no command, the repaired detection string must
+                        # never replace the user's words ("wiseflow" stays
+                        # "wiseflow" in ordinary dictation).
+                        command_content = detection.content or ""
+                        if command is None and detect_input != raw_transcript:
+                            command_content = raw_transcript
+                        if command is not None and command.operation == "unsupported":
+                            log.info("[COMMAND] unsupported voice command ignored: %r", command.raw_phrase[:80])
+                            self._overlay_call("show_done", "Unsupported voice command skipped; your text was only cleaned up.")
+                            command = None
                     except Exception:
                         log.exception("[COMMAND] detection failed; using plain dictation")
                 else:
