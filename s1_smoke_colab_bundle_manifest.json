@@ -1,12 +1,20 @@
 {
   "bundle_file": "s1_smoke_colab_bundle.zip",
-  "sha256": "6cfe88db9099f0a7d0afa3e519d0c19bbedb22762f67b9fb04b1b8baec0d2741",
-  "size_bytes": 43693,
-  "files_count": 16,
+  "sha256": "d76c40fab64d79c2e63edda1b9bf2f1d5b55ed3b73529080283fa1f9373ecf75",
+  "size_bytes": 52119,
+  "files_count": 18,
   "manifest": {
     "src/voice_flow/vf_contract.py": {
       "size": 12908,
       "sha256": "77134454e5dffadefb8c21252c20d9d59fb333fd34ce13ddcd1b390132feb761"
+    },
+    "src/voice_flow/vf_checks.py": {
+      "size": 24199,
+      "sha256": "56a419029ab96011aea866da15876fc687b7d0d3a905c399673f1ee4414ff81b"
+    },
+    "src/voice_flow/__init__.py": {
+      "size": 303,
+      "sha256": "4cab365407b98ff13f7617aff1e3d2ef009456ecb0c7c1da56e5c61b9bbed795"
     },
     "research/vf_phase2a/scripts/vf_render.py": {
       "size": 2838,
