@@ -803,6 +803,7 @@ def add_dataset_arguments(p):
     p.add_argument("--manifest", help="Path to dataset manifest JSON")
     p.add_argument("--hashes", help="Path to expected hashes JSON")
     p.add_argument("--renderer-dir", help="Path to directory containing p2b_render.py")
+    p.add_argument("--synthetic", action="store_true", help="Run with synthetic stand-in fixtures")
 
 
 def main():
@@ -811,7 +812,6 @@ def main():
 
     v = sub.add_parser("verify", help="Run CPU preflight checks")
     add_dataset_arguments(v)
-    v.add_argument("--synthetic", action="store_true", help="Run verification on synthetic stand-in fixtures")
     v.add_argument("--report", default="logs/trainer_verification.json")
     v.add_argument("--workdir", default="/tmp/s1_verify")
     v.add_argument("--max-len", type=int, default=640)
