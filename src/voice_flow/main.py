@@ -44,7 +44,7 @@ from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher, AI_POLISH_DETERMINISTIC_RESERVE_SECONDS
 from voice_flow.storage import storage
 from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, smart_format, split_press_enter
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
@@ -125,6 +125,16 @@ INJECTION_RESERVE_SECONDS = 0.3
 # Keep the large speech model resident briefly between OFF-mode dictations so
 # the next short utterance can reuse it without overlapping AI polish memory.
 NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = 10.0
+# With a cloud polish model no local LLM competes for RAM, so keep the
+# streaming speech model resident between dictations. Reloading it on every
+# hotkey press (~1-2.5s on low-power CPUs) made the first words of each
+# dictation decode while the recognizer was still cold.
+NEMOTRON_CLOUD_POLISH_WARM_SECONDS = 600.0
+# Re-decode short recordings offline after release: the full-context pass is
+# more accurate than the cache-aware streaming result and merges stutter
+# fragments that streaming finalized separately ("Q? Q. Quest? Question.").
+FULL_REDECODE_MAX_SECONDS = 30.0
+FULL_REDECODE_BUDGET_SECONDS = 2.5
 _S1_WARM_GATE = threading.Lock()
 # Cloud transcription keeps the full recovery window, while optional cleanup
 # shares a separate two-second interactive release target.
@@ -223,6 +233,17 @@ def _polish_deadline(
     if requires_ai:
         budget = max(budget, 6.0)
     return time.monotonic() + budget
+
+
+def _polish_model_is_local() -> bool:
+    """True when the selected polish model runs on this machine (fail-safe True)."""
+    try:
+        ref = str(storage.get_setting("voice_flow_polish_model", "") or "").strip().lower()
+    except Exception:
+        return True
+    if not ref:
+        return True
+    return ref.startswith("local/") or ref.startswith("superwhisper/") or "s1-mini" in ref or "lfm" in ref
 
 
 def _polishing_enabled() -> bool:
@@ -968,7 +989,24 @@ class VoiceFlowApp:
                 except Exception:
                     keep_nemotron_warm = False
                 release_after_idle = getattr(lease, "release_after_idle", None)
-                if keep_nemotron_warm and callable(release_after_idle):
+                keep_warm_cloud_polish = False
+                if not keep_nemotron_warm:
+                    try:
+                        keep_warm_cloud_polish = (
+                            is_nemotron_model(stt_model_ref)
+                            and not _polish_model_is_local()
+                        )
+                    except Exception:
+                        keep_warm_cloud_polish = False
+                if keep_warm_cloud_polish and callable(release_after_idle):
+                    try:
+                        release_after_idle(
+                            NEMOTRON_CLOUD_POLISH_WARM_SECONDS,
+                            max_seconds=NEMOTRON_CLOUD_POLISH_WARM_SECONDS,
+                        )
+                    except TypeError:
+                        release_after_idle(NEMOTRON_CLOUD_POLISH_WARM_SECONDS)
+                elif keep_nemotron_warm and callable(release_after_idle):
                     release_after_idle(NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
                 else:
                     release()
@@ -983,6 +1021,47 @@ class VoiceFlowApp:
                 # Frozen dataclasses retain the already-released idempotent
                 # token so dataclasses.replace continues to preserve ownership.
                 pass
+
+    def _full_redecode_short_recording(self, session: Any, audio_buffer: Any, duration: float, post_release_deadline: float) -> str:
+        """Offline full-context decode of a short local recording; "" means keep the stream text."""
+        try:
+            model_ref = getattr(session, "stt_model_ref", None) or (
+                session.get("stt_model_ref") if isinstance(session, dict) else None
+            )
+            from voice_flow.nemotron_engine import is_nemotron_model
+            if not is_nemotron_model(model_ref):
+                return ""
+            # OFF mode (polishing disabled) keeps its literal, lowest-latency
+            # release contract: the warm stream text is pasted as-is.
+            if not _polishing_enabled():
+                return ""
+            if not duration or float(duration) <= 0.0 or float(duration) > FULL_REDECODE_MAX_SECONDS:
+                return ""
+            if audio_buffer is None or getattr(audio_buffer, "size", 0) == 0:
+                return ""
+            deadline = min(
+                post_release_deadline - INJECTION_RESERVE_SECONDS,
+                time.monotonic() + FULL_REDECODE_BUDGET_SECONDS,
+            )
+            if deadline - time.monotonic() <= 0.2:
+                return ""
+            started = time.perf_counter()
+            text = _call_with_optional_deadline(
+                self.transcriber.transcribe,
+                audio_buffer,
+                deadline=deadline,
+                model_ref=model_ref,
+            ) or ""
+            text = str(text).strip()
+            if not text or time.monotonic() > deadline + 0.25:
+                log.info("[STT REDECODE] full-context pass gave no usable text; keeping stream text.")
+                return ""
+            log.info("[STT REDECODE] full-context pass used (%.1fs audio, %d ms, %d chars).",
+                     float(duration), int((time.perf_counter() - started) * 1000), len(text))
+            return text
+        except Exception as exc:
+            log.warning("[STT REDECODE] failed (%s); keeping stream text.", exc)
+            return ""
 
     def _on_stream_chunk_closed(self, chunk: Any, native_sr: int, *, overlap_prefix_seconds: float = 0.0) -> None:
         """Audio-callback thread -> background transcription of a closed chunk."""
@@ -1891,7 +1970,7 @@ class VoiceFlowApp:
             )
             effective_format = getattr(effective, "format", None) if effective is not None else None
             if can_use_local_structure and effective_format == "email" and supported_email_overrides:
-                locally_formatted = format_dictated_email(polished)
+                locally_formatted = format_email_command_fallback(polished)
                 if locally_formatted is not None:
                     # The content and layout are already fixed above; apply
                     # only the user's selected deterministic register so this
@@ -2085,6 +2164,11 @@ class VoiceFlowApp:
                             raw_transcript = str(part).strip()
                             used_stream_text = True
                             log.info("[STREAM STT] %d chars assembled from quiescent chunks.", len(raw_transcript))
+                            redecoded = self._full_redecode_short_recording(
+                                session, audio_buffer, duration, post_release_deadline
+                            )
+                            if redecoded:
+                                raw_transcript = redecoded
                         elif part:
                             log.warning(
                                 "[STREAM STT] discarded %d streamed chars; pending=%d failures=%s.",
