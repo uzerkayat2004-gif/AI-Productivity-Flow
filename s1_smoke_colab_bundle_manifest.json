@@ -1,7 +1,7 @@
 {
   "bundle_file": "s1_smoke_colab_bundle.zip",
-  "sha256": "f8f59281045a642c3f55e9fa5e44d62f480fc184707e2589afa04bf8dc7c906f",
-  "size_bytes": 41390,
+  "sha256": "f7a26bf9e3545b0ef134156a846d668aa30b3d6f9411477aa4e126cb512be68b",
+  "size_bytes": 43668,
   "files_count": 16,
   "manifest": {
     "src/voice_flow/vf_contract.py": {
@@ -21,8 +21,8 @@
       "sha256": "b9ac1ad7e34da090621c371a30be6a28eeeb421c95567368e2fa52dda540bac8"
     },
     "research/vf_phase3a/S1_COLAB_SMOKE_TEST.ipynb": {
-      "size": 14942,
-      "sha256": "32132156303da2d9caf0ec5043298bd79ab137181b929f11c867ed39eea5553b"
+      "size": 15930,
+      "sha256": "1d4c546e86d63796c96bf04f4c05fadc83ab99fb452a0511143ca1efbcdcfeb5"
     },
     "research/vf_phase3a/requirements.txt": {
       "size": 215,
@@ -37,8 +37,8 @@
       "sha256": "455b63337555c6e32870f4ba122dd8b833faa99eddb12809f34d86ff4954c2c8"
     },
     "research/vf_phase3a/eval_harness.py": {
-      "size": 8267,
-      "sha256": "b60d2bb206d1755dd1562b9adf0e441b72928b7cbf91745a3f29ef8cd1bceec9"
+      "size": 15603,
+      "sha256": "b538c255c2b7b3878e3f954d06bc2e5d7570de4db67c12a47b83a92348625885"
     },
     "research/vf_phase3a/synthetic_fixtures/synthetic_corpus.jsonl": {
       "size": 14572,
