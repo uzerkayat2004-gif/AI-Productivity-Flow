@@ -689,6 +689,7 @@
     const audioId = params.get('id') || '';
     const depthParam = params.get('depth') || 'balanced';
     const titleParam = params.get('title') || '';
+    const autoplayParam = params.get('autoplay') !== '0';
 
     const audio = document.getElementById('audio');
     const play = document.getElementById('play');
@@ -744,6 +745,30 @@
       return cleaned;
     }
 
+    let playbackError = false;
+    let playAttempt = 0;
+    let disposed = false;
+    function showPlaybackError(message) {
+      playbackError = true;
+      status.textContent = message + ' Press Play to retry.';
+      statusDot.className = 'status-dot error';
+      play.textContent = '▶';
+      visualizer.classList.remove('active');
+    }
+    async function requestPlay() {
+      if (!audio.src || disposed) return;
+      const attempt = ++playAttempt;
+      if (playbackError || audio.error) { playbackError = false; audio.load(); }
+      status.textContent = 'Starting playback…';
+      try { await audio.play(); }
+      catch (error) {
+        if (!disposed && attempt === playAttempt) showPlaybackError('Playback could not start.');
+      }
+    }
+    function cleanupPlayback() { disposed = true; ++playAttempt; audio.pause(); }
+    window.addEventListener('pagehide', cleanupPlayback);
+    window.addEventListener('beforeunload', cleanupPlayback);
+
     function loadAudioSource(id, depthLabel, snippetText, customTitle) {
       if (!id) {
         status.textContent = 'Summary unavailable';
@@ -754,6 +779,10 @@
       const currentTitle = customTitle || titleParam || (titleEl ? titleEl.textContent : '') || snippetText || 'Audio Summary';
       const cleanFileName = safeMediaFilename(currentTitle, 'Audio Summary', '.mp3');
       const mediaUrl = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(id)}`;
+      ++playAttempt;
+      audio.pause();
+      playbackError = false;
+      status.textContent = 'Preparing audio…';
       audio.src = mediaUrl;
       audio.load();
       downloadBtn.href = `${mediaUrl}&download=1&format=mp3&title=${encodeURIComponent(currentTitle)}`;
@@ -765,24 +794,12 @@
       }
     }
 
-    loadAudioSource(audioId, depthParam, titleParam);
-
     audio.addEventListener('loadedmetadata', () => {
       seek.max = audio.duration || 0;
       durationEl.textContent = fmt(audio.duration);
-      status.textContent = 'Ready';
-      statusDot.className = 'status-dot';
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          status.textContent = 'Playing';
-          statusDot.className = 'status-dot playing';
-          visualizer.classList.add('active');
-        }).catch(() => {
-          status.textContent = 'Ready — press Play to begin';
-          statusDot.className = 'status-dot';
-          visualizer.classList.remove('active');
-        });
+      if (audio.paused && !playbackError) {
+        status.textContent = 'Ready — press Play';
+        statusDot.className = 'status-dot';
       }
     });
 
@@ -793,7 +810,9 @@
       seek.style.background = `linear-gradient(90deg, var(--orange) ${pct}%, var(--orange-soft) ${pct}%)`;
     });
 
-    audio.addEventListener('play', () => {
+    audio.addEventListener('play', () => { status.textContent = 'Starting playback…'; });
+    audio.addEventListener('playing', () => {
+      playbackError = false;
       play.textContent = '❚❚';
       play.title = 'Pause';
       status.textContent = 'Playing';
@@ -804,7 +823,7 @@
     audio.addEventListener('pause', () => {
       play.textContent = '▶';
       play.title = 'Resume';
-      if (audio.currentTime > 0 && !audio.ended) {
+      if (!playbackError && !audio.ended) {
         status.textContent = 'Paused';
         statusDot.className = 'status-dot paused';
       }
@@ -818,30 +837,14 @@
       visualizer.classList.remove('active');
     });
 
-    audio.addEventListener('error', () => {
-      const code = audio.error ? audio.error.code : 0;
-      let msg = 'Audio is unavailable';
-      if (code === 4) msg = 'Audio format not supported or media not found';
-      else if (code === 2) msg = 'Network error loading audio';
-      else if (code === 3) msg = 'Audio decode error';
-      status.textContent = msg;
-      statusDot.className = 'status-dot error';
-      visualizer.classList.remove('active');
-    });
+    audio.addEventListener('error', () => showPlaybackError('Audio could not load or decode.'));
+    audio.addEventListener('waiting', () => { status.textContent = 'Buffering…'; visualizer.classList.remove('active'); });
+    audio.addEventListener('stalled', () => showPlaybackError('Audio loading stalled.'));
+    audio.addEventListener('canplay', () => { if (audio.paused && !playbackError) status.textContent = 'Ready — press Play'; });
 
     play.onclick = () => {
-      if (audio.paused) {
-        const p = audio.play();
-        if (p !== undefined) {
-          p.catch(err => {
-            console.warn('Audio play failed:', err);
-            status.textContent = 'Playback error: ' + (err.message || 'cannot play');
-            statusDot.className = 'status-dot error';
-          });
-        }
-      } else {
-        audio.pause();
-      }
+      if (audio.paused || playbackError) requestPlay();
+      else { ++playAttempt; audio.pause(); }
     };
 
     seek.oninput = () => {
@@ -859,6 +862,7 @@
     };
 
     document.getElementById('stop').onclick = () => {
+      ++playAttempt; playbackError = false;
       audio.pause();
       audio.currentTime = 0;
       status.textContent = 'Stopped';
@@ -964,7 +968,7 @@
       loadAudioSource(id, depth, snippet, activeTitle);
       titleEl.textContent = activeTitle.slice(0, 42) + (activeTitle.length > 42 ? '…' : '');
       toggleHistoryDrawer(false);
-      audio.play().catch(() => {});
+      requestPlay();
     };
 
     window.deleteHistoryItem = async (id) => {
@@ -991,6 +995,8 @@
       location.href = targetPath + '?' + u.searchParams.toString();
     };
 
+    loadAudioSource(audioId, depthParam, titleParam);
+    if (autoplayParam) requestPlay();
     // Fetch initial count
     fetchHistory();
   </script>

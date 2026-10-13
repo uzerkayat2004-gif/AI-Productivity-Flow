@@ -14,7 +14,6 @@ import base64
 import json
 import logging
 import os
-import queue
 import re
 import subprocess
 import sys
@@ -30,6 +29,7 @@ log = logging.getLogger("voice_flow.video_flow_widget")
 
 from voice_flow.video_flow_documents import DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, extract_document_text
 from voice_flow.storage import storage
+from voice_flow.ui_dispatch import UiDispatcher
 
 try:
     from voice_flow.video_flow_engine.notebooklm.document_profiler import (
@@ -367,8 +367,10 @@ class VideoFlowScreenWidget:
         self._controls: dict[str, Any] = {}
         self._cached_catalog: dict[str, Any] = {}
         self._catalog_request_id: int = 0
-        self._ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
-        self._ui_poll_id: str | None = None
+        self._ui_dispatcher = UiDispatcher()
+        self._lifecycle_generation = 0
+        self._auth_request_id = 0
+        self._submit_request_id = 0
         self._model_options: dict[str, dict[str, str]] = {}
         self._theme_options: dict[str, dict[str, str]] = {}
         self._format_options: dict[str, dict[str, str]] = {}
@@ -397,37 +399,20 @@ class VideoFlowScreenWidget:
 
     def attach_root(self, root: tk.Tk) -> None:
         self.root = root
-        self._schedule_ui_poll()
-
-    def _schedule_ui_poll(self) -> None:
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None and self._ui_poll_id is None:
-            try:
-                if getattr(root, "_tclCommands", None) is not None and root.winfo_exists():
-                    self._ui_poll_id = root.after(20, self._poll_ui_queue)
-            except Exception:
-                self._ui_poll_id = None
-
-    def _poll_ui_queue(self) -> None:
-        self._ui_poll_id = None
-        self._process_ui_queue()
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None:
-            try:
-                if getattr(root, "_tclCommands", None) is not None and root.winfo_exists():
-                    self._ui_poll_id = root.after(20, self._poll_ui_queue)
-            except Exception:
-                self._ui_poll_id = None
+        self._ui_dispatcher = self._ui_dispatcher.attach(root)
 
     def _process_ui_queue(self) -> None:
-        if not hasattr(self, "_ui_queue"):
-            return
-        while not self._ui_queue.empty():
-            try:
-                callback = self._ui_queue.get_nowait()
-                callback()
-            except Exception as exc:
-                log.exception("Error running callback in video_flow_widget UI queue: %s", exc)
+        self._ui_dispatcher.drain()
+
+    def _invalidate_completions(self) -> None:
+        self._lifecycle_generation += 1
+        self._catalog_request_id += 1
+        self._auth_request_id += 1
+        self._submit_request_id += 1
+
+    def _run_if_current(self, generation: int, request_attr: str, request_id: int, callback: Callable[[], None]) -> None:
+        if self._lifecycle_generation == generation and getattr(self, request_attr) == request_id:
+            callback()
 
     def launch(self, selected_text: str = "", mode: str = "summary") -> "VideoFlowScreenWidget":
         """Public, stable entrypoint for callers outside the dashboard."""
@@ -509,26 +494,25 @@ class VideoFlowScreenWidget:
         return options
 
     def hide(self) -> None:
-        """Withdraw composer window without destroying widget state."""
-        self._stop_grid()
-        if self.win and self.win.winfo_exists():
-            try:
+        """Withdraw composer and invalidate pending callbacks on its owner."""
+        def _hide() -> None:
+            self._invalidate_completions()
+            self._stop_grid()
+            if self.win and self.win.winfo_exists():
                 self.win.withdraw()
-            except Exception:
-                pass
+        self._run_on_ui(_hide)
 
     def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None) -> None:
         clean = (selected_text or "").strip()
-        self._mode = mode if mode in {"summary", "full"} else "summary"
-        self._source_text = clean
-        self._source_name = "Selected text" if clean else ""
-        self._initial_text = clean
-        if anchor_bar is not None:
-            self._anchor_win = anchor_bar
-        if self.root is None:
-            self.root = getattr(tk, "_default_root", None)
 
         def _show() -> None:
+            self._mode = mode if mode in {"summary", "full"} else "summary"
+            self._source_text = clean
+            self._source_name = "Selected text" if clean else ""
+            self._initial_text = clean
+            if anchor_bar is not None:
+                self._anchor_win = anchor_bar
+            self._invalidate_completions()
             if not self.root:
                 self.root = getattr(tk, "_default_root", None)
             if not self.root:
@@ -556,6 +540,8 @@ class VideoFlowScreenWidget:
                 self._controls["mode"].set(self._mode)
             if "file_label" in self._controls:
                 self._controls["file_label"].set(self._source_name or "No document selected")
+            if "generate" in self._controls:
+                self._controls["generate"].configure(state="normal")
             if "status" in self._controls:
                 self._controls["status"].set("Selected text is ready." if source_txt else "Paste text or choose a document.")
             self._stop_grid()
@@ -576,6 +562,7 @@ class VideoFlowScreenWidget:
         self._run_on_ui(_show)
 
     def _build(self) -> None:
+        self._invalidate_completions()
         if not self.root:
             self.root = getattr(tk, "_default_root", None)
         if not self.root:
@@ -1524,6 +1511,9 @@ class VideoFlowScreenWidget:
 
     def _check_notebooklm_auth(self) -> None:
         """Check NotebookLM authentication status and update the UI auth banner pill."""
+        self._auth_request_id += 1
+        request_id = self._auth_request_id
+        generation = self._lifecycle_generation
         is_auth, email = self._check_notebooklm_auth_local()
         self._update_auth_banner(is_auth, email)
 
@@ -1538,7 +1528,9 @@ class VideoFlowScreenWidget:
                     api_email = data.get("email")
                     if api_auth and not api_email:
                         api_email = email or self._auth_email
-                    self._run_on_ui(lambda: self._update_auth_banner(api_auth, api_email))
+                    self._run_on_ui(lambda: self._run_if_current(
+                        generation, "_auth_request_id", request_id,
+                        lambda: self._update_auth_banner(api_auth, api_email)))
             except Exception:
                 pass
 
@@ -1670,7 +1662,10 @@ class VideoFlowScreenWidget:
         threading.Thread(target=_trigger_auth_start, daemon=True, name="video-flow-auth-start").start()
 
         if self.win and self.win.winfo_exists():
-            self.win.after(4000, self._check_notebooklm_auth)
+            generation = self._lifecycle_generation
+            request_id = self._auth_request_id
+            self.win.after(4000, lambda: self._run_if_current(
+                generation, "_auth_request_id", request_id, self._check_notebooklm_auth))
 
     def _refresh_models(self) -> None:
         """Fetch model/theme catalog asynchronously without blocking the Tkinter UI thread."""
@@ -1682,6 +1677,7 @@ class VideoFlowScreenWidget:
 
         self._catalog_request_id = getattr(self, "_catalog_request_id", 0) + 1
         req_id = self._catalog_request_id
+        generation = self._lifecycle_generation
 
         def _fetch_catalog() -> None:
             catalog: dict[str, Any] = {}
@@ -1694,9 +1690,12 @@ class VideoFlowScreenWidget:
             except Exception:
                 catalog = {}
 
-            if catalog and getattr(self, "_catalog_request_id", 0) == req_id:
-                self._cached_catalog = catalog
-                self._run_on_ui(lambda: self._apply_catalog(catalog))
+            if catalog:
+                def _apply() -> None:
+                    self._cached_catalog = catalog
+                    self._apply_catalog(catalog)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_catalog_request_id", req_id, _apply))
 
         threading.Thread(target=_fetch_catalog, daemon=True, name="video-flow-catalog-refresh").start()
 
@@ -1902,14 +1901,22 @@ class VideoFlowScreenWidget:
         self._controls["status"].set("Starting Video Flow…")
         self._start_grid()
 
+        self._submit_request_id += 1
+        request_id = self._submit_request_id
+        generation = self._lifecycle_generation
+
         def _queue() -> None:
             try:
                 result = self.on_generate(payload) or {}
                 if not result.get("id"):
                     raise RuntimeError("Video Flow did not return a job.")
-                self._run_on_ui(self._queued)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_submit_request_id", request_id, self._queued))
             except Exception as exc:
-                self._run_on_ui(lambda: self._generation_error(str(exc)))
+                message = str(exc)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_submit_request_id", request_id,
+                    lambda: self._generation_error(message)))
 
         threading.Thread(target=_queue, daemon=True, name="video-flow-screen-queue").start()
 
@@ -1943,6 +1950,19 @@ class VideoFlowScreenWidget:
         src_dir = str(Path(__file__).resolve().parents[1])
         env = dict(os.environ)
         env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
+        api_base = env.get("VOICE_FLOW_API_BASE", "").strip().rstrip("/")
+        if not api_base:
+            # Inspect an already-running module; importing it here could start
+            # unrelated provider/storage initialization in standalone callers.
+            api_module = sys.modules.get("voice_flow.gui.api_server")
+            try:
+                port = int(getattr(api_module, "PORT", 8991))
+                if not 1 <= port <= 65535:
+                    port = 8991
+            except (TypeError, ValueError):
+                port = 8991
+            api_base = f"http://127.0.0.1:{port}"
+        env["VOICE_FLOW_API_BASE"] = api_base
 
         try:
             subprocess.Popen(
@@ -1952,9 +1972,9 @@ class VideoFlowScreenWidget:
                 env=env,
             )
         except Exception as exc:
-            log.warning("Could not launch video flow player subprocess: %s", exc)
+            log.warning("Could not launch video flow player subprocess (%s)", type(exc).__name__)
             import webbrowser
-            webbrowser.open(f"http://127.0.0.1:8991/video-player.html?id={urllib.parse.quote(str(video_id))}")
+            webbrowser.open(f"{api_base}/video-player.html?id={urllib.parse.quote(str(video_id))}")
 
     def _center(self) -> None:
         if not self.root:
@@ -1984,23 +2004,14 @@ class VideoFlowScreenWidget:
             self.win.geometry(f"{width}x{height}+{x}+{y}")
 
     def _run_on_ui(self, callback: Callable[[], None]) -> None:
-        if hasattr(self, "_ui_queue"):
-            self._ui_queue.put(callback)
-            self._schedule_ui_poll()
-            if threading.current_thread() is threading.main_thread():
-                self._process_ui_queue()
-            return
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None:
-            try:
-                root.after(0, callback)
-                return
-            except Exception:
-                pass
-        try:
-            callback()
-        except Exception:
-            pass
+        if self._ui_dispatcher.root is None and threading.current_thread() is threading.main_thread():
+            root = self.root or getattr(tk, "_default_root", None)
+            if root is not None:
+                self.attach_root(root)
+        if self._ui_dispatcher.is_owner():
+            self._ui_dispatcher._invoke(callback)
+        else:
+            self._ui_dispatcher.submit(callback)
 
 
 video_flow_widget = VideoFlowScreenWidget()

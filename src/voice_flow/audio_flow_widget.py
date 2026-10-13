@@ -24,6 +24,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 from typing import Any, Callable
 
+from voice_flow.ui_dispatch import UiDispatcher
+
 log = logging.getLogger(__name__)
 
 
@@ -125,6 +127,9 @@ class AudioFlowFloatingWidget:
 
     def __init__(self, root: tk.Tk | None = None, on_trigger: Callable[..., None] | None = None) -> None:
         self.root = root
+        self._ui_dispatcher = UiDispatcher()
+        if root is not None:
+            self._ui_dispatcher = self._ui_dispatcher.attach(root)
         self.win: tk.Toplevel | None = None
         self.canvas: tk.Canvas | None = None
         self.on_trigger = on_trigger or (lambda text, mode="full", summary_depth=None: None)
@@ -163,6 +168,7 @@ class AudioFlowFloatingWidget:
     def attach_root(self, root: tk.Tk) -> None:
         """Attach to main Tkinter root window and replay an early selection."""
         self.root = root
+        self._ui_dispatcher = self._ui_dispatcher.attach(root)
         self._init_tk()
         pending = self._pending_show
         if pending is not None:
@@ -379,7 +385,7 @@ class AudioFlowFloatingWidget:
         self._draw()
         self._ensure_animation()
         try:
-            self.win.update()
+            self.win.update_idletasks()
         except Exception:
             pass
 
@@ -389,7 +395,7 @@ class AudioFlowFloatingWidget:
         generation = self._show_generation
 
         def _do():
-            if generation != self._show_generation and self._is_playing:
+            if generation != self._show_generation:
                 return
             self._is_visible = False
             self._is_playing = False
@@ -407,13 +413,7 @@ class AudioFlowFloatingWidget:
                 self._hide_timer.cancel()
                 self._hide_timer = None
 
-        if self.root:
-            if threading.current_thread() is threading.main_thread():
-                _do()
-            else:
-                self._run_on_ui(_do)
-        else:
-            _do()
+        self._run_on_ui(_do)
 
     def contains_point(self, x: int, y: int) -> bool:
         """Check if screen point (x, y) falls inside the audio flow button window or interaction zone."""
@@ -1670,11 +1670,10 @@ class AudioFlowFloatingWidget:
         return None
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
-        if self.root:
-            try:
-                self.root.after(0, func)
-            except Exception:
-                pass
+        if self._ui_dispatcher.is_owner():
+            self._ui_dispatcher._invoke(func)
+        else:
+            self._ui_dispatcher.submit(func)
 
 
 audio_flow_widget = AudioFlowFloatingWidget()

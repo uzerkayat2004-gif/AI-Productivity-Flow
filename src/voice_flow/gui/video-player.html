@@ -25,7 +25,10 @@
 
     header, footer { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--white); }
     header { border-bottom: 1px solid var(--border); }
-    footer { border-top: 1px solid var(--border); }
+    footer { border-top: 1px solid var(--border); flex-wrap: wrap; }
+    #media-status { flex-basis: 100%; order: 1; font-size: 11px; overflow-wrap: anywhere; }
+    #media-status:empty { display: none; }
+    #retry-play, #download { flex-shrink: 0; }
     .brand { color: var(--orange); font-size: 11px; font-weight: 900; letter-spacing: 1.6px; }
     #title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
     button, a { border: 1px solid var(--border); border-radius: 9px; padding: 6px 11px; color: var(--ink);
@@ -281,6 +284,8 @@
     <span id="footer-stage">Video Flow</span>
     <span id="shorts-platform-pill" class="shorts-platform-pill hidden">📱 9:16 Shorts Mode</span>
     <span id="percent">0%</span>
+    <span id="media-status" role="status" aria-live="polite"></span>
+    <button id="retry-play" type="button">Play / Retry</button>
     <a id="download" href="#" download>↓ Download</a>
   </footer>
 
@@ -291,6 +296,52 @@
     const container = document.getElementById("player-container");
     let timer = null;
     let phoneFrameActive = true;
+    let inFlight = false;
+    let activeRequest = null;
+    let activeTimeout = null;
+    let disposed = false;
+    let mediaLoaded = false;
+    let mediaFailed = false;
+    let playAttempt = 0;
+    const mediaStatus = document.getElementById("media-status");
+
+    function reportMedia(message) { mediaStatus.textContent = message; }
+    async function tryPlay(reload = false) {
+      if (disposed) return;
+      if (!player.src) {
+        reportMedia("Checking video availability…");
+        await refresh();
+        if (!player.src) reportMedia("Video is unavailable. Press Play / Retry to check again.");
+        return;
+      }
+      const attempt = ++playAttempt;
+      if (reload) { mediaFailed = false; mediaLoaded = false; player.load(); }
+      reportMedia("Starting playback…");
+      try { await player.play(); }
+      catch (error) {
+        if (!disposed && attempt === playAttempt) reportMedia("Playback could not start. Press Play / Retry.");
+      }
+    }
+    document.getElementById("retry-play").onclick = () => tryPlay(mediaFailed);
+    player.addEventListener("playing", () => { mediaFailed = false; mediaLoaded = true; reportMedia("Playing"); });
+    player.addEventListener("canplay", () => { mediaLoaded = true; if (player.paused && !mediaFailed) reportMedia("Ready — press Play"); });
+    player.addEventListener("pause", () => { if (!mediaFailed) reportMedia(player.ended ? "Finished" : "Paused — press Play"); });
+    player.addEventListener("waiting", () => reportMedia("Buffering… Press Play / Retry if playback does not resume."));
+    player.addEventListener("stalled", () => { mediaFailed = true; reportMedia("Video loading stalled. Press Play / Retry."); });
+    player.addEventListener("error", () => {
+      mediaFailed = true; mediaLoaded = false;
+      reportMedia("Video could not load or decode. Press Play / Retry.");
+      if (!disposed && timer === null) timer = setInterval(refresh, 1200);
+    });
+    function cleanup() {
+      disposed = true;
+      clearInterval(timer); timer = null;
+      activeRequest?.abort();
+      clearTimeout(activeTimeout); activeTimeout = null;
+      player.pause();
+    }
+    window.addEventListener("pagehide", cleanup);
+    window.addEventListener("beforeunload", cleanup);
 
     function enableShortsMode() {
       document.getElementById("shorts-badge")?.classList.remove("hidden");
@@ -318,9 +369,24 @@
     });
 
     async function refresh() {
+      if (inFlight || disposed) return;
+      inFlight = true;
+      const controller = new AbortController();
+      activeRequest = controller;
+      let timeout;
       try {
-        const response = await fetch("/api/video-flow/jobs/status?id=" + encodeURIComponent(videoId));
-        const data = await response.json();
+        const request = async () => {
+          const response = await fetch("/api/video-flow/jobs/status?id=" + encodeURIComponent(videoId), { signal: controller.signal });
+          const data = await response.json();
+          return { response, data };
+        };
+        const { response, data } = await Promise.race([
+          request(),
+          new Promise((_, reject) => { timeout = activeTimeout = setTimeout(() => {
+            controller.abort(); reject(new Error("Progress check timed out. Retrying…"));
+          }, 5000); }),
+        ]);
+        if (disposed) return;
         if (!response.ok || !data.video) throw new Error("Video not found.");
         const video = data.video;
         document.getElementById("title").textContent = video.title || "Video Flow";
@@ -333,29 +399,43 @@
           enableShortsMode();
         }
 
-        const isReady = Boolean(
-          video.playable ||
+        if (video.status === "failed" || video.status === "cancelled") {
+          clearInterval(timer); timer = null;
+          ++playAttempt;
+          player.pause();
+          document.getElementById("status").classList.remove("hidden");
+          document.querySelector(".grid-indicator").style.display = "none";
+          document.getElementById("status-title").textContent = video.status === "cancelled" ? "Generation cancelled" : "Generation failed";
+          document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
+          return;
+        }
+        const isReady = video.playable === true || (video.playable == null && Boolean(
           video.status === "ready" ||
           video.status === "complete" ||
           video.status === "completed" ||
           Number(video.progress || 0) >= 100 ||
           (video.stage && String(video.stage).toLowerCase().includes("complete"))
-        );
+        ));
 
+        if (!isReady && (video.status === "ready" || video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100)) {
+          document.getElementById("status-title").textContent = "Video file unavailable";
+          reportMedia("Video is unavailable. Press Play / Retry to check again.");
+        }
         if (isReady) {
           document.getElementById("status").classList.add("hidden");
 
           if (video.view_url) {
             const targetUrl = new URL(video.view_url, location.origin).href;
             if (player.src !== targetUrl) {
+              mediaLoaded = false; mediaFailed = false;
               player.src = targetUrl;
-              player.play().catch(() => {});
+              tryPlay();
             }
           }
 
-          if ((video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
+          if (mediaLoaded && !mediaFailed && (video.status === "complete" || video.status === "completed" || Number(video.progress || 0) >= 100) &&
               (video.export_status === "exported" || video.export_status === "not_requested")) {
-            clearInterval(timer);
+            clearInterval(timer); timer = null;
           }
           const dl = document.getElementById("download");
           const isShorts = (video.format === "short" || video.format === "vertical");
@@ -380,19 +460,21 @@
               }).catch(() => {});
             };
           }
-        } else if (video.status === "failed" || video.status === "cancelled") {
-          clearInterval(timer);
-          document.querySelector(".grid-indicator").style.display = "none";
-          document.getElementById("status-title").textContent = video.status === "cancelled" ? "Generation cancelled" : "Generation failed";
-          document.getElementById("stage").textContent = video.error || "Open Video Flow history for details.";
         }
       } catch (error) {
+        if (disposed) return;
+        if (player.src) reportMedia(error.message || "Progress check failed. Retrying…");
         document.getElementById("stage").textContent = error.message || "Waiting for Voice Flow…";
         if (!videoId || /not found/i.test(String(error.message || ""))) {
-          clearInterval(timer);
+          clearInterval(timer); timer = null;
           document.querySelector(".grid-indicator").style.display = "none";
           document.getElementById("status-title").textContent = "Video not found";
         }
+      } finally {
+        clearTimeout(timeout);
+        activeTimeout = null;
+        if (activeRequest === controller) activeRequest = null;
+        inFlight = false;
       }
     }
 

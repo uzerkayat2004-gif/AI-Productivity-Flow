@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import ctypes
 import math
-import queue
 import sys
 import threading
 import time
 import tkinter as tk
 from typing import Callable
 
+from voice_flow.ui_dispatch import UiDispatcher
 from voice_flow.config import config
 from voice_flow.storage import storage
 
@@ -106,11 +106,21 @@ class FloatingOverlayBar:
     """Always-on-top, non-activating floating pill bar that mirrors Wispr Flow's UI."""
 
     def _is_theme_dark(self) -> bool:
+        # Color descriptors share a bounded snapshot instead of issuing a
+        # SQLite read per color on the Tk thread. No extra idle timer is needed.
+        token = (id(storage), getattr(storage, "db_path", None))
+        now = time.monotonic()
+        if (getattr(self, "_theme_cache_token", None) == token
+                and now < getattr(self, "_theme_cache_until", 0.0)):
+            return self._theme_cache_dark
         try:
-            from voice_flow.storage import storage
-            return str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
+            dark = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower() == "dark"
         except Exception:
-            return False
+            dark = False
+        self._theme_cache_token = token
+        self._theme_cache_dark = dark
+        self._theme_cache_until = now + 1.0
+        return dark
 
     # Colors — "Sunrise" design system with dark studio mode support matching studio-polish & design-system tokens
     ORANGE = _ThemeColor("#FF6A00", "#e6b092")        # Warm secondary peach accent (--polish-accent)
@@ -164,6 +174,7 @@ class FloatingOverlayBar:
         get_audio_level: Callable[[], float] | None = None,
     ) -> None:
         self.root = root
+        self._ui_dispatcher = UiDispatcher()
         self.win = None
         self.canvas = None
         self.on_cancel = on_cancel or (lambda: None)
@@ -246,14 +257,10 @@ class FloatingOverlayBar:
         self._user_pos: tuple[int, int] | None = None
         self._heartbeat_at: float | None = None
         self._proximity_after_id = None
-        self._main_thread_id: int | None = None
+        self._main_thread_id: int | None = threading.get_ident()
         self._mainloop_running: bool = False
-        # macOS: Tk 9 timers registered from a non-Tk thread never fire (the
-        # bundled _tkinter runs Tcl in non-threaded mode, so root.after() from
-        # a hotkey/API thread lands in that thread's own notifier). Work from
-        # other threads is queued here and drained by a main-thread pump.
-        self._ui_queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
-        self._ui_pump_after_id = None
+        # Legacy Mac tests/callers share the cross-platform owner queue.
+        self._ui_queue = self._ui_dispatcher.pending
         self._mac_repaint_done: bool = False
 
     def set_visible(self, visible: bool) -> bool:
@@ -408,13 +415,7 @@ class FloatingOverlayBar:
         """Create and initialize the Tkinter toplevel overlay and canvas."""
         cur_tid = threading.get_ident()
         if getattr(self, "_main_thread_id", None) is not None and cur_tid != self._main_thread_id:
-            if sys.platform == "darwin":
-                self._ui_queue.put(self._create_window)
-            elif self.root is not None and getattr(self, "_mainloop_running", False):
-                try:
-                    self.root.after(0, self._create_window)
-                except Exception:
-                    pass
+            self._ui_dispatcher.submit(self._create_window)
             return
 
         _enable_dpi_awareness()
@@ -435,6 +436,9 @@ class FloatingOverlayBar:
                     self.root.iconphoto(True, self._root_icon_photo)
             except Exception:
                 pass
+
+        self._ui_dispatcher = self._ui_dispatcher.attach(self.root)
+        self._ui_queue = self._ui_dispatcher.pending
 
         if self.win is not None:
             try:
@@ -538,7 +542,6 @@ class FloatingOverlayBar:
         if self.root:
             self._mainloop_running = True
             if sys.platform == "darwin":
-                self._schedule_ui_pump()
                 self._schedule_mac_repaint()
             try:
                 self.root.mainloop()
@@ -640,27 +643,16 @@ class FloatingOverlayBar:
             self._mac_nswindow = None
 
     def _schedule_ui_pump(self) -> None:
-        if self.root is None:
-            return
-        try:
-            self._ui_pump_after_id = self.root.after(self.UI_PUMP_INTERVAL_MS, self._pump_ui_queue)
-        except Exception:
-            self._ui_pump_after_id = None
+        """Compatibility entrypoint: arm the shared owner timer only once."""
+        if self.root is not None:
+            self._ui_dispatcher = self._ui_dispatcher.attach(self.root)
+            self._ui_queue = self._ui_dispatcher.pending
 
     def _pump_ui_queue(self, max_items: int = 200) -> None:
-        """Run queued cross-thread UI work on the Tk main thread."""
-        self._ui_pump_after_id = None
-        for _ in range(max_items):
-            try:
-                func = self._ui_queue.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                func()
-            except Exception:
-                pass
-        if getattr(self, "_mainloop_running", False):
-            self._schedule_ui_pump()
+        """Compatibility drain; the shared dispatcher enforces its smaller budget."""
+        self._schedule_ui_pump()
+        if self.root is not None:
+            self._ui_dispatcher.drain(max_callbacks=max_items)
 
     def _schedule_mac_repaint(self, delay_ms: int = 350) -> None:
         if self.root is None or getattr(self, "_mac_repaint_pending", False):
@@ -897,29 +889,24 @@ class FloatingOverlayBar:
     # -- Public State API --
 
     def _run_on_ui(self, func: Callable[[], None]) -> None:
-        cur_tid = threading.get_ident()
-        if sys.platform == "darwin":
-            main_tid = getattr(self, "_main_thread_id", None)
-            if main_tid is not None and cur_tid != main_tid:
-                # Never touch Tk from a background thread on macOS: the pump
-                # on the Tk thread drains this queue (also before mainloop).
-                self._ui_queue.put(func)
-                return
-        if self.root is not None and getattr(self, "_mainloop_running", False):
-            try:
-                self.root.after(0, func)
-                return
-            except Exception:
-                pass
-        elif getattr(self, "_main_thread_id", None) == cur_tid or getattr(self, "_main_thread_id", None) is None:
-            try:
+        if self._ui_dispatcher.root is None and threading.get_ident() == self._main_thread_id:
+            if self.root is None:
+                # Owner may create the root through show() before run_loop().
                 func()
-            except Exception:
-                pass
+                return
+            self._ui_dispatcher = self._ui_dispatcher.attach(self.root)
+            self._ui_queue = self._ui_dispatcher.pending
+        if self._ui_dispatcher.is_owner():
+            self._ui_dispatcher._invoke(func)
+        else:
+            self._ui_dispatcher.submit(func)
 
     def refresh(self) -> None:
         """Thread-safe redraw request: routes _draw through the UI loop."""
-        self._run_on_ui(self._draw)
+        def _do():
+            self._theme_cache_until = 0.0
+            self._draw()
+        self._run_on_ui(_do)
 
     def set_selected_text(self, text: str, timeout_ms: int = 15000) -> None:
         """Keep selected text available for the next Video Flow launch.

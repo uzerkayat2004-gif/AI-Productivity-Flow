@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 from pathlib import Path
 import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, IS_WINDOWS
@@ -2728,9 +2728,11 @@ class VoiceFlowApp:
                     return
                 self._read_pending = False
                 self._read_active = True
+            def _show() -> None:
                 audio_flow_widget.set_playing(True)
                 audio_flow_widget.hide()
                 self.overlay.show_reading(snippet)
+            self._dispatch_read_ui(generation, _show)
 
         def _on_done() -> None:
             with read_lock:
@@ -2738,11 +2740,12 @@ class VoiceFlowApp:
                     return
                 self._read_active = False
                 self._read_pending = False
+            def _show() -> None:
                 audio_flow_widget.set_playing(False)
                 audio_flow_widget.hide()
                 self.overlay.clear_selected_text()
-                if self.state == DictationState.IDLE:
-                    self.overlay.show_ready()
+                self.overlay.show_ready()
+            self._dispatch_read_ui(generation, _show)
 
         def _on_error(err_msg: str) -> None:
             with read_lock:
@@ -2750,12 +2753,13 @@ class VoiceFlowApp:
                     return
                 self._read_active = False
                 self._read_pending = False
+            def _show() -> None:
                 audio_flow_widget.set_playing(False)
                 audio_flow_widget.hide()
                 self.overlay.clear_selected_text()
-                if self.state == DictationState.IDLE:
-                    self.overlay.show_error(f"Audio Flow: {err_msg}"[:90])
-            log.warning("Audio Flow synthesis error: %s", err_msg)
+                self.overlay.show_error(f"Audio Flow: {err_msg}"[:90])
+            self._dispatch_read_ui(generation, _show)
+            log.warning("Audio Flow synthesis failed")
 
         speak_kwargs = {"on_start": _on_start, "on_done": _on_done, "on_error": _on_error}
         if model_override is not None:
@@ -2909,6 +2913,13 @@ class VoiceFlowApp:
                     self.overlay.show_error(str(exc))
             raise
         return job_id
+
+    def _dispatch_read_ui(self, generation: int, callback: Callable[[], None]) -> None:
+        """Publish only the current Read on the root owner, outside its lock."""
+        def _current() -> None:
+            if getattr(self, "_read_generation", 0) == generation and self.state == DictationState.IDLE:
+                callback()
+        self.overlay._run_on_ui(_current)
 
     def _get_read_generation_lock(self):
         lock = getattr(self, "_read_generation_lock", None)
@@ -3112,9 +3123,16 @@ class VoiceFlowApp:
                 style=job.style,
                 close_existing=False,
             )
+            if not player_token:
+                raise RuntimeError("Audio player did not start")
         except Exception as exc:
             self._clear_audio_summary_launch_reservation(job_id)
-            log.warning("Could not open ready audio summary %s: %s", job_id, exc)
+            log.warning("Could not open ready audio summary (%s)", type(exc).__name__)
+            if not automatic:
+                def _show_launch_error() -> None:
+                    if self.state == DictationState.IDLE and not getattr(self, "_read_active", False) and not getattr(self, "_read_pending", False):
+                        self.overlay.show_error("Could not open audio. Please try Play again.")
+                self.overlay._run_on_ui(_show_launch_error)
             return False
         with lock:
             if (
