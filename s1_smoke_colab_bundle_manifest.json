@@ -1,7 +1,7 @@
 {
   "bundle_file": "s1_smoke_colab_bundle.zip",
-  "sha256": "f7a26bf9e3545b0ef134156a846d668aa30b3d6f9411477aa4e126cb512be68b",
-  "size_bytes": 43668,
+  "sha256": "6cfe88db9099f0a7d0afa3e519d0c19bbedb22762f67b9fb04b1b8baec0d2741",
+  "size_bytes": 43693,
   "files_count": 16,
   "manifest": {
     "src/voice_flow/vf_contract.py": {
@@ -57,8 +57,8 @@
       "sha256": "cee5cbf55347322162be2da41ff2aee6cbb3946cee43a98564174fb1f989d7c8"
     },
     "research/vf_phase3a/synthetic_fixtures/gates_synthetic_smoke.json": {
-      "size": 901,
-      "sha256": "34a3b104f54085b55323e25b8cec366514ebbc405eaff5679d820873753611e1"
+      "size": 918,
+      "sha256": "e1c69065c0e554dab72262d214c859f2d99b07a5002956e3ee994fd8b0e03ebb"
     },
     "research/vf_phase3a/synthetic_fixtures/independent_eval_set.jsonl": {
       "size": 8876,

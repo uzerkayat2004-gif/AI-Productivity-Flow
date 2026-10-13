@@ -21,6 +21,6 @@
     "approved": true,
     "by": "Uzair Kayat",
     "date": "2026-10-13",
-    "evidence": "Explicitly authorized single limited S1-mini GPU engineering test on synthetic fixtures (max 8 optimizer steps)"
+    "evidence": "Explicitly authorized single execution of EXP-S1-STAGE3B-LORA-01 on synthetic fixtures (max 24 attempted / 20 confirmed updates)"
   }
 }
