@@ -1,4 +1,5 @@
 """Phase 3A trainer tests (CPU). Run: cd research/vf_phase3a && python -m pytest -q tests"""
+import argparse
 import json
 import os
 import subprocess
@@ -76,3 +77,54 @@ def test_full_profile_disabled_and_gates_block(tmp_path):
     r = subprocess.run([sys.executable, os.path.join(ROOT, "S1_LORA_TRAINER.py"), "train", "--p2b", P2B, "--gates", str(g),
                         "--profile", "tiny", "--out", str(tmp_path / "o")], capture_output=True, text=True)
     assert r.returncode != 0 and "Blocked" in (r.stderr + r.stdout)
+
+
+def test_synthetic_dataset_verify(tmp_path):
+    report_file = tmp_path / "synth_report.json"
+    workdir = tmp_path / "synth_work"
+    r = subprocess.run([
+        sys.executable, os.path.join(ROOT, "S1_LORA_TRAINER.py"), "verify",
+        "--synthetic", "--report", str(report_file), "--workdir", str(workdir)
+    ], capture_output=True, text=True)
+    assert r.returncode == 0
+    assert report_file.exists()
+    rep = json.loads(report_file.read_text())
+    assert rep.get("ALL_OK") is True
+
+
+def test_custom_manifest_support(tmp_path):
+    corpus, reh, held = T.generate_synthetic_dataset()
+    c_file = tmp_path / "c.jsonl"
+    r_file = tmp_path / "r.jsonl"
+    h_file = tmp_path / "h.jsonl"
+    with open(c_file, "w", encoding="utf-8") as f:
+        for row in corpus:
+            f.write(json.dumps(row) + "\n")
+    with open(r_file, "w", encoding="utf-8") as f:
+        for row in reh:
+            f.write(json.dumps(row) + "\n")
+    with open(h_file, "w", encoding="utf-8") as f:
+        for hid in held:
+            f.write(json.dumps({"id": hid, "request": {}, "target": ""}) + "\n")
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "corpus": str(c_file),
+        "rehearsal": str(r_file),
+        "heldout": str(h_file),
+        "hashes": {
+            str(c_file): T.sha256(str(c_file)),
+            str(r_file): T.sha256(str(r_file)),
+        }
+    }))
+    cfg = T.resolve_dataset_config(argparse.Namespace(
+        synthetic=False, manifest=str(manifest), p2b=None,
+        corpus=None, rehearsal=None, heldout=None, schedule=None, hashes=None
+    ))
+    assert cfg["mode"] == "manifest"
+    loaded_c, loaded_r, loaded_h = T.load_data(cfg)
+    assert len(loaded_c) == len(corpus)
+    assert len(loaded_r) == len(reh)
+    verified = T.verify_data_files(cfg, strict=True)
+    assert all(v["ok"] for v in verified.values())
+
