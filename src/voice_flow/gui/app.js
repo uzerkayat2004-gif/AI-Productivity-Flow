@@ -1045,7 +1045,22 @@ function resetAllSubViews() {
   } catch (_) {}
 }
 
+function loadPageWhilePending(pageId, loader) {
+  const pendingLoads = loadPageWhilePending.pendingLoads || (loadPageWhilePending.pendingLoads = new Map());
+  if (pendingLoads.has(pageId)) return pendingLoads.get(pageId);
+  const pending = Promise.resolve(loader());
+  pendingLoads.set(pageId, pending);
+  const release = () => {
+    if (pendingLoads.get(pageId) === pending) pendingLoads.delete(pageId);
+  };
+  pending.then(release, release);
+  return pending;
+}
+
 function switchPage(pageId, options = {}) {
+  // Invalidate corrections from every earlier navigation, including revisits.
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   const previousPageId = currentPageId;
   currentPageId = pageId;
   document.body.classList.toggle("flow-workspace-active", ["audioflow", "videoflow", "providers", "dictionary"].includes(pageId));
@@ -1078,29 +1093,34 @@ function switchPage(pageId, options = {}) {
     }
 
     if (pageId === "home") {
-      loadHome();
-      loadExecVoiceFlowPolicy();
-      loadVoiceFlowPolishSettings();
-      loadFeatureToggleStates();
+      loadPageWhilePending(pageId, () => Promise.allSettled([
+        loadHome(),
+        loadExecVoiceFlowPolicy(),
+        loadVoiceFlowPolishSettings(),
+        loadFeatureToggleStates(),
+      ]));
     }
-    if (pageId === "insights") loadInsights();
-    if (pageId === "dictionary") loadDictionary();
+    if (pageId === "insights") loadPageWhilePending(pageId, loadInsights);
+    if (pageId === "dictionary") loadPageWhilePending(pageId, loadDictionary);
     if (pageId === "style") {
-      loadStyleSettings();
+      loadPageWhilePending(pageId, loadStyleSettings);
       renderStyleCategory(currentStyleCategory);
     }
-    if (pageId === "providers") loadProvidersOverview();
-    if (pageId === "audioflow") loadAudioFlowPage();
+    if (pageId === "providers") loadPageWhilePending(pageId, loadProvidersOverview);
+    if (pageId === "audioflow") loadPageWhilePending(pageId, loadAudioFlowPage);
     if (pageId === "videoflow") {
-      if (typeof loadVideoFlow === "function") loadVideoFlow();
+      if (typeof loadVideoFlow === "function") loadPageWhilePending(pageId, loadVideoFlow);
       else if (typeof loadVideoCatalog === "function") loadVideoCatalog();
     }
 
     if (!options.skipScrollReset) {
-      requestAnimationFrame(() => resetPageScroll(target));
-      setTimeout(() => resetPageScroll(target), 50);
-      setTimeout(() => resetPageScroll(target), 150);
-      setTimeout(() => resetPageScroll(target), 300);
+      const correctCurrentPageScroll = () => {
+        if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll(target);
+      };
+      requestAnimationFrame(correctCurrentPageScroll);
+      setTimeout(correctCurrentPageScroll, 50);
+      setTimeout(correctCurrentPageScroll, 150);
+      setTimeout(correctCurrentPageScroll, 300);
     }
   }
 }
@@ -6472,13 +6492,16 @@ function initAudioLandingMotion() {
 
 function loadAudioFlowPage() {
   initAudioLandingMotion();
-  loadAudioProvidersOverview();
-  loadExecAudioFlowPolicy();
-  loadAudioSummarySettings();
-  loadAudioFlowSummaryStyle();
+  const pendingLoads = [
+    loadAudioProvidersOverview(),
+    loadExecAudioFlowPolicy(),
+    loadAudioSummarySettings(),
+    loadAudioFlowSummaryStyle(),
+  ];
   initAudioSpeedSelect();
   updateAudioSummaryConnectionUI();
-  loadAudioSummaryHistory();
+  pendingLoads.push(loadAudioSummaryHistory());
+  return Promise.allSettled(pendingLoads);
 }
 
 function applyAudioFlowSummaryStyleUI(style) {
@@ -13033,6 +13056,10 @@ async function handleGoogleAccountSignIn() {
 }
 
 function reloadAllApplicationMemory() {
+  // An account reset must never reuse the previous account's pending page load.
+  loadPageWhilePending.pendingLoads?.clear();
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   if(typeof loadDashboardTheme === "function")loadDashboardTheme();
   ++_settingsGeneration;
   for(const key of Object.keys(_settingConfirmed))delete _settingConfirmed[key];
@@ -13051,8 +13078,11 @@ function reloadAllApplicationMemory() {
   try { if (typeof loadAudioFlow === "function") loadAudioFlow(); } catch (_) {}
   try { if (typeof vfLoadProviders === "function") vfLoadProviders(); } catch (_) {}
   try { if (typeof vfGoogleLoadAccount === "function") vfGoogleLoadAccount(); } catch (_) {}
-  requestAnimationFrame(() => resetPageScroll());
-  setTimeout(() => resetPageScroll(), 100);
+  const correctAccountResetScroll = () => {
+    if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll();
+  };
+  requestAnimationFrame(correctAccountResetScroll);
+  setTimeout(correctAccountResetScroll, 100);
 }
 
 // Background utility functions for vault export/import
