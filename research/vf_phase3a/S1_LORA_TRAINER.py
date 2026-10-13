@@ -487,7 +487,9 @@ def train_loop(model, examples, sched, prof, out_dir, val_examples=None, precisi
     exposures = Counter()
     metrics = open(os.path.join(out_dir, "metrics.jsonl"), "a")
     model.train()
-    step, acc = 0, 0
+    attempted_steps, successful_updates, overflow_steps = 0, 0, 0
+    non_finite_grads, non_finite_losses = 0, 0
+    acc = 0
     src_loss = defaultdict(list)
     t0 = time.time()
     for mi, mb in enumerate(micro):
@@ -501,29 +503,86 @@ def train_loop(model, examples, sched, prof, out_dir, val_examples=None, precisi
         (scaler.scale(loss) if scaler else loss).backward()
         acc += 1
         if acc == ga or mi == len(micro) - 1:
+            scale_before = scaler.get_scale() if scaler else None
             if scaler:
                 scaler.unscale_(opt)
             gn = torch.nn.utils.clip_grad_norm_(params, 1.0)
+            gn_val = float(gn)
+            is_gn_finite = bool(math.isfinite(gn_val))
+            if not is_gn_finite:
+                non_finite_grads += 1
+
             (scaler.step(opt) if scaler else opt.step())
             if scaler:
                 scaler.update()
+            scale_after = scaler.get_scale() if scaler else None
+
+            # Detect whether scaler skipped the step due to inf/NaN gradients
+            step_skipped = bool(
+                scaler is not None
+                and (not is_gn_finite or (scale_before is not None and scale_after < scale_before))
+            )
+
+            attempted_steps += 1
+            if not step_skipped:
+                successful_updates += 1
+                sch.step()
+                status = "updated"
+            else:
+                overflow_steps += 1
+                status = "skipped_overflow"
+                # Do NOT advance learning rate scheduler on skipped step
+
             opt.zero_grad(set_to_none=True)
-            sch.step()
-            step, acc = step + 1, 0
-            rec = {"step": step, "lr": sch.get_last_lr()[0], "grad_norm": float(gn),
-                   "loss_common": _mean(src_loss["common"]), "loss_rehearsal": _mean(src_loss["s1_native_rehearsal"]),
-                   "exposures": dict(exposures), "elapsed_s": round(time.time() - t0, 1)}
+            acc = 0
+
+            loss_c = _mean(src_loss["common"])
+            loss_r = _mean(src_loss["s1_native_rehearsal"])
+            is_loss_finite = bool(
+                (loss_c is None or math.isfinite(loss_c))
+                and (loss_r is None or math.isfinite(loss_r))
+            )
+            if not is_loss_finite:
+                non_finite_losses += 1
+
+            rec = {
+                "attempted_step": attempted_steps,
+                "successful_updates": successful_updates,
+                "status": status,
+                "step": successful_updates,  # backwards compatibility
+                "lr": sch.get_last_lr()[0],
+                "grad_norm": gn_val if is_gn_finite else ("Infinity" if math.isinf(gn_val) else "NaN"),
+                "grad_norm_is_finite": is_gn_finite,
+                "loss_common": loss_c,
+                "loss_rehearsal": loss_r,
+                "loss_is_finite": is_loss_finite,
+                "scaler_value": scale_after,
+                "exposures": dict(exposures),
+                "elapsed_s": round(time.time() - t0, 1),
+            }
             src_loss.clear()
-            if val_examples and (step % prof["eval_every"] == 0 or step == total_updates):
+            if val_examples and (successful_updates % prof["eval_every"] == 0 or successful_updates == total_updates):
                 rec["val_loss"] = eval_loss(model, val_examples, bs, amp_dtype)
                 model.train()
             metrics.write(json.dumps(rec) + "\n")
             metrics.flush()
             log_fn(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in rec.items()}))
-            if max_steps and step >= max_steps:
+
+            if max_steps and successful_updates >= max_steps:
+                break
+            if max_steps and attempted_steps >= max_steps * 3:
                 break
     metrics.close()
-    return {"updates": step, "exposures": dict(exposures)}
+    return {
+        "attempted_steps": attempted_steps,
+        "successful_updates": successful_updates,
+        "updates": successful_updates,  # backwards compatibility
+        "overflow_steps": overflow_steps,
+        "scaler_final": (scaler.get_scale() if scaler else None),
+        "non_finite_gradients_count": non_finite_grads,
+        "non_finite_losses_count": non_finite_losses,
+        "exposures": dict(exposures),
+    }
 
 
 def _mean(x):
@@ -757,9 +816,28 @@ def mode_train(a):
     ad = os.path.join(a.out, "adapter")
     model.save_pretrained(ad)
     man = {f: sha256(os.path.join(ad, f)) for f in sorted(os.listdir(ad))}
-    json.dump({"result": res, "adapter_sha256": man, "base": f"{BASE_REPO}@{BASE_REVISION}",
-               "note": "adapter only; base weights not modified or saved"},
-              open(os.path.join(a.out, "provenance.json"), "w"), indent=1)
+    provenance = {
+        "result": res,
+        "adapter_sha256": man,
+        "base": f"{BASE_REPO}@{BASE_REVISION}",
+        "note": "adapter only; base weights not modified or saved",
+    }
+    persistent_dir = getattr(a, "persistent_dir", None)
+    if persistent_dir:
+        from checkpoint_persistence import export_and_verify_checkpoint
+        log(f"Exporting and verifying checkpoint to persistent storage: {persistent_dir}")
+        persist_manifest = export_and_verify_checkpoint(
+            source_dir=ad,
+            target_dir=persistent_dir,
+            extra_files=["run_config.json", "metrics.jsonl"],
+        )
+        provenance["persistence"] = {
+            "target_dir": persistent_dir,
+            "status": persist_manifest.get("status"),
+            "manifest": persist_manifest,
+        }
+        log(f"Checkpoint successfully verified in durable storage: {persistent_dir}")
+    json.dump(provenance, open(os.path.join(a.out, "provenance.json"), "w"), indent=1)
     log(f"done: {res} adapter={man}")
 
 
@@ -826,6 +904,7 @@ def main():
                    help="Precision setting (auto defaults to fp16 on T4, bf16 on Ampere+)")
     t.add_argument("--seed", type=int, default=20261012)
     t.add_argument("--max-steps", type=int, default=None)
+    t.add_argument("--persistent-dir", help="Path to persistent external storage to copy and verify checkpoint upon completion")
 
     c = sub.add_parser("compare", help="Compare base model vs trained adapter")
     add_dataset_arguments(c)

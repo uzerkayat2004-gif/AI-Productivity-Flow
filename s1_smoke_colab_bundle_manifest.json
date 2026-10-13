@@ -1,9 +1,8 @@
 {
   "bundle_file": "s1_smoke_colab_bundle.zip",
-  "sha256": "09697b25d367eebf5e64b6aaea45a6ce142c730f021a163392ac06da306f9ca7",
-  "size_bytes": 31507,
-  "files_count": 13,
-  "source_commit": "06708bc",
+  "sha256": "f8f59281045a642c3f55e9fa5e44d62f480fc184707e2589afa04bf8dc7c906f",
+  "size_bytes": 41390,
+  "files_count": 16,
   "manifest": {
     "src/voice_flow/vf_contract.py": {
       "size": 12908,
@@ -18,12 +17,12 @@
       "sha256": "a93ad38588d19ee224df0f335d1d95a0b99b7c7db333e494c284031cc1ab36a9"
     },
     "research/vf_phase3a/S1_LORA_TRAINER.py": {
-      "size": 41164,
-      "sha256": "b7555c23597af016288d8ce71d436c04d1f893389f16ad16b2ef7419db691306"
+      "size": 44275,
+      "sha256": "b9ac1ad7e34da090621c371a30be6a28eeeb421c95567368e2fa52dda540bac8"
     },
     "research/vf_phase3a/S1_COLAB_SMOKE_TEST.ipynb": {
-      "size": 11698,
-      "sha256": "0bd7f5c7de6165ffa8ff3dca17e959b8b8fa57f430153432be71bb99814bd96c"
+      "size": 14942,
+      "sha256": "32132156303da2d9caf0ec5043298bd79ab137181b929f11c867ed39eea5553b"
     },
     "research/vf_phase3a/requirements.txt": {
       "size": 215,
@@ -32,6 +31,14 @@
     "research/vf_phase3a/GATES_TEMPLATE.json": {
       "size": 395,
       "sha256": "f3b624bdcd081fe2b973113fd253bb6c74a64ea189d9daea6fe57672dbdd3cfb"
+    },
+    "research/vf_phase3a/checkpoint_persistence.py": {
+      "size": 8719,
+      "sha256": "455b63337555c6e32870f4ba122dd8b833faa99eddb12809f34d86ff4954c2c8"
+    },
+    "research/vf_phase3a/eval_harness.py": {
+      "size": 8267,
+      "sha256": "b60d2bb206d1755dd1562b9adf0e441b72928b7cbf91745a3f29ef8cd1bceec9"
     },
     "research/vf_phase3a/synthetic_fixtures/synthetic_corpus.jsonl": {
       "size": 14572,
@@ -52,6 +59,10 @@
     "research/vf_phase3a/synthetic_fixtures/gates_synthetic_smoke.json": {
       "size": 901,
       "sha256": "34a3b104f54085b55323e25b8cec366514ebbc405eaff5679d820873753611e1"
+    },
+    "research/vf_phase3a/synthetic_fixtures/independent_eval_set.jsonl": {
+      "size": 8876,
+      "sha256": "dc659b21e1ebcb7143009895957c8511a8b7dc8d3eac70c015c20573fd5bbfb6"
     },
     "scripts/fetch_tokenizers.py": {
       "size": 7594,
