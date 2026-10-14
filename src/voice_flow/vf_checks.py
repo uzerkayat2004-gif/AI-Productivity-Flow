@@ -40,7 +40,8 @@ _APOS_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in _APOS_CONTRACTIONS
 # before the cue or substitutes a value of the same kind (number, weekday);
 # otherwise they are ordinary words ("I'm sorry", "can't make it, sorry").
 _CORRECTION_CUE_RE = re.compile(
-    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|no,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait,?\s+make\s+that|wait\s+no,?\s+make\s+that|no\s+wait|wait\s+no|"
+    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|no,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait,?\s+make\s+that|wait\s+no,?\s+make\s+that|"
+    r"no\s+wait,?\s+actually|wait\s+no,?\s+actually|no,?\s+actually|no\s+wait|wait\s+no|"
     r"no\s+no|or\s+rather|make\s+that|scratch\s+that|actually\s+no|wait,?\s+actually)\b\s*,?\s*"
     r"|(?:,\s*)?\b(?P<weak>sorry|i\s+mean|no)\b\s*,?\s*",
     re.IGNORECASE,
@@ -205,8 +206,28 @@ _SMALL = {w: i for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
     "sixteen seventeen eighteen nineteen".split())}
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
-_SCALES = {"hundred": 100, "thousand": 1000, "lakh": 100000, "lakhs": 100000, "crore": 10000000,
-           "crores": 10000000, "million": 1000000, "billion": 1000000000}
+_SCALES = {"hundred": 100, "thousand": 1000, "thousands": 1000, "lakh": 100000, "lakhs": 100000, "crore": 10000000,
+           "crores": 10000000, "million": 1000000, "millions": 1000000, "billion": 1000000000, "billions": 1000000000}
+
+_DECIMAL_SCALE_RE = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*(" + "|".join(re.escape(k) for k in _SCALES) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_decimal_scales(text: str) -> str:
+    """Normalize phrases like '2.5 million' into their integer magnitude '2500000'."""
+    if not text:
+        return ""
+
+    def _rep(m: re.Match) -> str:
+        s_name = m.group(2).lower()
+        if s_name in _SCALES:
+            val = int(round(float(m.group(1)) * _SCALES[s_name]))
+            return str(val)
+        return m.group(0)
+
+    return _DECIMAL_SCALE_RE.sub(_rep, text)
 
 
 _ORDINALS = {
@@ -246,7 +267,14 @@ def _segment_numbers(words: list[str]) -> list[int | float]:
                 digits.append(str(_SMALL[words[j]]))
                 j += 1
             if digits:
-                values.append(float(f"{total + current}.{''.join(digits)}"))
+                dec_val = float(f"{total + current}.{''.join(digits)}")
+                if j < len(words) and words[j] in _SCALES:
+                    s_mult = _SCALES[words[j]]
+                    full_val = int(round(dec_val * s_mult))
+                    values.append(full_val)
+                    j += 1
+                else:
+                    values.append(dec_val)
                 total, current, last = 0, 0, None
                 i = j
                 continue
@@ -320,7 +348,8 @@ def number_values(text: str) -> list[set]:
     """Each spoken or written number as a set of acceptable canonical values."""
     out: list[set] = []
     t = text or ""
-    consumed = re.sub(r"(?<=\d),(?=\d)", "", t)
+    t_norm = normalize_decimal_scales(t)
+    consumed = re.sub(r"(?<=\d),(?=\d)", "", t_norm)
     consumed = re.sub(r"\b(\d{1,2}):00\b", r"\1", consumed)
     for m in re.finditer(r"(?<![\d.])\d+(?:\.\d+)?(?![\d])", consumed):
         v = float(m.group(0))
@@ -378,6 +407,10 @@ def number_values(text: str) -> list[set]:
 def _output_numbers(text: str) -> list[int | float]:
     vals: list = []
     t = re.sub(r"(?<=\d),(?=\d)", "", text or "")
+    for m in _DECIMAL_SCALE_RE.finditer(t):
+        s_name = m.group(2).lower()
+        if s_name in _SCALES:
+            vals.append(int(round(float(m.group(1)) * _SCALES[s_name])))
     for m in re.finditer(r"(?<![\d.])(\d+)(?::(\d{2}))?(?:\.(\d+))?(?![\d])", t):
         if m.group(2):
             vals.append(float(f"{int(m.group(1))}.{m.group(2)}"))
@@ -453,7 +486,8 @@ def check_output(
     allowed = set().union(*src_nums, *auth_nums) if (src_nums or auth_nums) else set()
     # Line-start list markers ("1. ", "2) ") are layout, not facts.
     list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", out)}
-    for m in re.finditer(r"(?<![\d.:])(\d+)(?![\d:])", re.sub(r"(?<=\d),(?=\d)", "", out)):
+    out_normalized = normalize_decimal_scales(out)
+    for m in re.finditer(r"(?<![\d.:])(\d+)(?![\d:])", re.sub(r"(?<=\d),(?=\d)", "", out_normalized)):
         v = int(m.group(1))
         if v in list_markers or allow_number_change:
             continue

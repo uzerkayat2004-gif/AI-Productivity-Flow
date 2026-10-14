@@ -252,32 +252,77 @@ class VF1Engine:
 
         # 2. Email task: ensure distinct Subject: header, greeting, body, sign-off
         if fmt == "email" or task == "email":
+            _GREETING_STOPWORDS = {
+                "the", "a", "an", "this", "that", "these", "those", "we", "i", "you",
+                "our", "my", "it", "here", "just", "please", "today", "as", "is", "are", "was", "were"
+            }
             if not re.match(r"^Subject:\s*", text, re.I):
                 m_subj = re.search(r"\bsubject\s+([^,\n]+?)(?:\s+(?:hi|hello|dear|the|team|executives|client)\b|\n|$)", text, re.I)
                 if not m_subj:
                     m_subj = re.search(r"\bsubject\s+([^,\n]+?)(?:\s+(?:hi|hello|dear|the|team|executives|client)\b|\n|$)", transcript, re.I)
                 if m_subj:
                     subj = m_subj.group(1).strip().title()
-                    body = re.sub(r"^(?:email to\s+[\w\s]+)?subject\s+[^,\n]+(?:\s+(?:hi|hello|dear)\s+[\w\s]+|\n)?", "", text, flags=re.I).strip()
+
+                    m_greet = re.search(r"\b(hi|hello|dear)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)[,\n]?", text, re.I)
+                    if not m_greet:
+                        m_greet = re.search(r"\b(hi|hello|dear)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)[,\n]?", transcript, re.I)
                     greeting = ""
-                    m_greet = re.search(r"\b(hi|hello|dear)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)[,\n]?", transcript, re.I)
+                    recip_tokens: list[str] = []
                     if m_greet:
-                        greeting = f"{m_greet.group(1).capitalize()} {m_greet.group(2).strip().title()},"
-                        body = re.sub(r"^(?:hi|hello|dear)\s+[\w\s]+,?\s*", "", body, flags=re.I).strip()
+                        lead = m_greet.group(1).capitalize()
+                        recip = m_greet.group(2).strip().split()
+                        if len(recip) > 1 and recip[-1].lower() in _GREETING_STOPWORDS:
+                            recip = recip[:-1]
+                        recip_tokens = recip
+                        greeting = f"{lead} {' '.join(recip).title()},"
+                        greet_pat = rf"\b{re.escape(lead)}\s+" + r"\s+".join(re.escape(w) for w in recip) + r"\b[,\s]*"
+                        m_real_greet = re.search(greet_pat, text, re.I)
+                        if m_real_greet:
+                            body = text[m_real_greet.end():].strip()
+                        else:
+                            body = text[m_greet.end():].strip()
+                    else:
+                        if m_subj:
+                            body = text[m_subj.end():].strip()
+                        else:
+                            body = text
+
+                    m_sign = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", body, re.I)
                     signoff = ""
-                    m_sign = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+)\.?$", transcript, re.I)
                     if m_sign:
-                        signoff = f"{m_sign.group(1).capitalize()},\n{m_sign.group(2).capitalize()}"
-                        body = re.sub(r"(?:regards|best regards|warm regards|thanks|thank you|sincerely),?\s*[A-Za-z]+\.?$", "", body, flags=re.I).strip()
+                        sal = m_sign.group(1).capitalize()
+                        sender_name = m_sign.group(2).strip().title()
+                        signoff = f"{sal},\n{sender_name}"
+                        body = body[:m_sign.start()].strip()
+                    else:
+                        m_sign_t = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", transcript, re.I)
+                        if m_sign_t:
+                            sal = m_sign_t.group(1).capitalize()
+                            sender_name = m_sign_t.group(2).strip().title()
+                            signoff = f"{sal},\n{sender_name}"
+
+                    if body:
+                        body = body.rstrip(",; ")
+                        if not body.endswith((".", "!", "?")):
+                            body += "."
+                        body = body[0].upper() + body[1:]
 
                     parts = [f"Subject: {subj}"]
                     if greeting:
                         parts.append(greeting)
                     if body:
-                        parts.append(body[0].upper() + body[1:] if body else "")
+                        parts.append(body)
                     if signoff:
                         parts.append(signoff)
                     text = "\n\n".join(parts)
+            else:
+                # Text already has Subject:, ensure greeting does not contain trailing stopwords
+                text = re.sub(
+                    r"\b(hi|hello|dear)\s+([A-Za-z]+)\s+(?:the|this|that|we|i|a|an)\s*,",
+                    r"\1 \2,",
+                    text,
+                    flags=re.I,
+                )
             return text
 
         # 3. Bullets / Lists task: ensure items are on separate bullet lines
@@ -508,8 +553,12 @@ class VF1Engine:
             output_token_count = len(raw_output.split()) if raw_output else 0
 
         # Post-clean generated tokens
-        clean_candidate = self._sanitize_raw_output(raw_output, transcript)
-        postprocessed_candidate = self._postprocess_candidate(clean_candidate, req)
+        if not raw_output:
+            clean_candidate = transcript
+            postprocessed_candidate = transcript
+        else:
+            clean_candidate = self._sanitize_raw_output(raw_output, transcript)
+            postprocessed_candidate = self._postprocess_candidate(clean_candidate, req)
 
         # 3. Deterministic Factual Preservation Safety Gate
         gate_decision: SafetyGateDecision = validate_and_gate_output(
@@ -791,3 +840,15 @@ def get_vf1_engine() -> VF1Engine:
     if _default_vf1_engine is None:
         _default_vf1_engine = VF1Engine()
     return _default_vf1_engine
+
+
+def _cleanup_engine_servers() -> None:
+    """Atexit hook: cleanly terminate any server child processes on exit."""
+    global _default_vf1_engine
+    if _default_vf1_engine is not None:
+        _default_vf1_engine.stop_server()
+
+
+import atexit
+atexit.register(_cleanup_engine_servers)
+

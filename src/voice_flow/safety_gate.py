@@ -26,6 +26,7 @@ from voice_flow.vf_checks import (
     canonical_source,
     check_output,
     expand_contractions,
+    normalize_decimal_scales,
     number_values,
 )
 
@@ -107,7 +108,7 @@ def check_numerical_preservation(source: str, candidate: str, task: str = "clean
     allowed: Set[Any] = set().union(*src_nums) if src_nums else set()
     list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", cleaned_candidate)}
 
-    cand_consumed = re.sub(r"(?<=\d),(?=\d)", "", cleaned_candidate or "")
+    cand_consumed = re.sub(r"(?<=\d),(?=\d)", "", normalize_decimal_scales(cleaned_candidate) or "")
     for m in re.finditer(r"(?<![\d.:])(\d+)(?![\d:])", cand_consumed):
         val = int(m.group(1))
         if val in list_markers:
