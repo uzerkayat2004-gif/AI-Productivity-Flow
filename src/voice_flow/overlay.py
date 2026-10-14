@@ -244,6 +244,8 @@ class FloatingOverlayBar:
         self.visible = True
         self.dock = "bottom"
         self._user_pos: tuple[int, int] | None = None
+        # Screen right/top of the foreground controls, independent of job rows.
+        self._visible_anchor: tuple[int, int] | None = None
         self._heartbeat_at: float | None = None
         self._proximity_after_id = None
         self._main_thread_id: int | None = None
@@ -280,6 +282,7 @@ class FloatingOverlayBar:
             return False
         self.dock = value
         self._user_pos = None
+        self._visible_anchor = None
         self._persist_position()
         self._run_on_ui(self._position_window)
         return True
@@ -293,8 +296,14 @@ class FloatingOverlayBar:
         self._persist_enabled = True
         try:
             saved = storage.get_setting(self._POS_SETTING_KEY, None)
-            if isinstance(saved, (list, tuple)) and len(saved) == 2:
+            if isinstance(saved, dict) and saved.get("version") == 2:
+                right, top = int(saved["right"]), int(saved["top"])
+                self._visible_anchor = (right, top)
+                fg_w, fg_h = self._foreground_size()
+                self._user_pos = (right - fg_w // 2, top + fg_h)
+            elif isinstance(saved, (list, tuple)) and len(saved) == 2:
                 self._user_pos = (int(saved[0]), int(saved[1]))
+                self._visible_anchor = None
         except Exception:
             pass
 
@@ -303,6 +312,9 @@ class FloatingOverlayBar:
             return
         try:
             pos = list(self._user_pos) if self._user_pos is not None else None
+            if pos is not None and self._visible_anchor is not None:
+                right, top = self._visible_anchor
+                pos = {"version": 2, "right": right, "top": top}
             storage.save_setting(self._POS_SETTING_KEY, pos)
         except Exception:
             pass
@@ -327,6 +339,7 @@ class FloatingOverlayBar:
     def reset_position(self) -> None:
         """Explicitly reset floating bar to the default dock position and bring to front."""
         self._user_pos = None
+        self._visible_anchor = None
         self._persist_position()
 
         def _do():
@@ -382,14 +395,15 @@ class FloatingOverlayBar:
         self._run_on_ui(_do)
 
     def _set_bar_size(self, new_width: int, new_height: int) -> None:
-        if self.width != new_width or self.height != new_height:
-            self.width = new_width
-            self.height = new_height
-            self._last_drawn_width = new_width
-            if self.win and self.canvas:
-                if hasattr(self.canvas, "config"):
-                    self.canvas.config(width=self.width, height=self.height)
-                self._position_window()
+        changed = self.width != new_width or self.height != new_height
+        self.width = new_width
+        self.height = new_height
+        self._last_drawn_width = new_width
+        if self.win and self.canvas:
+            if hasattr(self.canvas, "config"):
+                self.canvas.config(width=self.width, height=self.height)
+            self._position_window()
+            if changed:
                 if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
                     # Tk 9 Aqua leaves a freshly enlarged bar unpainted (black)
                     # until its geometry changes again; repaint right after.
@@ -461,7 +475,7 @@ class FloatingOverlayBar:
         if hasattr(self.win, "attributes"):
             try:
                 self.win.attributes("-topmost", True)
-                self.win.attributes("-alpha", 0.95)
+                self.win.attributes("-alpha", 1.0)
             except Exception:
                 pass
 
@@ -746,13 +760,9 @@ class FloatingOverlayBar:
             if is_expanded:
                 w = max(w, self.ready_actions_width)
 
-            # When docked at bottom and collapsed, expansion moves upper boundary UPWARDS
-            if getattr(self, "dock", "bottom") == "bottom" and not is_expanded:
-                y_min = cur_y - (self.hover_height - self.height) - 4
-                y_max = cur_y + self.height + 4
-            else:
-                y_min = cur_y - 4
-                y_max = cur_y + h + 4
+            # Expansion keeps the foreground top/right fixed and grows left/down.
+            y_min = cur_y - 4
+            y_max = cur_y + h + 4
 
             if is_expanded:
                 anchor_cx = cur_x + w // 2
@@ -788,29 +798,36 @@ class FloatingOverlayBar:
             return
         screen_w = self.root.winfo_screenwidth() if self.root and hasattr(self.root, "winfo_screenwidth") else 1920
         screen_h = self.root.winfo_screenheight() if self.root and hasattr(self.root, "winfo_screenheight") else 1080
-        if self._user_pos is not None:
-            anchor_cx, anchor_by = self._user_pos
-            target_x = int(anchor_cx - self.width // 2)
-            target_y = int(anchor_by - self.height)
-            x, y = self._clamp_to_screen(target_x, target_y, screen_w, screen_h)
-        elif getattr(self, "dock", "bottom") == "left":
-            x, y = 8, (screen_h - self.height) // 2
-            area = self._mac_visible_area()
-            if area is not None:
-                x = area[0] + 8
-        elif getattr(self, "dock", "bottom") == "right":
-            x, y = screen_w - self.width - 8, (screen_h - self.height) // 2
-            area = self._mac_visible_area()
-            if area is not None:
-                x = area[2] - self.width - 8
-        else:
-            x = (screen_w - self.width) // 2
-            margin = getattr(config, "bar_bottom_margin", 60)
-            y = screen_h - self.height - margin
-            # macOS: the Dock can be taller than the margin; sit above it.
-            area = self._mac_visible_area()
-            if area is not None:
-                y = min(y, area[3] - self.height - self.MAC_DOCK_GAP)
+        fg_w, fg_h = self._foreground_size()
+        anchor_w, anchor_h = self._foreground_anchor_size()
+        area = self._mac_visible_area()
+        if self._visible_anchor is None:
+            if self._user_pos is not None:
+                # Read the established center/bottom preference once. Do not
+                # write a migration merely because the bar is shown/resized.
+                cx, bottom = self._user_pos
+                x, y = cx - fg_w // 2, bottom - fg_h
+            elif self.dock == "left":
+                x, y = (area[0] if area else 0) + 8 + anchor_w - fg_w, (screen_h - fg_h) // 2
+            elif self.dock == "right":
+                x, y = (area[2] if area else screen_w) - fg_w - 8, (screen_h - fg_h) // 2
+            else:
+                x = (screen_w - fg_w) // 2
+                y = screen_h - fg_h - getattr(config, "bar_bottom_margin", 60)
+                if area:
+                    y = min(y, area[3] - fg_h - self.MAC_DOCK_GAP)
+            self._visible_anchor = (x + fg_w, y)
+        right, top = self._visible_anchor
+        min_x, min_y, max_x, max_y = self._get_screen_bounds()
+        if area:
+            min_y, max_y = max(min_y, area[1]), min(max_y, area[3])
+        # Clamp the visible foreground only. Rows fit the available space;
+        # adding/removing them must never reposition the user's controls.
+        right = max(min_x + anchor_w, min(right, max_x))
+        top = max(min_y, min(top, max_y - anchor_h))
+        self._visible_anchor = (right, top)
+        offset_x, offset_y = self._foreground_offset()
+        x, y = right - fg_w - offset_x, top - offset_y
         if hasattr(self.win, "geometry"):
             self._suppress_leave_until = time.monotonic() + 0.15
             self.win.geometry(f"{self.width}x{self.height}+{x}+{y}")
@@ -1104,6 +1121,13 @@ class FloatingOverlayBar:
                 except Exception:
                     pass
             available = screen_height - self._foreground_size()[1] - top_gap
+            if self._visible_anchor is not None:
+                _, top = self._visible_anchor
+                _, min_y, _, max_y = self._get_screen_bounds()
+                area = self._mac_visible_area()
+                if area:
+                    min_y, max_y = max(min_y, area[1]), min(max_y, area[3])
+                available = max(top - min_y, max_y - top - self._foreground_size()[1]) - top_gap
             if count * row_height + (count - 1) * gap > available:
                 row_height = max(12, min(26, (available - count + 1) // count))
                 gap = 1
@@ -1247,7 +1271,9 @@ class FloatingOverlayBar:
                     if row.get("status") in ("ready", "failed"):
                         return f"summary_activate:{index}"
                     return None
-            if y >= foreground_h:
+            offset_x, offset_y = self._foreground_offset()
+            x, y = x - offset_x, y - offset_y
+            if not (0 <= y < foreground_h and 0 <= x < foreground_w):
                 return None  # The 4px separators between rows are intentionally inert.
             foreground_grip_left = foreground_w - self.GRIP_W
             if x >= foreground_w:
@@ -1267,13 +1293,13 @@ class FloatingOverlayBar:
                 return "speak"
             if self.state == "READY":
                 cancel_btn_left = foreground_grip_left - 11
-                if self.video_status == "processing":
+                if not rows and self.video_status == "processing":
                     if cancel_btn_left <= x < foreground_grip_left:
                         return "video_cancel"
-                elif self.audio_summary_status == "processing":
+                elif not rows and self.audio_summary_status == "processing":
                     if cancel_btn_left <= x < foreground_grip_left:
                         return "audio_summary_cancel"
-                elif self.video_status in ("ready", "failed"):
+                elif not rows and self.video_status in ("ready", "failed"):
                     if not getattr(self, "_selection_expanded", False):
                         if cancel_btn_left <= x < foreground_grip_left:
                             return "video_cancel"
@@ -1381,6 +1407,16 @@ class FloatingOverlayBar:
         self._is_dragging = False
         zone = self._get_zone(event.x, event.y)
         self._press_zone = zone
+        self._press_screen = (
+            getattr(event, "x_root", self.win.winfo_x() + event.x if self.win and hasattr(self.win, "winfo_x") else event.x),
+            getattr(event, "y_root", self.win.winfo_y() + event.y if self.win and hasattr(self.win, "winfo_y") else event.y),
+        )
+        self._press_window_xy = self._current_xy()
+        offset_x, offset_y = self._foreground_offset()
+        self._press_foreground_anchor = (
+            self._press_window_xy[0] + offset_x + self._foreground_size()[0],
+            self._press_window_xy[1] + offset_y,
+        )
         if zone and zone.startswith("summary_cancel:"):
             self._handle_summary_row_click(zone, activate=False)
         elif zone and zone.startswith("summary_dismiss:"):
@@ -1445,32 +1481,44 @@ class FloatingOverlayBar:
                     self.on_finish()
 
         was_mouse_over = self._is_mouse_over
-        if zone not in ("video_flow", "settings", "audio_settings", "audio_pause"):
+        if zone not in ("grip", "video_flow", "settings", "audio_settings", "audio_pause"):
             self._is_mouse_over = False
             if was_mouse_over and (self.state == "READY" or self._summary_rows()):
                 self._draw_if_available()
 
     def _on_drag(self, event: tk.Event) -> None:
-        dx = event.x - self.drag_x
-        dy = event.y - self.drag_y
-        dist = math.hypot(event.x - getattr(self, "_press_start_x", event.x), event.y - getattr(self, "_press_start_y", event.y))
-        # Only start dragging if user pressed the dedicated grip strip OR intentionally dragged > 6px
-        if getattr(self, "_press_zone", None) != "grip" and dist < 6.0 and not getattr(self, "_is_dragging", False):
+        if getattr(self, "_press_zone", None) != "grip" or not self.win:
             return
-
+        start_x, start_y = self._press_window_xy
+        press_x, press_y = self._press_screen
+        dx = getattr(event, "x_root", start_x + event.x) - press_x
+        dy = getattr(event, "y_root", start_y + event.y) - press_y
         self._is_dragging = True
-        new_x = (self.win.winfo_x() if hasattr(self.win, "winfo_x") else 0) + dx
-        new_y = (self.win.winfo_y() if hasattr(self.win, "winfo_y") else 0) + dy
-        clamped_x, clamped_y = self._clamp_to_screen(new_x, new_y)
+        offset_x, offset_y = self._foreground_offset()
+        fg_w, fg_h = self._foreground_size()
+        anchor_w, anchor_h = self._foreground_anchor_size()
+        min_x, min_y, max_x, max_y = self._get_screen_bounds()
+        press_right, press_top = self._press_foreground_anchor
+        fg_x = max(min_x + anchor_w, min(press_right + dx, max_x)) - fg_w
+        fg_y = max(min_y, min(press_top + dy, max_y - anchor_h))
+        clamped_x, clamped_y = fg_x - offset_x, fg_y - offset_y
         if hasattr(self.win, "geometry"):
             self.win.geometry(f"+{clamped_x}+{clamped_y}")
-        # Store bottom-center anchor point so all states remain concentric
-        self._user_pos = (clamped_x + self.width // 2, clamped_y + self.height)
+        self._visible_anchor = (fg_x + fg_w, fg_y)
+        self._user_pos = (fg_x + fg_w // 2, fg_y + fg_h)
+        if self._summary_rows() and (
+            self._foreground_offset() != (offset_x, offset_y)
+            or self._target_size() != (self.width, self.height)
+        ):
+            self._last_draw_sig = None
+            self._set_bar_size(*self._target_size())
+            self._draw()
 
     def _on_release(self, _event: tk.Event) -> None:
         if getattr(self, "_is_dragging", False):
             self._is_dragging = False
             self._persist_position()
+        self._press_zone = None
 
     def _on_motion(self, event: tk.Event) -> None:
         was_over = self._is_mouse_over
@@ -1492,6 +1540,8 @@ class FloatingOverlayBar:
                 self._draw()
 
     def _on_leave(self, _event: tk.Event) -> None:
+        if getattr(self, "_press_zone", None) == "grip":
+            return
         if time.monotonic() < getattr(self, "_suppress_leave_until", 0.0):
             return
         cur_pos = _get_cursor_pos()
@@ -1526,22 +1576,22 @@ class FloatingOverlayBar:
 
             # 1. When resting (collapsed to rest pill):
             if not self._is_mouse_over:
-                anchor_cx = wx + ww // 2
-                anchor_by = wy + wh
+                anchor_right = wx + ww
+                foreground_top = wy + self._foreground_offset()[1]
 
                 # A. 32px generous surround margin around the rest pill
                 rest_near = (wx - 32 <= cx <= wx + ww + 32) and (wy - 32 <= cy <= wy + wh + 32)
                 # B. Area where expanded bar will appear + 20px surround margin
-                exp_x1 = anchor_cx - self.ready_actions_width // 2 - 20
-                exp_x2 = anchor_cx + self.ready_actions_width // 2 + 20
-                exp_y1 = anchor_by - self.hover_height - 20
-                exp_y2 = anchor_by + 20
+                exp_x1 = anchor_right - self.ready_actions_width - 20
+                exp_x2 = anchor_right + 20
+                exp_y1 = foreground_top - 20
+                exp_y2 = foreground_top + self.hover_height + 20
                 exp_near = (exp_x1 <= cx <= exp_x2) and (exp_y1 <= cy <= exp_y2)
 
                 if rest_near or exp_near:
                     self._is_mouse_over = True
-                    self._hover_zone = self._get_zone(int(cx - (anchor_cx - self.ready_actions_width // 2)), int(cy - (anchor_by - self.hover_height)))
                     self._draw()
+                    self._hover_zone = self._get_zone(int(cx - self.win.winfo_x()), int(cy - self.win.winfo_y()))
             else:
                 # 2. When already expanded: keep alive with generous hysteresis buffer
                 leave_x1 = wx - 28
@@ -1727,8 +1777,18 @@ class FloatingOverlayBar:
             self._clear_legacy_audio_summary_status()
     # -- Drawing --
 
+    def _foreground_anchor_size(self) -> tuple[int, int]:
+        """Bounds for placement, without allocating an unused canvas reserve."""
+        return (
+            max(self.idle_width, self.expanded_width, self.ready_actions_width,
+                self.recording_width, self.audio_playback_width, self.working_width, 180),
+            max(self.idle_height, self.hover_height, self.working_height),
+        )
+
     def _foreground_size(self) -> tuple[int, int]:
         """Size of the voice controls, excluding independent background job rows."""
+        if self.state == "HIDDEN":
+            return self.idle_width, self.idle_height
         if self.state == "READY":
             if (
                 getattr(self, "_is_mouse_over", False)
@@ -1757,10 +1817,32 @@ class FloatingOverlayBar:
         top_gap, row_h, gap = self._summary_row_metrics()
         return max(fg_w, self.video_progress_width), fg_h + top_gap + len(rows) * row_h + (len(rows) - 1) * gap
 
+    def _rows_above_foreground(self) -> bool:
+        if not self._summary_rows():
+            return False
+        _, fg_h = self._foreground_size()
+        _, min_y, _, max_y = self._get_screen_bounds()
+        top = self._visible_anchor[1] if self._visible_anchor is not None else max_y - fg_h - getattr(config, "bar_bottom_margin", 60)
+        above, below = top - min_y, max_y - top - fg_h
+        top_gap, row_h, gap = self._summary_row_metrics()
+        count = len(self._summary_rows())
+        needed = top_gap + count * row_h + (count - 1) * gap
+        return above >= needed or above >= below
+
+    def _foreground_offset(self) -> tuple[int, int]:
+        fg_w, fg_h = self._foreground_size()
+        offset_x = self.width - fg_w
+        if self._visible_anchor is not None:
+            right, _ = self._visible_anchor
+            min_x, _, max_x, _ = self._get_screen_bounds()
+            window_left = max(min_x, min(right - self.width, max_x - self.width))
+            offset_x = right - fg_w - window_left
+        return offset_x, self.height - fg_h if self._rows_above_foreground() else 0
+
     def _summary_row_geometry(self) -> list[tuple[int, int, dict[str, object]]]:
         _, foreground_h = self._foreground_size()
         top_gap, row_h, gap = self._summary_row_metrics()
-        top = foreground_h + top_gap
+        top = 0 if self._rows_above_foreground() else foreground_h + top_gap
         rows = self._summary_rows()
         return [(top + i * (row_h + gap), top + i * (row_h + gap) + row_h, row) for i, row in enumerate(rows)]
     def _draw_signature(self) -> tuple:
@@ -1860,6 +1942,10 @@ class FloatingOverlayBar:
             self._draw_error(flow_width, flow_height)
 
         self._draw_grip(flow_width, flow_height)
+        offset_x, offset_y = self._foreground_offset()
+        if hasattr(c, "addtag_all") and hasattr(c, "move"):
+            c.addtag_all("foreground")
+            c.move("foreground", offset_x, offset_y)
         self._draw_summary_rows(w)
 
         self._last_draw_at = now
@@ -1921,18 +2007,20 @@ class FloatingOverlayBar:
     def _draw_summary_rows(self, w: int) -> None:
         c = self.canvas
         for index, (top, bottom, row) in enumerate(self._summary_row_geometry()):
-            self._draw_pill(1, top, w - 1, bottom, 12, self.WHITE, self.BORDER)
+            row_height = bottom - top
+            self._draw_pill(1, top, w - 1, bottom, min(12, row_height / 2), self.WHITE, self.BORDER)
             kind = str(row["kind"])
             status = str(row["status"])
             job_id = str(row.get("job_id") or "")
             cancel_zone = f"summary_cancel:{index}"
             ready_zone = f"summary_activate:{index}"
             cy = (top + bottom) / 2
+            row_font = (config.bar_font_family, 7 if row_height < 22 else 8, "bold")
             if status == "processing":
                 title = "Video Flow" if kind == "video" else "Audio Flow"
                 progress = max(0, min(100, int(row.get("progress") or 0)))
-                c.create_text(12, cy, text=f"{title} · {progress}%", fill=self.INK,
-                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                c.create_text(12, cy - (2 if row_height < 22 else 0), text=f"{title} · {progress}%", fill=self.INK,
+                              font=row_font, anchor="w")
                 rail_left, rail_right, rail_y = 12, w - 42, bottom - 4
                 c.create_line(rail_left, rail_y, rail_right, rail_y, fill=self.ORANGE_FAINT, width=2, capstyle="round")
                 if progress:
@@ -1953,7 +2041,7 @@ class FloatingOverlayBar:
                         display_title = display_title[:17].rstrip() + "…"
                     title = f"▶ {display_title} Ready — Click to play"
                 c.create_text(12, cy, text=title, fill=self.GREEN if self._hover_zone == ready_zone else self.INK,
-                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                              font=row_font, anchor="w")
                 cx = w - self.GRIP_W - 8
                 c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
                 c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
@@ -1964,7 +2052,7 @@ class FloatingOverlayBar:
                     display_title = display_title[:17].rstrip() + "…"
                 failure_label = "Video failed — click to dismiss" if kind == "video" else f"{display_title} failed — click to dismiss"
                 c.create_text(12, cy, text=failure_label, fill=self.RED,
-                              font=(config.bar_font_family, 8, "bold"), anchor="w")
+                              font=row_font, anchor="w")
                 cx = w - self.GRIP_W - 8
                 c.create_line(cx - 3, cy - 3, cx + 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")
                 c.create_line(cx + 3, cy - 3, cx - 3, cy + 3, fill=self.GRAY, width=1.5, capstyle="round")

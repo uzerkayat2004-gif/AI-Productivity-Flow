@@ -646,15 +646,13 @@ def main():
 
     combined_corpus = train_records + val_records
 
-    # Rehearsal slice: draw verified S1 native rehearsal rows from S1_NATIVE_REHEARSAL.jsonl
-    rehearsal_src = Path("research/vf_phase2b/data/S1_NATIVE_REHEARSAL.jsonl")
+    # Rehearsal slice: draw verified independently authored S1 native rehearsal rows
+    rehearsal_src = OUTPUT_DIR / "clean_rehearsal.jsonl"
     rehearsal_records = []
     if rehearsal_src.exists():
         with open(rehearsal_src, "r", encoding="utf-8") as f:
-            all_reh = [json.loads(line) for line in f if line.strip()]
-        # Select 40 clean rehearsal rows covering numbers, commitments, proper nouns
-        rehearsal_records = all_reh[:40]
-        print(f"Loaded {len(rehearsal_records)} verified S1-mini native rehearsal records.")
+            rehearsal_records = [json.loads(line) for line in f if line.strip()]
+        print(f"Loaded {len(rehearsal_records)} verified clean S1-mini native rehearsal records.")
     else:
         print("Warning: rehearsal source not found, generating synthetic native rehearsal.")
         for i in range(25):

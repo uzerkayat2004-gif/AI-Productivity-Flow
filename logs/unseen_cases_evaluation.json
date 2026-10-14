@@ -1,0 +1,37 @@
+[
+  {
+    "id": "UNSEEN-001",
+    "category": "prompt",
+    "description": "Complex AI prompt without meta-wrapper",
+    "latency_ms": 14656.0,
+    "output": "Can you make a GPT-4 prompt that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?"
+  },
+  {
+    "id": "UNSEEN-002",
+    "category": "followup_edit",
+    "description": "Surgical draft edit of date and time",
+    "latency_ms": 8732.0,
+    "output": "Let us push the launch to Friday at 11:30am instead."
+  },
+  {
+    "id": "UNSEEN-003",
+    "category": "cleanup_corrections",
+    "description": "Multiple speech corrections and currency",
+    "latency_ms": 8979.0,
+    "output": "Please wire $7,500 to account 9821 by 5pm."
+  },
+  {
+    "id": "UNSEEN-004",
+    "category": "email",
+    "description": "Professional email with distinct subject and sender",
+    "latency_ms": 13449.5,
+    "output": "Subject: Successful Closure of Acquisition\n\nDear Steering Committee,\n\nWe are pleased to confirm that we successfully closed the acquisition this morning.\n\nThanks for your support,\nMarcus"
+  },
+  {
+    "id": "UNSEEN-005",
+    "category": "notes_checklist",
+    "description": "Markdown checklist with intact action items",
+    "latency_ms": 10127.0,
+    "output": "- Review pull request 88\n- Deploy the hotfix to staging\n- Notify the customer success team"
+  }
+]
