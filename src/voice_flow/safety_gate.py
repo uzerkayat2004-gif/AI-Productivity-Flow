@@ -82,7 +82,19 @@ def check_numerical_preservation(source: str, candidate: str, task: str = "clean
     failures: List[str] = []
     src_canon, _ = canonical_source(source)
     src_nums = number_values(src_canon)
-    out_nums = _output_numbers(candidate)
+
+    # Strip prompt metadata tags before numerical extraction so that metadata tags
+    # like [VF-1], [Task: cleanup], [Transcript], etc. do not pollute numerical analysis
+    # (the '1' in VF-1 is a tag echo, not a corrupted numerical amount).
+    cleaned_candidate = re.sub(
+        r"\[(?:VF-1|Task:\s*\w+|Transcript|Rules|Instruction|Draft|Sender:[^\]]+|Recipient:[^\]]+)\]",
+        "",
+        candidate or "",
+        flags=re.IGNORECASE,
+    )
+    cleaned_candidate = re.sub(r"^cleanup(?:,\s*task:\s*\w+)?\.?\s*", "", cleaned_candidate, flags=re.IGNORECASE)
+
+    out_nums = _output_numbers(cleaned_candidate)
     out_counter = Counter(out_nums)
 
     # 1. Missing numbers: every required number from source must exist in candidate
@@ -93,9 +105,9 @@ def check_numerical_preservation(source: str, candidate: str, task: str = "clean
 
     # 2. Invented / altered numbers: candidate must not introduce new numerical magnitudes
     allowed: Set[Any] = set().union(*src_nums) if src_nums else set()
-    list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", candidate)}
+    list_markers = {int(n) for n in re.findall(r"(?m)^\s*(\d+)[.)]\s", cleaned_candidate)}
 
-    cand_consumed = re.sub(r"(?<=\d),(?=\d)", "", candidate or "")
+    cand_consumed = re.sub(r"(?<=\d),(?=\d)", "", cleaned_candidate or "")
     for m in re.finditer(r"(?<![\d.:])(\d+)(?![\d:])", cand_consumed):
         val = int(m.group(1))
         if val in list_markers:

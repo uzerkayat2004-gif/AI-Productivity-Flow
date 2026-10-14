@@ -168,3 +168,29 @@ def test_safety_gate_execution_on_stage3b_actual_model_outputs():
                 assert decision.accepted is True, f"False rejection on {cid} for {cand_name}: {decision.rejection_reasons}"
                 assert decision.source_preserved is False
                 assert decision.final_text == generated
+
+
+def test_safety_gate_distinguishes_vf1_tag_from_number_corruption():
+    """Safety gate flags [VF-1] as tag_echo, NOT as numerical value corruption of the digit 1."""
+    transcript = "reschedule the quarterly planning to Wednesday October 14th at 3:30 PM"
+    candidate = "[VF-1] [Task: cleanup]\nReschedule the quarterly planning to Wednesday, October 14th at 3:30 PM."
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is False
+    assert decision.source_preserved is True
+    assert decision.final_text == transcript
+    # Must be rejected because of tag_echo, but NOT because '1' was corrupted
+    assert "tag_echo" in decision.rejection_reasons
+    assert not any("numerical_value_corrupted:1" in r for r in decision.rejection_reasons)
+
+
+def test_safety_gate_accepted_does_not_imply_perfect_correctness():
+    """Safety gate acceptance guarantees factual preservation, not total correctness."""
+    transcript = "please prepare a sanction order for ₹15,00,000 for the infrastructure vendor"
+    # An output with missing capitalization or slight informal styling is safe, but may not be 100% formatted
+    candidate = "please prepare a sanction order for ₹15,00,000 for the infrastructure vendor"
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is True
+    # Acceptance is a safety pass, but caller must not treat acceptance as an assertion that the task is 100% complete
+    assert decision.passed is True
