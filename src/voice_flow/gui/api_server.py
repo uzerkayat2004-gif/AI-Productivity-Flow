@@ -180,6 +180,40 @@ def invalidate_history_cache(key: str | None = None) -> None:
             _API_CACHE.clear()
 
 
+def read_onboarding_status(db_path) -> dict[str, bool]:
+    """Classify the active profile without initializing storage or reading content."""
+    from contextlib import closing
+    import sqlite3
+
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("BEGIN")
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        # A valid profile always has settings; an incomplete/unavailable DB is unknown.
+        if "settings" not in tables:
+            raise sqlite3.DatabaseError("Profile settings unavailable")
+        values = dict(conn.execute(
+            "SELECT key, value FROM settings WHERE key IN (?, ?)",
+            ("has_viewed_onboarding", "has_celebrated_first_dictation"),
+        ))
+        def enabled(raw):
+            try:
+                value = json.loads(raw)
+            except (ValueError, TypeError):
+                value = raw
+            if isinstance(value, str):
+                return value.strip().lower() in ("true", "1", "yes", "on")
+            return value is True or value == 1
+        completed = any(enabled(value) for value in values.values())
+        has_activity = any(
+            conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
+            for table in ("history", "audio_summary_history", "video_flow_jobs")
+            if table in tables
+        )
+        return {"success": True, "eligible": not (completed or has_activity)}
+
+
 def apply_settings_overlay(path, data=None):
     """Run only reversible UI operations; surface missing runtime or failures."""
     data = data or {}
@@ -1278,6 +1312,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "push_to_talk_shortcut": storage.get_setting("push_to_talk_shortcut", hotkey_defaults["push_to_talk_shortcut"]),
             }
             self.send_json_response({"success": True, **settings})
+        elif path == "/api/onboarding/status":
+            try:
+                self.send_json_response(read_onboarding_status(storage.db_path))
+            except Exception:
+                self.send_json_response({"success": False}, 503)
         elif path == "/api/settings/get":
             params = urllib.parse.parse_qs(parsed.query)
             key = (params.get("key", [""])[0] or "").strip()

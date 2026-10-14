@@ -19,7 +19,7 @@ def test_vf1_engine_cleanup_task():
     engine = VF1Engine(VF1EngineConfig(backend="mock"))
 
     def mock_cleanup(prompt: str, req: VF1Request) -> str:
-        # Mock clean model generation
+        # Mock model generation with filler
         return "So basically, we should refactor this legacy module."
 
     engine.set_mock_generator(mock_cleanup)
@@ -29,7 +29,7 @@ def test_vf1_engine_cleanup_task():
 
     assert res.safety_accepted is True
     assert res.source_preserved is False
-    assert res.final_text == "So basically, we should refactor this legacy module."
+    assert res.final_text == "We should refactor this legacy module."
     assert res.latency_ms >= 0.0
     assert res.task == "cleanup"
 

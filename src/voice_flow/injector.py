@@ -503,6 +503,55 @@ def focus_target_window(hwnd: int) -> None:
             pass
 
 
+def _find_direct_paste_control(hwnd: int) -> int | None:
+    """Find Edit or RichEdit control inside target window hierarchy for direct injection."""
+    if not IS_WINDOWS or not hwnd:
+        return None
+    try:
+        user32 = windll.user32
+        if not user32.IsWindow(hwnd):
+            return None
+        cname = get_window_class_name(hwnd).lower()
+        if "richedit" in cname or cname == "edit":
+            return hwnd
+        found = None
+
+        def _enum_ch(ch, _):
+            nonlocal found
+            cbuff = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(ch, cbuff, 256)
+            name = cbuff.value.lower()
+            if "richedit" in name or name == "edit":
+                found = ch
+                return False
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumChildWindows(hwnd, WNDENUMPROC(_enum_ch), 0)
+        return found
+    except Exception:
+        return None
+
+
+def get_control_text(hwnd: int) -> str:
+    """Read back text from an Edit or RichEdit control via WM_GETTEXT."""
+    if not IS_WINDOWS or not hwnd:
+        return ""
+    try:
+        user32 = windll.user32
+        target = _find_direct_paste_control(hwnd) or hwnd
+        WM_GETTEXTLENGTH = 0x000E
+        WM_GETTEXT = 0x000D
+        length = user32.SendMessageW(target, WM_GETTEXTLENGTH, 0, 0)
+        if length <= 0:
+            return ""
+        buff = ctypes.create_unicode_buffer(length + 1)
+        user32.SendMessageW(target, WM_GETTEXT, length + 1, buff)
+        return buff.value
+    except Exception:
+        return ""
+
+
 _paste_lock = threading.Lock()
 _clipboard_restore_token = 0
 _clipboard_token_lock = threading.Lock()
@@ -830,22 +879,27 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
             # Wait for physical Ctrl, Alt, Shift & Win keys to be released
             _wait_for_modifiers_released(timeout_ms=80)
 
+            direct_paste_target = None
             if target_hwnd:
                 if not ctypes.windll.user32.IsWindow(target_hwnd):
                     log.warning("[INJECTOR] Target window closed during dictation; refusing to paste into the focused window.")
                     return False
                 focus_target_window(target_hwnd)
                 # SetForegroundWindow can be denied by Windows' foreground
-                # restrictions.  Do not turn that failure into a paste in
+                # restrictions. Do not turn that failure into a paste in
                 # whichever unrelated app still has focus.
-                # Verify that the active foreground window belongs to the target window hierarchy
+                # Verify that active foreground belongs to target hierarchy, or find direct edit child.
                 fg = ctypes.windll.user32.GetForegroundWindow()
                 if not is_same_window_hierarchy(fg, target_hwnd):
-                    log.warning("[INJECTOR] Could not focus target hwnd %d (active is %d); refusing to paste elsewhere.", target_hwnd, fg)
-                    return False
+                    direct_ctrl = _find_direct_paste_control(target_hwnd)
+                    if direct_ctrl:
+                        direct_paste_target = direct_ctrl
+                    else:
+                        log.warning("[INJECTOR] Could not focus target hwnd %d (active is %d); refusing to paste elsewhere.", target_hwnd, fg)
+                        return False
 
-            active_hwnd = ctypes.windll.user32.GetForegroundWindow()
-            active_title = get_active_window_title()
+            active_hwnd = ctypes.windll.user32.GetForegroundWindow() if not direct_paste_target else target_hwnd
+            active_title = get_active_window_title() if not direct_paste_target else ""
             active_class = get_window_class_name(active_hwnd)
 
             if is_internal_window(active_hwnd):
@@ -870,22 +924,31 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
             clipboard_changed = True
             time.sleep(0.015)
 
-            # Dispatch paste keystroke:
-            # Modern Windows Terminal, PowerShell, CMD, VS Code terminal, Alacritty: Ctrl+V
-            # Legacy terminal emulators (mintty, PuTTY): Shift+Insert
-            is_legacy_terminal = (
-                active_class in ("mintty", "PuTTY")
-                or any(kw in active_title.lower() for kw in ["putty", "mintty"])
-            )
-
-            if is_legacy_terminal:
-                _send_win32_shift_insert()
+            # Dispatch paste:
+            if direct_paste_target:
+                WM_PASTE = 0x0302
+                ctypes.windll.user32.SendMessageW(direct_paste_target, WM_PASTE, 0, 0)
+                if press_enter:
+                    time.sleep(0.02)
+                    WM_CHAR = 0x0102
+                    VK_RETURN = 0x0D
+                    ctypes.windll.user32.SendMessageW(direct_paste_target, WM_CHAR, VK_RETURN, 0)
             else:
-                _send_win32_ctrl_v()
+                # Modern Windows Terminal, PowerShell, CMD, VS Code terminal, Alacritty: Ctrl+V
+                # Legacy terminal emulators (mintty, PuTTY): Shift+Insert
+                is_legacy_terminal = (
+                    active_class in ("mintty", "PuTTY")
+                    or any(kw in active_title.lower() for kw in ["putty", "mintty"])
+                )
 
-            if press_enter:
-                time.sleep(0.05)
-                _send_win32_enter()
+                if is_legacy_terminal:
+                    _send_win32_shift_insert()
+                else:
+                    _send_win32_ctrl_v()
+
+                if press_enter:
+                    time.sleep(0.05)
+                    _send_win32_enter()
 
             # Restore previous clipboard content asynchronously so the caller does not block.
             # WhatsApp and UWP apps read clipboard asynchronously over WinRT/COM, so extend delay to >=400ms.

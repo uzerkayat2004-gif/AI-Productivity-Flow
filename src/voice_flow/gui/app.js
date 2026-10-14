@@ -834,6 +834,88 @@ let currentPageId = "home";
 // The five Voice Flow features live inside the collapsible parent menu.
 const VOICEFLOW_CHILD_PAGES = ["home", "insights", "dictionary", "style", "providers"];
 
+let _onboardingAccountEpoch = 0;
+let _onboardingStatusPromise = null;
+let _onboardingEligible = null;
+let _onboardingWelcomeShown = false;
+let _pendingAutomaticGuide = null;
+const _automaticGuideAttempts = new Set();
+
+function isOnboardingAccountChanging() {
+  return (typeof _accountMutationPending !== "undefined" && _accountMutationPending) ||
+    (typeof _googleSignInPending !== "undefined" && _googleSignInPending);
+}
+
+function loadOnboardingEligibility() {
+  if (isOnboardingAccountChanging()) return Promise.resolve(null);
+  if (_onboardingStatusPromise) return _onboardingStatusPromise;
+  const accountEpoch = _onboardingAccountEpoch;
+  _onboardingStatusPromise = (async () => {
+    let eligible = null;
+    try {
+      const res = await fetch("/api/onboarding/status", { cache: "no-store" });
+      const data = await res.json();
+      if (res.ok && data.success === true && typeof data.eligible === "boolean") {
+        eligible = data.eligible;
+      }
+    } catch (_) { /* Unknown status never enrolls a profile automatically. */ }
+    if (accountEpoch !== _onboardingAccountEpoch) return null;
+    _onboardingEligible = eligible;
+    return eligible;
+  })();
+  return _onboardingStatusPromise;
+}
+
+function cancelAutomaticGuide() {
+  if (_pendingAutomaticGuide && _pendingAutomaticGuide.timer !== undefined) {
+    clearTimeout(_pendingAutomaticGuide.timer);
+  }
+  _pendingAutomaticGuide = null;
+}
+
+function resetOnboardingSession() {
+  ++_onboardingAccountEpoch;
+  cancelAutomaticGuide();
+  _onboardingStatusPromise = null;
+  _onboardingEligible = null;
+  _onboardingWelcomeShown = false;
+  _automaticGuideAttempts.clear();
+}
+
+function scheduleAutomaticGuide(feature, pageId) {
+  if (isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature)) return;
+  cancelAutomaticGuide();
+  const pending = {
+    feature, pageId,
+    accountEpoch: _onboardingAccountEpoch,
+    navigationGeneration: switchPage.scrollGeneration,
+  };
+  _pendingAutomaticGuide = pending;
+  const isCurrent = () => _pendingAutomaticGuide === pending &&
+    pending.accountEpoch === _onboardingAccountEpoch &&
+    pending.navigationGeneration === switchPage.scrollGeneration &&
+    currentPageId === pending.pageId;
+  loadOnboardingEligibility().then(eligible => {
+    if (!isCurrent()) return;
+    if (eligible !== true || isOnboardingAccountChanging() || isFeatureGuideVisible("onboarding-overlay")) {
+      _pendingAutomaticGuide = null;
+      return;
+    }
+    pending.timer = setTimeout(() => {
+      if (!isCurrent()) return;
+      if (_onboardingEligible !== true || isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature) || isFeatureGuideVisible("onboarding-overlay")) {
+        _pendingAutomaticGuide = null;
+        return;
+      }
+      _pendingAutomaticGuide = null;
+      _automaticGuideAttempts.add(feature);
+      if (feature === "voice" && typeof startVoiceFlowGuide === "function") startVoiceFlowGuide();
+      if (feature === "audio" && typeof startAudioFlowGuide === "function") startAudioFlowGuide();
+      if (feature === "video" && typeof startVideoFlowGuide === "function") startVideoFlowGuide();
+    }, 60);
+  });
+}
+
 function toggleVoiceFlowMenu(event) {
   if (event) event.stopPropagation();
   const group = document.getElementById("voiceflow-nav-group");
@@ -846,11 +928,7 @@ function toggleVoiceFlowMenu(event) {
 
   if (group) group.classList.add("open");
   switchPage("home", { userInitiated: true });
-  setTimeout(() => {
-    if (typeof startVoiceFlowGuide === "function") {
-      startVoiceFlowGuide();
-    }
-  }, 60);
+  scheduleAutomaticGuide("voice", "home");
 }
 
 function setVoiceFlowMenuOpen(open) {
@@ -872,52 +950,18 @@ function initNavigation() {
   navItems.forEach(item => {
     item.addEventListener("click", () => {
       const pageId = item.getAttribute("data-page");
-      const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
-      const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
-      const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
-
-      if (isVoiceFlowFeature && !vfVoiceGuided) {
-        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
-        switchPage("home", { userInitiated: true });
-        setTimeout(() => {
-          if (typeof startVoiceFlowGuide === "function") {
-            startVoiceFlowGuide();
-          }
-        }, 60);
-        return;
-      }
-
-      const isSwitching = (currentPageId !== pageId);
+      const isSwitching = currentPageId !== pageId;
       switchPage(pageId, { userInitiated: true });
-
-      if (pageId === "videoflow") {
-        const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
-        if (!vfSeen) {
-          setTimeout(() => {
-            if (typeof startVideoFlowGuide === "function") {
-              startVideoFlowGuide();
-            }
-          }, 60);
-        }
-      } else if (pageId === "home" && !vfVoiceGuided) {
-        setTimeout(() => {
-          if (typeof startVoiceFlowGuide === "function") {
-            startVoiceFlowGuide();
-          }
-        }, 60);
+      // Keep the requested page until account authority confirms a first-run guide.
+      if (VOICEFLOW_CHILD_PAGES.includes(pageId)) {
+        scheduleAutomaticGuide("voice", pageId);
+      } else if (pageId === "videoflow") {
+        scheduleAutomaticGuide("video", pageId);
       } else if (pageId === "audioflow" && isSwitching) {
-        const afSeen = (onboardingFlag("vf_onboarding.af_guided") === "1");
-        if (!afSeen) {
-          setTimeout(() => {
-            if (typeof startAudioFlowGuide === "function") {
-              startAudioFlowGuide();
-            }
-          }, 60);
-        }
+        scheduleAutomaticGuide("audio", pageId);
       }
     });
   });
-  // Start with the dropdown open when the landing page is one of its children.
   updateVoiceFlowParentState(currentPageId);
 }
 
@@ -1021,7 +1065,28 @@ function resetAllSubViews() {
   } catch (_) {}
 }
 
+function isFeatureGuideVisible(overlayId) {
+  const overlay = document.getElementById(overlayId);
+  return Boolean(overlay && !overlay.classList.contains("hidden"));
+}
+
+function loadPageWhilePending(pageId, loader) {
+  const pendingLoads = loadPageWhilePending.pendingLoads || (loadPageWhilePending.pendingLoads = new Map());
+  if (pendingLoads.has(pageId)) return pendingLoads.get(pageId);
+  const pending = Promise.resolve(loader());
+  pendingLoads.set(pageId, pending);
+  const release = () => {
+    if (pendingLoads.get(pageId) === pending) pendingLoads.delete(pageId);
+  };
+  pending.then(release, release);
+  return pending;
+}
+
 function switchPage(pageId, options = {}) {
+  if (typeof cancelAutomaticGuide === "function") cancelAutomaticGuide();
+  // Invalidate corrections from every earlier navigation, including revisits.
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   const previousPageId = currentPageId;
   currentPageId = pageId;
   document.body.classList.toggle("flow-workspace-active", ["audioflow", "videoflow", "providers", "dictionary"].includes(pageId));
@@ -1032,9 +1097,9 @@ function switchPage(pageId, options = {}) {
 
   // Cleanly dismiss active guide for other pages when leaving without marking completed
   if (!options.fromGuide && !options.fromWelcomeTour) {
-    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function") stopAudioFlowGuide(false);
-    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function") stopVideoFlowGuide(false);
-    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function") stopVoiceFlowGuide(false);
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function" && isFeatureGuideVisible("audioflow-guide-overlay")) stopAudioFlowGuide(false);
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function" && isFeatureGuideVisible("videoflow-guide-overlay")) stopVideoFlowGuide(false);
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function" && isFeatureGuideVisible("voiceflow-guide-overlay")) stopVoiceFlowGuide(false);
   }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
@@ -1054,29 +1119,34 @@ function switchPage(pageId, options = {}) {
     }
 
     if (pageId === "home") {
-      loadHome();
-      loadExecVoiceFlowPolicy();
-      loadVoiceFlowPolishSettings();
-      loadFeatureToggleStates();
+      loadPageWhilePending(pageId, () => Promise.allSettled([
+        loadHome(),
+        loadExecVoiceFlowPolicy(),
+        loadVoiceFlowPolishSettings(),
+        loadFeatureToggleStates(),
+      ]));
     }
-    if (pageId === "insights") loadInsights();
-    if (pageId === "dictionary") loadDictionary();
+    if (pageId === "insights") loadPageWhilePending(pageId, loadInsights);
+    if (pageId === "dictionary") loadPageWhilePending(pageId, loadDictionary);
     if (pageId === "style") {
-      loadStyleSettings();
+      loadPageWhilePending(pageId, loadStyleSettings);
       renderStyleCategory(currentStyleCategory);
     }
-    if (pageId === "providers") loadProvidersOverview();
-    if (pageId === "audioflow") loadAudioFlowPage();
+    if (pageId === "providers") loadPageWhilePending(pageId, loadProvidersOverview);
+    if (pageId === "audioflow") loadPageWhilePending(pageId, loadAudioFlowPage);
     if (pageId === "videoflow") {
-      if (typeof loadVideoFlow === "function") loadVideoFlow();
+      if (typeof loadVideoFlow === "function") loadPageWhilePending(pageId, loadVideoFlow);
       else if (typeof loadVideoCatalog === "function") loadVideoCatalog();
     }
 
     if (!options.skipScrollReset) {
-      requestAnimationFrame(() => resetPageScroll(target));
-      setTimeout(() => resetPageScroll(target), 50);
-      setTimeout(() => resetPageScroll(target), 150);
-      setTimeout(() => resetPageScroll(target), 300);
+      const correctCurrentPageScroll = () => {
+        if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll(target);
+      };
+      requestAnimationFrame(correctCurrentPageScroll);
+      setTimeout(correctCurrentPageScroll, 50);
+      setTimeout(correctCurrentPageScroll, 150);
+      setTimeout(correctCurrentPageScroll, 300);
     }
   }
 }
@@ -6448,13 +6518,16 @@ function initAudioLandingMotion() {
 
 function loadAudioFlowPage() {
   initAudioLandingMotion();
-  loadAudioProvidersOverview();
-  loadExecAudioFlowPolicy();
-  loadAudioSummarySettings();
-  loadAudioFlowSummaryStyle();
+  const pendingLoads = [
+    loadAudioProvidersOverview(),
+    loadExecAudioFlowPolicy(),
+    loadAudioSummarySettings(),
+    loadAudioFlowSummaryStyle(),
+  ];
   initAudioSpeedSelect();
   updateAudioSummaryConnectionUI();
-  loadAudioSummaryHistory();
+  pendingLoads.push(loadAudioSummaryHistory());
+  return Promise.allSettled(pendingLoads);
 }
 
 function applyAudioFlowSummaryStyleUI(style) {
@@ -7380,23 +7453,22 @@ function onboardingFlag(key) {
 }
 function setOnboardingFlag(key, value) {
   try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+  const completedFeature = {
+    "vf_onboarding.vf_voice_guided": "voice",
+    "vf_onboarding.af_guided": "audio",
+    "vf_onboarding.vf_guided": "video",
+  }[key];
+  if (completedFeature && (value === "1" || value === "true" || value === 1 || value === true)) {
+    _automaticGuideAttempts.add(completedFeature);
+  }
 }
 
 async function maybeShowOnboarding() {
-  const localFlag = onboardingFlag("hasViewedOnboarding") || onboardingFlag("vf_onboarding.done");
-  if (localFlag === "true" || localFlag === "1") return;
-
-  try {
-    const res = await fetch("/api/settings/get?key=has_viewed_onboarding");
-    const data = await res.json();
-    if (data.success && data.value === true) {
-      setOnboardingFlag("hasViewedOnboarding", "true");
-      setOnboardingFlag("vf_onboarding.done", "1");
-      return;
-    }
-  } catch (e) {}
-
-  // Display upgraded Scene 1 onboarding hero on user's desktop app
+  const accountEpoch = _onboardingAccountEpoch;
+  const eligible = await loadOnboardingEligibility();
+  if (eligible !== true || isOnboardingAccountChanging() || accountEpoch !== _onboardingAccountEpoch || _onboardingWelcomeShown) return;
+  _onboardingWelcomeShown = true;
+  // Preserve this session's first-run eligibility after our own viewed marker write.
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
   setOnboardingFlag("hasViewedOnboarding", "true");
   setOnboardingFlag("vf_onboarding.done", "1");
@@ -9982,8 +10054,8 @@ function stopVoiceFlowGuide(markCompleted = false) {
 }
 
 function replayOnboarding() {
-  setOnboardingFlag("vf_onboarding.done", "");
-  setOnboardingFlag("hasViewedOnboarding", "");
+  cancelAutomaticGuide();
+  _onboardingWelcomeShown = true;
   if (typeof closeSettings === "function") closeSettings();
   onboardingSlide = 0;
   renderOnboardingSlide();
@@ -13002,6 +13074,11 @@ async function handleGoogleAccountSignIn() {
 }
 
 function reloadAllApplicationMemory() {
+  if (typeof resetOnboardingSession === "function") resetOnboardingSession();
+  // An account reset must never reuse the previous account's pending page load.
+  loadPageWhilePending.pendingLoads?.clear();
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   if(typeof loadDashboardTheme === "function")loadDashboardTheme();
   ++_settingsGeneration;
   for(const key of Object.keys(_settingConfirmed))delete _settingConfirmed[key];
@@ -13020,8 +13097,11 @@ function reloadAllApplicationMemory() {
   try { if (typeof loadAudioFlow === "function") loadAudioFlow(); } catch (_) {}
   try { if (typeof vfLoadProviders === "function") vfLoadProviders(); } catch (_) {}
   try { if (typeof vfGoogleLoadAccount === "function") vfGoogleLoadAccount(); } catch (_) {}
-  requestAnimationFrame(() => resetPageScroll());
-  setTimeout(() => resetPageScroll(), 100);
+  const correctAccountResetScroll = () => {
+    if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll();
+  };
+  requestAnimationFrame(correctAccountResetScroll);
+  setTimeout(correctAccountResetScroll, 100);
 }
 
 // Background utility functions for vault export/import

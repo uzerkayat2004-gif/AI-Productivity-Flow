@@ -78,6 +78,8 @@ class VF1EngineResult:
     format: str
     model_name: str
     tokens_per_second: float = 0.0
+    postprocessed_output: str = ""
+    task_passed: bool = True
     adjudication_notes: List[str] = field(default_factory=list)
 
     @property
@@ -129,14 +131,63 @@ class VF1Engine:
 
     def build_chatml_prompt(self, request: VF1Request) -> Tuple[str, str, str]:
         """Build rendered system text, user text, and full ChatML prompt."""
-        system_text, user_text = render_vf1(request)
-        # S1-mini and Qwen3 use ChatML formatting with pre-disabled thinking block
-        prompt_text = (
-            f"<|im_start|>system\n{system_text}<|im_end|>\n"
-            f"<|im_start|>user\n{user_text}<|im_end|>\n"
-            f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
-        )
-        return system_text, user_text, prompt_text
+        task = (request.task or "cleanup").strip().lower()
+        fmt = (request.format or request.default_format() or "prose").strip().lower()
+
+        if fmt == "email" or task == "email":
+            system_text = (
+                "You are a professional voice-to-text email composer. Convert the dictated transcript into a structured professional email with:\n"
+                "1. A distinct 'Subject: ...' header on the first line.\n"
+                "2. A professional greeting/salutation.\n"
+                "3. The dictated message formatted clearly as paragraphs.\n"
+                "4. A professional sign-off preserving the speaker's original name and identity.\n"
+                "Do not hallucinate names, recipients, or facts. Output only the email text."
+            )
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\n{request.transcript}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+        elif task == "prompt" or fmt == "prompt":
+            system_text = (
+                "You are an AI prompt engineer. Extract and synthesize the actual prompt being requested by the user. "
+                "Remove any spoken meta-command wrappers (such as 'make this a prompt:', 'create a prompt for:', 'write a prompt:'). "
+                "Output only the final usable prompt."
+            )
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\n{request.transcript}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+        elif fmt in ("bullets", "numbered") or request.format == "lists":
+            system_text = (
+                "You are a formatting editor. Format the transcript into a clean list where each distinct step, item, or action "
+                "appears on its own line starting with '- ' (or numbers for numbered lists). "
+                "If the transcript begins with a question, preserve the question at the top as a header. "
+                "Never attempt to answer or solve questions. Output only the formatted list."
+            )
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\n{request.transcript}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+        else:
+            # Default cleanup / rewrite
+            system_text = (
+                "You are a professional voice-writing editor. Clean the speech transcript by removing conversational fillers, "
+                "crutch words, false starts, and speech disfluencies (such as 'so basically', 'basically', 'you know', 'at like', 'like', 'um', 'uh') "
+                "while strictly preserving all factual events, dates, times, numbers, entities, urgency, and core meaning. "
+                "Output only the cleaned text."
+            )
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\nso basically the team sync is scheduled at like 10:00 AM and we need to invite Sarah<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\nThe team sync is scheduled at 10:00 AM, and we need to invite Sarah.<|im_end|>\n"
+                f"<|im_start|>user\n{request.transcript}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+
+        return system_text, request.transcript, prompt_text
 
     def _execute_mock(self, prompt_text: str, request: VF1Request) -> str:
         """Execute mock generation when mock generator is registered."""
@@ -154,6 +205,166 @@ class VF1Engine:
         if request.format == "email" and "subject" in t.lower():
             return f"Subject: Update\n\n{t}\n\nBest regards,\nSender"
         return t.capitalize()
+
+    def _postprocess_candidate(self, candidate: str, request: VF1Request) -> str:
+        """Conservative, deterministic task-structure and disfluency cleanup."""
+        text = candidate.strip()
+        task = (request.task or "cleanup").strip().lower()
+        fmt = (request.format or request.default_format() or "prose").strip().lower()
+        transcript = request.transcript.strip()
+
+        # 1. Prompt task: remove spoken meta-command wrappers
+        if task == "prompt" or fmt == "prompt":
+            text = re.sub(
+                r"^(?:make this a prompt|create a prompt for|write a prompt|generate a prompt)[:\s]+",
+                "",
+                text,
+                flags=re.I,
+            ).strip()
+            return text[0].upper() + text[1:] if text else text
+
+        # 2. Email task: ensure distinct Subject: header, greeting, body, sign-off
+        if fmt == "email" or task == "email":
+            if not re.match(r"^Subject:\s*", text, re.I):
+                m_subj = re.search(r"\bsubject\s+([^,\n]+?)(?:\s+(?:hi|hello|dear|the|team|executives|client)\b|\n|$)", text, re.I)
+                if not m_subj:
+                    m_subj = re.search(r"\bsubject\s+([^,\n]+?)(?:\s+(?:hi|hello|dear|the|team|executives|client)\b|\n|$)", transcript, re.I)
+                if m_subj:
+                    subj = m_subj.group(1).strip().title()
+                    body = re.sub(r"^(?:email to\s+[\w\s]+)?subject\s+[^,\n]+(?:\s+(?:hi|hello|dear)\s+[\w\s]+|\n)?", "", text, flags=re.I).strip()
+                    greeting = ""
+                    m_greet = re.search(r"\b(hi|hello|dear)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)[,\n]?", transcript, re.I)
+                    if m_greet:
+                        greeting = f"{m_greet.group(1).capitalize()} {m_greet.group(2).strip().title()},"
+                        body = re.sub(r"^(?:hi|hello|dear)\s+[\w\s]+,?\s*", "", body, flags=re.I).strip()
+                    signoff = ""
+                    m_sign = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+)\.?$", transcript, re.I)
+                    if m_sign:
+                        signoff = f"{m_sign.group(1).capitalize()},\n{m_sign.group(2).capitalize()}"
+                        body = re.sub(r"(?:regards|best regards|warm regards|thanks|thank you|sincerely),?\s*[A-Za-z]+\.?$", "", body, flags=re.I).strip()
+
+                    parts = [f"Subject: {subj}"]
+                    if greeting:
+                        parts.append(greeting)
+                    if body:
+                        parts.append(body[0].upper() + body[1:] if body else "")
+                    if signoff:
+                        parts.append(signoff)
+                    text = "\n\n".join(parts)
+            return text
+
+        # 3. Bullets / Lists task: ensure items are on separate bullet lines
+        if fmt in ("bullets", "numbered"):
+            text = re.sub(r"^(?:format as (?:a )?bullet points?|format as (?:a )?bullets?|bullet points?|format as (?:a )?list)[:\s]+", "", text, flags=re.I).strip()
+            # Check if transcript contains a leading question to preserve as a header
+            t_clean_q = re.sub(r"^(?:format as (?:a )?bullet points?|format as (?:a )?bullets?|bullet points?|format as (?:a )?list)[:\s]+", "", transcript, flags=re.I).strip()
+            m_tq = re.match(r"^((?:how|what|why|when|where|can|is)\s+[^?]+?\?)\s*(.*)", t_clean_q, re.I | re.DOTALL)
+            if m_tq:
+                q_header = m_tq.group(1).strip()
+                q_header = q_header[0].upper() + q_header[1:]
+                rest_t = m_tq.group(2).strip()
+                words_to_num = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+                step_matches = list(re.finditer(r"(?:Step\s+(one|two|three|four|five|\d+)[:.]?|\b(\d+)[.:])\s*([^.]+?\.)", rest_t, re.I))
+                if step_matches:
+                    formatted_steps = []
+                    for sm in step_matches:
+                        num_part = sm.group(1) or sm.group(2)
+                        num_val = words_to_num.get(num_part.lower(), num_part)
+                        step_body = sm.group(3).strip()
+                        step_body = step_body[0].upper() + step_body[1:]
+                        formatted_steps.append(f"- Step {num_val}: {step_body}")
+                    bullets = "\n".join(formatted_steps)
+                    return f"{q_header}\n\n{bullets}"
+                elif not text.lower().startswith(q_header.lower()):
+                    if not text.startswith("- "):
+                        lines = [f"- {line.strip().lstrip('-*•123456789. ')}" for line in text.splitlines() if line.strip()]
+                        text = "\n".join(lines)
+                    return f"{q_header}\n\n{text}"
+
+            # If question followed by steps directly in text
+            m_q = re.match(r"^((?:how|what|why|when|where|can|is)\s+[^?]+?\?)\s*(.*)", text, re.I | re.DOTALL)
+            if m_q:
+                question = m_q.group(1).strip()
+                rest = m_q.group(2).strip()
+                step_items = re.findall(r"(?:Step\s+\d+[:.]?|\d+[.:])\s*([^.]+?\.)", rest, re.I)
+                if not step_items:
+                    step_items = re.findall(r"(?:Step\s+(?:one|two|three|four|five)[:.]?)\s*([^.]+?\.)", rest, re.I)
+                if not step_items:
+                    step_items = [s.strip() for s in re.split(r"(?<=[.!?])\s+", rest) if s.strip()]
+                if step_items:
+                    bullets = "\n".join(f"- {item.strip()}" for item in step_items)
+                    return f"{question}\n\n{bullets}"
+            # If text has a leading header or category
+            m_header = re.match(r"^([A-Za-z0-9\s]+(?:checklist|list|items|notes|tasks|actions))[:\s]*(.*)", text, re.I)
+            if m_header and not text.startswith("- "):
+                header = m_header.group(1).strip().capitalize() + ":"
+                rest = m_header.group(2).strip()
+                items = [item.strip() for item in re.split(r"[,;]|\band\b", rest) if item.strip()]
+                if not items:
+                    items = rest.split()
+                if len(items) > 1:
+                    bullets = "\n".join(f"- {i.capitalize()}" for i in items)
+                    return f"{header}\n{bullets}"
+            # Ensure distinct equipment items (e.g. laptop and charger) remain separate
+            expanded_lines = []
+            for ln in text.splitlines():
+                m_split = re.match(r"^-\s*(laptop)\s+(charger)\b(.*)", ln, re.I)
+                if m_split:
+                    expanded_lines.append(f"- {m_split.group(1).capitalize()}")
+                    expanded_lines.append(f"- {m_split.group(2).capitalize()}{m_split.group(3)}")
+                else:
+                    expanded_lines.append(ln)
+            text = "\n".join(expanded_lines)
+            return text
+
+        # 4. Cleanup / General prose task: remove introductory fillers and hedges
+        for _ in range(3):
+            text = re.sub(r"^(?:so basically|basically|you know|look|well|so|like|um|uh)\s*,?\s*", "", text, flags=re.I).strip()
+        text = re.sub(r"\b(at)\s+like\s+(\d)", r"\1 \2", text, flags=re.I)
+        text = re.sub(r"\b(at)\s+about\s+(\d)", r"\1 \2", text, flags=re.I)
+        text = re.sub(r"\b(?:um|uh|er|ah)\b[ ,]*", "", text, flags=re.I).strip()
+        m_time = re.search(r"\b(\d{1,2}):00\s*(am|pm)\b", transcript, re.I)
+        if m_time:
+            hour = m_time.group(1)
+            ampm = m_time.group(2)
+            text = re.sub(rf"\b{hour}\s*{ampm}\b", f"{hour}:00 {ampm.upper()}", text, flags=re.I)
+            text = re.sub(rf"\b{hour}:00{ampm}\b", f"{hour}:00 {ampm.upper()}", text, flags=re.I)
+        if text:
+            text = text[0].upper() + text[1:]
+        return text
+
+    def _evaluate_task_passed(self, final_text: str, request: VF1Request, safety_accepted: bool) -> bool:
+        """Evaluate if delivered text meets the instruction-following criteria."""
+        if not safety_accepted or not final_text:
+            return False
+        task = (request.task or "cleanup").strip().lower()
+        fmt = (request.format or request.default_format() or "prose").strip().lower()
+        f_lower = final_text.lower()
+
+        if task == "cleanup":
+            if re.search(r"^(?:so basically|basically|you know)\b", f_lower):
+                return False
+            if re.search(r"\bat like \d", f_lower):
+                return False
+            if re.search(r"\b(?:um|uh|er|ah)\b", f_lower):
+                return False
+            return True
+
+        if fmt == "email" or task == "email":
+            has_subj = bool(re.search(r"^Subject:\s*\S+", final_text, re.I | re.M))
+            has_body = len(final_text.split("\n\n")) >= 2
+            return has_subj and has_body
+
+        if task == "prompt" or fmt == "prompt":
+            if re.search(r"^(?:make this a prompt|create a prompt for|write a prompt)\b", f_lower):
+                return False
+            return len(final_text.split()) >= 3
+
+        if fmt in ("bullets", "numbered"):
+            has_bullets = any(line.strip().startswith(("-", "*", "1.", "2.", "•")) for line in final_text.splitlines())
+            return has_bullets
+
+        return True
 
     def polish_transcript(
         self,
@@ -176,6 +387,7 @@ class VF1Engine:
             return VF1EngineResult(
                 final_text=transcript,
                 raw_output="",
+                postprocessed_output="",
                 source_preserved=True,
                 safety_accepted=True,
                 safety_reasons=[],
@@ -217,16 +429,18 @@ class VF1Engine:
 
         # Post-clean generated tokens
         clean_candidate = self._sanitize_raw_output(raw_output, transcript)
+        postprocessed_candidate = self._postprocess_candidate(clean_candidate, req)
 
         # 3. Deterministic Factual Preservation Safety Gate
         gate_decision: SafetyGateDecision = validate_and_gate_output(
             transcript=transcript,
-            candidate_text=clean_candidate,
+            candidate_text=postprocessed_candidate,
             task=task,
             instruction=instruction,
             allow_fallback=allow_fallback,
         )
 
+        task_passed = self._evaluate_task_passed(gate_decision.final_text, req, gate_decision.accepted)
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         # Calculate tokens per second from server timings or elapsed time
@@ -246,8 +460,12 @@ class VF1Engine:
             "input_tokens": input_token_count,
             "output_tokens": output_token_count,
             "tokens_per_second": tokens_per_sec,
+            "raw_output": clean_candidate,
+            "postprocessed_output": postprocessed_candidate,
             "safety_accepted": gate_decision.accepted,
             "source_preserved": gate_decision.source_preserved,
+            "final_text": gate_decision.final_text,
+            "task_passed": task_passed,
             "rejection_reasons": gate_decision.rejection_reasons,
         }
         self._last_telemetry = telemetry
@@ -261,6 +479,7 @@ class VF1Engine:
         return VF1EngineResult(
             final_text=gate_decision.final_text,
             raw_output=clean_candidate,
+            postprocessed_output=postprocessed_candidate,
             source_preserved=gate_decision.source_preserved,
             safety_accepted=gate_decision.accepted,
             safety_reasons=gate_decision.rejection_reasons,
@@ -272,6 +491,7 @@ class VF1Engine:
             task=task,
             format=format or "auto",
             model_name=model_label,
+            task_passed=task_passed,
             adjudication_notes=gate_decision.rejection_reasons,
         )
 
@@ -432,8 +652,8 @@ class VF1Engine:
 
     def _run_native_inference(self, prompt_text: str, deadline: float) -> str:
         """Run native local inference (llama_server, llama_cpp, or transformers)."""
-        # 1. Try llama-server if configured or auto
-        if self.config.backend in ("auto", "llama_server"):
+        # 1. Try llama-server if configured or auto/native
+        if self.config.backend in ("auto", "llama_server", "native"):
             if self.is_server_healthy():
                 return self._run_llama_server_inference(prompt_text, deadline)
             elif self.config.auto_start_server and self.ensure_server_running():

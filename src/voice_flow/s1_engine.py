@@ -802,23 +802,35 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
         if getattr(polish_with_s1, "_cached_llm_path", None) == str(model_path):
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
-        from llama_cpp import Llama  # type: ignore
+        try:
+            from llama_cpp import Llama  # type: ignore
 
-        gpu_layers = -1 if sys.platform == "darwin" else 0
-        llm = Llama(
-            model_path=str(model_path),
-            n_ctx=_S1_CONTEXT_TOKENS,
-            **_s1_runtime_batch_settings(),
-            n_gpu_layers=gpu_layers,
-            verbose=False,
-        )
-        old_llm = getattr(polish_with_s1, "_cached_llm", None)
-        if old_llm is not None:
-            _release_cached_s1(old_llm)
-        setattr(polish_with_s1, "_cached_llm", llm)
-        setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-        setattr(polish_with_s1, "_last_used", idle_time())
-        return True
+            gpu_layers = -1 if sys.platform == "darwin" else 0
+            llm = Llama(
+                model_path=str(model_path),
+                n_ctx=_S1_CONTEXT_TOKENS,
+                **_s1_runtime_batch_settings(),
+                n_gpu_layers=gpu_layers,
+                verbose=False,
+            )
+            old_llm = getattr(polish_with_s1, "_cached_llm", None)
+            if old_llm is not None:
+                _release_cached_s1(old_llm)
+            setattr(polish_with_s1, "_cached_llm", llm)
+            setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            setattr(polish_with_s1, "_last_used", idle_time())
+            return True
+        except Exception:
+            from voice_flow import vf1_engine
+
+            engine = vf1_engine.get_vf1_engine()
+            if engine.is_server_healthy() or (
+                engine._find_llama_server_binary() and engine.ensure_server_running()
+            ):
+                setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+                setattr(polish_with_s1, "_last_used", idle_time())
+                return True
+            return False
     except Exception as exc:
         log.warning("[S1] Could not warm S1-mini model: %s", exc)
         return False

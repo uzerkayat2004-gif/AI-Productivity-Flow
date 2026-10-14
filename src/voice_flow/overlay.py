@@ -1929,14 +1929,9 @@ class FloatingOverlayBar:
             ready_zone = f"summary_activate:{index}"
             cy = (top + bottom) / 2
             if status == "processing":
-                title = str(row.get("title") or ("Video Flow" if kind == "video" else "Audio Flow"))
+                title = "Video Flow" if kind == "video" else "Audio Flow"
                 progress = max(0, min(100, int(row.get("progress") or 0)))
-                stage = str(row.get("stage") or "Working")
-                title = title[:20]
-                progress_label = f"{progress}%"
-                stage_room = max(4, 48 - len(title) - len(progress_label) - 6)
-                c.create_text(12, cy, text=title, fill="", state="hidden")
-                c.create_text(12, cy, text=f"{title} · {progress_label} · {stage[:stage_room]}", fill=self.INK,
+                c.create_text(12, cy, text=f"{title} · {progress}%", fill=self.INK,
                               font=(config.bar_font_family, 8, "bold"), anchor="w")
                 rail_left, rail_right, rail_y = 12, w - 42, bottom - 4
                 c.create_line(rail_left, rail_y, rail_right, rail_y, fill=self.ORANGE_FAINT, width=2, capstyle="round")

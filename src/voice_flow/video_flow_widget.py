@@ -11,6 +11,8 @@ scaling, format presets, styles, live document analysis, and Native Engine (Visu
 from __future__ import annotations
 
 import base64
+import ctypes
+from ctypes import wintypes
 import json
 import logging
 import os
@@ -386,7 +388,6 @@ class VideoFlowScreenWidget:
         self._nlm_format: tk.StringVar | None = None
         self._nlm_style: tk.StringVar | None = None
         self._nlm_style_prompt: tk.StringVar | None = None
-        self._nlm_focus: tk.Text | None = None
         self._auth_banner_frame: tk.Frame | None = None
         self._auth_pill_frame: tk.Frame | None = None
         self._auth_status_label: tk.Label | None = None
@@ -598,7 +599,7 @@ class VideoFlowScreenWidget:
         win.withdraw()
         win.title("Video Flow — Create video")
         win.geometry("560x650")
-        win.minsize(500, 560)
+        win.minsize(320, 240)
         win.resizable(True, True)
         win.attributes("-topmost", True)
         win.configure(bg=colors["background"])
@@ -616,6 +617,10 @@ class VideoFlowScreenWidget:
         except Exception:
             pass
         self._configure_styles(win)
+
+        # Reserve the action area before allocating the scrollable body.
+        footer_frame = tk.Frame(win, bg=colors["surface"], padx=20, pady=10)
+        footer_frame.pack(side="bottom", fill="x")
 
         viewport = tk.Frame(win, bg=colors["background"])
         viewport.pack(fill="both", expand=True)
@@ -642,7 +647,7 @@ class VideoFlowScreenWidget:
             highlightthickness=1,
             highlightbackground=colors["border"],
             padx=20,
-            pady=20,
+            pady=12,
         )
         shell_window = scroll_canvas.create_window((280, 12), window=shell, anchor="n")
 
@@ -671,7 +676,7 @@ class VideoFlowScreenWidget:
         def sync_shell_width(event: tk.Event) -> None:
             canvas_width = event.width
             card_margin = 16
-            card_width = max(440, canvas_width - (card_margin * 2))
+            card_width = max(1, canvas_width - (card_margin * 2))
             center_x = canvas_width // 2
             scroll_canvas.coords(shell_window, center_x, 12)
             scroll_canvas.itemconfigure(shell_window, width=card_width)
@@ -999,28 +1004,6 @@ class VideoFlowScreenWidget:
         )
         custom_style_entry.pack(fill="x", ipady=4, pady=(2, 4))
 
-        # Focus / Visual Direction Entry
-        nlm_focus_frame = tk.Frame(notebooklm_frame, bg=colors["surface"])
-        nlm_focus_frame.pack(fill="x", pady=(2, 6))
-        self._label(nlm_focus_frame, "Focus / Visual Direction (optional)")
-        nlm_focus = tk.Text(
-            nlm_focus_frame,
-            height=2,
-            wrap="word",
-            bg=colors["surface"],
-            fg=colors["text"],
-            insertbackground=colors["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=colors["border"],
-            highlightcolor=colors["border_focus"],
-            padx=10,
-            pady=6,
-            font=("Segoe UI", 9),
-            undo=True,
-        )
-        nlm_focus.pack(fill="x", pady=(2, 0))
-
         # 4B. NATIVE ENGINE CONFIGURATION (Legacy Visual V2.1)
         native_frame = tk.Frame(shell, bg=colors["surface"])
         self._native_frame = native_frame
@@ -1095,27 +1078,6 @@ class VideoFlowScreenWidget:
         theme = ttk.Combobox(theme_cell, textvariable=theme_display_var, state="readonly", style="VideoFlow.TCombobox", width=14)
         theme.pack(fill="x", ipady=2, pady=(2, 0))
 
-        native_direction_frame = tk.Frame(native_frame, bg=colors["surface"])
-        native_direction_frame.pack(fill="x", pady=(4, 4))
-        self._label(native_direction_frame, "Your visual direction (optional)")
-        visual_direction = tk.Text(
-            native_direction_frame,
-            height=2,
-            wrap="word",
-            bg=colors["surface"],
-            fg=colors["text"],
-            insertbackground=colors["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=colors["border"],
-            highlightcolor=colors["border_focus"],
-            padx=10,
-            pady=6,
-            font=("Segoe UI", 9),
-            undo=True,
-        )
-        visual_direction.pack(fill="x", pady=(2, 0))
-
         # Pack default NotebookLM frame
         notebooklm_frame.pack(fill="x", pady=(0, 6))
 
@@ -1144,9 +1106,6 @@ class VideoFlowScreenWidget:
         # ---------------------------------------------------------------------
         # 6. BOTTOM ACTION & STATUS FOOTER
         # ---------------------------------------------------------------------
-        footer_frame = tk.Frame(shell, bg=colors["surface"])
-        footer_frame.pack(fill="x", pady=(4, 0))
-
         status_left = tk.Frame(footer_frame, bg=colors["surface"])
         status_left.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
@@ -1186,14 +1145,13 @@ class VideoFlowScreenWidget:
             font=("Segoe UI", 10, "bold"),
             cursor="hand2",
         )
-        generate.pack(side="right")
+        generate.pack(side="right", before=status_left)
         generate.bind("<Enter>", lambda _e: generate.configure(bg=colors["orange_dark"]) if str(generate.cget("state")) != "disabled" else None)
         generate.bind("<Leave>", lambda _e: generate.configure(bg=colors["orange"]))
 
         self._nlm_format = format_ref_var
         self._nlm_style = style_ref_var
         self._nlm_style_prompt = custom_style_var
-        self._nlm_focus = nlm_focus
 
         self._controls = {
             "provider": provider_var,
@@ -1212,8 +1170,6 @@ class VideoFlowScreenWidget:
             "style_box": style_box,
             "style_prompt": custom_style_var,
             "style_prompt_entry": custom_style_entry,
-            "nlm_focus": nlm_focus,
-            "visual_direction": visual_direction,
             "model": model_ref_var,
             "model_display": model_display_var,
             "model_detail": model_detail_var,
@@ -1259,6 +1215,9 @@ class VideoFlowScreenWidget:
                 pass
 
         refresh_provider_cards()
+        win.update_idletasks()
+        initial_height = max(650, shell.winfo_reqheight() + 24 + footer_frame.winfo_reqheight())
+        win.geometry(f"560x{initial_height}")
 
     def _configure_styles(self, master: tk.Misc) -> None:
         colors = getattr(self, "colors", None) or get_composer_colors()
@@ -1393,10 +1352,6 @@ class VideoFlowScreenWidget:
         format_ref = str(self._controls.get("format", tk.StringVar(value="auto")).get() or "auto").strip().lower()
 
         focus_text = ""
-        if self._nlm_focus is not None:
-            focus_text = self._nlm_focus.get("1.0", "end-1c").strip()[:1000]
-        elif "nlm_focus" in self._controls:
-            focus_text = self._controls["nlm_focus"].get("1.0", "end-1c").strip()[:1000]
         title_text = self._controls["title"].get().strip() if "title" in self._controls else ""
 
         try:
@@ -1802,12 +1757,7 @@ class VideoFlowScreenWidget:
         format_ref = str((self._nlm_format.get() if self._nlm_format is not None else self._controls.get("format", tk.StringVar(value="auto")).get()) or "auto").strip().lower()
         style_ref = str((self._nlm_style.get() if self._nlm_style is not None else self._controls.get("style", tk.StringVar(value="auto")).get()) or "auto").strip().lower()
         style_prompt = ((self._nlm_style_prompt.get() if self._nlm_style_prompt is not None else self._controls.get("style_prompt", tk.StringVar(value="")).get()) or "").strip() if style_ref == "custom" else ""
-        if self._nlm_focus is not None:
-            focus_text = self._nlm_focus.get("1.0", "end-1c").strip()[:1000]
-        elif "nlm_focus" in self._controls:
-            focus_text = self._controls["nlm_focus"].get("1.0", "end-1c").strip()[:1000]
-        else:
-            focus_text = ""
+        focus_text = ""
 
         title_text = self._controls["title"].get().strip() if "title" in self._controls else ""
         try:
@@ -1879,7 +1829,7 @@ class VideoFlowScreenWidget:
                 "target_duration_seconds": duration_sec,
                 "document_profile": profile_dict,
                 "theme": self._controls["theme"].get() or "auto",
-                "visual_direction": self._controls["visual_direction"].get("1.0", "end-1c").strip()[:1000],
+                "visual_direction": "",
                 "allow_local_fallback": True,
             }
 
@@ -1956,6 +1906,27 @@ class VideoFlowScreenWidget:
             import webbrowser
             webbrowser.open(f"http://127.0.0.1:8991/video-player.html?id={urllib.parse.quote(str(video_id))}")
 
+    def _composer_work_area(self, width: int, height: int, x: int, y: int) -> tuple[int, int, int, int]:
+        """Return the candidate rectangle's monitor work area in Tk coordinates."""
+        if sys.platform == "win32":
+            try:
+                class MonitorInfo(ctypes.Structure):
+                    _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT),
+                                ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
+                user32 = ctypes.windll.user32
+                user32.MonitorFromRect.argtypes = [ctypes.POINTER(wintypes.RECT), wintypes.DWORD]
+                user32.MonitorFromRect.restype = wintypes.HANDLE
+                user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
+                info = MonitorInfo()
+                info.size = ctypes.sizeof(info)
+                candidate = wintypes.RECT(x, y, x + width, y + height)
+                monitor = user32.MonitorFromRect(ctypes.byref(candidate), 2)
+                if user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                    return info.work.left, info.work.top, info.work.right, info.work.bottom
+            except (AttributeError, OSError, tk.TclError):
+                pass
+        return 0, 0, self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+
     def _center(self) -> None:
         if not self.root:
             self.root = getattr(tk, "_default_root", None)
@@ -1963,25 +1934,36 @@ class VideoFlowScreenWidget:
             return
         try:
             from voice_flow.audio_flow_dialog import calculate_anchored_dialog_geometry
-            w, h, x, y = calculate_anchored_dialog_geometry(
+            width, height, x, y = calculate_anchored_dialog_geometry(
                 self.win,
                 parent=getattr(self, "_anchor_win", None),
                 default_w=560,
                 default_h=650,
                 gap=12,
             )
-            self.win.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
             self.win.update_idletasks()
-            current_w = self.win.winfo_width()
-            current_h = self.win.winfo_height()
-            width = current_w if current_w > 200 else 560
-            height = current_h if current_h > 200 else 650
-            screen_w = self.win.winfo_screenwidth()
-            screen_h = self.win.winfo_screenheight()
-            x = max(0, (screen_w - width) // 2)
-            y = max(0, (screen_h - height) // 2 - 20)
-            self.win.geometry(f"{width}x{height}+{x}+{y}")
+            width = self.win.winfo_width()
+            height = self.win.winfo_height()
+            width = width if width > 200 else 560
+            height = height if height > 200 else 650
+            x = (self.win.winfo_screenwidth() - width) // 2
+            y = (self.win.winfo_screenheight() - height) // 2 - 20
+        # A withdrawn window can still report its previous applied height.
+        # Preserve the initial content request before clamping to available space.
+        if self._title_frame is not None and "generate" in self._controls:
+            body = self._title_frame.master
+            footer = self._controls["generate"].master
+            height = max(height, body.winfo_reqheight() + 24 + footer.winfo_reqheight())
+        left, top, right, bottom = self._composer_work_area(width, height, x, y)
+        # Leave room for the native title bar and borders on compact displays.
+        available_w = max(1, right - left - 16)
+        available_h = max(1, bottom - top - 48)
+        width, height = min(width, available_w), min(height, available_h)
+        self.win.minsize(min(320, available_w), min(240, available_h))
+        x = max(left + 8, min(x, right - width - 8))
+        y = max(top + 32, min(y, bottom - height - 16))
+        self.win.geometry(f"{width}x{height}+{x}+{y}")
 
     def _run_on_ui(self, callback: Callable[[], None]) -> None:
         if hasattr(self, "_ui_queue"):

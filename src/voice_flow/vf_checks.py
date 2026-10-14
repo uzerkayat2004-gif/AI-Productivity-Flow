@@ -40,8 +40,8 @@ _APOS_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in _APOS_CONTRACTIONS
 # before the cue or substitutes a value of the same kind (number, weekday);
 # otherwise they are ordinary words ("I'm sorry", "can't make it, sorry").
 _CORRECTION_CUE_RE = re.compile(
-    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|no,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait|wait\s+no|"
-    r"no\s+no|or\s+rather|make\s+that|scratch\s+that|actually\s+no)\b\s*,?\s*"
+    r"(?:,\s*)?\b(?P<strong>no,?\s+actually,?\s+make\s+that|no,?\s+make\s+that|actually,?\s+make\s+that|no\s+wait,?\s+make\s+that|wait\s+no,?\s+make\s+that|no\s+wait|wait\s+no|"
+    r"no\s+no|or\s+rather|make\s+that|scratch\s+that|actually\s+no|wait,?\s+actually)\b\s*,?\s*"
     r"|(?:,\s*)?\b(?P<weak>sorry|i\s+mean|no)\b\s*,?\s*",
     re.IGNORECASE,
 )
@@ -136,6 +136,39 @@ def resolve_corrections(text: str) -> tuple[str, list[str]]:
                 "our", "your", "not", "now", "just"}
         # Weak cues only look three words back; strong cues eight.
         reach = 3 if weak else 8
+        # If repair starts with a number or weekday, try numeric/weekday substitution first
+        first = after_words[0].strip(",.").lower()
+        kind = None
+        if _NUMERIC_TOKEN_RE.match(first):
+            kind = _NUMERIC_TOKEN_RE
+        elif re.fullmatch(_WEEKDAYS, first):
+            kind = re.compile(rf"^(?:{_WEEKDAYS})$", re.I)
+
+        if kind is not None:
+            for j in range(len(before_words) - 1, max(-1, len(before_words) - 8), -1):
+                if kind.match(before_words[j].strip(",.").lower()):
+                    j1 = j
+                    j0 = j
+                    while j0 - 1 >= 0 and kind is _NUMERIC_TOKEN_RE and _NUMERIC_TOKEN_RE.match(before_words[j0 - 1].strip(",.").lower()):
+                        j0 -= 1
+                    k = 1
+                    while k < len(after_words) and kind is _NUMERIC_TOKEN_RE and _NUMERIC_TOKEN_RE.match(after_words[k].strip(",.").lower()):
+                        k += 1
+                    after_tail = after_words[k:]
+                    before_tail = before_words[j1 + 1:]
+                    if after_tail and any(w.strip(",.").lower() in [bw.strip(",.").lower() for bw in before_tail] for w in after_tail):
+                        removed.append(" ".join(before_words[j0:]))
+                        text = " ".join(before_words[:j0] + after_words)
+                    else:
+                        removed.append(" ".join(before_words[j0:j1 + 1]))
+                        text = " ".join(before_words[:j0] + after_words[:k] + before_words[j1 + 1:] + after_words[k:])
+                    cut = -1
+                    break
+
+        if cut == -1:
+            search_from = 0
+            continue
+
         first_word = after_words[0].strip(",.").lower()
         n_probe = 2 if (not weak or first_word in {"dont", "don't", "do", "not", "never", "please", "just"}) else 1
         for probe in [w.strip(",.").lower() for w in after_words[:n_probe]]:
@@ -145,32 +178,6 @@ def resolve_corrections(text: str) -> tuple[str, list[str]]:
             if cands and probe not in stop:
                 cut = offset + max(cands)
                 break
-        if cut is None:
-            first = after_words[0].strip(",.").lower()
-            kind = None
-            if _NUMERIC_TOKEN_RE.match(first):
-                kind = _NUMERIC_TOKEN_RE
-            elif re.fullmatch(_WEEKDAYS, first):
-                kind = re.compile(rf"^(?:{_WEEKDAYS})$", re.I)
-            if kind is not None:
-                for j in range(len(before_words) - 1, max(-1, len(before_words) - 5), -1):
-                    if kind.match(before_words[j].strip(",.").lower()):
-                        j1 = j
-                        j0 = j
-                        while j0 - 1 >= 0 and kind is _NUMERIC_TOKEN_RE and _NUMERIC_TOKEN_RE.match(before_words[j0 - 1].strip(",.").lower()):
-                            j0 -= 1
-                        k = 1
-                        while k < len(after_words) and kind is _NUMERIC_TOKEN_RE and _NUMERIC_TOKEN_RE.match(after_words[k].strip(",.").lower()):
-                            k += 1
-                        # Substitute the value in place: "fifteen units sorry
-                        # fifty by friday" -> "fifty units by friday".
-                        removed.append(" ".join(before_words[j0:j1 + 1]))
-                        text = " ".join(before_words[:j0] + after_words[:k] + before_words[j1 + 1:] + after_words[k:])
-                        cut = -1
-                        break
-        if cut == -1:
-            search_from = 0
-            continue
         if cut is None:
             if weak:
                 search_from = m.end()
@@ -314,6 +321,7 @@ def number_values(text: str) -> list[set]:
     out: list[set] = []
     t = text or ""
     consumed = re.sub(r"(?<=\d),(?=\d)", "", t)
+    consumed = re.sub(r"\b(\d{1,2}):00\b", r"\1", consumed)
     for m in re.finditer(r"(?<![\d.])\d+(?:\.\d+)?(?![\d])", consumed):
         v = float(m.group(0))
         out.append({int(v) if v.is_integer() else v})

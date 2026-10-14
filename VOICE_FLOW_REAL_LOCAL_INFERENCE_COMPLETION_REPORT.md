@@ -161,7 +161,7 @@ All experiment assets, adapters, and evidence bundles remain locked and preserve
 | :--- | :--- | :--- | :--- |
 | **S1-mini GGUF Model** | `C:\Users\Asus\.voice_flow\models\s1-mini-q4_k_m.gguf` | `3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634` | Primary offline inference weights |
 | **llama-server Binary** | `C:\Users\Asus\.voice_flow\bin\llama\llama-server.exe` | Verified in build 11604 bundle | Native CPU inference daemon |
-| **Stage 3B LoRA Adapter** | Vault: `adapter_model.safetensors` | `c56208e9a265ae0fca10ad3504812a23d940656a81ad536db6d79a2f79035e16` | Preserved fine-tuning weights |
+| **Stage 3B LoRA Adapter** | Vault: `adapter_model.safetensors` | `c56208e93edd513c6980d031992fbea93e45756eb6817d358d934894e5eba98f` | Preserved fine-tuning weights |
 | **Benchmark Evidence** | `D:\.zcode\workspace\default\AI-Productivity-Flow\benchmark_stage4_results.json` | Generated live 2026-10-14 | Machine-readable metrics & logs |
 | **Stage 4 Regression Tests** | `tests/test_real_local_execution.py` | 9 passing tests | Continuous regression suite |
 
