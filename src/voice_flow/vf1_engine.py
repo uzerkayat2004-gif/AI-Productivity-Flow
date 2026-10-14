@@ -9,12 +9,16 @@ Operates completely locally without cloud API dependencies.
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -44,13 +48,17 @@ class VF1EngineConfig:
     model_revision: str = DEFAULT_S1_REVISION
     use_lora: bool = False
     lora_adapter_path: Optional[str] = None
-    backend: str = "auto"  # "auto", "llama_cpp", "transformers", "mock"
+    backend: str = "auto"  # "auto", "llama_server", "llama_cpp", "transformers", "mock"
     device: str = "auto"   # "auto", "cuda", "cpu"
     timeout_seconds: float = 5.0
     max_new_tokens: int = 256
     temperature: float = 0.0
     repetition_penalty: float = 1.0
     enable_thinking: bool = False
+    server_host: str = "127.0.0.1"
+    server_port: int = 8080
+    server_binary_path: Optional[str] = None
+    auto_start_server: bool = True
 
 
 @dataclass
@@ -69,6 +77,7 @@ class VF1EngineResult:
     task: str
     format: str
     model_name: str
+    tokens_per_second: float = 0.0
     adjudication_notes: List[str] = field(default_factory=list)
 
     @property
@@ -86,6 +95,8 @@ class VF1Engine:
         self._loaded_tokenizer: Any = None
         self._mock_generator: Optional[Callable[[str, VF1Request], str]] = None
         self._last_telemetry: Optional[Dict[str, Any]] = None
+        self._server_process: Optional[Any] = None
+        self._last_server_timings: Optional[Dict[str, Any]] = None
 
     def set_mock_generator(self, generator: Optional[Callable[[str, VF1Request], str]]) -> None:
         """Set mock generator for deterministic unit/integration testing without downloading weights."""
@@ -178,9 +189,10 @@ class VF1Engine:
             )
 
         # 1. Build contract request
+        norm_format = None if format in (None, "auto") else format
         req = VF1Request(
             task=task,
-            format=format,
+            format=norm_format,
             instruction=instruction,
             rules=rules,
             context=context,
@@ -217,6 +229,13 @@ class VF1Engine:
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
+        # Calculate tokens per second from server timings or elapsed time
+        tokens_per_sec = 0.0
+        if self._last_server_timings and "predicted_per_second" in self._last_server_timings:
+            tokens_per_sec = round(float(self._last_server_timings["predicted_per_second"]), 2)
+        elif elapsed_ms > 0 and output_token_count > 0:
+            tokens_per_sec = round(output_token_count / (elapsed_ms / 1000.0), 2)
+
         # Telemetry
         model_label = f"{self.config.model_id} (VF-1 LoRA)" if self.config.use_lora else f"{self.config.model_id} (VF-1 Base)"
         telemetry = {
@@ -226,6 +245,7 @@ class VF1Engine:
             "latency_ms": elapsed_ms,
             "input_tokens": input_token_count,
             "output_tokens": output_token_count,
+            "tokens_per_second": tokens_per_sec,
             "safety_accepted": gate_decision.accepted,
             "source_preserved": gate_decision.source_preserved,
             "rejection_reasons": gate_decision.rejection_reasons,
@@ -247,6 +267,7 @@ class VF1Engine:
             latency_ms=elapsed_ms,
             input_tokens=input_token_count,
             output_tokens=output_token_count,
+            tokens_per_second=tokens_per_sec,
             memory_mb=memory_mb,
             task=task,
             format=format or "auto",
@@ -271,9 +292,156 @@ class VF1Engine:
         out = out.strip().strip('"')
         return out if out else source_transcript
 
+    def _find_llama_server_binary(self) -> Optional[Path]:
+        """Locate the official precompiled llama-server executable."""
+        if self.config.server_binary_path:
+            p = Path(self.config.server_binary_path)
+            if p.is_file():
+                return p
+
+        env_path = os.environ.get("LLAMA_SERVER_PATH")
+        if env_path:
+            p = Path(env_path)
+            if p.is_file():
+                return p
+
+        from voice_flow import downloadable_models
+        candidate_dirs = [
+            downloadable_models.get_models_dir().parent / "bin" / "llama",
+            Path.home() / ".voice_flow" / "bin" / "llama",
+        ]
+        exe_names = ["llama-server.exe", "llama-server"]
+        for cdir in candidate_dirs:
+            for name in exe_names:
+                candidate = cdir / name
+                if candidate.is_file():
+                    return candidate
+
+        import shutil
+        for name in exe_names:
+            found = shutil.which(name)
+            if found:
+                return Path(found)
+        return None
+
+    def is_server_healthy(self, host: Optional[str] = None, port: Optional[int] = None) -> bool:
+        """Check if local llama-server is healthy and ready for completions."""
+        h = host or self.config.server_host
+        p = port or self.config.server_port
+        url = f"http://{h}:{p}/health"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "VoiceFlow/VF1"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                    return data.get("status") in ("ok", "loading model") or resp.status == 200
+        except Exception:
+            return False
+        return False
+
+    def ensure_server_running(self) -> bool:
+        """Ensure llama-server process is running, launching if necessary."""
+        if self.is_server_healthy():
+            return True
+
+        binary = self._find_llama_server_binary()
+        if not binary:
+            log.warning("[VF-1] llama-server executable not found.")
+            return False
+
+        from voice_flow import s1_engine
+        model_path = s1_engine.get_s1_model_path()
+        if not model_path:
+            log.warning("[VF-1] S1-mini GGUF model file not found.")
+            return False
+
+        threads = max(1, min(8, os.cpu_count() or 4))
+        cmd = [
+            str(binary),
+            "-m", str(model_path),
+            "--host", self.config.server_host,
+            "--port", str(self.config.server_port),
+            "-c", str(DEFAULT_CONTEXT_TOKENS),
+            "-ngl", "0",
+            "-t", str(threads),
+        ]
+        log.info("[VF-1] Spawning llama-server: %s", " ".join(cmd))
+        try:
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+
+            self._server_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags,
+            )
+            deadline = time.perf_counter() + 10.0
+            while time.perf_counter() < deadline:
+                if self.is_server_healthy():
+                    log.info("[VF-1] llama-server successfully started on port %d", self.config.server_port)
+                    return True
+                time.sleep(0.25)
+            log.warning("[VF-1] llama-server did not become healthy within timeout.")
+            return False
+        except Exception as exc:
+            log.error("[VF-1] Failed to launch llama-server: %s", exc)
+            return False
+
+    def stop_server(self) -> None:
+        """Stop locally spawned server process if managed by this instance."""
+        if self._server_process is not None:
+            try:
+                self._server_process.terminate()
+                self._server_process.wait(timeout=3.0)
+            except Exception:
+                try:
+                    self._server_process.kill()
+                except Exception:
+                    pass
+            self._server_process = None
+
+    def _run_llama_server_inference(self, prompt_text: str, deadline: float) -> str:
+        """Execute inference against local llama-server /completion endpoint."""
+        url = f"http://{self.config.server_host}:{self.config.server_port}/completion"
+        payload = {
+            "prompt": prompt_text,
+            "n_predict": self.config.max_new_tokens,
+            "temperature": self.config.temperature,
+            "repeat_penalty": self.config.repetition_penalty,
+            "stop": ["<|im_end|>", "<|endoftext|>"],
+            "stream": False,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        timeout = max(1.0, deadline - time.perf_counter())
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "User-Agent": "VoiceFlow/VF1"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    res_obj = json.loads(resp.read().decode("utf-8", errors="replace"))
+                    self._last_server_timings = res_obj.get("timings")
+                    return str(res_obj.get("content") or "")
+        except Exception as exc:
+            log.warning("[VF-1] llama-server inference error: %s", exc)
+        return ""
+
     def _run_native_inference(self, prompt_text: str, deadline: float) -> str:
-        """Run native local inference (llama_cpp or transformers)."""
-        # If llama_cpp is available and GGUF exists
+        """Run native local inference (llama_server, llama_cpp, or transformers)."""
+        # 1. Try llama-server if configured or auto
+        if self.config.backend in ("auto", "llama_server"):
+            if self.is_server_healthy():
+                return self._run_llama_server_inference(prompt_text, deadline)
+            elif self.config.auto_start_server and self.ensure_server_running():
+                return self._run_llama_server_inference(prompt_text, deadline)
+            elif self.config.backend == "llama_server":
+                return ""
+
+        # 2. Try llama_cpp in-process if available
         from voice_flow import s1_engine
 
         model_path = s1_engine.get_s1_model_path()
