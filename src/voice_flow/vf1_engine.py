@@ -152,7 +152,8 @@ class VF1Engine:
             system_text = (
                 "You are an AI prompt engineer. Extract and synthesize the actual prompt being requested by the user. "
                 "Remove any spoken meta-command wrappers (such as 'make this a prompt:', 'create a prompt for:', 'write a prompt:'). "
-                "Output only the final usable prompt."
+                "Output an actionable direct instruction prompt starting with an imperative verb (such as 'Design', 'Create', 'Write', 'Build') "
+                "while faithfully preserving the speaker's requested topic and technical constraints. Output only the final usable prompt."
             )
             prompt_text = (
                 f"<|im_start|>system\n{system_text}<|im_end|>\n"
@@ -163,6 +164,7 @@ class VF1Engine:
             system_text = (
                 "You are a formatting editor. Format the transcript into a clean list where each distinct step, item, or action "
                 "appears on its own line starting with '- ' (or numbers for numbered lists). "
+                "For checklists and action items, keep each action verb and its direct object together on the same line. "
                 "If the transcript begins with a question, preserve the question at the top as a header. "
                 "Never attempt to answer or solve questions. Output only the formatted list."
             )
@@ -213,7 +215,7 @@ class VF1Engine:
         fmt = (request.format or request.default_format() or "prose").strip().lower()
         transcript = request.transcript.strip()
 
-        # 1. Prompt task: remove spoken meta-command wrappers
+        # 1. Prompt task: remove spoken meta-command wrappers and ensure actionable imperative form
         if task == "prompt" or fmt == "prompt":
             text = re.sub(
                 r"^(?:make this a prompt|create a prompt for|write a prompt|generate a prompt)[:\s]+",
@@ -221,6 +223,31 @@ class VF1Engine:
                 text,
                 flags=re.I,
             ).strip()
+            # Convert opening gerunds to direct imperative action verbs (e.g. "designing" -> "Design")
+            gerund_to_imperative = {
+                "designing": "Design",
+                "creating": "Create",
+                "writing": "Write",
+                "building": "Build",
+                "implementing": "Implement",
+                "developing": "Develop",
+                "generating": "Generate",
+                "evaluating": "Evaluate",
+                "optimizing": "Optimize",
+                "analyzing": "Analyze",
+                "comparing": "Compare",
+                "testing": "Test",
+                "formatting": "Format",
+                "summarizing": "Summarize",
+                "drafting": "Draft",
+                "setting": "Set",
+                "configuring": "Configure",
+            }
+            words = text.split(None, 1)
+            if words and words[0].lower() in gerund_to_imperative:
+                first_verb = gerund_to_imperative[words[0].lower()]
+                rest = words[1] if len(words) > 1 else ""
+                text = f"{first_verb} {rest}".strip()
             return text[0].upper() + text[1:] if text else text
 
         # 2. Email task: ensure distinct Subject: header, greeting, body, sign-off
@@ -303,8 +330,8 @@ class VF1Engine:
                 if not items:
                     items = rest.split()
                 if len(items) > 1:
-                    bullets = "\n".join(f"- {i.capitalize()}" for i in items)
-                    return f"{header}\n{bullets}"
+                    text = f"{header}\n" + "\n".join(f"- {i.capitalize()}" for i in items)
+
             # Ensure distinct equipment items (e.g. laptop and charger) remain separate
             expanded_lines = []
             for ln in text.splitlines():
@@ -315,6 +342,48 @@ class VF1Engine:
                 else:
                     expanded_lines.append(ln)
             text = "\n".join(expanded_lines)
+
+            # General repair of action checklists: keep action verbs and their direct objects together
+            ACTION_VERBS = {
+                "backup", "run", "deploy", "verify", "test", "build", "check", "review",
+                "update", "create", "add", "delete", "remove", "configure", "install",
+                "restart", "monitor", "inspect", "commit", "push", "sync", "validate",
+                "fix", "send", "prepare", "schedule", "clean", "archive", "order"
+            }
+            repaired_lines = []
+            for ln in text.splitlines():
+                if not ln.strip():
+                    continue
+                if not ln.strip().startswith(("-", "*", "•", "1.", "2.")):
+                    repaired_lines.append(ln)
+                    continue
+                cleaned = ln.strip().lstrip("-*•123456789. ")
+                words = cleaned.split()
+                if not words:
+                    continue
+                first = words[0].lower()
+                # If bullet line has no action verb and is an orphaned short noun fragment,
+                # merge it into preceding action line (e.g. "- Verify health" + "- Endpoint" -> "- Verify health endpoint")
+                if first not in ACTION_VERBS and len(words) <= 2 and repaired_lines and repaired_lines[-1].strip().startswith(("-", "*", "•")):
+                    prev = repaired_lines[-1]
+                    prev_words = prev.strip().lstrip("-*•123456789. ").split()
+                    if prev_words and prev_words[0].lower() in ACTION_VERBS:
+                        suffix = cleaned.lower() if not cleaned.isupper() and cleaned.istitle() else cleaned
+                        repaired_lines[-1] = f"{prev} {suffix}"
+                        continue
+                # If preceding bullet line ended with an action verb and current line begins with a noun phrase:
+                # shift the verb forward (e.g. "- Update API documentation review" + "- Pull request 42" -> "- Update API documentation" + "- Review pull request 42")
+                if repaired_lines and repaired_lines[-1].strip().startswith(("-", "*", "•")):
+                    prev = repaired_lines[-1]
+                    prev_words = prev.strip().lstrip("-*•123456789. ").split()
+                    if len(prev_words) >= 2 and prev_words[-1].lower() in ACTION_VERBS and first not in ACTION_VERBS:
+                        verb = prev_words[-1].capitalize()
+                        prev_base = " ".join(prev_words[:-1])
+                        repaired_lines[-1] = f"- {prev_base}"
+                        obj_clean = cleaned[0].lower() + cleaned[1:] if not cleaned.startswith("PR") and not cleaned.isupper() else cleaned
+                        ln = f"- {verb} {obj_clean}"
+                repaired_lines.append(ln)
+            text = "\n".join(repaired_lines)
             return text
 
         # 4. Cleanup / General prose task: remove introductory fillers and hedges
@@ -358,11 +427,22 @@ class VF1Engine:
         if task == "prompt" or fmt == "prompt":
             if re.search(r"^(?:make this a prompt|create a prompt for|write a prompt)\b", f_lower):
                 return False
+            # Actionable prompt must not start with a gerund phrase
+            first_w = final_text.split()[0].lower().rstrip(":,.")
+            if first_w.endswith("ing"):
+                return False
             return len(final_text.split()) >= 3
 
         if fmt in ("bullets", "numbered"):
-            has_bullets = any(line.strip().startswith(("-", "*", "1.", "2.", "•")) for line in final_text.splitlines())
-            return has_bullets
+            lines = [l.strip() for l in final_text.splitlines() if l.strip().startswith(("-", "*", "1.", "2.", "•"))]
+            if not lines:
+                return False
+            # Check for orphaned single-word fragments like '- Endpoint'
+            for l in lines:
+                w = l.lstrip("-*•123456789. ").split()
+                if len(w) == 1 and w[0].lower() in ("endpoint", "review", "42"):
+                    return False
+            return True
 
         return True
 
