@@ -21,6 +21,6 @@
     "approved": true,
     "by": "Uzair Kayat",
     "date": "2026-10-14",
-    "evidence": "Explicitly authorized bounded training run on authorized local compute (15 optimizer updates)"
+    "evidence": "Explicitly authorized bounded strengthened training run on authorized local compute (20 optimizer updates on strengthened multi-task dataset)"
   }
 }

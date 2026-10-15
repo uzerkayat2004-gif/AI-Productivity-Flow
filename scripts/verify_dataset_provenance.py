@@ -26,6 +26,7 @@ DATA_FILES = [
     Path("data/clean_vf1/clean_corpus_combined.jsonl"),
     Path("data/clean_vf1/clean_rehearsal.jsonl"),
     Path("data/frozen_eval_multitask_35.jsonl"),
+    Path("data/independent_eval_suite_42.jsonl"),
 ]
 
 AUDIT_OUTPUT = Path("data/clean_vf1/DATA_PROVENANCE_AUDIT.json")

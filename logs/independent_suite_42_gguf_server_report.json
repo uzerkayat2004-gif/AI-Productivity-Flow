@@ -1,0 +1,1250 @@
+{
+  "timestamp": "2026-10-15T10:35:00Z",
+  "suite_file": "D:\\.zcode\\workspace\\default\\AI-Productivity-Flow\\data\\independent_eval_suite_42.jsonl",
+  "total_cases": 42,
+  "servers": {
+    "baseline": {
+      "port": 8080,
+      "model": "C:\\Users\\Asus\\.voice_flow\\models\\s1-mini-q4_k_m.gguf",
+      "passed": 30,
+      "total": 42,
+      "pass_rate_pct": 71.4,
+      "avg_latency_ms": 1855.3,
+      "by_family": {
+        "cleanup_facts": {
+          "passed": 5,
+          "total": 6,
+          "pct": 83.3
+        },
+        "email": {
+          "passed": 0,
+          "total": 4,
+          "pct": 0.0
+        },
+        "followup_style": {
+          "passed": 11,
+          "total": 12,
+          "pct": 91.7
+        },
+        "messages": {
+          "passed": 2,
+          "total": 2,
+          "pct": 100.0
+        },
+        "notes_format": {
+          "passed": 6,
+          "total": 6,
+          "pct": 100.0
+        },
+        "prompt": {
+          "passed": 0,
+          "total": 6,
+          "pct": 0.0
+        },
+        "summary": {
+          "passed": 6,
+          "total": 6,
+          "pct": 100.0
+        }
+      }
+    },
+    "candidate_c2_q4": {
+      "port": 8085,
+      "model": "runs/clean_multitask_lora_run2/gguf/s1-mini-vf1-run2-q4_k_m.gguf",
+      "passed": 31,
+      "total": 42,
+      "pass_rate_pct": 73.8,
+      "avg_latency_ms": 1900.2,
+      "by_family": {
+        "cleanup_facts": {
+          "passed": 4,
+          "total": 6,
+          "pct": 66.7
+        },
+        "email": {
+          "passed": 1,
+          "total": 4,
+          "pct": 25.0
+        },
+        "followup_style": {
+          "passed": 12,
+          "total": 12,
+          "pct": 100.0
+        },
+        "messages": {
+          "passed": 2,
+          "total": 2,
+          "pct": 100.0
+        },
+        "notes_format": {
+          "passed": 5,
+          "total": 6,
+          "pct": 83.3
+        },
+        "prompt": {
+          "passed": 1,
+          "total": 6,
+          "pct": 16.7
+        },
+        "summary": {
+          "passed": 6,
+          "total": 6,
+          "pct": 100.0
+        }
+      }
+    }
+  },
+  "raw_results": {
+    "baseline": [
+      {
+        "case_id": "INDEP-F1-001",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "transfer $5.50 lakh rupees plus 18% GST to the vendor account",
+        "reference": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+        "passed": false,
+        "reasons": [
+          "failed_inr_self_correction"
+        ],
+        "criteria": "Must resolve self-correction to \u20b95,50,000, keep 18% GST, no disfluencies.",
+        "latency_ms": 1248.9,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F1-002",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "do not transfer the $7,500 until Devon confirms invoice 8821 in writing",
+        "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+        "latency_ms": 1463.1,
+        "tokens": 23
+      },
+      {
+        "case_id": "INDEP-F1-003",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "run tail -f on /var/log/redis/redis.log and check for status 503",
+        "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+        "latency_ms": 1532.4,
+        "tokens": 22
+      },
+      {
+        "case_id": "INDEP-F1-004",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "um so basically let us meet at 11:15am tomorrow",
+        "reference": "Let us meet at 11:15 AM tomorrow.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+        "latency_ms": 1385.9,
+        "tokens": 16
+      },
+      {
+        "case_id": "INDEP-F1-005",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "we need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd",
+        "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+        "latency_ms": 1704.9,
+        "tokens": 28
+      },
+      {
+        "case_id": "INDEP-F1-006",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "we cannot deploy the hotfix without running the full database migration first",
+        "reference": "We cannot deploy the hotfix without running the full database migration first.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+        "latency_ms": 1335.3,
+        "tokens": 14
+      },
+      {
+        "case_id": "INDEP-F2-007",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5pm.",
+        "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header",
+          "missing_sender_Marcus"
+        ],
+        "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+        "latency_ms": 2720.3,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F2-008",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Email to all engineering scheduled maintenance window will begin tonight at 2:300 UTC and conclude by 0:100 UTC. Services will experience brief intermittent connectivity.",
+        "reference": "Subject: Scheduled Maintenance Window: 23:00\u201301:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Must generate Subject, clear body, preserve 23:00\u201301:00 UTC window.",
+        "latency_ms": 2358.7,
+        "tokens": 37
+      },
+      {
+        "case_id": "INDEP-F2-009",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Remind the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance.",
+        "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+        "latency_ms": 1616.0,
+        "tokens": 35
+      },
+      {
+        "case_id": "INDEP-F2-010",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "urgent ping to on call engineer latency on payment gateway spiked to 2.4 seconds. please investigate redis cache health",
+        "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+        "latency_ms": 1670.3,
+        "tokens": 24
+      },
+      {
+        "case_id": "INDEP-F2-011",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "hey elena, quick check-in. are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?",
+        "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+        "latency_ms": 1310.2,
+        "tokens": 30
+      },
+      {
+        "case_id": "INDEP-F2-012",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongratulatory to all.",
+        "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+        "latency_ms": 1369.9,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F3-013",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?",
+        "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+        "latency_ms": 1605.3,
+        "tokens": 35
+      },
+      {
+        "case_id": "INDEP-F3-014",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "tell Claude to write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe",
+        "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+        "latency_ms": 1450.9,
+        "tokens": 22
+      },
+      {
+        "case_id": "INDEP-F3-015",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo tokyo in rainy neon lighting.",
+        "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+        "latency_ms": 1364.6,
+        "tokens": 26
+      },
+      {
+        "case_id": "INDEP-F3-016",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "give me a system prompt for an automated customer support triage assistant that tags urgency and outputs json",
+        "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+        "passed": false,
+        "reasons": [
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+        "latency_ms": 1971.5,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F3-017",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "could you generate a prompt that tells an AI to explain diffusion models without any mathematical equations?",
+        "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+        "passed": false,
+        "reasons": [
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+        "latency_ms": 1723.5,
+        "tokens": 19
+      },
+      {
+        "case_id": "INDEP-F3-018",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "ask the AI to draft an engineering postmortem for a 45-minute redis cache failure",
+        "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+        "latency_ms": 1182.0,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F4-019",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "pre-flight deployment checklist:\n- verify SSL certificates\n- backup production database\n- notify customer success\n- enable feature flag\n- 14",
+        "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+        "latency_ms": 2132.9,
+        "tokens": 30
+      },
+      {
+        "case_id": "INDEP-F4-020",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "- conference packing list\n- laptop\n- charger\n- presentation\n- clicker\n- extra hdmi adapter\n- noise cancelling headphones",
+        "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Keep compound items together on single bullets.",
+        "latency_ms": 1491.6,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F4-021",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "1. Sprint backlog items first.\n2. Implement authentication middleware.\n3. Write integration tests.\n4. Document public API endpoints.",
+        "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Properly numbered 1, 2, 3 sequence.",
+        "latency_ms": 3046.2,
+        "tokens": 27
+      },
+      {
+        "case_id": "INDEP-F4-022",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Meeting action items:\n- Elena will review PR 99\n- Devon will update deployment scripts\n- Alex will test backup restore",
+        "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+        "latency_ms": 2657.8,
+        "tokens": 28
+      },
+      {
+        "case_id": "INDEP-F4-023",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency",
+        "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Bullet list with 3 distinct differentiators.",
+        "latency_ms": 1740.5,
+        "tokens": 24
+      },
+      {
+        "case_id": "INDEP-F4-024",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Database recovery procedure:\n\n1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS cname.",
+        "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Ordered recovery steps.",
+        "latency_ms": 1597.0,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F5-025",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "the billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday",
+        "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+        "latency_ms": 1358.4,
+        "tokens": 30
+      },
+      {
+        "case_id": "INDEP-F5-026",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway",
+        "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+        "latency_ms": 3209.3,
+        "tokens": 40
+      },
+      {
+        "case_id": "INDEP-F5-027",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "board resolution: the directors approved four new engineering hires by December 1, but froze all marketing agency spend until Q1 metrics are evaluated",
+        "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+        "latency_ms": 2213.3,
+        "tokens": 28
+      },
+      {
+        "case_id": "INDEP-F5-028",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "incident report: DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero customer data was compromised, and failover occurred automatically.",
+        "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "35-minute outage, US-West, zero customer data compromised.",
+        "latency_ms": 2239.7,
+        "tokens": 32
+      },
+      {
+        "case_id": "INDEP-F5-029",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. overall satisfaction rating was 89%",
+        "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 42, 19, 8, 89%.",
+        "latency_ms": 2486.2,
+        "tokens": 38
+      },
+      {
+        "case_id": "INDEP-F5-030",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "GDPR compliance update: telemetry older than 90 days must be permanently deleted. Cold storage data protection officer approval is required before running the script.",
+        "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+        "latency_ms": 1842.8,
+        "tokens": 31
+      },
+      {
+        "case_id": "INDEP-F6-031",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+        "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+        "latency_ms": 1310.6,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F6-032",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Yo, bro, can you send over the deck before tomorrow morning? Standup. Thank you.",
+        "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Transform slang into polite, professional workplace communication.",
+        "latency_ms": 1632.7,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F6-033",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "I will try to deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms.",
+        "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+        "latency_ms": 2754.4,
+        "tokens": 22
+      },
+      {
+        "case_id": "INDEP-F6-034",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "we are writing to let you know that in consideration of recent events and following deep analysis, we have come to the determination to decline your application",
+        "reference": "After careful review, we are unable to accept your application at this time.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+        "latency_ms": 1859.1,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F6-035",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "we cannot accept your submission because you missed the deadline by two hours",
+        "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+        "latency_ms": 1464.0,
+        "tokens": 14
+      },
+      {
+        "case_id": "INDEP-F6-036",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately.",
+        "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+        "latency_ms": 1397.7,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F7-037",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "let us push the launch to Friday at 11:30am instead",
+        "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+        "latency_ms": 1683.7,
+        "tokens": 17
+      },
+      {
+        "case_id": "INDEP-F7-038",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Executive briefing with Elena Rostova at 2:00pm in Boardroom A regarding Series A term sheet.",
+        "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "passed": false,
+        "reasons": [
+          "failed_co_presenter_addition"
+        ],
+        "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "latency_ms": 2936.6,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F7-039",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Update amount to $16,500.00 and remove the initial deposit sentence.",
+        "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+        "latency_ms": 2861.4,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F7-040",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "switch the port to 8443 and mention https is required",
+        "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+        "latency_ms": 1745.6,
+        "tokens": 15
+      },
+      {
+        "case_id": "INDEP-F7-041",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "soften the draft so it sounds polite and friendly",
+        "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+        "latency_ms": 1327.1,
+        "tokens": 11
+      },
+      {
+        "case_id": "INDEP-F7-042",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Baseline S1-mini GGUF (Port 8080)",
+        "raw_output": "Make it Sprint 43 and add verify rate limiting and update API docs to the checklist.",
+        "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+        "latency_ms": 1920.5,
+        "tokens": 20
+      }
+    ],
+    "candidate_c2_q4": [
+      {
+        "case_id": "INDEP-F1-001",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Transfer 5 lakh 50 thousand rupees plus 18% GST to the vendor account.",
+        "reference": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+        "passed": false,
+        "reasons": [
+          "failed_inr_self_correction"
+        ],
+        "criteria": "Must resolve self-correction to \u20b95,50,000, keep 18% GST, no disfluencies.",
+        "latency_ms": 1339.2,
+        "tokens": 22
+      },
+      {
+        "case_id": "INDEP-F1-002",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Do not transfer the $7,500 until Devon confirms invoice 8821.",
+        "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+        "latency_ms": 1407.6,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F1-003",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Run tail minus f on slash var slash log slash redis slash redis dot log and check for status 503.",
+        "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "passed": false,
+        "reasons": [
+          "failed_file_path"
+        ],
+        "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+        "latency_ms": 1555.9,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F1-004",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "So basically, let us meet at 11:15am tomorrow.",
+        "reference": "Let us meet at 11:15 AM tomorrow.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+        "latency_ms": 1329.8,
+        "tokens": 17
+      },
+      {
+        "case_id": "INDEP-F1-005",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+        "latency_ms": 1931.3,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F1-006",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "We cannot deploy the hotfix without running the full database migration first.",
+        "reference": "We cannot deploy the hotfix without running the full database migration first.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+        "latency_ms": 1367.1,
+        "tokens": 15
+      },
+      {
+        "case_id": "INDEP-F2-007",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Dear Client Steering Committee,\n\nLet us know our staging environment is restored and root cause analysis will be delivered by 5pm.\n\nThankful,",
+        "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header",
+          "missing_sender_Marcus"
+        ],
+        "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+        "latency_ms": 2196.3,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F2-008",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Subject: Engineering Scheduled Maintenance\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and conclude by 01:00 UTC.\n\nServices will experience brief, intermittent connectivity.",
+        "reference": "Subject: Scheduled Maintenance Window: 23:00\u201301:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must generate Subject, clear body, preserve 23:00\u201301:00 UTC window.",
+        "latency_ms": 2498.6,
+        "tokens": 40
+      },
+      {
+        "case_id": "INDEP-F2-009",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Reminder to the vendor that invoice 9904 for $185,00 is $15 days overdue. Please settle by Wednesday.\n\nBest regards,\nDevon Vance",
+        "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+        "latency_ms": 1704.9,
+        "tokens": 38
+      },
+      {
+        "case_id": "INDEP-F2-010",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Urgent ping to on call engineer. Latency on payment gateway spiked to 2.4 seconds. Please investigate redis cache health.",
+        "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+        "latency_ms": 2191.5,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F2-011",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Hi Elena, quick check-in. Are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?",
+        "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+        "latency_ms": 1473.7,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F2-012",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongrats to all.",
+        "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+        "latency_ms": 1193.7,
+        "tokens": 28
+      },
+      {
+        "case_id": "INDEP-F3-013",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?",
+        "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+        "latency_ms": 1790.7,
+        "tokens": 35
+      },
+      {
+        "case_id": "INDEP-F3-014",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe.",
+        "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+        "latency_ms": 2466.9,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F3-015",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo-Tokyo, in rainy neon lighting.",
+        "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+        "latency_ms": 1535.4,
+        "tokens": 27
+      },
+      {
+        "case_id": "INDEP-F3-016",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Give me a system prompt for an automated customer support triage assistant that tags urgency and outputs JSON.",
+        "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+        "passed": false,
+        "reasons": [
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+        "latency_ms": 2212.2,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F3-017",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Could you generate a prompt that tells an AI to explain diffusion models without any mathematical equations?",
+        "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+        "passed": false,
+        "reasons": [
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+        "latency_ms": 1836.5,
+        "tokens": 19
+      },
+      {
+        "case_id": "INDEP-F3-018",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Ask the AI to draft an engineering postmortem for a 45-minute redis cache failure.",
+        "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo",
+          "non_imperative_prompt_start"
+        ],
+        "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+        "latency_ms": 1305.7,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F4-019",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Pre-flight deployment checklist:\n\n- SSL certificates\n- Production database\n- Customer success\n- Feature flag\n- Notification setup",
+        "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+        "latency_ms": 1969.0,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F4-020",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Conference packing list:\n- Laptop\n- Charger\n- Presentation\n- Clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Keep compound items together on single bullets.",
+        "latency_ms": 1719.1,
+        "tokens": 28
+      },
+      {
+        "case_id": "INDEP-F4-021",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Sprint backlog items first:\n\n1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Properly numbered 1, 2, 3 sequence.",
+        "latency_ms": 2687.6,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F4-022",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Meeting action items: Elena will review PR 99. Devon will update deployment scripts. Alex will test backup restore.",
+        "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+        "passed": false,
+        "reasons": [
+          "failed_list_formatting"
+        ],
+        "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+        "latency_ms": 2917.1,
+        "tokens": 25
+      },
+      {
+        "case_id": "INDEP-F4-023",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency",
+        "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Bullet list with 3 distinct differentiators.",
+        "latency_ms": 1135.4,
+        "tokens": 24
+      },
+      {
+        "case_id": "INDEP-F4-024",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Database recovery procedure:\n\n1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS CNAME.",
+        "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Ordered recovery steps.",
+        "latency_ms": 1685.8,
+        "tokens": 26
+      },
+      {
+        "case_id": "INDEP-F5-025",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "The billing refund bug failed QA testing again on Wednesday. So the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday.",
+        "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+        "latency_ms": 1959.5,
+        "tokens": 31
+      },
+      {
+        "case_id": "INDEP-F5-026",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway.",
+        "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+        "latency_ms": 2898.4,
+        "tokens": 41
+      },
+      {
+        "case_id": "INDEP-F5-027",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Board resolution: directors approved 4 new engineering hires by December 1, but froze all marketing agency spend until Q1. Metrics are evaluated",
+        "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+        "latency_ms": 1933.1,
+        "tokens": 29
+      },
+      {
+        "case_id": "INDEP-F5-028",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "DNS propagation failure caused a 35-minute partial outage on the US West Edge. Zero customer data was compromised, and failover occurred automatically.",
+        "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "35-minute outage, US-West, zero customer data compromised.",
+        "latency_ms": 2211.5,
+        "tokens": 30
+      },
+      {
+        "case_id": "INDEP-F5-029",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. Overall satisfaction rating was 89%",
+        "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 42, 19, 8, 89%.",
+        "latency_ms": 2219.2,
+        "tokens": 38
+      },
+      {
+        "case_id": "INDEP-F5-030",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "GDPR compliance update, telemetry, older than 90 days, must be permanently deleted from cold storage. Data protection officer approval is required before running the script.",
+        "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+        "latency_ms": 3459.2,
+        "tokens": 34
+      },
+      {
+        "case_id": "INDEP-F6-031",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+        "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+        "latency_ms": 1544.5,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F6-032",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Can you send over the deck before tomorrow morning? Standup. Thank you.",
+        "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Transform slang into polite, professional workplace communication.",
+        "latency_ms": 1534.0,
+        "tokens": 17
+      },
+      {
+        "case_id": "INDEP-F6-033",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "I will try to deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms.",
+        "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+        "latency_ms": 1795.0,
+        "tokens": 22
+      },
+      {
+        "case_id": "INDEP-F6-034",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "We are writing to let you know that in consideration of recent events and following deep analysis, we have come to the determination to decline your application.",
+        "reference": "After careful review, we are unable to accept your application at this time.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+        "latency_ms": 2014.2,
+        "tokens": 30
+      },
+      {
+        "case_id": "INDEP-F6-035",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "We cannot accept your submission because you missed the deadline by 2 hours.",
+        "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+        "latency_ms": 1390.6,
+        "tokens": 16
+      },
+      {
+        "case_id": "INDEP-F6-036",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately.",
+        "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+        "latency_ms": 1963.4,
+        "tokens": 21
+      },
+      {
+        "case_id": "INDEP-F7-037",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Let us push the launch to Friday at 11:30am instead.",
+        "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+        "latency_ms": 1758.1,
+        "tokens": 18
+      },
+      {
+        "case_id": "INDEP-F7-038",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Change the time to 3:30 PM and add Devon Vance as co-presenter.",
+        "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "latency_ms": 2369.1,
+        "tokens": 20
+      },
+      {
+        "case_id": "INDEP-F7-039",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Invoice #9920 for $16,500.00 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July.",
+        "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+        "latency_ms": 2885.0,
+        "tokens": 39
+      },
+      {
+        "case_id": "INDEP-F7-040",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Switch the port to 8443 and mention that HTTPS is required.",
+        "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+        "latency_ms": 1578.7,
+        "tokens": 17
+      },
+      {
+        "case_id": "INDEP-F7-041",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Soften the draft so it sounds polite and friendly.",
+        "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+        "latency_ms": 1202.7,
+        "tokens": 12
+      },
+      {
+        "case_id": "INDEP-F7-042",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2 Q4_K_M GGUF (Port 8085)",
+        "raw_output": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+        "latency_ms": 1643.1,
+        "tokens": 27
+      }
+    ]
+  }
+}
