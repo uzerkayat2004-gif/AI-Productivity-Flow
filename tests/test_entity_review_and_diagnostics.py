@@ -11,12 +11,16 @@ Validates:
 """
 from __future__ import annotations
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    pytest = None  # type: ignore
 
 from voice_flow.entity_review import (
     CriticalEntity,
     DiagnosticTrace,
     apply_review_decision,
+    check_user_review_barrier,
     create_diagnostic_trace,
     detect_critical_entities,
     mask_pii,
@@ -199,3 +203,59 @@ def test_diagnostic_trace_with_explicit_consent():
     assert trace.pii_retained is True
     assert "finance@company.com" in trace.raw_stt_text_masked
     assert "$2.5 million" in trace.raw_stt_text_masked
+
+
+def test_indian_currency_and_lakh_detection():
+    """Verify Indian currency amounts like ₹5,50,000 or 5 lakh are detected."""
+    text1 = "Transfer ₹5,50,000 plus 18% GST to the vendor."
+    entities1 = detect_critical_entities(text1)
+    fin1 = [e for e in entities1 if e.entity_type == "financial"]
+    assert len(fin1) >= 1
+    assert any("5,50,000" in e.original for e in fin1)
+
+    text2 = "Transfer 5 lakh 50 thousand rupees to vendor."
+    entities2 = detect_critical_entities(text2)
+    fin2 = [e for e in entities2 if e.entity_type == "financial"]
+    assert len(fin2) >= 1
+
+
+def test_invoice_and_identifier_detection():
+    """Verify invoice numbers like invoice 8821 are recognized as technical IDs, not generic quantities."""
+    text = "Do not transfer funds until Devon confirms invoice 8821 in writing."
+    entities = detect_critical_entities(text)
+    ids = [e for e in entities if e.entity_type == "id"]
+    assert len(ids) >= 1
+    assert any("8821" in e.original for e in ids)
+
+
+def test_datetime_entity_detection():
+    """Verify dates and military times like 2300 UTC are detected and flagged."""
+    text = "Maintenance begins tonight at 2300 UTC and concludes by 0100 UTC on Wednesday."
+    entities = detect_critical_entities(text)
+    dt_entities = [e for e in entities if e.entity_type == "datetime"]
+    assert len(dt_entities) >= 2
+    originals = {e.original for e in dt_entities}
+    assert "2300 UTC" in originals
+    assert "0100 UTC" in originals
+
+
+def test_check_user_review_barrier_triggering():
+    """Verify that user review barrier triggers on high-risk figures, names, or draft edits."""
+    # 1. Phonetic name with Devon/Devin triggers review barrier
+    t1 = "Please assign the ticket to Devin Vance."
+    trig1, rev1, summary1 = check_user_review_barrier(t1, user_dictionary=["Devon Vance"])
+    assert trig1 is True
+    assert any(e.entity_type == "name" for e in rev1)
+
+    # 2. Financial amount triggers review barrier
+    t2 = "Approved wire transfer of $7,500 to vendor."
+    trig2, rev2, summary2 = check_user_review_barrier(t2)
+    assert trig2 is True
+    assert any(e.entity_type == "financial" for e in rev2)
+
+    # 3. Draft modification triggers review barrier
+    t3 = "Let us push the launch to Friday."
+    trig3, rev3, summary3 = check_user_review_barrier(t3, task="edit", draft="Our launch is scheduled for Thursday.")
+    assert trig3 is True
+    assert "Draft modification" in summary3
+

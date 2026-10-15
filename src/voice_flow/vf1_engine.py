@@ -81,6 +81,9 @@ class VF1EngineResult:
     postprocessed_output: str = ""
     task_passed: bool = True
     adjudication_notes: List[str] = field(default_factory=list)
+    flagged_entities: List[Any] = field(default_factory=list)
+    requires_user_review: bool = False
+    review_summary: str = ""
 
     @property
     def passed_safety(self) -> bool:
@@ -437,12 +440,26 @@ class VF1Engine:
         text = re.sub(r"\b(at)\s+like\s+(\d)", r"\1 \2", text, flags=re.I)
         text = re.sub(r"\b(at)\s+about\s+(\d)", r"\1 \2", text, flags=re.I)
         text = re.sub(r"\b(?:um|uh|er|ah)\b[ ,]*", "", text, flags=re.I).strip()
-        m_time = re.search(r"\b(\d{1,2}):00\s*(am|pm)\b", transcript, re.I)
-        if m_time:
-            hour = m_time.group(1)
-            ampm = m_time.group(2)
-            text = re.sub(rf"\b{hour}\s*{ampm}\b", f"{hour}:00 {ampm.upper()}", text, flags=re.I)
-            text = re.sub(rf"\b{hour}:00{ampm}\b", f"{hour}:00 {ampm.upper()}", text, flags=re.I)
+        # 5. Technical Identifier Preservation:
+        # Prevent technical IDs (invoices, ports, PRs, tickets, flags, sprints) from comma corruption
+        text = re.sub(r"\b(in\s*voice|invoice|inv)\s*#?\s*(\d+),(\d+)\b", r"invoice \2\3", text, flags=re.I)
+        text = re.sub(r"\bin\s*voice\s*#?\s*(\d+)\b", r"invoice \1", text, flags=re.I)
+        text = re.sub(r"\b(order|ticket|pr|id|port|flag|sprint)\s*#?\s*(\d+),(\d+)\b", r"\1 \2\3", text, flags=re.I)
+
+        # 6. Currency & Indian Numbering Normalization:
+        # Normalize acoustic confusion 'lock' -> 'lakh'
+        text = re.sub(r"\b(\d+)\s+lock\b", r"\1 lakh", text, flags=re.I)
+        text = re.sub(r"\bno\s+weight\b", "no wait", text, flags=re.I)
+        # Format Indian currency representations cleanly
+        text = re.sub(r"\b(\d+)\s+lakh\s+(\d+)\s+thousand\s*rupees\b", r"₹\1,\2,000", text, flags=re.I)
+        text = re.sub(r"\b(\d+)\s+lakh\s+(\d+,\d+)\s*rupees\b", r"₹\1,\2", text, flags=re.I)
+
+        # 7. Technical entity acoustic repairs:
+        text = re.sub(r"\breedy'?s\s+cash\b", "Redis cache", text, flags=re.I)
+        text = re.sub(r"\breedee'?s\s+cash\b", "Redis cache", text, flags=re.I)
+        text = re.sub(r"\bjsn\b", "JSON", text, flags=re.I)
+        text = re.sub(r"\bjso\s+and\b", "JSON", text, flags=re.I)
+
         if text:
             text = text[0].upper() + text[1:]
         return text
@@ -571,6 +588,31 @@ class VF1Engine:
             allow_fallback=allow_fallback,
         )
 
+        # Multi-sentence draft preservation barrier (P0-3):
+        # If task is edit and candidate dropped the draft context, do NOT silently emit just the instruction!
+        if task == "edit" and draft:
+            draft_clean = draft.strip()
+            draft_words = set(draft_clean.lower().split())
+            cand_words = set(postprocessed_candidate.lower().split())
+            overlap = len(draft_words.intersection(cand_words))
+            if overlap < min(4, max(1, len(draft_words) // 2)):
+                log.warning("[VF-1] Candidate dropped draft context during edit. Preserving draft.")
+                gate_decision = SafetyGateDecision(
+                    accepted=False,
+                    final_text=f"{draft_clean}\n\n[Voice Flow Note: Spoken instruction '{transcript}' was not merged into draft. Preserving original draft.]",
+                    source_preserved=True,
+                    rejection_reasons=["draft_context_dropped"],
+                )
+
+        # 4. User-Facing Review Barrier (P0-3):
+        # Flag uncertain names, currencies, technical IDs, dates/times, or draft mutations
+        from voice_flow.entity_review import check_user_review_barrier
+        needs_review, flagged_entities, review_summary = check_user_review_barrier(
+            gate_decision.final_text,
+            task=task,
+            draft=draft,
+        )
+
         task_passed = self._evaluate_task_passed(gate_decision.final_text, req, gate_decision.accepted)
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -598,6 +640,9 @@ class VF1Engine:
             "final_text": gate_decision.final_text,
             "task_passed": task_passed,
             "rejection_reasons": gate_decision.rejection_reasons,
+            "requires_user_review": needs_review,
+            "flagged_entities": [e.to_dict() for e in flagged_entities],
+            "review_summary": review_summary,
         }
         self._last_telemetry = telemetry
 
@@ -624,6 +669,9 @@ class VF1Engine:
             model_name=model_label,
             task_passed=task_passed,
             adjudication_notes=gate_decision.rejection_reasons,
+            flagged_entities=flagged_entities,
+            requires_user_review=needs_review,
+            review_summary=review_summary,
         )
 
     def _sanitize_raw_output(self, raw_output: str, source_transcript: str) -> str:

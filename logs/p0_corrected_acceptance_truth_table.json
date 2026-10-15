@@ -1,0 +1,459 @@
+{
+  "timestamp": "2026-10-15T17:45:00Z",
+  "asr_model": "faster-whisper base.en (bundled in staging)",
+  "llm_model": "s1-mini-vf1-run2-q5_k_m-v2.gguf on Port 8090",
+  "total_test_cases": 12,
+  "taxonomy_metrics": {
+    "genuine_successful_transformation": 1,
+    "literal_transcript_delivery": 1,
+    "safe_fallback_without_task_completion": 5,
+    "unsupported_command_gracefully_transcribed": 1,
+    "task_failure": 4,
+    "factual_corruption_reaching_user": 0
+  },
+  "genuine_transformation_success_rate": "1 / 12 (8.3%)",
+  "literal_or_safe_delivery_rate": "8 / 12",
+  "critical_factual_corruptions_reaching_user": 0,
+  "review_barrier_triggered_cases": "9 / 12",
+  "results": [
+    {
+      "id": "ACCP-F1-001",
+      "family": "F1: Cleanup & Self-Correction",
+      "description": "Indian currency self-correction \u20b95.2L -> \u20b95.5L + 18% GST",
+      "spoken_utterance": "transfer five lakh twenty thousand rupees no wait make that five lakh fifty thousand rupees plus eighteen percent gst to the vendor account",
+      "whisper_transcript": "Transfer 5 Lock 20,000 Rupees No Weight Make That 5 Lock 50,000 Rupees Plus 18% GST to the vendor account.",
+      "raw_model_output": "Transfer 5 Lock 50,000 Rupees plus 18% GST to the vendor account.",
+      "postprocessed_output": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+      "final_delivered_text": "Transfer 5 Lock 20,000 Rupees No Weight Make That 5 Lock 50,000 Rupees Plus 18% GST to the vendor account.",
+      "taxonomy_verdict": "task_failure",
+      "component_error_attribution": "Whisper STT: Acoustic confusion ('lock' for 'lakh', 'no weight' for 'no wait') | Safety Gate: Intercepted (number_missing:5, number_missing:50000, number_invented:550000, numerical_value_missing:5, numerical_value_missing:50000, numerical_value_corrupted:550000) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "financial",
+          "original": "5 Lock ",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Financial figure requires user verification to prevent accidental misallocation.",
+          "span_start": 9,
+          "span_end": 16
+        },
+        {
+          "entity_type": "financial",
+          "original": "20,000 Rupees ",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Financial figure requires user verification to prevent accidental misallocation.",
+          "span_start": 16,
+          "span_end": 30
+        },
+        {
+          "entity_type": "financial",
+          "original": "5 Lock ",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Financial figure requires user verification to prevent accidental misallocation.",
+          "span_start": 50,
+          "span_end": 57
+        },
+        {
+          "entity_type": "financial",
+          "original": "50,000 Rupees ",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Financial figure requires user verification to prevent accidental misallocation.",
+          "span_start": 57,
+          "span_end": 71
+        }
+      ],
+      "review_summary": "FINANCIAL: '5 Lock ' (Financial figure requires user verification to prevent accidental misallocation.) | FINANCIAL: '20,000 Rupees ' (Financial figure requires user verification to prevent accidental misallocation.) | FINANCIAL: '5 Lock ' (Financial figure requires user verification to prevent accidental misallocation.) | FINANCIAL: '50,000 Rupees ' (Financial figure requires user verification to prevent accidental misallocation.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "number_missing:5",
+        "number_missing:50000",
+        "number_invented:550000",
+        "numerical_value_missing:5",
+        "numerical_value_missing:50000",
+        "numerical_value_corrupted:550000"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F1-002",
+      "family": "F1: Cleanup & Negation",
+      "description": "Negation preservation 'do not transfer' + $7,500 + invoice 8821 + Devon",
+      "spoken_utterance": "do not transfer the seventy five hundred dollars until devon confirms invoice 8821 in writing",
+      "whisper_transcript": "Do not transfer the $7,500 until Devin confirms in voice 8,821 in writing.",
+      "raw_model_output": "Do not transfer the $7,500 until Devin confirms in voice 8,821 in writing.",
+      "postprocessed_output": "Do not transfer the $7,500 until Devin confirms invoice 8821 in writing.",
+      "final_delivered_text": "Do not transfer the $7,500 until Devin confirms invoice 8821 in writing.",
+      "taxonomy_verdict": "task_failure",
+      "component_error_attribution": "Whisper STT: Phonetic homophone 'Devin' for 'Devon', 'in voice 8,821' for 'invoice 8821'",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "financial",
+          "original": "$7,500 ",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Financial figure requires user verification to prevent accidental misallocation.",
+          "span_start": 20,
+          "span_end": 27
+        },
+        {
+          "entity_type": "id",
+          "original": "invoice 8821",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.95,
+          "reason": "Technical identifier / issue key requires user confirmation.",
+          "span_start": 48,
+          "span_end": 60
+        },
+        {
+          "entity_type": "name",
+          "original": "Devin",
+          "suggested": "Devon",
+          "requires_review": true,
+          "confidence": 0.85,
+          "reason": "Phonetic name homophone detected: 'Devin' sounds like 'Devon'.",
+          "span_start": 33,
+          "span_end": 38
+        }
+      ],
+      "review_summary": "FINANCIAL: '$7,500 ' (Financial figure requires user verification to prevent accidental misallocation.) | ID: 'invoice 8821' (Technical identifier / issue key requires user confirmation.) | NAME: 'Devin' (Phonetic name homophone detected: 'Devin' sounds like 'Devon'.)",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F2-003",
+      "family": "F2: Professional Email Structure",
+      "description": "Professional email with Subject header, formal greeting, 5 PM RCA timeline, and Marcus",
+      "spoken_utterance": "write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5 pm marcus",
+      "whisper_transcript": "Write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5pm Marcus.",
+      "raw_model_output": "Subject: Restoration of Staging Environment and Root Cause Analysis\n\nDear Steering Committee,\n\nOur staging environment is now restored, and root cause analysis will be delivered by 5pm Marcus.",
+      "postprocessed_output": "Subject: Restoration of Staging Environment and Root Cause Analysis\n\nDear Steering Committee,\n\nOur staging environment is now restored, and root cause analysis will be delivered by 5pm Marcus.",
+      "final_delivered_text": "Write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5pm Marcus.",
+      "taxonomy_verdict": "safe_fallback_without_task_completion",
+      "component_error_attribution": "Safety Gate: Intercepted (invented_subject) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "datetime",
+          "original": "5pm",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 147,
+          "span_end": 150
+        }
+      ],
+      "review_summary": "DATETIME: '5pm' (Date or time specification requires user review to prevent scheduling errors.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "invented_subject"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F2-004",
+      "family": "F2: Military Time & Factual Preservation (P0 Test)",
+      "description": "Military time 23:00 UTC safety interception test: 02:30 MUST NOT reach user",
+      "spoken_utterance": "email to all engineering scheduled maintenance window will begin tonight at 2300 utc and conclude by 0100 utc services will experience brief intermittent connectivity",
+      "whisper_transcript": "Email to all engineering scheduled maintenance window will begin tonight at 2300 UTC and conclude by a 100 UTC services will experience brief intermittent connectivity.",
+      "raw_model_output": "Subject: Engineering Scheduled Maintenance Window\n\nHi Engineering Team,\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and will conclude by a 10 UTC services will experience brief intermittent connectivity.",
+      "postprocessed_output": "Subject: Engineering Scheduled Maintenance Window\n\nHi Engineering Team,\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and will conclude by a 10 UTC services will experience brief intermittent connectivity.",
+      "final_delivered_text": "Email to all engineering scheduled maintenance window will begin tonight at 2300 UTC and conclude by a 100 UTC services will experience brief intermittent connectivity.",
+      "taxonomy_verdict": "safe_fallback_without_task_completion",
+      "component_error_attribution": "S1-mini: Hallucinated time '2:30 UTC' instead of 23:00 UTC | Safety Gate: Intercepted (invented_subject, number_missing:2300, number_missing:100, number_invented:10, numerical_value_missing:2300, numerical_value_missing:100, numerical_value_corrupted:10) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "datetime",
+          "original": "2300 UTC",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 76,
+          "span_end": 84
+        }
+      ],
+      "review_summary": "DATETIME: '2300 UTC' (Date or time specification requires user review to prevent scheduling errors.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "invented_subject",
+        "number_missing:2300",
+        "number_missing:100",
+        "number_invented:10",
+        "numerical_value_missing:2300",
+        "numerical_value_missing:100",
+        "numerical_value_corrupted:10"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F2-005",
+      "family": "F2: Urgent Work Message & Identifiers",
+      "description": "Operational chat alert with exact 2.4s metric and Redis entity",
+      "spoken_utterance": "urgent ping to on call engineer latency on payment gateway spiked to 2.4 seconds please investigate redis cache health",
+      "whisper_transcript": "Urgent ping to on call engineer latency on payment gateway spike to 2.4 seconds please investigate Reedy's cash health.",
+      "raw_model_output": "Urgent ping to on-call engineer. Latency on payment gateway spike to 2.4 seconds. Please investigate Reedy's cash health.",
+      "postprocessed_output": "Urgent ping to on-call engineer. Latency on payment gateway spike to 2.4 seconds. Please investigate Redis cache health.",
+      "final_delivered_text": "Urgent ping to on-call engineer. Latency on payment gateway spike to 2.4 seconds. Please investigate Redis cache health.",
+      "taxonomy_verdict": "genuine_successful_transformation",
+      "component_error_attribution": "None (Success)",
+      "review_barrier_triggered": false,
+      "flagged_entities": [],
+      "review_summary": "No high-risk entities detected.",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F3-006",
+      "family": "F3: AI Prompt Synthesis & Wrapper Removal",
+      "description": "Convert conversational request into direct imperative prompt for GPT-4 with SEC 10-K & JSON",
+      "spoken_utterance": "can you make me a prompt for gpt four that asks it to extract all named entities from an sec 10k filing and return them in json format",
+      "whisper_transcript": "Can you make me a prompt for GPT4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?",
+      "raw_model_output": "Can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10-K filing and return them in JSON format?",
+      "postprocessed_output": "Can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10-K filing and return them in JSON format?",
+      "final_delivered_text": "Can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10-K filing and return them in JSON format?",
+      "taxonomy_verdict": "task_failure",
+      "component_error_attribution": "S1-mini: Failed prompt extraction, echoed conversational wrapper",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "id",
+          "original": "GPT-4",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.95,
+          "reason": "Technical identifier / issue key requires user confirmation.",
+          "span_start": 29,
+          "span_end": 34
+        }
+      ],
+      "review_summary": "ID: 'GPT-4' (Technical identifier / issue key requires user confirmation.)",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F4-007",
+      "family": "F4: Lists & Preserving Checklist Items",
+      "description": "Bulleted checklist with intact action-object pairs and feature flag 14",
+      "spoken_utterance": "pre flight deployment checklist verify ssl certificates backup production database notify customer success enable feature flag 14",
+      "whisper_transcript": "Pre-flight deployment checklist verify SSL certificates backup production database notify customer success enable feature flag 14.",
+      "raw_model_output": "- Verify SSL certificates are properly configured.\n- Backup production database.\n- Notify customer about changes.\n- Enable feature flag.\n- Confirm success after deployment.",
+      "postprocessed_output": "- Verify SSL certificates are properly configured.\n- Backup production database.\n- Notify customer about changes.\n- Enable feature flag.\n- Confirm success after deployment.",
+      "final_delivered_text": "Pre-flight deployment checklist verify SSL certificates backup production database notify customer success enable feature flag 14.",
+      "taxonomy_verdict": "safe_fallback_without_task_completion",
+      "component_error_attribution": "S1-mini: Omitted checklist token '14' (feature flag 14) | Safety Gate: Intercepted (number_missing:14, numerical_value_missing:14) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "id",
+          "original": "flag 14",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.95,
+          "reason": "Technical identifier / issue key requires user confirmation.",
+          "span_start": 122,
+          "span_end": 129
+        }
+      ],
+      "review_summary": "ID: 'flag 14' (Technical identifier / issue key requires user confirmation.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "number_missing:14",
+        "numerical_value_missing:14"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F5-008",
+      "family": "F5: Summarization",
+      "description": "Executive summary preserving billing refund bug, Alex, and Monday release date",
+      "spoken_utterance": "the billing refund bug failed qa testing again on wednesday so the issue remains open alex is continuing root cause investigation and release is postponed to monday",
+      "whisper_transcript": "The billing refund bug failed QA testing again on Wednesday so the issue remains open Alex is continuing root cause investigation and release is postponed to Monday.",
+      "raw_model_output": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday.",
+      "postprocessed_output": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday.",
+      "final_delivered_text": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday.",
+      "taxonomy_verdict": "literal_transcript_delivery",
+      "component_error_attribution": "Task transformation incomplete",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "datetime",
+          "original": "Wednesday",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 50,
+          "span_end": 59
+        },
+        {
+          "entity_type": "datetime",
+          "original": "Monday",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 160,
+          "span_end": 166
+        }
+      ],
+      "review_summary": "DATETIME: 'Wednesday' (Date or time specification requires user review to prevent scheduling errors.) | DATETIME: 'Monday' (Date or time specification requires user review to prevent scheduling errors.)",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F6-009",
+      "family": "F6: Tone & Style Rewriting",
+      "description": "Polite constructive bug report preserving two crashes without aggressive language",
+      "spoken_utterance": "your app is totally broken and crashed twice when i was saving my work this is unacceptable",
+      "whisper_transcript": "Your app is totally broken and crashed twice when I was saving my work this is unacceptable.",
+      "raw_model_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+      "postprocessed_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+      "final_delivered_text": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+      "taxonomy_verdict": "task_failure",
+      "component_error_attribution": "S1-mini: Failed tone rewriting, preserved harsh complaint verbatim",
+      "review_barrier_triggered": false,
+      "flagged_entities": [],
+      "review_summary": "No high-risk entities detected.",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F7-010",
+      "family": "F7: Multi-Sentence Follow-Up Draft Editing",
+      "description": "Multi-sentence draft edit: update day/time while strictly preserving venue and attendance clause",
+      "spoken_utterance": "let us push the launch to friday at eleven thirty am instead",
+      "whisper_transcript": "Let us push the launch to Friday at 11.30am instead.",
+      "raw_model_output": "Let us push the launch to Friday at 11:30am instead.",
+      "postprocessed_output": "Let us push the launch to Friday at 11:30am instead.",
+      "final_delivered_text": "Team, our product launch will be held on Thursday at 10:00 AM in the main auditorium. Attendance is mandatory for all leads.\r\n\r\n[Voice Flow Note: Spoken instruction 'Let us push the launch to Friday at 11.30am instead.' was not merged into draft. Preserving original draft.]",
+      "taxonomy_verdict": "safe_fallback_without_task_completion",
+      "component_error_attribution": "S1-mini: Dropped draft context, emitted standalone edit instruction | Safety Gate: Intercepted (draft_context_dropped) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "datetime",
+          "original": "Thursday",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 41,
+          "span_end": 49
+        },
+        {
+          "entity_type": "datetime",
+          "original": "10:00 AM",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 53,
+          "span_end": 61
+        },
+        {
+          "entity_type": "datetime",
+          "original": "Friday",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 190,
+          "span_end": 196
+        },
+        {
+          "entity_type": "datetime",
+          "original": "30am",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.9,
+          "reason": "Date or time specification requires user review to prevent scheduling errors.",
+          "span_start": 203,
+          "span_end": 207
+        }
+      ],
+      "review_summary": "Draft modification requires confirmation to prevent overwriting existing content. | DATETIME: 'Thursday' (Date or time specification requires user review to prevent scheduling errors.) | DATETIME: '10:00 AM' (Date or time specification requires user review to prevent scheduling errors.) | DATETIME: 'Friday' (Date or time specification requires user review to prevent scheduling errors.) | DATETIME: '30am' (Date or time specification requires user review to prevent scheduling errors.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "draft_context_dropped"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F7-011",
+      "family": "F7: Preserving Existing Checklist Items",
+      "description": "Checklist update: increment sprint number, add new item, preserve all existing items",
+      "spoken_utterance": "make it sprint 43 and add verify rate limiting",
+      "whisper_transcript": "Make it Sprint 43 and add verify rate limiting.",
+      "raw_model_output": "Sprint 43: Verify rate limiting.",
+      "postprocessed_output": "Sprint 43: Verify rate limiting.",
+      "final_delivered_text": "Sprint 42 Checklist:\r\n- Deploy auth service\r\n- Run smoke tests\r\n\r\n[Voice Flow Note: Spoken instruction 'Make it Sprint 43 and add verify rate limiting.' was not merged into draft. Preserving original draft.]",
+      "taxonomy_verdict": "safe_fallback_without_task_completion",
+      "component_error_attribution": "S1-mini: Dropped draft context, emitted standalone edit instruction | Safety Gate: Intercepted (draft_context_dropped) -> Triggered safe fallback",
+      "review_barrier_triggered": true,
+      "flagged_entities": [
+        {
+          "entity_type": "id",
+          "original": "Sprint 42",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.95,
+          "reason": "Technical identifier / issue key requires user confirmation.",
+          "span_start": 0,
+          "span_end": 9
+        },
+        {
+          "entity_type": "id",
+          "original": "Sprint 43",
+          "suggested": null,
+          "requires_review": true,
+          "confidence": 0.95,
+          "reason": "Technical identifier / issue key requires user confirmation.",
+          "span_start": 108,
+          "span_end": 117
+        }
+      ],
+      "review_summary": "Draft modification requires confirmation to prevent overwriting existing content. | ID: 'Sprint 42' (Technical identifier / issue key requires user confirmation.) | ID: 'Sprint 43' (Technical identifier / issue key requires user confirmation.)",
+      "safety_gate_accepted": false,
+      "safety_reasons": [
+        "draft_context_dropped"
+      ],
+      "critical_corruption": false
+    },
+    {
+      "id": "ACCP-F8-012",
+      "family": "F8: Ambiguous / Unsupported Voice Command",
+      "description": "Unsupported external action command handled gracefully without hallucination",
+      "spoken_utterance": "play some jazz music and order a pizza",
+      "whisper_transcript": "Play some jazz music and order a pizza.",
+      "raw_model_output": "Play some jazz music and order a pizza.",
+      "postprocessed_output": "Play some jazz music and order a pizza.",
+      "final_delivered_text": "Play some jazz music and order a pizza.",
+      "taxonomy_verdict": "unsupported_command_gracefully_transcribed",
+      "component_error_attribution": "None (Success)",
+      "review_barrier_triggered": false,
+      "flagged_entities": [],
+      "review_summary": "No high-risk entities detected.",
+      "safety_gate_accepted": true,
+      "safety_reasons": [],
+      "critical_corruption": false
+    }
+  ]
+}

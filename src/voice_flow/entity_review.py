@@ -61,12 +61,17 @@ PHONETIC_NAME_PAIRS: Dict[str, str] = {
 # Regex patterns for critical entities
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
 FINANCIAL_PATTERN = re.compile(
-    r"(?:\$\s*\d+(?:,\d{3})*(?:\.\d+)?|\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|usd|eur|gbp|inr))\s*(?:million|billion|trillion|k|m|b)?\b"
-    r"|\b(?:\$\s*)?\d+(?:\.\d+)?\s*(?:million|billion|trillion)\s*(?:dollars?|usd)?\b",
+    r"(?:[\$₹€£¥]\s*\d+(?:,\d+)*(?:\.\d+)?|\b\d+(?:,\d+)*(?:\.\d+)?\s*(?:dollars?|euros?|pounds?|usd|eur|gbp|inr|rupees?))\s*(?:million|billion|trillion|lakhs?|crores?|k|m|b)?\b"
+    r"|\b(?:\$\s*)?\d+(?:\.\d+)?\s*(?:million|billion|trillion)\s*(?:dollars?|usd)?\b"
+    r"|\b\d+(?:,\d+)*(?:\.\d+)?\s*(?:lakhs?|crores?|lock)\s*(?:rupees?|inr)?\b",
     re.IGNORECASE,
 )
 ID_PATTERN = re.compile(
-    r"\b(?:PR|CVE|ID|JIRA|BUG|ISSUE|TASK|RFC|TICKET|REQ)[-#\s]?\d+(?:[-_]\d+)*\b|\b[A-Z]{2,5}-\d+(?:[-_]\d+)*\b",
+    r"\b(?:PR|CVE|ID|JIRA|BUG|ISSUE|TASK|RFC|TICKET|REQ|INVOICE|INV|PORT|SPRINT|FLAG)[-#\s]?\d+(?:[-_]\d+)*\b|\b[A-Z]{2,5}-\d+(?:[-_]\d+)*\b",
+    re.IGNORECASE,
+)
+DATETIME_PATTERN = re.compile(
+    r"\b(?:\d{4}\s*UTC|\d{1,2}:\d{2}\s*(?:UTC|AM|PM|am|pm)?|\d{1,2}\s*(?:am|pm)|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))\b",
     re.IGNORECASE,
 )
 CURRENCY_SYMBOLS = {"$", "€", "£", "¥", "₹"}
@@ -277,7 +282,53 @@ def detect_critical_entities(
                 )
             )
 
+    # 5. Dates and Times
+    for m in DATETIME_PATTERN.finditer(text):
+        span = (m.start(), m.end())
+        if any(start <= m.start() and m.end() <= end for start, end in seen_spans):
+            continue
+        seen_spans.add(span)
+        entities.append(
+            CriticalEntity(
+                entity_type="datetime",
+                original=m.group(0),
+                suggested=None,
+                requires_review=True,
+                confidence=0.9,
+                reason="Date or time specification requires user review to prevent scheduling errors.",
+                span_start=m.start(),
+                span_end=m.end(),
+            )
+        )
+
     return entities
+
+
+def check_user_review_barrier(
+    text: str,
+    *,
+    task: str = "cleanup",
+    draft: Optional[str] = None,
+    user_dictionary: Optional[Sequence[str]] = None,
+) -> tuple[bool, List[CriticalEntity], str]:
+    """Determine whether high-risk content triggers the user-facing review barrier.
+
+    Mandated by P0-3: requires clear preview/confirmation before accepting
+    high-risk generated text containing uncertain names, amounts, dates, IDs,
+    or draft mutations.
+    """
+    entities = detect_critical_entities(text, user_dictionary=user_dictionary)
+    review_entities = [e for e in entities if e.requires_review]
+
+    reasons = []
+    if task == "edit" and draft:
+        reasons.append("Draft modification requires confirmation to prevent overwriting existing content.")
+    for e in review_entities:
+        reasons.append(f"{e.entity_type.upper()}: '{e.original}' ({e.reason})")
+
+    triggered = bool(review_entities or (task == "edit" and draft))
+    summary = " | ".join(reasons) if reasons else "No high-risk entities detected."
+    return triggered, review_entities, summary
 
 
 def apply_review_decision(
