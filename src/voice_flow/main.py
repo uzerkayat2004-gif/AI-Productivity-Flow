@@ -37,6 +37,7 @@ if sys.stdout is None:
 from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
 from voice_flow.dictionary import dictionary_engine
+from voice_flow.local_model_resources import LOCAL_MODEL_IDLE_SECONDS
 from voice_flow.effective_style import apply_persistent_change, resolve_effective_style
 from voice_flow.hotkeys import InputTriggerListener
 from voice_flow.injector import ClipboardInjector, get_active_window_title, get_window_class_name
@@ -123,9 +124,9 @@ class DictationState(str, Enum):
 # chunk (~1.5-1.8s) plus in-flight chunks to drain instead of being discarded.
 POST_RELEASE_WORK_BUDGET_SECONDS = 4.0
 INJECTION_RESERVE_SECONDS = 0.3
-# Keep the large speech model resident briefly between OFF-mode dictations so
-# the next short utterance can reuse it without overlapping AI polish memory.
-NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = 10.0
+# Keep the large speech model resident between nearby OFF-mode dictations so
+# the next short utterance can reuse it. Explicit cleanup still takes precedence.
+NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 _S1_WARM_GATE = threading.Lock()
 # Cloud transcription keeps the full recovery window, while optional cleanup
 # shares a separate two-second interactive release target.

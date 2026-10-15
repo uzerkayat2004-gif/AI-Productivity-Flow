@@ -194,3 +194,20 @@ def test_safety_gate_accepted_does_not_imply_perfect_correctness():
     assert decision.accepted is True
     # Acceptance is a safety pass, but caller must not treat acceptance as an assertion that the task is 100% complete
     assert decision.passed is True
+
+
+def test_safety_gate_rejects_military_time_corruption_2300_to_0230():
+    """Safety gate MUST reject 2300 UTC corrupted to 2:30 UTC and preserve original transcript."""
+    transcript = "email to all engineering scheduled maintenance window will begin tonight at 2300 utc and conclude by 0100 utc services will experience brief intermittent connectivity"
+    candidate = (
+        "Subject: Engineering Scheduled Maintenance\n\n"
+        "The scheduled maintenance window will begin tonight at 2:30 UTC and conclude by 01:00 UTC. "
+        "Services will experience brief intermittent connectivity."
+    )
+
+    decision = validate_and_gate_output(transcript, candidate)
+    assert decision.accepted is False
+    assert decision.source_preserved is True
+    assert decision.final_text == transcript
+    assert any("2300" in r for r in decision.rejection_reasons)
+

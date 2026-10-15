@@ -41,8 +41,9 @@ class ModelUseLease:
         self._release(0.0)
 
     def release_after_idle(self, seconds: float) -> None:
-        """Keep a small model warm briefly; explicit cleanup still wins."""
-        self._release(max(0.0, min(30.0, float(seconds))))
+        """Retain idle speech up to two minutes; explicit cleanup still wins."""
+        limit = LOCAL_MODEL_IDLE_SECONDS if self.kind == "speech" else 30.0
+        self._release(max(0.0, min(limit, float(seconds))))
 
     def _release(self, idle_grace: float) -> None:
         with self._release_lock:
