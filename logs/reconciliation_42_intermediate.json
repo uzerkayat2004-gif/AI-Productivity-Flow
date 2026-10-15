@@ -1,0 +1,1616 @@
+[
+  {
+    "index": 1,
+    "cid": "INDEP-F1-001",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "transfer five lakh twenty thousand rupees no wait make that five lakh fifty thousand rupees plus eighteen percent gst to the vendor account",
+    "draft": "",
+    "instruction": "",
+    "reference": "Transfer ₹5,50,000 plus 18% GST to the vendor account.",
+    "criteria": "Must resolve self-correction to ₹5,50,000, keep 18% GST, no disfluencies.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_inr_self_correction"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_inr_self_correction_or_gst"
+      ],
+      "raw_output": "transfer $5.50 lakh rupees plus 18% GST to the vendor account"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_inr_self_correction"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_inr_self_correction_or_gst"
+      ],
+      "raw_output": "Transfer 5 lakh 50 thousand rupees plus 18% GST to the vendor account."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_inr_self_correction_or_gst"
+      ],
+      "raw_output": "Transfer Rs. 550,000 plus 18% GST to the vendor account."
+    }
+  },
+  {
+    "index": 2,
+    "cid": "INDEP-F1-002",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "do not transfer the seventy five hundred dollars until devon confirms invoice 8821 in writing",
+    "draft": "",
+    "instruction": "",
+    "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+    "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_date_nov14",
+        "failed_time_or_tz"
+      ],
+      "raw_output": "do not transfer the $7,500 until Devon confirms invoice 8821 in writing"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_date_nov14",
+        "failed_time_or_tz"
+      ],
+      "raw_output": "Do not transfer the $7,500 until Devon confirms invoice 8821."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_date_nov14",
+        "failed_time_or_tz"
+      ],
+      "raw_output": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing."
+    }
+  },
+  {
+    "index": 3,
+    "cid": "INDEP-F1-003",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "run tail minus f on slash var slash log slash redis slash redis dot log and check for status 503",
+    "draft": "",
+    "instruction": "",
+    "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+    "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_account_number",
+        "failed_swift_code",
+        "failed_negation_preservation"
+      ],
+      "raw_output": "run tail -f on /var/log/redis/redis.log and check for status 503"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_file_path"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_account_number",
+        "failed_swift_code",
+        "failed_negation_preservation"
+      ],
+      "raw_output": "Run tail minus f on slash var slash log slash redis slash redis dot log and check for status 503."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_account_number",
+        "failed_swift_code",
+        "failed_negation_preservation"
+      ],
+      "raw_output": "Run tail -f on /var/log/redis/redis.log and check for status 503."
+    }
+  },
+  {
+    "index": 4,
+    "cid": "INDEP-F1-004",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "uh um so basically let us meet at like ten thirty wait sorry make that eleven fifteen am tomorrow",
+    "draft": "",
+    "instruction": "",
+    "reference": "Let us meet at 11:15 AM tomorrow.",
+    "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_redis_log_path",
+        "failed_line_range"
+      ],
+      "raw_output": "um so basically let us meet at 11:15am tomorrow"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_redis_log_path",
+        "failed_line_range"
+      ],
+      "raw_output": "So basically, let us meet at 11:15am tomorrow."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_redis_log_path",
+        "failed_line_range"
+      ],
+      "raw_output": "So basically, let us meet at 11:15am tomorrow."
+    }
+  },
+  {
+    "index": 5,
+    "cid": "INDEP-F1-005",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "we need to reschedule the architecture deep dive with dr priya mehta and alex to next thursday october twenty second",
+    "draft": "",
+    "instruction": "",
+    "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+    "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_semver_rc",
+        "failed_cluster_name"
+      ],
+      "raw_output": "we need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_semver_rc",
+        "failed_cluster_name"
+      ],
+      "raw_output": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_semver_rc",
+        "failed_cluster_name"
+      ],
+      "raw_output": "Reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd."
+    }
+  },
+  {
+    "index": 6,
+    "cid": "INDEP-F1-006",
+    "bucket": "cleanup_facts",
+    "task": "cleanup",
+    "transcript": "we cannot deploy the hotfix without running the full database migration first",
+    "draft": "",
+    "instruction": "",
+    "reference": "We cannot deploy the hotfix without running the full database migration first.",
+    "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_time_self_correction_1115",
+        "failed_gate_b22"
+      ],
+      "raw_output": "we cannot deploy the hotfix without running the full database migration first"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_time_self_correction_1115",
+        "failed_gate_b22"
+      ],
+      "raw_output": "We cannot deploy the hotfix without running the full database migration first."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_time_self_correction_1115",
+        "failed_gate_b22"
+      ],
+      "raw_output": "We cannot deploy the hotfix without running the full database migration first."
+    }
+  },
+  {
+    "index": 7,
+    "cid": "INDEP-F2-007",
+    "bucket": "email",
+    "task": "rewrite",
+    "transcript": "write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5 pm marcus",
+    "draft": "",
+    "instruction": "",
+    "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+    "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header",
+        "missing_sender_Marcus"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header",
+        "missing_sender_marcus"
+      ],
+      "raw_output": "Write an email to the client steering committee letting them know our staging environment is restored and root cause analysis will be delivered by 5pm."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header",
+        "missing_sender_Marcus"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header",
+        "missing_sender_marcus"
+      ],
+      "raw_output": "Dear Client Steering Committee,\n\nLet us know our staging environment is restored and root cause analysis will be delivered by 5pm.\n\nThankful,"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Subject: Restoration of Staging Environment and Root Cause Analysis\n\nDear Client Steering Committee,\n\nWe are restoring the staging environment, and our root cause analysis will be delivered by 5pm.\n\nBest regards,\nMarcus"
+    }
+  },
+  {
+    "index": 8,
+    "cid": "INDEP-F2-008",
+    "bucket": "email",
+    "task": "rewrite",
+    "transcript": "email to all engineering scheduled maintenance window will begin tonight at 2300 utc and conclude by 0100 utc services will experience brief intermittent connectivity",
+    "draft": "",
+    "instruction": "",
+    "reference": "Subject: Scheduled Maintenance Window: 23:00–01:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+    "criteria": "Must generate Subject, clear body, preserve 23:00–01:00 UTC window.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header",
+        "corrupted_maintenance_time_2300_to_0230",
+        "missing_end_time_0100"
+      ],
+      "raw_output": "Email to all engineering scheduled maintenance window will begin tonight at 2:300 UTC and conclude by 0:100 UTC. Services will experience brief intermittent connectivity."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "corrupted_maintenance_time_2300_to_0230"
+      ],
+      "raw_output": "Subject: Engineering Scheduled Maintenance\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and conclude by 01:00 UTC.\n\nServices will experience brief, intermittent connectivity."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "corrupted_maintenance_time_2300_to_0230"
+      ],
+      "raw_output": "Subject: Engineering Scheduled Maintenance Window\n\nDear Engineering Team,\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and will conclude by 01:00 UTC. Services will experience brief intermittent connectivity."
+    }
+  },
+  {
+    "index": 9,
+    "cid": "INDEP-F2-009",
+    "bucket": "email",
+    "task": "rewrite",
+    "transcript": "remind the vendor that invoice 9904 for 18500 dollars is 15 days overdue please settle by wednesday devon vance",
+    "draft": "",
+    "instruction": "",
+    "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+    "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header"
+      ],
+      "raw_output": "Remind the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header",
+        "missing_invoice_amount"
+      ],
+      "raw_output": "Reminder to the vendor that invoice 9904 for $185,00 is $15 days overdue. Please settle by Wednesday.\n\nBest regards,\nDevon Vance"
+    },
+    "pytorch_merged": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_or_misplaced_subject_header"
+      ],
+      "raw_output": "Reminder to the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance."
+    }
+  },
+  {
+    "index": 10,
+    "cid": "INDEP-F2-010",
+    "bucket": "messages",
+    "task": "rewrite",
+    "transcript": "urgent ping to on call engineer latency on payment gateway spiked to 2.4 seconds please investigate redis cache health",
+    "draft": "",
+    "instruction": "",
+    "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+    "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_rescheduled_time_330",
+        "missing_room_beta"
+      ],
+      "raw_output": "urgent ping to on call engineer latency on payment gateway spiked to 2.4 seconds. please investigate redis cache health"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_rescheduled_time_330",
+        "missing_room_beta"
+      ],
+      "raw_output": "Urgent ping to on call engineer. Latency on payment gateway spiked to 2.4 seconds. Please investigate redis cache health."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_rescheduled_time_330",
+        "missing_room_beta"
+      ],
+      "raw_output": "Urgent ping to On Call Engineer. Latency on payment gateway spiked to 2.4 seconds. Please investigate Redis Cache health."
+    }
+  },
+  {
+    "index": 11,
+    "cid": "INDEP-F2-011",
+    "bucket": "messages",
+    "task": "rewrite",
+    "transcript": "hey elena quick check in are you free for a 15 minute coffee chat at two pm to brainstorm the beta rollout",
+    "draft": "",
+    "instruction": "",
+    "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+    "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_lag_12ms",
+        "missing_error_rate_001"
+      ],
+      "raw_output": "hey elena, quick check-in. are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_lag_12ms",
+        "missing_error_rate_001"
+      ],
+      "raw_output": "Hi Elena, quick check-in. Are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "missing_lag_12ms",
+        "missing_error_rate_001"
+      ],
+      "raw_output": "Hey Elena, quick check-in. Are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?"
+    }
+  },
+  {
+    "index": 12,
+    "cid": "INDEP-F2-012",
+    "bucket": "email",
+    "task": "rewrite",
+    "transcript": "hi team proud to announce we officially passed our soc 2 type 2 audit with zero findings congratulations to all",
+    "draft": "",
+    "instruction": "",
+    "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+    "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongratulatory to all."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongrats to all."
+    },
+    "pytorch_merged": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "missing_subject_header"
+      ],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongrats to all!"
+    }
+  },
+  {
+    "index": 13,
+    "cid": "INDEP-F3-013",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "can you make me a prompt for gpt four that asks it to extract all named entities from an sec 10k filing and return them in json format",
+    "draft": "",
+    "instruction": "",
+    "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+    "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?"
+    },
+    "pytorch_merged": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Can you make a prompt for GPT-4 that asks it to extract all named entities from a SEC 10K filing and return them in JSON format?"
+    }
+  },
+  {
+    "index": 14,
+    "cid": "INDEP-F3-014",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "tell claude to write a python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe",
+    "draft": "",
+    "instruction": "",
+    "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+    "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "tell Claude to write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas DataFrame."
+    }
+  },
+  {
+    "index": 15,
+    "cid": "INDEP-F3-015",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "i want an instruction for midjourney to render a cyberpunk tea house in neo tokyo in rainy neon lighting",
+    "draft": "",
+    "instruction": "",
+    "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+    "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo tokyo in rainy neon lighting."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start",
+        "missing_neo_tokyo_or_neon"
+      ],
+      "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo-Tokyo, in rainy neon lighting."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Render a cyberpunk tea house in Neo Tokyo, in rainy neon lighting."
+    }
+  },
+  {
+    "index": 16,
+    "cid": "INDEP-F3-016",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "give me a system prompt for an automated customer support triage assistant that tags urgency and outputs json",
+    "draft": "",
+    "instruction": "",
+    "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+    "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "give me a system prompt for an automated customer support triage assistant that tags urgency and outputs json"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Give me a system prompt for an automated customer support triage assistant that tags urgency and outputs JSON."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Provide an automated customer support triage assistant that tags urgency and outputs JSON."
+    }
+  },
+  {
+    "index": 17,
+    "cid": "INDEP-F3-017",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "could you generate a prompt that tells an ai to explain diffusion models without any mathematical equations",
+    "draft": "",
+    "instruction": "",
+    "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+    "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "could you generate a prompt that tells an AI to explain diffusion models without any mathematical equations?"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Could you generate a prompt that tells an AI to explain diffusion models without any mathematical equations?"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Could you explain what a diffusion model is, including its components and how it learns to reconstruct images from noise?"
+    }
+  },
+  {
+    "index": 18,
+    "cid": "INDEP-F3-018",
+    "bucket": "prompt",
+    "task": "prompt",
+    "transcript": "ask the ai to draft an engineering postmortem for a 45 minute redis cache failure",
+    "draft": "",
+    "instruction": "",
+    "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+    "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "ask the AI to draft an engineering postmortem for a 45-minute redis cache failure"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "meta_wrapper_echo",
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Ask the AI to draft an engineering postmortem for a 45-minute redis cache failure."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "non_imperative_prompt_start"
+      ],
+      "raw_output": "Engineering postmortem for a 45-minute Redis cache failure."
+    }
+  },
+  {
+    "index": 19,
+    "cid": "INDEP-F4-019",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "pre flight deployment checklist verify ssl certificates backup production database notify customer success enable feature flag 14",
+    "draft": "",
+    "instruction": "",
+    "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+    "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "pre-flight deployment checklist:\n- verify SSL certificates\n- backup production database\n- notify customer success\n- enable feature flag\n- 14"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Pre-flight deployment checklist:\n\n- SSL certificates\n- Production database\n- Customer success\n- Feature flag\n- Notification setup"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer\n- Success enable feature flag\n- 14"
+    }
+  },
+  {
+    "index": 20,
+    "cid": "INDEP-F4-020",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "conference packing list laptop charger presentation clicker extra hdmi adapter noise cancelling headphones",
+    "draft": "",
+    "instruction": "",
+    "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+    "criteria": "Keep compound items together on single bullets.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "- conference packing list\n- laptop\n- charger\n- presentation\n- clicker\n- extra hdmi adapter\n- noise cancelling headphones"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Conference packing list:\n- Laptop\n- Charger\n- Presentation\n- Clicker\n- Extra HDMI adapter\n- Noise cancelling headphones"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "- Laptop\n- Charger\n- Presentation\n- Clicker\n- Extra HDMI adapter\n- Noise cancelling headphones"
+    }
+  },
+  {
+    "index": 21,
+    "cid": "INDEP-F4-021",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "sprint backlog items first implement authentication middleware second write integration tests third document public api endpoints",
+    "draft": "",
+    "instruction": "",
+    "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+    "criteria": "Properly numbered 1, 2, 3 sequence.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "1. Sprint backlog items first.\n2. Implement authentication middleware.\n3. Write integration tests.\n4. Document public API endpoints."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Sprint backlog items first:\n\n1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "1. Implement authentication middleware.\n2. Write integration tests.\n3. Document public API endpoints."
+    }
+  },
+  {
+    "index": 22,
+    "cid": "INDEP-F4-022",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "meeting action items elena will review pr 99 devon will update deployment scripts alex will test backup restore",
+    "draft": "",
+    "instruction": "",
+    "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+    "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Meeting action items:\n- Elena will review PR 99\n- Devon will update deployment scripts\n- Alex will test backup restore"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_list_formatting"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_list_formatting"
+      ],
+      "raw_output": "Meeting action items: Elena will review PR 99. Devon will update deployment scripts. Alex will test backup restore."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Meeting action items:\n- Elena will review PR 99\n- Devon will update deployment scripts\n- Alex will test backup restore"
+    }
+  },
+  {
+    "index": 23,
+    "cid": "INDEP-F4-023",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "key differentiators local offline execution low memory footprint under one gigabyte zero cloud latency",
+    "draft": "",
+    "instruction": "",
+    "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+    "criteria": "Bullet list with 3 distinct differentiators.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency"
+    }
+  },
+  {
+    "index": 24,
+    "cid": "INDEP-F4-024",
+    "bucket": "notes_format",
+    "task": "rewrite",
+    "transcript": "database recovery procedure first drain traffic from primary node second promote replica third update dns cname",
+    "draft": "",
+    "instruction": "",
+    "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+    "criteria": "Ordered recovery steps.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Database recovery procedure:\n\n1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS cname."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Database recovery procedure:\n\n1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS CNAME."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS cname."
+    }
+  },
+  {
+    "index": 25,
+    "cid": "INDEP-F5-025",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "the billing refund bug failed qa testing again on wednesday so the issue remains open alex is continuing root cause investigation and release is postponed to monday",
+    "draft": "",
+    "instruction": "",
+    "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+    "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_revenue_12.4m",
+        "failed_growth_22pct"
+      ],
+      "raw_output": "the billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_revenue_12.4m",
+        "failed_growth_22pct"
+      ],
+      "raw_output": "The billing refund bug failed QA testing again on Wednesday. So the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_revenue_12.4m",
+        "failed_growth_22pct"
+      ],
+      "raw_output": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and the release is postponed to Monday."
+    }
+  },
+  {
+    "index": 26,
+    "cid": "INDEP-F5-026",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "third quarter financial report arr increased by 34 percent reaching 4.2 million dollars monthly net burn was successfully reduced to 180000 dollars leaving 18 months of runway",
+    "draft": "",
+    "instruction": "",
+    "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+    "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_latency_42pct",
+        "failed_p99_280ms"
+      ],
+      "raw_output": "third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_latency_42pct",
+        "failed_p99_280ms"
+      ],
+      "raw_output": "Third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_latency_42pct",
+        "failed_p99_280ms"
+      ],
+      "raw_output": "Third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway."
+    }
+  },
+  {
+    "index": 27,
+    "cid": "INDEP-F5-027",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "board resolution the directors approved four new engineering hires by december first but froze all marketing agency spend until q1 metrics are evaluated",
+    "draft": "",
+    "instruction": "",
+    "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+    "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "board resolution: the directors approved four new engineering hires by December 1, but froze all marketing agency spend until Q1 metrics are evaluated"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Board resolution: directors approved 4 new engineering hires by December 1, but froze all marketing agency spend until Q1. Metrics are evaluated"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Board approved four new engineering hires by December 1, but froze all marketing agency spend until January 1. Metrics are evaluated before Q1."
+    }
+  },
+  {
+    "index": 28,
+    "cid": "INDEP-F5-028",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "incident report dns propagation failure caused a 35 minute partial outage on the us west edge zero customer data was compromised and failover occurred automatically",
+    "draft": "",
+    "instruction": "",
+    "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+    "criteria": "35-minute outage, US-West, zero customer data compromised.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "incident report: DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero customer data was compromised, and failover occurred automatically."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "DNS propagation failure caused a 35-minute partial outage on the US West Edge. Zero customer data was compromised, and failover occurred automatically."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero. Customer data was compromised, and automatic failover occurred."
+    }
+  },
+  {
+    "index": 29,
+    "cid": "INDEP-F5-029",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "beta survey feedback 42 users voted for dark mode 19 requested offline mode and 8 noticed occasional audio crackling overall satisfaction rating was 89 percent",
+    "draft": "",
+    "instruction": "",
+    "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+    "criteria": "Preserve 42, 19, 8, 89%.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. overall satisfaction rating was 89%"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. Overall satisfaction rating was 89%"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. Overall satisfaction rating was 89%."
+    }
+  },
+  {
+    "index": 30,
+    "cid": "INDEP-F5-030",
+    "bucket": "summary",
+    "task": "summarize",
+    "transcript": "gdpr compliance update telemetry older than 90 days must be permanently deleted from cold storage data protection officer approval is required before running the script",
+    "draft": "",
+    "instruction": "",
+    "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+    "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "GDPR compliance update: telemetry older than 90 days must be permanently deleted. Cold storage data protection officer approval is required before running the script."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "GDPR compliance update, telemetry, older than 90 days, must be permanently deleted from cold storage. Data protection officer approval is required before running the script."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "GDPR compliance: telemetry older than 90 days must be permanently deleted from cold storage. Approval is required before running the script."
+    }
+  },
+  {
+    "index": 31,
+    "cid": "INDEP-F6-031",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "your app is totally broken and crashed twice when i was saving my work this is unacceptable",
+    "draft": "",
+    "instruction": "",
+    "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+    "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable."
+    }
+  },
+  {
+    "index": 32,
+    "cid": "INDEP-F6-032",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "yo bro can u send over the deck before tomorrow morning standup thx",
+    "draft": "",
+    "instruction": "",
+    "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+    "criteria": "Transform slang into polite, professional workplace communication.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Yo, bro, can you send over the deck before tomorrow morning? Standup. Thank you."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Can you send over the deck before tomorrow morning? Standup. Thank you."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Can you send over the deck before tomorrow morning? Standup. Thank you."
+    }
+  },
+  {
+    "index": 33,
+    "cid": "INDEP-F6-033",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "i will try to deliver the prototype by wednesday but it completely depends on whether legal approves the terms",
+    "draft": "",
+    "instruction": "don't change my promise",
+    "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+    "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "I will try to deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "I will try to deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "I will deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms."
+    }
+  },
+  {
+    "index": 34,
+    "cid": "INDEP-F6-034",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "we are writing to let you know that in consideration of recent events and following deep analysis we have come to the determination to decline your application",
+    "draft": "",
+    "instruction": "",
+    "reference": "After careful review, we are unable to accept your application at this time.",
+    "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "dropped_legal_approval_condition"
+      ],
+      "raw_output": "we are writing to let you know that in consideration of recent events and following deep analysis, we have come to the determination to decline your application"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "dropped_legal_approval_condition"
+      ],
+      "raw_output": "We are writing to let you know that in consideration of recent events and following deep analysis, we have come to the determination to decline your application."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "dropped_legal_approval_condition"
+      ],
+      "raw_output": "We are writing to let you know that, in consideration of recent events and following deep analysis, we have come to the determination to decline your application."
+    }
+  },
+  {
+    "index": 35,
+    "cid": "INDEP-F6-035",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "we cannot accept your submission because you missed the deadline by two hours",
+    "draft": "",
+    "instruction": "",
+    "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+    "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "we cannot accept your submission because you missed the deadline by two hours"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "We cannot accept your submission because you missed the deadline by 2 hours."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "We cannot accept your submission because you missed the deadline by two hours."
+    }
+  },
+  {
+    "index": 36,
+    "cid": "INDEP-F6-036",
+    "bucket": "followup_style",
+    "task": "rewrite",
+    "transcript": "unless the vendor signs the dpa before 5 pm today we will terminate the pilot immediately",
+    "draft": "",
+    "instruction": "",
+    "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+    "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately."
+    }
+  },
+  {
+    "index": 37,
+    "cid": "INDEP-F7-037",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "let us push the launch to friday at eleven thirty am instead",
+    "draft": "The product launch is scheduled for Tuesday at 9:00 AM in the main auditorium.",
+    "instruction": "Change Tuesday to Friday and change 9:00 AM to 11:30 AM.",
+    "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+    "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_draft_edit_or_dropped_auditorium",
+        "converted_edit_to_prose_dropped_draft"
+      ],
+      "raw_output": "let us push the launch to Friday at 11:30am instead"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_draft_edit_or_dropped_auditorium",
+        "converted_edit_to_prose_dropped_draft"
+      ],
+      "raw_output": "Let us push the launch to Friday at 11:30am instead."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": true,
+      "master_reasons": [],
+      "raw_output": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium."
+    }
+  },
+  {
+    "index": 38,
+    "cid": "INDEP-F7-038",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "change the time to three thirty pm and make sure devon vance is listed as co-presenter",
+    "draft": "Executive briefing with Elena Rostova at 2:00 PM in Boardroom A regarding series A term sheet.",
+    "instruction": "change time to 3:30 pm and add Devon Vance as co-presenter",
+    "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+    "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+    "baseline_gguf": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_co_presenter_addition"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_co_presenter_devon",
+        "failed_time_330"
+      ],
+      "raw_output": "Executive briefing with Elena Rostova at 2:00pm in Boardroom A regarding Series A term sheet."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "dropped_elena_or_boardroom"
+      ],
+      "raw_output": "Change the time to 3:30 PM and add Devon Vance as co-presenter."
+    },
+    "pytorch_merged": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_co_presenter_addition"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_co_presenter_devon"
+      ],
+      "raw_output": "Executive briefing with Elena Rostova at 3:30 PM in Boardroom A regarding Series A term sheet."
+    }
+  },
+  {
+    "index": 39,
+    "cid": "INDEP-F7-039",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "update amount to sixteen thousand five hundred dollars and remove the initial deposit sentence",
+    "draft": "Invoice #9920 for $14,000.00 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July.",
+    "instruction": "change the amount to $16,500.00 and delete the sentence about the initial deposit",
+    "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+    "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_deletion_of_deposit_sentence"
+      ],
+      "raw_output": "Update amount to $16,500.00 and remove the initial deposit sentence."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_deletion_of_deposit_sentence"
+      ],
+      "raw_output": "Invoice #9920 for $16,500.00 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July."
+    },
+    "pytorch_merged": {
+      "prev_pass": false,
+      "prev_reasons": [
+        "failed_deletion_of_deposit"
+      ],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_deletion_of_deposit_sentence"
+      ],
+      "raw_output": "Invoice #9920 for $16,500 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July."
+    }
+  },
+  {
+    "index": 40,
+    "cid": "INDEP-F7-040",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "switch the port to 8443 and mention https is required",
+    "draft": "The staging environment is hosted at staging.internal.net on port 8080. Database credentials are in 1Password.",
+    "instruction": "change port 8080 to port 8443 and add that HTTPS is required",
+    "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+    "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_postgres_16",
+        "failed_doubled_ram_128gb"
+      ],
+      "raw_output": "switch the port to 8443 and mention https is required"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_postgres_16",
+        "failed_doubled_ram_128gb"
+      ],
+      "raw_output": "Switch the port to 8443 and mention that HTTPS is required."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_postgres_16",
+        "failed_doubled_ram_128gb"
+      ],
+      "raw_output": "The staging environment is hosted at staging.internal.net on port 8443. Database credentials are in 1Password. HTTPS is required."
+    }
+  },
+  {
+    "index": 41,
+    "cid": "INDEP-F7-041",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "soften the draft so it sounds polite and friendly",
+    "draft": "You must review PR 305 immediately or the release will be blocked.",
+    "instruction": "make it polite, friendly and professional",
+    "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+    "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_security_audit_addition",
+        "dropped_prior_attachments"
+      ],
+      "raw_output": "soften the draft so it sounds polite and friendly"
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_security_audit_addition",
+        "dropped_prior_attachments"
+      ],
+      "raw_output": "Soften the draft so it sounds polite and friendly."
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_security_audit_addition",
+        "dropped_prior_attachments"
+      ],
+      "raw_output": "You must review PR 305 immediately or the release will be blocked."
+    }
+  },
+  {
+    "index": 42,
+    "cid": "INDEP-F7-042",
+    "bucket": "followup_style",
+    "task": "edit",
+    "transcript": "make it sprint 43 and add verify rate limiting and update api docs to the checklist",
+    "draft": "Sprint 42 Checklist:\n- Deploy auth service\n- Run smoke tests",
+    "instruction": "change Sprint 42 to Sprint 43 and add two items: 'Verify rate limiting' and 'Update API docs'",
+    "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+    "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+    "baseline_gguf": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_port_8443",
+        "failed_https_switch"
+      ],
+      "raw_output": "Make it Sprint 43 and add verify rate limiting and update API docs to the checklist."
+    },
+    "candidate_c2_q4": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_port_8443",
+        "failed_https_switch"
+      ],
+      "raw_output": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs"
+    },
+    "pytorch_merged": {
+      "prev_pass": true,
+      "prev_reasons": [],
+      "master_pass": false,
+      "master_reasons": [
+        "failed_port_8443",
+        "failed_https_switch"
+      ],
+      "raw_output": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs"
+    }
+  }
+]
