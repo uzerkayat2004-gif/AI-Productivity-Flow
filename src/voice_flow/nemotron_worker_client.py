@@ -34,6 +34,9 @@ WORKER_SCRIPT = Path(__file__).with_name("nemotron_native_worker.py")
 _SPAWN_LOCK = threading.Lock()
 _GENERATIONS = itertools.count(1)
 MAX_AUDIO_BYTES = 64 * 1024 * 1024
+# Cleanup operations run even when their caller already gave up: skipping a
+# close would leak native state that makes every later stream "busy".
+_ALWAYS_RUN_OPS = frozenset({"stream_close", "recognizer_close", "shutdown"})
 
 
 class NativeASRClient:
@@ -122,7 +125,7 @@ class NativeASRClient:
                 request, done, box, audio_bytes = task
                 try:
                     with self._lock:
-                        if box.get("abandoned"):
+                        if box.get("abandoned") and request["op"] not in _ALWAYS_RUN_OPS:
                             # The caller gave up before submission reached the
                             # worker; never run work nobody is waiting for.
                             box["error"] = NativeASRAbandonedError("Speech request abandoned before execution")
@@ -146,6 +149,8 @@ class NativeASRClient:
                         box["error"] = self._poison(request["op"], "worker_" + code)
                     else:
                         box["value"] = response["value"]
+                        if box.get("abandoned") and request["op"] == "stream_open":
+                            self._close_orphan_stream(response["value"])
                 except MemoryError:
                     box["error"] = self._poison(request["op"], "ipc_memory_error")
                 except (EOFError, OSError):
@@ -177,6 +182,18 @@ class NativeASRClient:
         if inflight is not None and now - inflight[1] >= inflight[2]:
             return inflight[0]
         return None
+
+    def _close_orphan_stream(self, value) -> None:
+        """Close a stream whose opener abandoned the call (RPC thread only)."""
+        handle = value.get("handle") if isinstance(value, dict) else None
+        if not handle:
+            return
+        request = {"id": next(self._ids), "generation": self.generation,
+                   "op": "stream_close", "values": {"handle": handle}}
+        self._connection.send(request)
+        response = self._connection.recv()
+        if not isinstance(response, dict) or response.get("id") != request["id"]:
+            raise ValueError("invalid response")
 
     def call(self, op: str, *, deadline=None, cancelled=None, timeout: float = 120.0, **values):
         """Run one worker operation.

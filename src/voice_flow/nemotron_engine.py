@@ -456,9 +456,16 @@ class NemotronGGUFEngine:
             except NativeASRWorkerError as exc:
                 self._mark_native_failure(exc)
                 raise
-            created = self._native_call("create", deadline=self._startup_deadline,
-                                        cancelled=self._startup_cancelled,
-                                        dll_path=str(dll_path), model_path=str(self.model_path))
+            try:
+                created = self._native_call("create", deadline=self._startup_deadline,
+                                            cancelled=self._startup_cancelled,
+                                            dll_path=str(dll_path), model_path=str(self.model_path))
+            except NativeASRBusyError:
+                # The load was cancelled or ran out of time (soft): do not leave
+                # a half-created worker behind for this unpublished engine.
+                self._native.close()
+                self._native = None
+                raise
             if created["status"] == 0 and created["handle"]:
                 self.rec_handle = ctypes.c_void_p(created["handle"])
                 log.info("[NEMOTRON] Created warm isolated native recognizer")
@@ -1267,7 +1274,8 @@ class NemotronStreamTranscriber:
             if stream.value and eng is not None and eng._native is not None and not eng.fatal_error:
                 try:
                     # Cleanup ignores user cancellation but remains bounded.
-                    eng._native_call("stream_close", handle=stream.value, timeout=0.3)
+                    eng._native_call("stream_close", handle=stream.value, timeout=0.3,
+                                     deadline=time.monotonic() + 2.0)
                 except NativeASRWorkerError as exc:
                     self.fatal_error = exc
                     self._failed = True

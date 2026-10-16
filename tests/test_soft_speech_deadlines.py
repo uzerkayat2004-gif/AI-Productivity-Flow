@@ -26,8 +26,9 @@ from voice_flow import nemotron_worker_client as transport
 FIXTURE = Path(__file__).parent / "fixtures" / "slow_speech_worker.py"
 
 
-def _engine(monkeypatch, *, recognize_seconds=0.4, push_seconds=0.002):
+def _engine(monkeypatch, *, recognize_seconds=0.4, push_seconds=0.002, open_seconds=0.0):
     monkeypatch.setattr(transport, "WORKER_SCRIPT", FIXTURE)
+    monkeypatch.setenv("SLOW_WORKER_OPEN_SECONDS", str(open_seconds))
     monkeypatch.setenv("SLOW_WORKER_RECOGNIZE_SECONDS", str(recognize_seconds))
     monkeypatch.setenv("SLOW_WORKER_PUSH_SECONDS", str(push_seconds))
     monkeypatch.setattr(nemotron_engine, "notify_models_available", lambda *_a: None)
@@ -200,5 +201,42 @@ def test_pipeline_fallback_runs_after_discarded_stream(monkeypatch):
         stream.discard()
         assert stream._done.wait(3)
         assert getattr(stream, "fatal_error", None) is None
+    finally:
+        _close(engine)
+
+
+def test_abandoned_stream_open_does_not_leak_a_busy_native_stream(monkeypatch):
+    engine = _engine(monkeypatch, open_seconds=0.3)
+    try:
+        client = engine._native
+        with pytest.raises(transport.NativeASRAbandonedError):
+            client.call("stream_open", handle=1, deadline=time.monotonic() + 0.05)
+        # The orphaned stream is closed by the RPC thread, so the recognizer
+        # is free for the next dictation instead of reporting busy forever.
+        reply = client.call("stream_open", handle=1, timeout=5)
+        assert reply["status"] == 0 and reply["handle"]
+        client.call("stream_close", handle=reply["handle"], timeout=2)
+        assert engine.transcribe(_speech(1.0), deadline=time.monotonic() + 5) == "whole recording text."
+        assert client.error is None
+    finally:
+        _close(engine)
+
+
+def test_abandoned_stream_close_still_runs(monkeypatch):
+    engine = _engine(monkeypatch)
+    try:
+        client = engine._native
+        opened = client.call("stream_open", handle=1, timeout=5)
+        # A slow request ahead of the close makes the close wait in the queue;
+        # its caller gives up, but the close must still reach the worker.
+        slow = threading.Thread(target=lambda: client.call("sleep", seconds=0.3, timeout=5))
+        slow.start()
+        time.sleep(0.05)
+        with pytest.raises(transport.NativeASRAbandonedError):
+            client.call("stream_close", handle=opened["handle"], deadline=time.monotonic() + 0.05)
+        slow.join(3)
+        reply = client.call("stream_open", handle=1, timeout=5)
+        assert reply["status"] == 0 and reply["handle"]
+        assert client.error is None
     finally:
         _close(engine)
