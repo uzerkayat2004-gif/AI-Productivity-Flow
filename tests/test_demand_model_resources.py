@@ -227,7 +227,9 @@ def test_native_stream_start_returns_while_model_loads_and_buffers_audio(monkeyp
     session.end_session()
     unblock.set()
     assert session._done.wait(1.0)
-    assert dll.pushed == [(160, 16000), (320, 16000)]
+    # + the trailing-silence pad pushed before stream_finish
+    pad = int(nemotron_engine.TRAILING_SILENCE_SECONDS * 16000)
+    assert dll.pushed == [(160, 16000), (320, 16000), (pad, 16000)]
     assert engine.acquired == 0
     assert not session.had_failures()
 

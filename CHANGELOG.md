@@ -7,7 +7,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Voice Flow
 - **Local S1-mini polish (VF-1)**: Voice Flow can clean up dictation on the device with the S1-mini model, through llama-cpp or a local llama-server, with a factual safety gate that rejects output that drops or invents content.
-- **Review before risky edits**: A review step keeps the original draft when the polished text changes names, numbers, or other facts.
 - **Faster, steadier speech recognition**: The Nemotron recognizer runs in its own worker process, stays warm between dictations, and re-decodes short recordings with full context for better accuracy.
 - **Smarter voice commands**: Task-aware time limits, safer command checks, email layouts that handle "Hey/He <Name>," greetings, and tolerance for common mishearings of "Hey Voice Flow".
 

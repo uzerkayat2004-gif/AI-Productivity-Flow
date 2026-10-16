@@ -133,6 +133,7 @@ def test_offline_request_uses_pinned_native_context_abi_and_boost(monkeypatch):
         "handle": 1, "streaming": True, "language": "en", "vocabulary": ("OpenAI", "Kubernetes", "openai"),
         "audio": np.ones(3200, dtype=np.float32).tobytes(), "count": 3200,
         "rate": 16000, "deadline": None,
+        "stop_history_eou_ms": nemotron_engine.WHOLE_RECORDING_EOU_HISTORY_MS,
     }
 
 

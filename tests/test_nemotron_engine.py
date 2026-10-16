@@ -402,7 +402,10 @@ def test_nemotron_stream_applies_far_mic_conditioning_before_native_push(monkeyp
     session.end_session()
 
     assert session._done.wait(1.0)
-    pushed = np.concatenate(dll.pushed)
+    # The final push is the trailing silence pad added before stream_finish.
+    pad = dll.pushed[-1]
+    assert pad.size == int(nemotron_engine.TRAILING_SILENCE_SECONDS * sr) and not np.any(pad)
+    pushed = np.concatenate(dll.pushed[:-1])
     assert pushed.size == faint.size * 5
     assert pushed.dtype == np.float32
     assert np.all(np.isfinite(pushed))
@@ -515,7 +518,9 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(
     session.end_session()
 
     assert session._done.wait(1.0)
-    pushed = np.concatenate(dll.pushed_samples)
+    pad = dll.pushed_samples[-1]
+    assert pad.size == int(nemotron_engine.TRAILING_SILENCE_SECONDS * 16000) and not np.any(pad)
+    pushed = np.concatenate(dll.pushed_samples[:-1])
     np.testing.assert_array_equal(pushed, np.concatenate(frames))
     assert session._text == "hello"
     assert session.had_failures() is True
@@ -615,7 +620,8 @@ def test_nemotron_long_buffer_segmentation_keeps_short_final_tail(monkeypatch):
     text = engine.transcribe(audio)
 
     assert text == "part 1 part 2 part 3"
-    np.testing.assert_array_equal(np.concatenate(segments), audio)
+    pad = np.zeros(int(nemotron_engine.TRAILING_SILENCE_SECONDS * engine.sample_rate), dtype=np.float32)
+    np.testing.assert_array_equal(np.concatenate(segments), np.concatenate([audio, pad]))
     assert all(len(segment) >= int(0.2 * engine.sample_rate) for segment in segments)
 
 
