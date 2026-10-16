@@ -69,8 +69,8 @@ echo -e "${YELLOW}║${NC}  You may experience permissions prompts, audio input 
 echo -e "${YELLOW}║${NC}  minor hotkey quirks depending on your macOS version and hardware.    ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}                                                                      ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  • Windows 10/11 x64 is the primary, production-verified platform.    ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${NC}  • macOS Apple Silicon (M1/M2/M3/M4) and Intel are supported in       ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${NC}    active development mode.                                           ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${NC}  • macOS: Apple Silicon only (M1 or newer).                          ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${NC}    Intel Macs are not supported.                                     ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}                                                                      ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  Please report any macOS bugs or feedback to:                        ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  ${CYAN}https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues${NC}     ${YELLOW}║${NC}"
@@ -90,6 +90,11 @@ fi
 
 ARCH="$(uname -m)"
 echo -e "${GREEN}==>${NC} Detected macOS on ${BOLD}${ARCH}${NC}"
+if [ "$ARCH" != "arm64" ]; then
+    echo -e "${RED}[X] Error: AI Productivity Flow on Mac supports Apple Silicon only (M1 or newer). Detected: $ARCH${NC}"
+    echo "Intel Macs are not supported."
+    exit 1
+fi
 
 # ------------------------------------------------------------------------------
 # 2. Python 3.10+ Detection (Prefer 3.11 / 3.12 for ML wheels)
