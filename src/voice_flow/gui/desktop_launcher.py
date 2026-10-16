@@ -142,7 +142,8 @@ except Exception as _import_exc:  # broken/partial install must never die silent
 
     def runtime_is_compatible(*, host: str = "127.0.0.1", port: int = PORT, timeout: float = 1.0) -> bool:
         try:
-            with _urlreq.urlopen(f"http://{host}:{port}/api/runtime", timeout=timeout) as response:
+            _opener = _urlreq.build_opener(_urlreq.ProxyHandler({}))  # loopback: never via proxy
+            with _opener.open(f"http://{host}:{port}/api/runtime", timeout=timeout) as response:
                 return response.status == 200
         except Exception:
             return False
@@ -198,6 +199,7 @@ def _poke_overlay_show() -> None:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
+            # Loopback: runtime_guard's import installed the no-proxy-for-loopback opener.
             with urllib.request.urlopen(req, timeout=1.0) as res:
                 if res.status == 200:
                     _launcher_log(f"Sent {endpoint} to restore floating bar & refresh UI")
@@ -216,7 +218,7 @@ def _poke_keepalive_refresh() -> None:
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=2.0):
+        with urllib.request.urlopen(req, timeout=2.0):  # loopback: never proxied (local_http)
             pass
         _launcher_log("Sent /api/video-flow/notebooklm/keepalive/refresh on window open/focus")
     except Exception as e:
