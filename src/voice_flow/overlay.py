@@ -618,9 +618,10 @@ class FloatingOverlayBar:
                 self._app_menu = menu
             x = int(getattr(event, "x_root", 0) or 0)
             y = int(getattr(event, "y_root", 0) or 0)
+            logging.getLogger(__name__).info("Floating bar menu opened at %s,%s", x, y)
             menu.tk_popup(x, y)
         except Exception as exc:
-            logging.getLogger(__name__).debug("Floating bar menu error: %s", exc)
+            logging.getLogger(__name__).warning("Floating bar menu error: %s", exc)
         finally:
             try:
                 if getattr(self, "_app_menu", None) is not None:

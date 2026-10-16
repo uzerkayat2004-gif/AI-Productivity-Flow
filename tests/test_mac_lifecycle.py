@@ -372,3 +372,27 @@ def test_video_page_makes_no_render_calls_when_gated_on_mac():
     assert "vfVideoFlowGatedOnMac" in body and "!vfGated" in body
     j = js.index('"/api/video-flow/documents/extract"')
     assert "vfVideoFlowGatedOnMac" in js[j - 900:j]
+
+
+def test_pyobjc_classes_have_valid_selector_prototypes():
+    """PyObjC turns every method into a selector: arg count must equal colons.
+
+    A helper method like ``_run(self, key)`` raised BadPrototypeError on a real
+    Mac and the menu bar item was never added.
+    """
+    import ast
+
+    tree = ast.parse((SRC / "voice_flow" / "platform" / "macos_lifecycle.py").read_text())
+    checked = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and any(getattr(b, "id", "") == "NSObject" for b in node.bases):
+            for fn in node.body:
+                if isinstance(fn, ast.FunctionDef):
+                    decorators = [ast.unparse(d) for d in fn.decorator_list]
+                    if any("python_method" in d for d in decorators):
+                        continue
+                    colons = fn.name.lstrip("_").count("_")  # leading "_" is not a colon
+                    args = len(fn.args.args) - 1
+                    assert colons == args, f"{node.name}.{fn.name}: {args} args but selector has {colons} colons"
+                    checked += 1
+    assert checked >= 4

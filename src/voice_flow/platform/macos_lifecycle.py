@@ -457,28 +457,33 @@ def _status_target_class():
     if _status_target_cls is None:
         from Foundation import NSObject
 
+        # Every method of an NSObject subclass becomes an Objective-C selector,
+        # so the shared dispatch lives outside the class (a "_run(self, key)"
+        # method fails PyObjC's prototype check and nothing would be added).
         class APFStatusMenuTarget(NSObject):  # type: ignore[misc]
             actions = None
 
             def openApp_(self, _sender):
-                self._run("open")
+                _run_status_action(self, "open")
 
             def showBar_(self, _sender):
-                self._run("bar")
+                _run_status_action(self, "bar")
 
             def quitApp_(self, _sender):
-                self._run("quit")
-
-            def _run(self, key):
-                fn = (self.actions or {}).get(key)
-                if fn is not None:
-                    try:
-                        fn()
-                    except Exception:
-                        log.debug("[MAC] status menu action %s failed", key, exc_info=True)
+                _run_status_action(self, "quit")
 
         _status_target_cls = APFStatusMenuTarget
     return _status_target_cls
+
+
+def _run_status_action(target: Any, key: str) -> None:
+    fn = (getattr(target, "actions", None) or {}).get(key)
+    log.info("[MAC] Menu bar item: %s", key)
+    if fn is not None:
+        try:
+            fn()
+        except Exception:
+            log.warning("[MAC] menu bar action %s failed", key, exc_info=True)
 
 
 def _status_icon():
