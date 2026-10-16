@@ -557,7 +557,7 @@ def test_incomplete_audio_stream_uses_archive_without_harvesting_partial_text(mo
             "Hey Voice Flow make this short. We launch Monday.",
             "command_unfulfilled",
             None,
-            "Voice command could not be completed — basic cleanup applied — Short",
+            "Voice command not done — your full text was kept — Short",
         ),
     ],
     ids=["fulfilled-local-model", "provider-failure", "command-unfulfilled"],

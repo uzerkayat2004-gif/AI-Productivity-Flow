@@ -98,7 +98,12 @@ _WAKE_RE = re.compile(
     # Further ASR mishearings of "Voice Flow" ("why slow", "boys flow",
     # "voice flo"). Only with an explicit hey/ok prefix and, in _is_wake_at,
     # only when a known command verb follows immediately.
-    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-]{0,3}(?:slow|flo|flu|flows?)"
+    # The mishearing may carry a comma inside it ("Hey boy, slow make ...",
+    # seen from Nemotron on macOS, Oct 2026).
+    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-,]{0,3}(?:slow|flo|flu|flows?)"
+    # "Hay" for "Hey" (Nemotron, Oct 2026: "hiring hay voice flow summarize
+    # this"). _is_wake_at requires a known command right after it.
+    r"|hay\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-,]{0,3}(?:slow|flo|flu|flows?)"
     r"|(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice[\s-]?low|voice)"
     # A verified STT error for "Hey Voice Flow".  Keep this deliberately
     # literal and require a command continuation below; it is not fuzzy wake
@@ -110,6 +115,9 @@ _WAKE_RE = re.compile(
     # A narrow ASR alias for "Voice Flow". _is_wake_at additionally requires
     # a command immediately after it and a clause boundary before it.
     r"|voice[\s-]?low"
+    # "Voice slow" (Whisper on macOS, Oct 2026): same narrow rule as
+    # "voice low" -- clause start and a known command right after it.
+    r"|voice[\s-]?slow"
     r"|voice[\s\-]{0,3}flows?"
     r")(?![\w])",
     re.IGNORECASE,
@@ -220,7 +228,11 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
     ):
         return False
     matched = match.group(0).lower()
-    if re.fullmatch(r"voice[\s-]?low", matched, re.IGNORECASE):
+    if re.match(r"hay\b", matched, re.IGNORECASE):
+        # "Hay" is an ordinary word; only a mishearing of the wake phrase
+        # when a known imperative follows immediately.
+        return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
+    if re.fullmatch(r"voice[\s-]?s?low", matched, re.IGNORECASE):
         # "Voicelow" / "Voice low" is a specific ASR substitution, not a
         # general wake phrase. Accept it only at the start of a clause and
         # when a known imperative follows immediately, so filenames, URLs,
@@ -244,7 +256,7 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
         # wake prefix and a known imperative immediately after the alias.
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.fullmatch(
-        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-]{0,3}(?:slow|flo|flu|flows?)",
+        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-,]{0,3}(?:slow|flo|flu|flows?)",
         matched,
         re.IGNORECASE,
     ) and not re.search(r"voice[\s\-]{0,3}flows?$", matched):

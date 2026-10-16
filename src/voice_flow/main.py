@@ -146,6 +146,8 @@ NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 # hotkey press (~1-2.5s on low-power CPUs) made the first words of each
 # dictation decode while the recognizer was still cold.
 NEMOTRON_CLOUD_POLISH_WARM_SECONDS = 600.0
+# macOS keeps the local speech model warm this long after a dictation.
+MAC_SPEECH_WARM_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 # Re-decode short recordings offline after release: the full-context pass is
 # more accurate than the cache-aware streaming result and merges stutter
 # fragments that streaming finalized separately ("Q? Q. Quest? Question.").
@@ -436,7 +438,7 @@ def _polish_outcome_label(outcome: str) -> str:
         "timeout": "AI timed out — basic cleanup applied",
         "provider_failure": "AI unavailable — basic cleanup applied",
         "fidelity_reject": "AI output rejected — basic cleanup applied",
-        "command_unfulfilled": "Voice command could not be completed — basic cleanup applied",
+        "command_unfulfilled": "Voice command not done — your full text was kept",
     }.get(str(outcome or ""), "AI unavailable — basic cleanup applied")
 
 
@@ -1058,6 +1060,12 @@ class VoiceFlowApp:
                         release_after_idle(NEMOTRON_CLOUD_POLISH_WARM_SECONDS)
                 elif keep_nemotron_warm and callable(release_after_idle):
                     release_after_idle(NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
+                elif sys.platform == "darwin" and callable(release_after_idle):
+                    # macOS: keep the speech model (bundled Whisper base.en)
+                    # resident between dictations instead of reloading it from
+                    # disk every time (seen: one load per dictation, Oct 2026).
+                    # Idle cleanup still frees it after MAC_SPEECH_WARM_SECONDS.
+                    release_after_idle(MAC_SPEECH_WARM_SECONDS)
                 else:
                     release()
             except Exception:

@@ -37,6 +37,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 from voice_flow.platform import macos_native as native
 from voice_flow.platform.base import PermissionReport, PermissionState
@@ -242,6 +243,76 @@ class MacOSBackend:
             return True
         app = str(info.get("app", "")).strip().lower()
         return bool(app) and app in _OWN_APP_NAMES
+
+    def restore_paste_target_focus(self, timeout: float = 0.8) -> dict:
+        """Give keyboard focus back to the user's app before Cmd+V.
+
+        Clicking the floating bar or the Audio Flow widget makes this engine
+        process the active app. Its windows are not normal (layer 0) windows,
+        so the frontmost document window still belongs to e.g. TextEdit, but
+        the Cmd+V keystroke goes to the active app -- us -- and the paste is
+        lost (seen on macOS 15, Oct 2026). When that happens, re-activate the
+        app that owns the frontmost normal window and wait until it is active.
+
+        Returns a small report for logging; never raises."""
+        report: dict = {"restored": False}
+        if not IS_MACOS:
+            return report
+        try:
+            from AppKit import NSApplication, NSRunningApplication, NSWorkspace
+
+            front = NSWorkspace.sharedWorkspace().frontmostApplication()
+            front_pid = int(front.processIdentifier()) if front is not None else 0
+            report["active_pid"] = front_pid
+            if front_pid != os.getpid():
+                return report
+            target = native.frontmost_window_owner() or {}
+            pid = target.get("pid")
+            report["target"] = {"app": target.get("app"), "pid": pid}
+            if not isinstance(pid, int) or pid <= 0 or pid == os.getpid() or self.is_own_app(target):
+                return report
+            app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+            if app is None:
+                return report
+            try:
+                # macOS 14+: cooperative activation -- the active app yields.
+                ns_app = NSApplication.sharedApplication()
+                if hasattr(ns_app, "yieldActivationToApplication_"):
+                    ns_app.yieldActivationToApplication_(app)
+            except Exception:
+                pass
+            try:
+                from AppKit import NSApplicationActivateIgnoringOtherApps
+
+                options = NSApplicationActivateIgnoringOtherApps
+            except Exception:
+                options = 2
+            app.activateWithOptions_(options)
+            deadline = time.monotonic() + max(0.1, timeout)
+            used_open = False
+            while time.monotonic() < deadline:
+                time.sleep(0.04)
+                now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
+                if now_front is not None and int(now_front.processIdentifier()) == pid:
+                    report["restored"] = True
+                    break
+                if not used_open and time.monotonic() > deadline - timeout / 2:
+                    # Fallback through LaunchServices (no Automation permission).
+                    used_open = True
+                    url = app.bundleURL()
+                    path = str(url.path()) if url is not None else ""
+                    if path:
+                        subprocess.run(["/usr/bin/open", "-a", path], timeout=2,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            report["used_open"] = used_open
+            if report["restored"]:
+                # Let the target's key window take first responder again.
+                time.sleep(0.08)
+            log.info("[MACOS] Paste target focus restore: %s", report)
+        except Exception as exc:
+            report["error"] = repr(exc)
+            log.debug("[MACOS] restore_paste_target_focus failed", exc_info=True)
+        return report
 
     # ------------------------------------------------------------------
     # selection

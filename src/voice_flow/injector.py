@@ -924,6 +924,11 @@ def _inject_text_non_windows(text: str, press_enter: bool = False) -> bool:
             try:
                 from voice_flow.platform import macos_native
 
+                restore_focus = getattr(backend, "restore_paste_target_focus", None)
+                if text and callable(restore_focus):
+                    # A click on our bar/widget leaves this process active, so
+                    # Cmd+V would land here instead of the user's app.
+                    restore_focus()
                 if text:
                     before_snapshot = macos_native.focused_value_snapshot()
                     # The live AX error is the truth; AXIsProcessTrusted() can
