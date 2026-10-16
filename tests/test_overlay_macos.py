@@ -272,6 +272,9 @@ def _placed_bar(monkeypatch, platform):
     bar.win = FakeWin()
     bar._user_pos = None
     bar.dock = "bottom"
+    # Use the fake 1920x1080 screen, never the CI runner's real monitor
+    # (Win32 GetSystemMetrics would report the runner's 1024x768 desktop).
+    monkeypatch.setattr(bar, "_get_screen_bounds", lambda: (0, 0, 1920, 1080))
     return bar
 
 

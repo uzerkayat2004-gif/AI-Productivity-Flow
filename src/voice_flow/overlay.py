@@ -734,6 +734,8 @@ class FloatingOverlayBar:
     def _schedule_mac_repaint(self, delay_ms: int = 350) -> None:
         if self.root is None or getattr(self, "_mac_repaint_pending", False):
             return  # coalesce bursts of resizes into one repaint
+        if getattr(self, "_in_mac_repaint", False):
+            return  # the repaint's own redraw must not queue another repaint (loop)
         try:
             self.root.after(delay_ms, self._mac_force_repaint)
             self._mac_repaint_pending = True
@@ -763,9 +765,13 @@ class FloatingOverlayBar:
             self._mac_repaint_done = True
         except Exception:
             pass
-        self._position_window()
-        self._last_draw_sig = None  # bypass the redraw throttle
-        self._draw()
+        self._in_mac_repaint = True
+        try:
+            self._position_window()
+            self._last_draw_sig = None  # bypass the redraw throttle
+            self._draw()
+        finally:
+            self._in_mac_repaint = False
 
     def _current_xy(self) -> tuple[int, int]:
         try:
