@@ -58,9 +58,14 @@ case "rclick":
     let p = CGPoint(x: x, y: y)
     CGWarpMouseCursorPosition(p)
     usleep(80_000)
-    CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
-    usleep(60_000)
-    CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+    // Hardware clicks carry clickState 1; set it so the synthetic click looks real.
+    for t in [CGEventType.rightMouseDown, CGEventType.rightMouseUp] {
+        if let e = CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: t, mouseCursorPosition: p, mouseButton: .right) {
+            e.setIntegerValueField(.mouseEventClickState, value: 1)
+            e.post(tap: .cghidEventTap)
+        }
+        usleep(60_000)
+    }
     print("ok")
 case "ctrlclick":
     guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(2) }
