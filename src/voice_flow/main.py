@@ -48,7 +48,7 @@ from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
 from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, collapse_stutter_fragments, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
-from voice_flow.voice_commands import detect_voice_command
+from voice_flow.voice_commands import detect_voice_command, remove_activation_phrases
 from voice_flow.activation import DEFAULT_ACTIVATION, activation_from_settings
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
@@ -416,6 +416,10 @@ def get_cached_setting(key: str, default: Any = None, ttl: float = 5.0) -> Any:
     with _MODULE_SETTINGS_CACHE_LOCK:
         _MODULE_SETTINGS_CACHE[key] = (now, val)
     return val
+
+
+# Polish outcomes that mean a spoken command was NOT carried out.
+_COMMAND_NOT_PERFORMED = frozenset({"local", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
 
 
 def _polish_outcome_label(outcome: str) -> str:
@@ -1820,6 +1824,53 @@ class VoiceFlowApp:
 
         threading.Thread(target=_write, args=(), kwargs={}, daemon=True).start()
 
+    def _command_fallback_text(
+        self,
+        source: str,
+        session: Any,
+        press_enter_enabled: bool,
+        deadline: float | None = None,
+        dictionary_trace: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Deterministic cleanup of the dictation when its command could not run.
+
+        Never calls a model: the selected one just failed (or none exists),
+        and a second attempt would only add latency.
+        """
+        level = getattr(session, "cleanup_level", None) or (
+            session.get("cleanup_level") if isinstance(session, dict) else "cleanup_light"
+        ) or "cleanup_light"
+        style = getattr(session, "style_id", None) or (
+            session.get("style_id") if isinstance(session, dict) else "smart_clean"
+        ) or "smart_clean"
+        try:
+            text = apply_spoken_punctuation(split_press_enter(source, press_enter_enabled).text)
+            cleaned = _call_with_optional_deadline(
+                polisher.polish,
+                text,
+                deadline=deadline,
+                model_ref="local/deterministic",
+                style_instruction=style,
+                cleanup_level=level,
+                force_ai=False,
+                task="cleanup",
+                style_id=str(style),
+                dictionary_trace=dictionary_trace,
+            )
+        except Exception:
+            log.debug("[COMMAND] fallback cleanup failed; using the wake-stripped dictation", exc_info=True)
+            cleaned = source
+        cleaned = str(cleaned or "").strip() or str(source or "").strip()
+        guard = getattr(dictionary_engine, "guard_polished_output", None)
+        if guard is not None and cleaned:
+            try:
+                guarded = guard(source, cleaned)
+                if isinstance(guarded, str) and guarded:
+                    cleaned = guarded
+            except Exception:
+                log.debug("[DICTIONARY] fallback guard failed", exc_info=True)
+        return cleaned
+
     def _finalize_text(self, raw_action_text: str, *args: Any, **kwargs: Any) -> str:
         """Finalize on every route, then guard the user's dictionary words.
 
@@ -2326,6 +2377,10 @@ class VoiceFlowApp:
                     log.debug("[STT] stutter collapse skipped", exc_info=True)
                 command = None
                 command_content = raw_transcript
+                # The user's own words minus the wake phrase. Pasted instead
+                # of the command's content fragment when nothing could
+                # perform a spoken command (see _COMMAND_NOT_PERFORMED).
+                command_fallback_source: str | None = None
                 if polishing_enabled:
                     # Deterministic wake-phrase command detection. The raw
                     # transcript is first repaired for known mis-hearings.
@@ -2351,6 +2406,15 @@ class VoiceFlowApp:
                         command_content = detection.content or ""
                         if command is None and detect_input != raw_transcript:
                             command_content = raw_transcript
+                        if command is not None and (command_content or "").strip():
+                            try:
+                                command_fallback_source = remove_activation_phrases(
+                                    detect_input,
+                                    None if activation == DEFAULT_ACTIVATION else activation,
+                                ) or None
+                            except Exception:
+                                log.debug("[COMMAND] wake-phrase strip failed", exc_info=True)
+                                command_fallback_source = None
                         if command is not None and command.operation == "unsupported":
                             log.info("[COMMAND] unsupported voice command ignored: %r", command.raw_phrase[:80])
                             self._overlay_call("show_done", "Unsupported voice command skipped; your text was only cleaned up.")
@@ -2498,6 +2562,35 @@ class VoiceFlowApp:
                     dictionary_trace=dictionary_trace,
                     attempt_outcome_callback=lambda outcome: polish_attempt_outcome.update(value=str(outcome)),
                 )
+                if (
+                    command is not None
+                    and command_fallback_source
+                    and effective is not None
+                    and bool(getattr(effective, "requires_ai", False))
+                    and polish_outcome["value"] in _COMMAND_NOT_PERFORMED
+                ):
+                    # Nothing could perform the spoken command (no AI model,
+                    # provider/offline failure, rejected output). Pasting the
+                    # command's content alone loses words ("make this an
+                    # email to Priya ..." became "To Priya ..."), so deliver
+                    # the whole dictation minus the wake phrase, cleaned.
+                    fallback_text = self._command_fallback_text(
+                        command_fallback_source,
+                        session,
+                        bool(press_enter_enabled),
+                        deadline=polish_deadline,
+                        dictionary_trace=dictionary_trace,
+                    )
+                    if fallback_text:
+                        log.info(
+                            "[COMMAND] %s could not be performed (polish=%s); pasting the dictation without the wake phrase.",
+                            command.label(), polish_outcome["value"],
+                        )
+                        polished_text = fallback_text
+                        if polish_outcome["value"] == "local":
+                            # "Cleaned locally" would hide that the command
+                            # did not run; failures keep their own label.
+                            polish_outcome["value"] = "command_unfulfilled"
                 polish_elapsed = time.perf_counter() - polish_started
                 processing_metadata = _processing_metadata(
                     polish_outcome=polish_outcome["value"],

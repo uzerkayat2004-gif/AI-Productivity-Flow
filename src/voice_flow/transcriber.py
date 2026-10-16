@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 
@@ -146,6 +147,163 @@ def _deadline_remaining(deadline: float | None, cap: float | None = None) -> flo
         return float(cap) if cap is not None else float("inf")
     remaining = max(0.0, float(deadline) - time.monotonic())
     return min(remaining, float(cap)) if cap is not None else remaining
+
+
+# --- Silence-hallucination guard -------------------------------------------
+# Whisper (notably base.en) emits "You" / "Thank you" when it is fed a window
+# with no speech in it. Streaming dictation closes a chunk at every pause, so
+# the final tail chunk is often pure trailing silence: decoded without VAD it
+# produced "See you tomorrow You." / "Thanks you." on 17 of 24 Mac QA
+# dictations (2026-10-16, voice_a2). Speech detection uses faster-whisper's
+# bundled Silero model (offline ONNX asset, no download).
+_TAIL_HALLUCINATION_RE = re.compile(
+    r"(?:^|(?<=[\s.,!?;:]))(thank you|thanks for watching|you)[\s.!?]*$",
+    re.IGNORECASE,
+)
+_CHUNK_TAIL_PAD_SECONDS = 0.25
+_SILENT_TAIL_MIN_SECONDS = 0.25
+
+
+def _speech_regions(audio: NDArray[np.float32], vad_params: dict | None) -> list[tuple[int, int]] | None:
+    """Sample ranges Silero VAD hears as speech; ``None`` when VAD is unavailable."""
+    if audio is None or audio.size == 0:
+        return []
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except Exception:
+        return None
+    params = dict(vad_params or {})
+    try:
+        options = VadOptions(
+            threshold=float(params.get("threshold", 0.20)),
+            # Lenient on purpose: this gate must never drop a short real word
+            # ("Okay."); it only has to recognise a window with no speech.
+            min_speech_duration_ms=min(int(params.get("min_speech_duration_ms", 200)), 120),
+            min_silence_duration_ms=int(params.get("min_silence_duration_ms", 250)),
+            speech_pad_ms=int(params.get("speech_pad_ms", 150)),
+        )
+        stamps = get_speech_timestamps(np.asarray(audio, dtype=np.float32), options)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("[STT] Speech-region probe unavailable: %s", exc)
+        return None
+    return [(int(t["start"]), int(t["end"])) for t in stamps]
+
+
+def _trim_chunk_trailing_silence(
+    audio: NDArray[np.float32], regions: list[tuple[int, int]] | None, sample_rate: int
+) -> NDArray[np.float32]:
+    """Cut a streaming chunk's trailing non-speech; leading audio is untouched."""
+    if not regions:
+        return audio
+    end = min(audio.size, regions[-1][1] + int(_CHUNK_TAIL_PAD_SECONDS * sample_rate))
+    return audio[:end] if 0 < end < audio.size else audio
+
+
+def strip_silent_tail_hallucination(
+    text: str,
+    regions: list[tuple[int, int]] | None,
+    audio_seconds: float,
+    word_spans: list[tuple[str, float, float]] | None,
+    sample_rate: int = 16000,
+) -> str:
+    """Remove a trailing lone "you" / "thank you" that Whisper invented in silence.
+
+    Guarded three ways, so a spoken "Thank you." or "See you." survives:
+    the text must end in one of the known hallucination phrases, the audio
+    after the last detected speech must be silent for at least
+    ``_SILENT_TAIL_MIN_SECONDS``, and the decoder's own word timestamps must
+    place every word of that phrase after the speech ended. Without VAD
+    regions or word timestamps nothing is removed.
+    """
+    original = str(text or "")
+    match = _TAIL_HALLUCINATION_RE.search(original.rstrip())
+    if not match or regions is None:
+        return original
+    if not regions:
+        # No speech anywhere: the whole output is the hallucination only when
+        # it is nothing but the phrase.
+        return "" if match.start() == 0 else original
+    speech_end = regions[-1][1] / float(sample_rate)
+    if audio_seconds - speech_end < _SILENT_TAIL_MIN_SECONDS:
+        return original
+    if not word_spans:
+        return original
+    phrase_words = match.group(1).split()
+    tail = word_spans[-len(phrase_words):]
+    if len(tail) != len(phrase_words):
+        return original
+    normalized = [re.sub(r"[^a-z]", "", w.lower()) for w, _s, _e in tail]
+    if normalized != [w.lower() for w in phrase_words]:
+        return original
+    # Allow a small tolerance for the VAD pad / DTW alignment jitter.
+    if not all(start >= speech_end - 0.05 for _w, start, _e in tail):
+        return original
+    kept = original.rstrip()[: match.start()].rstrip()
+    kept = re.sub(r"[\s,;:]+$", "", kept)
+    log.info("[STT] Removed trailing '%s' decoded in %.2fs of silence (hallucination guard).",
+             match.group(1), audio_seconds - speech_end)
+    return kept
+
+
+_WHISPER_REQUIRED_FILES = ("model.bin", "config.json", "tokenizer.json")
+
+
+def _whisper_snapshot_complete(path: Path) -> bool:
+    """True when ``path`` holds every file faster-whisper loads at runtime."""
+    try:
+        if not path.is_dir():
+            return False
+        if not all((path / name).is_file() for name in _WHISPER_REQUIRED_FILES):
+            return False
+        return any(path.glob("vocabulary.*"))
+    except OSError:
+        return False
+
+
+def resolve_local_whisper_model(model_name: str) -> tuple[str, bool]:
+    """Return ``(model_ref, local_files_only)`` for a local Whisper model.
+
+    Privacy contract (local-only dictation): once a Whisper model exists on
+    disk, loading it must never touch the network. faster-whisper's default
+    loader calls ``huggingface_hub.snapshot_download`` which performs a
+    ``GET /api/models/<repo>/revision/main`` round trip on *every* load,
+    even when the files are cached. We therefore resolve, in order:
+
+    1. the bundled ``runtime/models/whisper/base.en`` directory,
+    2. an explicit directory path,
+    3. a complete snapshot already in the Hugging Face cache (resolved with
+       ``try_to_load_from_cache``, which only reads the local cache),
+
+    and hand faster-whisper the directory itself, so no hub call is made.
+    Only when none exists do we return the bare model name with
+    ``local_files_only=False``: that is the one-time first download.
+    """
+    name = str(model_name or "").strip() or "base.en"
+    try:
+        from voice_flow import runtime_env
+
+        bundled = runtime_env.whisper_model_path()
+        if bundled is not None and name.casefold() == "base.en":
+            return str(bundled), True
+    except Exception:
+        pass
+    try:
+        if Path(name).is_dir():
+            return name, True
+    except (OSError, ValueError):
+        pass
+    repo_id = name if "/" in name else f"Systran/faster-whisper-{name}"
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        cached = try_to_load_from_cache(repo_id, "model.bin")
+        if isinstance(cached, (str, Path)):
+            snapshot = Path(cached).parent
+            if _whisper_snapshot_complete(snapshot):
+                return str(snapshot), True
+    except Exception:
+        pass
+    return name, False
 
 
 class Transcriber:
@@ -415,17 +573,7 @@ class Transcriber:
                 else:
                     log.warning("[MODEL] Nemotron GGUF engine unavailable for '%s', falling back to whisper", requested_model)
 
-            resolved_model_ref: object = requested_model
-            try:
-                from voice_flow import runtime_env
-
-                bundled = runtime_env.whisper_model_path()
-                # The bundled runtime only contains base.en. Selecting tiny,
-                # small, or another local model must load that exact model.
-                if bundled is not None and (resolved_model_ref == "base.en" or requested_model.casefold() == "base.en"):
-                    resolved_model_ref = str(bundled)
-            except Exception:
-                pass
+            resolved_model_ref, is_local = resolve_local_whisper_model(requested_model)
 
             # Check in-memory whisper cache to eliminate reload latency
             cache_key = str(resolved_model_ref)
@@ -438,17 +586,8 @@ class Transcriber:
                 log.info("[MODEL] Reused cached Whisper model ('%s')", cache_key)
                 return
 
-            # Check local HF hub cache to prevent blocking network queries
-            is_local = not isinstance(resolved_model_ref, str) or Path(str(resolved_model_ref)).is_dir()
-            if not is_local and isinstance(resolved_model_ref, str):
-                try:
-                    from huggingface_hub import try_to_load_from_cache
-                    cached_snap = try_to_load_from_cache(f"Systran/faster-whisper-{resolved_model_ref}", "model.bin")
-                    if cached_snap is not None:
-                        is_local = True
-                except Exception:
-                    pass
-
+            if not is_local:
+                log.info("[MODEL] Whisper '%s' is not on this device yet; downloading it once.", requested_model)
             model_inst = WhisperModel(
                 resolved_model_ref,
                 device=config.device,
@@ -863,14 +1002,16 @@ class Transcriber:
                     if getattr(self, "model", None) is None:
                         try:
                             log.info("[STT] Lazily loading local Whisper fallback model on demand...")
-                            from voice_flow import runtime_env
-                            bundled = runtime_env.whisper_model_path()
-                            w_ref = str(bundled) if bundled is not None else "base.en"
+                            # Resolve the on-disk copy first: the
+                            # fallback runs on every Nemotron miss, so a hub
+                            # round trip here leaked one request per dictation.
+                            w_ref, w_local = resolve_local_whisper_model("base.en")
                             inst = WhisperModel(
                                 w_ref,
                                 device="cpu",
                                 compute_type=config.compute_type,
                                 cpu_threads=config.cpu_threads,
+                                local_files_only=w_local,
                             )
                             with self._lock:
                                 self._whisper_models = {w_ref: inst}
@@ -888,6 +1029,22 @@ class Transcriber:
         vad_params = getattr(self, "_last_vad_parameters", None)
         if not vad_params:
             vad_params = calibrate_vad_parameters("normal")
+
+        # Silence-hallucination guard. A streaming chunk is decoded without
+        # Whisper's internal VAD (it could clip quiet edge words), so a tail
+        # chunk holding only the pause after the last word reached the model
+        # as pure silence and came back as "You". Skip such chunks and cut
+        # trailing non-speech off the rest; leading audio is never trimmed.
+        # Whole recordings decode through Whisper's own VAD; their regions are
+        # only needed (lazily, below) when the text ends in a suspect phrase.
+        speech_regions = _speech_regions(clean_audio, vad_params) if is_chunk else None
+        if is_chunk and speech_regions is not None:
+            if not speech_regions and not _has_audible_audio(audio):
+                log.info("[STT] Streaming chunk (%.1fs) is silent; not decoding it.", duration)
+                return ""
+            # An audible chunk the VAD missed is still decoded in full; a
+            # decode that is nothing but "You" is dropped by the tail guard.
+            clean_audio = _trim_chunk_trailing_silence(clean_audio, speech_regions, config.sample_rate)
 
         log.info("Transcribing %.1fs audio on %d CPU threads (beam=%d)...", duration, config.cpu_threads, config.beam_size)
 
@@ -952,6 +1109,7 @@ class Transcriber:
                     compression_ratio_threshold=2.4,
                     vad_parameters=vad_params,
                 )
+                segments = list(segments)
                 parts = [s.text.strip() for s in segments if s.text.strip()]
                 result = " ".join(parts).strip()
             except Exception as e:
@@ -980,6 +1138,13 @@ class Transcriber:
                 except Exception as e:
                     log.error("[FALLBACK] Direct transcription pass failed: %s", e)
 
+            if result and _TAIL_HALLUCINATION_RE.search(result.rstrip()):
+                if speech_regions is None:
+                    speech_regions = _speech_regions(clean_audio, vad_params)
+                result = self._guard_tail_hallucination(
+                    model, clean_audio, result, speech_regions, prompt_hint, deadline
+                )
+
         finally:
             try:
                 with self._lock:
@@ -989,6 +1154,52 @@ class Transcriber:
                 notify_models_available("speech")
 
         return result
+
+    @staticmethod
+    def _guard_tail_hallucination(
+        model,
+        audio: NDArray[np.float32],
+        text: str,
+        speech_regions: list[tuple[int, int]] | None,
+        prompt_hint: str | None,
+        deadline: float | None,
+    ) -> str:
+        """Confirm a trailing "you"/"thank you" with word timestamps before removing it.
+
+        Runs only when the text ends in a known hallucination phrase *and*
+        the audio has a silent tail, so ordinary dictations pay nothing.
+        """
+        if speech_regions is None:
+            return text
+        audio_seconds = audio.size / float(config.sample_rate)
+        if not speech_regions:
+            return strip_silent_tail_hallucination(text, speech_regions, audio_seconds, None, config.sample_rate)
+        silent_tail = audio_seconds - speech_regions[-1][1] / float(config.sample_rate)
+        # Bounded: a word-timestamp pass over a long recording costs real
+        # time, and the whole-buffer path already decodes through VAD.
+        if audio_seconds > 30.0:
+            return text
+        if silent_tail < _SILENT_TAIL_MIN_SECONDS or _deadline_remaining(deadline) < 1.0:
+            return text
+        try:
+            segments, _ = model.transcribe(
+                audio,
+                beam_size=config.beam_size,
+                temperature=config.temperature,
+                language=config.language,
+                initial_prompt=prompt_hint,
+                vad_filter=False,
+                condition_on_previous_text=False,
+                word_timestamps=True,
+            )
+            spans: list[tuple[str, float, float]] = []
+            for seg in segments:
+                for word in getattr(seg, "words", None) or []:
+                    spans.append((str(word.word).strip(), float(word.start), float(word.end)))
+        except Exception as exc:
+            log.debug("[STT] Word-timestamp check unavailable: %s", exc)
+            return text
+        return strip_silent_tail_hallucination(text, speech_regions, audio_seconds, spans, config.sample_rate)
 
     @property
     def _cloud_stt_failures(self) -> int:
