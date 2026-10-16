@@ -108,7 +108,8 @@ def main_window() -> dict | None:
 
 
 def bar_windows() -> list[dict]:
-    return [w for w in app_windows() if w.get("h", 0) < 120 and w.get("w", 0) < 400]
+    # Layer 25 = the menu-bar status item (v1.0.3), not the floating bar.
+    return [w for w in app_windows() if w.get("h", 0) < 120 and w.get("w", 0) < 400 and w.get("layer", 0) != 25]
 
 
 def crop_bar(src: str, label: str, bar: dict | None) -> str | None:

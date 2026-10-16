@@ -167,7 +167,7 @@ def audio_flow(pw):
         time.sleep(2.5)
         s2 = shot("after-mouse-text-selection-in-TextEdit")
         ov = api("/api/overlay/status")[1]
-        bars = [x for x in json.loads(helper("windows") or "[]") if x.get("owner") == "AI Productivity Flow" and x.get("h", 0) < 140]
+        bars = [x for x in json.loads(helper("windows") or "[]") if x.get("owner") == "AI Productivity Flow" and x.get("h", 0) < 140 and x.get("layer", 0) != 25]
         note = f"overlay after selection={ov}\napp small windows={bars}"
         record(A, "Audio Flow on Mac: select text with the mouse (should offer Listen)", "info", note, s2)
         # Cmd+A then click the bar's speak zone.
@@ -177,7 +177,7 @@ def audio_flow(pw):
         if bar:
             helper("move", str(bar["x"] + bar["w"] / 2), str(bar["y"] + bar["h"] / 2))
             time.sleep(1.5)
-            bars2 = [x for x in json.loads(helper("windows") or "[]") if x.get("owner") == "AI Productivity Flow" and x.get("h", 0) < 140]
+            bars2 = [x for x in json.loads(helper("windows") or "[]") if x.get("owner") == "AI Productivity Flow" and x.get("h", 0) < 140 and x.get("layer", 0) != 25]
             big = max(bars2, key=lambda x: x["w"] * x["h"]) if bars2 else bar
             s3 = shot("bar-hover-with-selection")
             helper("click", str(big["x"] + big["w"] / 2), str(big["y"] + big["h"] / 2))

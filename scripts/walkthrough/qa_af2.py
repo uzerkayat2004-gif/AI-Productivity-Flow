@@ -36,7 +36,8 @@ def appwins() -> list[dict]:
 
 
 def floating() -> list[dict]:
-    return [w for w in appwins() if w.get("h", 0) < 140]
+    # Layer 25 = the menu-bar status item (v1.0.3), not the bar or widget.
+    return [w for w in appwins() if w.get("h", 0) < 140 and w.get("layer", 0) != 25]
 
 
 def key(w: dict) -> tuple:
