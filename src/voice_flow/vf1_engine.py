@@ -1057,6 +1057,10 @@ while parent_alive; do
 done
 stop_child
 """
+# macOS: llama-server's SIGTERM handler calls exit() and can abort in a static
+# destructor (stream_session_manager), leaving a crash report. The server has
+# no state to flush, so the guard stops it with SIGKILL there.
+_DARWIN_GUARD_SCRIPT = _POSIX_GUARD_SCRIPT.replace('kill -TERM "$child"', 'kill -KILL "$child"')
 
 
 def _free_loopback_port(host: str = "127.0.0.1") -> int:
@@ -1268,6 +1272,11 @@ class LlamaServerManager:
 
     def _spawn(self, cmd: List[str]) -> subprocess.Popen:
         env = no_proxy_environment()
+        if sys.platform == "darwin":
+            # CPU-only server: create no Metal device. Each Metal device
+            # compiles ggml's embedded shader library at startup (~35-40 s on
+            # a first run, saturating the CPU that Nemotron needs).
+            env["GGML_METAL_DEVICES"] = "0"
         if os.name == "nt":
             proc = subprocess.Popen(
                 cmd,
@@ -1279,7 +1288,8 @@ class LlamaServerManager:
             )
         else:
             proc = subprocess.Popen(
-                ["/bin/sh", "-c", _POSIX_GUARD_SCRIPT, _GUARD_MARKER, str(os.getpid()), *cmd],
+                ["/bin/sh", "-c", _DARWIN_GUARD_SCRIPT if sys.platform == "darwin" else _POSIX_GUARD_SCRIPT,
+                 _GUARD_MARKER, str(os.getpid()), *cmd],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1288,6 +1298,8 @@ class LlamaServerManager:
             )
         # Windows: kill-on-close job object; all: killed at app exit.
         child_processes.track(proc, "llama-server")
+        if sys.platform == "darwin":
+            child_processes.mark_hard_kill(proc)
         return proc
 
     def stop(self) -> None:

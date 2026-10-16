@@ -331,3 +331,69 @@ def test_llama_server_ready_timeout_longer_on_mac(monkeypatch):
     assert engine._server_ready_timeout() == 60.0
     monkeypatch.setattr(vf1_engine.sys, "platform", "win32")
     assert engine._server_ready_timeout() == float(engine.config.server_ready_timeout_seconds)
+
+
+def _capture_popen(monkeypatch, platform_name):
+    from voice_flow import vf1_engine
+
+    monkeypatch.setattr(vf1_engine.sys, "platform", platform_name)
+    monkeypatch.setattr(vf1_engine.os, "name", "posix")
+    seen = {}
+
+    class FakeProc:
+        pid = 987654
+
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"], seen["env"] = cmd, kwargs.get("env") or {}
+        return FakeProc()
+
+    monkeypatch.setattr(vf1_engine.subprocess, "Popen", fake_popen)
+    marked = []
+    monkeypatch.setattr(vf1_engine.child_processes, "track", lambda proc, name="": proc)
+    monkeypatch.setattr(vf1_engine.child_processes, "mark_hard_kill", lambda proc: marked.append(proc))
+    manager = vf1_engine.LlamaServerManager(run_dir=Path("/nonexistent-run"))
+    manager._spawn(["llama-server", "-m", "s1.gguf"])
+    return seen, marked
+
+
+def test_mac_llama_server_creates_no_metal_device_and_is_hard_killed(monkeypatch):
+    seen, marked = _capture_popen(monkeypatch, "darwin")
+    assert seen["env"].get("GGML_METAL_DEVICES") == "0"
+    script = seen["cmd"][2]
+    assert 'kill -KILL "$child"' in script and 'kill -TERM "$child"' not in script
+    assert len(marked) == 1
+
+
+def test_linux_llama_server_spawn_unchanged(monkeypatch):
+    seen, marked = _capture_popen(monkeypatch, "linux")
+    assert "GGML_METAL_DEVICES" not in seen["env"]
+    assert 'kill -TERM "$child"' in seen["cmd"][2]
+    assert marked == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+def test_hard_kill_tree_never_delivers_sigterm(tmp_path):
+    import subprocess
+    import time
+    from voice_flow import child_processes
+
+    marker = tmp_path / "got-term"
+    proc = subprocess.Popen(
+        ["/bin/sh", "-c", f"trap 'echo term > {marker}; exit 0' TERM; while :; do sleep 0.05; done"],
+        start_new_session=True,
+    )
+    try:
+        time.sleep(0.3)
+        child_processes.track(proc, "hard")
+        child_processes.mark_hard_kill(proc)
+        child_processes.kill_tree(proc, timeout=3)
+        assert proc.poll() is not None
+        assert proc.returncode == -9
+        assert not marker.exists()
+    finally:
+        child_processes.untrack(proc)
+        if proc.poll() is None:
+            proc.kill()
