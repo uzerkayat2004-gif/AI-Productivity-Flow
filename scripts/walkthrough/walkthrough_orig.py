@@ -292,6 +292,28 @@ def lock_click(page, label: str, selector: str, wait: float = 2.0, win: dict | N
     return st
 
 
+MAC_VF_GATE = "coming to Mac"
+
+
+def videoflow_check(p, s):
+    """On macOS Video Flow is gated by design: the click keeps the current page
+    and shows the 'coming to Mac soon' toast. Elsewhere it must open the page."""
+    if sys.platform == "darwin":
+        gated = any(MAC_VF_GATE in t for t in (s.get("toasts") or []))
+        return gated, f"page={s['page']} mac_gate_toast={gated}"
+    return s["page"] == "videoflow", f"page={s['page']}"
+
+
+def open_voice_submenu(page, win, label):
+    """Home/Insights/Dictionary/Style/Providers live in the collapsible Voice Flow
+    group; a user opens it first (clicking 'Voice Flow' opens it and shows Home)."""
+    if page.evaluate("!!document.querySelector('#voiceflow-nav-group.open')"):
+        return
+    lock_click(page, label, "#voiceflow-nav-toggle", win=win,
+               check=lambda p, s: (p.evaluate("!!document.querySelector('#voiceflow-nav-group.open')") and s["page"] == "home",
+                                   f"page={s['page']} submenu_open={p.evaluate('!!document.querySelector(\'#voiceflow-nav-group.open\')')}"))
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright
 
@@ -306,7 +328,11 @@ def main() -> int:
               "/api/video-flow/history", "/api/settings/autostart/status", "/api/updates/check",
               "/api/video-flow/notebooklm/status", "/api/auth/status"):
         code, body = api(p)
-        record(f"API GET {p}", "ok" if code == 200 else "fail", f"HTTP {code}: {json.dumps(body, default=str)[:400]}")
+        # /api/video-flow/status is a per-job endpoint (?id=...): with no id the
+        # app answers 404 "Video not found" by design.
+        by_design = p == "/api/video-flow/status" and code == 404 and isinstance(body, dict) and body.get("error") == "Video not found"
+        record(f"API GET {p}" + (" (no job id: 404 by design)" if by_design else ""), "ok" if code == 200 or by_design else "fail",
+               f"HTTP {code}: {json.dumps(body, default=str)[:400]}")
 
     time.sleep(3)
     win = main_window()
@@ -317,10 +343,16 @@ def main() -> int:
 
     with sync_playwright() as pw:
         try:
+            # Playwright's WebKit hangs in new_page() on the GitHub macOS 14 image
+            # (22-33 min, runs 38934873990, 38967036385, 38974404603); the DOM checks
+            # only need a browser engine, so macOS 14 uses Chromium.
+            import platform as _pf
+            if _pf.mac_ver()[0].split(".")[0] == "14" or os.environ.get("QA_BROWSER") == "chromium":
+                raise RuntimeError("macOS 14 runner: Playwright WebKit new_page() hangs; using Chromium")
             browser = pw.webkit.launch(timeout=90000)
             record("Playwright WebKit launch", "ok", browser.version)
         except Exception as exc:
-            record("Playwright WebKit launch", "fail", f"{exc!r} -> falling back to Chromium")
+            record("Playwright WebKit launch", "info", f"{exc!r} -> falling back to Chromium")
             browser = pw.chromium.launch(timeout=90000)
         vw, vh = (int(win["w"]), int(win["h"] - 28)) if win else (1160, 732)
         ctx = browser.new_context(viewport={"width": vw, "height": vh})
@@ -392,7 +424,7 @@ def main() -> int:
                    check=lambda p, s: (p.evaluate("!document.body.classList.contains('af-guide-active')"), "guide finished"))
         page.evaluate("() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         lock_click(page, "after finishing guide: sidebar click Video Flow", ".sidebar .nav-item[data-page=videoflow]",
-                   win=win, check=lambda p, s: (s["page"] == "videoflow", f"page={s['page']}"))
+                   win=win, check=videoflow_check)
         lock_click(page, "after finishing guide: sidebar click Settings", ".sidebar .nav-item[onclick*=openSettings]", win=win,
                    check=lambda p, s: ("settings-modal" in s["openModals"], f"modals={s['openModals']}"))
         page.keyboard.press("Escape")
@@ -404,10 +436,16 @@ def main() -> int:
         # (the card grows with the live caption, so click X before narration moves it).
         lock_click(page, "sidebar click Audio Flow", ".sidebar .nav-item[data-page=audioflow]", win=win,
                    check=lambda p, s: (s["page"] == "audioflow", f"page={s['page']}"))
-        lock_click(page, "Feature Guide button re-opens the guide", "#page-audioflow .af-guide-trigger-btn", win=win, wait=0.6,
-                   check=lambda p, s: (p.evaluate("document.body.classList.contains('af-guide-active')"), f"counter={counter(p)!r}"))
+        # The Audio Flow page no longer has a Feature Guide button (current UI starts
+        # the guide automatically / from the tour); start it the way the app does.
+        page.evaluate("() => { try { startAudioFlowGuide(); } catch(e){} }")
+        page.wait_for_timeout(1500)
+        reopened = page.evaluate("document.body.classList.contains('af-guide-active')")
+        record("Audio Flow guide re-opens (startAudioFlowGuide)", "ok" if reopened else "fail", f"af-guide-active={reopened} counter={counter(page)!r}",
+               shot(page, "af-guide-reopened"))
         lock_click(page, "close the re-opened guide (X)", ".af-guide-close-btn", win=win, wait=2.0,
                    check=lambda p, s: (p.evaluate("!document.body.classList.contains('af-guide-active')"), "guide closed"))
+        open_voice_submenu(page, win, "after closing guide: open Voice Flow group")
         lock_click(page, "after closing guide: sidebar click Home", ".sidebar .nav-item[data-page=home]",
                    win=win, check=lambda p, s: (s["page"] == "home", f"page={s['page']}"))
         page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
@@ -415,7 +453,11 @@ def main() -> int:
         step(page, "main app after onboarding", wait=1.5)
 
         # Replay from the sidebar + Skip Tour, as a user would (native + WebKit)
-        lock_click(page, "replay tour (sidebar 'Welcome Tour')", ".sidebar .nav-item[onclick*=replayOnboarding]", win=win,
+        # Replay Tour lives in Settings > System (no sidebar 'Welcome Tour' item in this UI).
+        lock_click(page, "open Settings (to replay tour)", ".sidebar .nav-item[onclick*=openSettings]", win=win,
+                   check=lambda p, s: ("settings-modal" in s["openModals"], f"modals={s['openModals']}"))
+        lock_click(page, "settings tab system (to replay tour)", "#settings-nav-system", win=win)
+        lock_click(page, "replay tour (Settings > System > Replay Tour)", "button.action-btn[onclick*=replayOnboarding]", win=win, wait=3.0,
                    check=lambda p, s: (s["onboardingVisible"], "tour visible again"))
         lock_click(page, "Skip Tour", "#onboarding-overlay .scene1-skip-badge:visible", win=win,
                    check=lambda p, s: (not s["onboardingVisible"], "tour closed by Skip"))
@@ -423,7 +465,8 @@ def main() -> int:
         locked = page.evaluate("document.body.classList.contains('af-guide-active')")
         record("after Skip Tour: Audio Flow guide did not auto-start", "fail" if locked else "ok", f"af-guide-active={locked}")
         lock_click(page, "after Skip Tour: sidebar click Video Flow (app usable?)", ".sidebar .nav-item[data-page=videoflow]",
-                   win=win, check=lambda p, s: (s["page"] == "videoflow", f"page={s['page']}"))
+                   win=win, check=videoflow_check)
+        open_voice_submenu(page, win, "after Skip Tour: open Voice Flow group")
         lock_click(page, "after Skip Tour: sidebar click Home", ".sidebar .nav-item[data-page=home]",
                    win=win, check=lambda p, s: (s["page"] == "home", f"page={s['page']}"))
         lock_click(page, "after Skip Tour: sidebar click Settings", ".sidebar .nav-item[onclick*=openSettings]", win=win,
@@ -483,8 +526,10 @@ def main() -> int:
 
         # ---- real sidebar clicks, native + WebKit side by side
         for pid in ["audioflow", "videoflow", "home", "insights", "dictionary", "style", "providers"]:
+            if pid == "home":
+                open_voice_submenu(page, win, "open Voice Flow group (sidebar)")
             lock_click(page, f"sidebar click {pid}", f".sidebar .nav-item[data-page={pid}]", win=win,
-                       check=lambda p, s, pid=pid: (s["page"] == pid, f"page={s['page']}"))
+                       check=videoflow_check if pid == "videoflow" else (lambda p, s, pid=pid: (s["page"] == pid, f"page={s['page']}")))
         lock_click(page, "sidebar click Settings", ".sidebar .nav-item[onclick*=openSettings]", win=win,
                    check=lambda p, s: ("settings-modal" in s["openModals"], f"modals={s['openModals']}"))
         for tab in ("system", "account", "general"):

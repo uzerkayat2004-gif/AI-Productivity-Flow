@@ -34,8 +34,22 @@ def run_original():
            f"took {time.time()-t:.0f}s; counts {counts.group(1) if counts else '?'}\nfailed rows:\n" + "\n".join(fails)[:2500], "SUMMARY.md")
 
 
+def _launch(pw):
+    """WebKit, except on the macOS 14 runner where Playwright's WebKit hangs in
+    new_page(); retry once and fall back to Chromium if WebKit's driver drops."""
+    import platform as _pf
+    if _pf.mac_ver()[0].split(".")[0] == "14" or os.environ.get("QA_BROWSER") == "chromium":
+        return pw.chromium.launch(timeout=90000)
+    for _ in range(2):
+        try:
+            return pw.webkit.launch(timeout=90000)
+        except Exception:
+            time.sleep(5)
+    return pw.chromium.launch(timeout=90000)
+
+
 def page_ctx(pw, fresh=True):
-    b = pw.webkit.launch()
+    b = _launch(pw)
     ctx = b.new_context(viewport={"width": 1280, "height": 860})
     pg = ctx.new_page()
     errs = []
@@ -201,7 +215,10 @@ def audio_history_apostrophes(pw):
     if not mp3.exists():
         sh(f"say -o /tmp/af.aiff \"It's Uzair's summary test\"; afconvert -f mp4f -d aac /tmp/af.aiff {shlex.quote(str(EV / 'af-sample.m4a'))}", quiet=True)
         mp3 = EV / "af-sample.m4a"
-    dest = HOME / ".voice_flow" / "qa_audio"
+    # Generated summaries live in ~/.voice_flow/audio_summaries; the player
+    # refuses audio outside that folder on purpose (path-safety guard), so the
+    # seeded item must sit where the app would have written it.
+    dest = HOME / ".voice_flow" / "audio_summaries"
     dest.mkdir(parents=True, exist_ok=True)
     target = dest / mp3.name
     sh(f"cp {shlex.quote(str(mp3))} {shlex.quote(str(target))}", quiet=True)
@@ -285,16 +302,28 @@ def main():
         wait_api(120)
         time.sleep(10)
     from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        for fn in (video_gate, audio_flow, audio_history_apostrophes, permissions_ui, onboarding_persistence):
+    # One Playwright driver per check: on the macOS 15 runner the driver once
+    # dropped ("Connection closed while reading from the driver") after an app
+    # restart and took every later check down with it.
+    for fn in (video_gate, audio_flow, audio_history_apostrophes, permissions_ui, onboarding_persistence):
+        tb = ""
+        for attempt in (1, 2):
             try:
-                log(f"=== {fn.__name__}")
-                fn(pw)
+                log(f"=== {fn.__name__} (attempt {attempt})")
+                with sync_playwright() as pw:
+                    fn(pw)
+                tb = ""
+                break
             except BaseException:
                 import traceback
-                record(A, fn.__name__, "error", traceback.format_exc()[-1500:])
-                if "watchdog" in traceback.format_exc():
+                tb = traceback.format_exc()
+                if "watchdog" in tb or "Connection closed while reading from the driver" not in tb:
                     break
+                record(A, f"{fn.__name__}: Playwright driver dropped, retrying once", "info", tb[-600:])
+        if tb:
+            record(A, fn.__name__, "error", tb[-1500:])
+            if "watchdog" in tb:
+                break
     sh(f"mkdir -p {shlex.quote(str(EV / 'voice_flow_logs'))} && cp -R ~/.voice_flow/logs/. {shlex.quote(str(EV / 'voice_flow_logs'))}/; true", quiet=True)
     wd = sh("grep -rn windll ~/.voice_flow/logs | head -20", quiet=True)[1]
     record(A, "no windll errors in logs after UI walkthrough", "ok" if not wd.strip() else "fail", wd.strip()[:1500] or "0 matches")
