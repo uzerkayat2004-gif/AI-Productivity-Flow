@@ -21,6 +21,15 @@ class NativeASRBusyError(RuntimeError):
     """A previous stream has not closed; do not collide with its native state."""
 
 
+class NativeASRAbandonedError(NativeASRBusyError):
+    """The caller's soft deadline or cancellation fired before the reply.
+
+    The worker stays alive: the in-flight native call finishes in the
+    background and its reply is discarded. Only a native call that outlives
+    its own hard ``timeout`` (a genuinely hung worker) poisons the client.
+    """
+
+
 WORKER_SCRIPT = Path(__file__).with_name("nemotron_native_worker.py")
 _SPAWN_LOCK = threading.Lock()
 _GENERATIONS = itertools.count(1)
@@ -36,6 +45,8 @@ class NativeASRClient:
         self._audio_bytes = 0
         self._ids = itertools.count(1)
         self._closed = threading.Event()
+        # (op, started monotonic, hard timeout) of the request being executed.
+        self._inflight: tuple[str, float, float] | None = None
         parent, child = multiprocessing.Pipe(duplex=True)
         lifetime_child, self._lifetime_writer = multiprocessing.Pipe(duplex=False)
         self._connection = parent
@@ -110,6 +121,14 @@ class NativeASRClient:
                     continue
                 request, done, box, audio_bytes = task
                 try:
+                    with self._lock:
+                        if box.get("abandoned"):
+                            # The caller gave up before submission reached the
+                            # worker; never run work nobody is waiting for.
+                            box["error"] = NativeASRAbandonedError("Speech request abandoned before execution")
+                            continue
+                        box["started"] = time.monotonic()
+                        self._inflight = (request["op"], box["started"], box.get("timeout", 120.0))
                     if self._closed.is_set():
                         raise OSError("closed generation")
                     self._connection.send(request)
@@ -138,6 +157,7 @@ class NativeASRClient:
                 finally:
                     with self._lock:
                         self._audio_bytes -= audio_bytes
+                        self._inflight = None
                     done.set()
         finally:
             self._connection.close()
@@ -151,7 +171,24 @@ class NativeASRClient:
                     self._audio_bytes -= audio_bytes
                 done.set()
 
+    def _stalled_inflight(self, now: float):
+        """Return the op of an executing request that outlived its hard timeout."""
+        inflight = self._inflight
+        if inflight is not None and now - inflight[1] >= inflight[2]:
+            return inflight[0]
+        return None
+
     def call(self, op: str, *, deadline=None, cancelled=None, timeout: float = 120.0, **values):
+        """Run one worker operation.
+
+        ``deadline`` and ``cancelled`` are *soft*: when either fires the call
+        raises :class:`NativeASRAbandonedError` (a ``NativeASRBusyError``) and
+        the worker keeps running; an already-executing native call completes in
+        the background and its reply is dropped. ``timeout`` is the *hard*
+        bound on native execution time, measured from when the worker starts
+        the request (not while it waits in the queue). Only that hard bound, a
+        dead process or a protocol error poisons this client.
+        """
         if self.error:
             raise self.error
         if self._closed.is_set():
@@ -164,10 +201,8 @@ class NativeASRClient:
         audio = values.get("audio", b"")
         if not isinstance(audio, bytes) or len(audio) > MAX_AUDIO_BYTES:
             raise ValueError("invalid audio payload size")
-        done, box = threading.Event(), {}
+        done, box = threading.Event(), {"timeout": float(timeout)}
         request = {"id": next(self._ids), "generation": self.generation, "op": op, "values": values}
-        absolute = time.monotonic() + timeout
-        full = False
         with self._lock:
             if self._closed.is_set():
                 raise self.error or NativeASRWorkerError("Local speech worker closed")
@@ -178,15 +213,27 @@ class NativeASRClient:
                 self._requests.put_nowait((request, done, box, len(audio)))
             except queue.Full:
                 self._audio_bytes -= len(audio)
-                full = True
-        if full:
-            raise self._poison(op, "request queue full")
+                raise NativeASRBusyError("Speech request queue is full; recording retained")
+
+        def abandon(reason: str):
+            with self._lock:
+                box["abandoned"] = True
+            return NativeASRAbandonedError(f"Speech {op} {reason}; worker kept alive, recording retained")
+
         while True:
+            now = time.monotonic()
             limit = deadline() if callable(deadline) else deadline
             if cancelled is not None and cancelled.is_set():
-                raise self._poison(op, "cancelled")
-            if time.monotonic() >= min(absolute, limit if limit is not None else absolute):
-                raise self._poison(op, "deadline exceeded")
+                raise abandon("cancelled")
+            if limit is not None and now >= limit:
+                raise abandon("deadline exceeded")
+            started = box.get("started")
+            if started is not None and now - started >= timeout:
+                raise self._poison(op, "hard timeout")
+            stalled = self._stalled_inflight(now)
+            if stalled is not None:
+                # An earlier (possibly abandoned) native call is hung.
+                raise self._poison(stalled, "hard timeout")
             if self.error:
                 raise self.error
             if done.wait(0.02):
@@ -199,8 +246,8 @@ class NativeASRClient:
     def close(self):
         if not self._closed.is_set():
             try:
-                self.call("shutdown", timeout=0.3)
-            except NativeASRWorkerError:
+                self.call("shutdown", timeout=0.3, deadline=time.monotonic() + 1.0)
+            except (NativeASRWorkerError, NativeASRBusyError):
                 pass
         with self._lock:
             self._closed.set()
