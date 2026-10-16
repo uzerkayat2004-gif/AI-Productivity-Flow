@@ -838,6 +838,14 @@ class VF1Engine:
             if p.is_file():
                 return p
 
+        if sys.platform == "darwin":
+            # The macOS .app ships the official llama.cpp llama-server.
+            from voice_flow import runtime_env
+
+            bundled = runtime_env.mac_bundled_llama_server()
+            if bundled is not None:
+                return bundled
+
         from voice_flow import downloadable_models
         candidate_dirs = [
             downloadable_models.get_models_dir().parent / "bin" / "llama",

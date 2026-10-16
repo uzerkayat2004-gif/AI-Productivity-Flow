@@ -51,6 +51,59 @@ def is_installed() -> bool:
     return install_root() is not None
 
 
+def _mac_resources_dir() -> Path:
+    """``Contents/Resources`` when this package runs from the macOS .app."""
+    return Path(__file__).resolve().parents[2]
+
+
+def mac_bundle_runtime_dir() -> Path | None:
+    """``Contents/Resources/runtime`` of the macOS .app this code runs from.
+
+    The .app layout differs from the Windows install root: this package lives
+    in ``Contents/Resources/src/voice_flow`` and the runtime (Python,
+    llama-server, NeMo-Speech) in ``Contents/Resources/runtime`` with a
+    ``build-manifest.json``. None when not running from a macOS bundle.
+    """
+    if sys.platform != "darwin":
+        return None
+    runtime = _mac_resources_dir() / "runtime"
+    return runtime if (runtime / "build-manifest.json").is_file() else None
+
+
+def mac_bundled_llama_server() -> Path | None:
+    """The llama-server shipped inside the macOS .app (S1-mini polish), if any."""
+    runtime = mac_bundle_runtime_dir()
+    if runtime is None:
+        return None
+    candidate = runtime / "llama" / "llama-server"
+    return candidate if candidate.is_file() else None
+
+
+def mac_bundled_nemo_speech_dylib() -> Path | None:
+    """The NeMo-Speech C ABI dylib shipped inside the macOS .app (Nemotron), if any."""
+    runtime = mac_bundle_runtime_dir()
+    if runtime is None:
+        return None
+    candidate = runtime / "nemo" / "lib" / "libnemo_speech_asr_c.dylib"
+    return candidate if candidate.is_file() else None
+
+
+def native_worker_python() -> str:
+    """Interpreter for the isolated native speech worker.
+
+    On macOS ``sys.executable`` is the app launcher; started with ``-I`` it
+    ignores PYTHONHOME and cannot find the standard library, so the worker
+    uses the bundled ``python3`` binary instead (it locates its stdlib from
+    its own path). Everywhere else this is ``python_executable()``.
+    """
+    runtime = mac_bundle_runtime_dir()
+    if runtime is not None:
+        bundled = runtime / "python" / "bin" / "python3"
+        if bundled.is_file():
+            return str(bundled)
+    return python_executable()
+
+
 def runtime_root() -> Path | None:
     root = install_root()
     return (root / "runtime") if root else None

@@ -22,6 +22,7 @@ import logging
 import os
 import queue
 import shutil
+import sys
 import struct
 import subprocess
 import tempfile
@@ -170,6 +171,16 @@ def retry_failed_model(model_ref, action):
 
 def _find_nemo_speech_dll() -> Path | None:
     """Find native NeMo-Speech C ABI DLL/dylib (nemo_speech_asr_c) if available."""
+    if sys.platform == "darwin":
+        # The macOS .app ships the official NeMo-Speech.cpp arm64 dylib.
+        try:
+            from voice_flow import runtime_env
+
+            bundled = runtime_env.mac_bundled_nemo_speech_dylib()
+            if bundled is not None:
+                return bundled
+        except Exception:
+            pass
     candidates = [
         paths.data_dir() / "bin" / "nemo_speech_asr_c.dll",
         paths.data_dir() / "bin" / "libnemo_speech_asr_c.dylib",
@@ -452,7 +463,7 @@ class NemotronGGUFEngine:
         if dll_path is not None:
             from voice_flow import runtime_env
             try:
-                self._native = NativeASRClient(str(dll_path), runtime_env.python_executable())
+                self._native = NativeASRClient(str(dll_path), runtime_env.native_worker_python())
             except NativeASRWorkerError as exc:
                 self._mark_native_failure(exc)
                 raise
@@ -844,6 +855,11 @@ class NemotronGGUFEngine:
                 cli_res = self._transcribe_native_cli(wav, exe_path, deadline=deadline)
                 if cli_res is not None:
                     result = cli_res
+            else:
+                log.warning(
+                    "[NEMOTRON] Native NeMo-Speech runtime is not available on this system; "
+                    "no local transcription was produced."
+                )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         self.last_latency_ms = elapsed_ms
