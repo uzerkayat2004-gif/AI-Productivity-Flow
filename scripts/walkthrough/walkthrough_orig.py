@@ -343,17 +343,15 @@ def main() -> int:
 
     with sync_playwright() as pw:
         try:
-            # Playwright's WebKit hangs in new_page() on the GitHub macOS 14 image
-            # (22-33 min, runs 38934873990, 38967036385, 38974404603); the DOM checks
-            # only need a browser engine, so macOS 14 uses Chromium.
-            import platform as _pf
-            if _pf.mac_ver()[0].split(".")[0] == "14" or os.environ.get("QA_BROWSER") == "chromium":
+            from qa_browser import use_chromium
+            if use_chromium():
                 raise RuntimeError("macOS 14 runner: Playwright WebKit new_page() hangs; using Chromium")
             browser = pw.webkit.launch(timeout=90000)
             record("Playwright WebKit launch", "ok", browser.version)
         except Exception as exc:
             record("Playwright WebKit launch", "info", f"{exc!r} -> falling back to Chromium")
-            browser = pw.chromium.launch(timeout=90000)
+            from qa_browser import _chromium
+            browser = _chromium(pw)
         vw, vh = (int(win["w"]), int(win["h"] - 28)) if win else (1160, 732)
         ctx = browser.new_context(viewport={"width": vw, "height": vh})
         page = ctx.new_page()

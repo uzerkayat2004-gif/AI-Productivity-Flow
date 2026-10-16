@@ -361,7 +361,7 @@ def phase_a():
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            b = pw.webkit.launch()
+            b = __import__('qa_browser').launch(pw)
             pg = b.new_page(viewport={"width": 1280, "height": 900})
             errs = []
             pg.on("pageerror", lambda e: errs.append(str(e)))

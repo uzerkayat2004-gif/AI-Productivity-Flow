@@ -90,7 +90,7 @@ def main():
         record(A, "seeded Audio Summary History item", "info", f"id={sid} title={title!r} mp3 exists={mp3.exists()} size={mp3.stat().st_size if mp3.exists() else 0}")
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            b = pw.webkit.launch()
+            b = __import__('qa_browser').launch(pw)
             ctx = b.new_context(viewport={"width": 1280, "height": 900}, accept_downloads=True)
             pg = ctx.new_page()
             errs, reqs = [], []

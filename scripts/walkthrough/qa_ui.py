@@ -35,11 +35,8 @@ def run_original():
 
 
 def _launch(pw):
-    """WebKit, except on the macOS 14 runner where Playwright's WebKit hangs in
-    new_page(); retry once and fall back to Chromium if WebKit's driver drops."""
-    import platform as _pf
-    if _pf.mac_ver()[0].split(".")[0] == "14" or os.environ.get("QA_BROWSER") == "chromium":
-        return pw.chromium.launch(timeout=90000)
+    from qa_browser import launch
+    return launch(pw)
     for _ in range(2):
         try:
             return pw.webkit.launch(timeout=90000)
