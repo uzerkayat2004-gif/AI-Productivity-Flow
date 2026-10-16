@@ -646,6 +646,14 @@ def launch_summary_audio_player(
         )
         with _media_lock:
             _player_processes[token] = proc
+        if sys.platform == "darwin":
+            # Reap the player when it exits on its own (window closed, Quit):
+            # otherwise it lingers as a <defunct> child of the engine.
+            try:
+                from voice_flow.platform.macos_lifecycle import reap_when_done
+                reap_when_done(proc)
+            except Exception:
+                pass
         return token
     except OSError as exc:
         try:
@@ -1766,6 +1774,22 @@ def _apply_player_icon(window=None) -> None:
         pass
 
 
+def _install_mac_player_quit(base_url: str) -> bool:
+    """macOS: the player runs as the same app bundle, so Dock > Quit / Cmd+Q /
+    the quit Apple Event can land on it. Quit then ends the whole app (engine,
+    window, helpers) instead of only this player. Closing the player window
+    stops its run loop without -terminate:, so it does not quit the app."""
+    try:
+        from urllib.parse import urlparse
+        from voice_flow.platform import macos_lifecycle
+
+        port = urlparse(base_url).port or macos_lifecycle.DEFAULT_PORT
+        return macos_lifecycle.install_terminate_observer(
+            lambda: macos_lifecycle.notify_engine_quit(port=port, reason="player-quit"))
+    except Exception:
+        return False
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         return
@@ -1828,6 +1852,9 @@ def main() -> None:
             win.events.shown += _on_shown
         except Exception:
             pass
+
+        if sys.platform == "darwin":
+            _install_mac_player_quit(base_url)
 
         if ico_str:
             webview.start(icon=ico_str, debug=False, private_mode=False, http_server=False)

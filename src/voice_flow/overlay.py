@@ -22,6 +22,7 @@ import threading
 import time
 import tkinter as tk
 from typing import Callable
+from types import SimpleNamespace
 
 from voice_flow.ui_dispatch import UiDispatcher
 from voice_flow.config import config
@@ -585,6 +586,22 @@ class FloatingOverlayBar:
             self.canvas.bind("<ButtonRelease-1>", self._on_release)
             self.canvas.bind("<Motion>", self._on_motion)
             self.canvas.bind("<Leave>", self._on_leave)
+            if sys.platform == "darwin":
+                # Right-click (Aqua reports Button-2 on Tk 8.6, Button-3 on Tk 9)
+                # opens Open / Quit, so the app stays reachable and quittable
+                # after its window is closed.
+                self.canvas.bind("<ButtonPress-2>", self._show_app_menu)
+                self.canvas.bind("<ButtonPress-3>", self._show_app_menu)
+                # Control-click is the standard Mac secondary click; its release
+                # must not reach _on_release (which would start dictation).
+                self.canvas.bind("<Control-ButtonPress-1>", self._show_app_menu)
+                self.canvas.bind("<Control-ButtonRelease-1>", lambda _e: "break")
+                self.canvas.bind("<Control-B1-Motion>", lambda _e: "break")
+                # A real right-click (mouse button 2 / two-finger click) on this
+                # non-key, overrideredirect window is not delivered to Tk's
+                # bindings on Aqua (QA: Control-click opened the menu, the same
+                # right-click did not). Catch it in Cocoa before Tk does.
+                self._mac_install_menu_monitor()
 
         self._position_window()
         if hasattr(self.win, "bind"):
@@ -594,6 +611,95 @@ class FloatingOverlayBar:
         self._schedule_proximity_poll()
         if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
             self._schedule_mac_repaint()  # recreated bar (restart/refresh)
+
+    # NSEvent masks / flags (AppKit constants, spelled out so tests need no AppKit).
+    _NS_MASK_RIGHT_MOUSE_DOWN = 1 << 3
+    _NS_MASK_OTHER_MOUSE_DOWN = 1 << 25
+
+    def _mac_secondary_click(self, x: float, y: float, on_bar: bool) -> bool:
+        """Handle a Cocoa right/other mouse-down at Tk screen point (x, y).
+
+        Runs inside an NSEvent monitor, i.e. inside Tcl_DoOneEvent while
+        _tkinter holds the Tcl lock: calling ANY Tcl/Tk command here (winfo,
+        after, ...) deadlocks the main thread. So it only queues the menu for
+        the UI pump and returns True when the caller should swallow the event."""
+        logging.getLogger(__name__).info("[MAC] Secondary click at %d,%d (on floating bar: %s)", int(x), int(y), on_bar)
+        if not on_bar:
+            return False
+        dispatcher = getattr(self, "_ui_dispatcher", None)
+        pending = getattr(dispatcher, "pending", None)
+        if pending is None:
+            return False
+        ev = SimpleNamespace(x_root=int(x), y_root=int(y))
+        pending.put(lambda: self._show_app_menu(ev))
+        return True
+
+    def _mac_install_menu_monitor(self) -> None:
+        """Local NSEvent monitor: right-click / other-click on the bar opens the menu."""
+        if sys.platform != "darwin" or getattr(self, "_mac_menu_monitor", None) is not None:
+            return
+        try:
+            from AppKit import NSEvent, NSScreen
+        except Exception:
+            return
+
+        def _handler(event):
+            # Cocoa only in here: no Tcl/Tk calls (see _mac_secondary_click).
+            try:
+                bar = getattr(self, "_mac_nswindow", None)
+                target = event.window()
+                on_bar = bar is not None and target is not None and bool(target == bar)
+                loc = NSEvent.mouseLocation()
+                screens = NSScreen.screens()
+                primary_h = float(screens[0].frame().size.height) if screens else 0.0
+                if self._mac_secondary_click(float(loc.x), primary_h - float(loc.y), on_bar):
+                    return None
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Floating bar right-click monitor error: %s", exc)
+            return event
+
+        try:
+            self._mac_menu_handler = _handler  # keep the block alive
+            self._mac_menu_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+                self._NS_MASK_RIGHT_MOUSE_DOWN | self._NS_MASK_OTHER_MOUSE_DOWN, _handler)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Floating bar right-click monitor not installed: %s", exc)
+            self._mac_menu_monitor = None
+            return
+        logging.getLogger(__name__).info("[MAC] Floating bar right-click monitor installed")
+
+    def _show_app_menu(self, event=None) -> str | None:
+        """macOS floating-bar context menu: Open the app window / Quit the app."""
+        actions = getattr(self, "app_menu_actions", None) or {}
+        if not actions or self.root is None:
+            return None
+        now = time.monotonic()
+        if now - getattr(self, "_app_menu_shown_at", -10.0) < 0.4:
+            return "break"  # same click reported by Tk and the Cocoa monitor
+        self._app_menu_shown_at = now
+        try:
+            menu = getattr(self, "_app_menu", None)
+            if menu is None:
+                menu = tk.Menu(self.root, tearoff=0)
+                menu.add_command(label="Open AI Productivity Flow",
+                                 command=lambda: (getattr(self, "app_menu_actions", None) or {}).get("open", lambda: None)())
+                menu.add_separator()
+                menu.add_command(label="Quit AI Productivity Flow",
+                                 command=lambda: (getattr(self, "app_menu_actions", None) or {}).get("quit", lambda: None)())
+                self._app_menu = menu
+            x = int(getattr(event, "x_root", 0) or 0)
+            y = int(getattr(event, "y_root", 0) or 0)
+            logging.getLogger(__name__).info("Floating bar menu opened at %s,%s", x, y)
+            menu.tk_popup(x, y)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Floating bar menu error: %s", exc)
+        finally:
+            try:
+                if getattr(self, "_app_menu", None) is not None:
+                    self._app_menu.grab_release()
+            except Exception:
+                pass
+        return "break"
 
     def _init_tk(self) -> None:
         self._create_window()
