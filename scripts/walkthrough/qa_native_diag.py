@@ -130,7 +130,10 @@ out["audio_s"] = round(len(pcm) / rate, 2); out["rate"] = rate
 buf = (ctypes.c_float * len(pcm))(*pcm.tolist())
 def opts():
     o = dll.nemo_speech_asr_recognition_options_default(); o.enable_automatic_punctuation = True; return o
+quick = len(sys.argv) > 6 and sys.argv[6] == "quick"
 for i in range(3):
+    if i and quick and out.get("recognize0_s", 0) > 8:
+        print(json.dumps(out)); sys.exit()
     o = opts(); res = ctypes.c_void_p()
     t = time.time(); st = dll.nemo_speech_asr_recognize_f32(h, ctypes.byref(o), buf, len(pcm), rate, ctypes.byref(res)); dt = time.time() - t
     txt = dll.nemo_speech_asr_result_transcript(res, 0) if st == 0 and res.value else None
@@ -174,14 +177,28 @@ print(json.dumps(out))
 '''
 
 
-def nemo_run(name, dll, model, wav, gpu=-1, env_extra=None):
+def nemo_run(name, dll, model, wav, gpu=-1, env_extra=None, quick=True, sample=False):
     probe = TMP / "nemo_probe.py"
     probe.write_text(NEMO_PROBE)
     env = dict(os.environ)
     env.update(env_extra or {})
     t = time.time()
-    p = subprocess.run(["/usr/bin/time", "-l", str(PY), "-I", "-B", str(probe), str(dll), str(model), str(wav),
-                        str(RES / "src" / "voice_flow"), str(gpu)], capture_output=True, text=True, timeout=900, env=env)
+    args = ["/usr/bin/time", "-l", str(PY), "-I", "-B", str(probe), str(dll), str(model), str(wav),
+            str(RES / "src" / "voice_flow"), str(gpu), "quick" if quick else "full"]
+    if sample:
+        pr = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        time.sleep(8)
+        rc, _ = sh(f"pgrep -f nemo_probe.py | head -1 | xargs -I{{}} sample {{}} 6 -file {EV}/diag-sample-{name}.txt")
+        so, se = pr.communicate(timeout=900)
+        p = subprocess.CompletedProcess(args, pr.returncode, so, se)
+        try:
+            txt = (EV / f"diag-sample-{name}.txt").read_text(errors="replace")
+            m = re.search(r"Sort by top of stack.*", txt, re.S)
+            (EV / f"diag-sample-{name}-top.txt").write_text((m.group(0) if m else txt[-6000:])[:6000])
+        except Exception:
+            pass
+    else:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=900, env=env)
     res = {"wall_s": round(time.time() - t, 2), "rc": p.returncode}
     for line in p.stdout.splitlines():
         if line.startswith("{"):
@@ -194,53 +211,58 @@ def nemo_run(name, dll, model, wav, gpu=-1, env_extra=None):
     return res
 
 
+def build_blas_stub(dest_dir):
+    src = TMP / "blas_stub.c"
+    src.write_text("""#include <stddef.h>
+#include <stdbool.h>
+/* NULL registry: ggml's registry skips it, so no BLAS backend is offered. */
+void *ggml_backend_blas_reg(void) { return NULL; }
+void *ggml_backend_blas_init(void) { return NULL; }
+bool ggml_backend_is_blas(void *b) { (void)b; return false; }
+void ggml_backend_blas_set_n_threads(void *b, int n) { (void)b; (void)n; }
+""")
+    out = dest_dir / "libggml-blas.0.12.0.dylib"
+    rc, o = sh(f"clang -arch arm64 -dynamiclib -O2 -mmacosx-version-min=11.0 -install_name @rpath/libggml-blas.0.dylib "
+               f"-current_version 0.12.0 -compatibility_version 0 -o '{out}.new' '{src}' && mv '{out}.new' '{out}' && codesign -f -s - '{out}'")
+    log(f"blas stub build rc={rc} {o[-400:]}")
+
+
 def main():
     sh("pkill -f 'AI Productivity Flow.app/Contents' || true")
     time.sleep(3)
-    RESULTS["system"] = {"ncpu": sh("sysctl -n hw.ncpu hw.perflevel0.physicalcpu hw.memsize machdep.cpu.brand_string")[1],
-                         "sw_vers": sh("sw_vers")[1]}
-    s1 = TMP / "s1.gguf"
     nem = TMP / "nemotron.gguf"
-    download("https://huggingface.co/superwhisper/s1-mini-GGUF/resolve/main/s1-mini-q4_k_m.gguf", s1)
     download("https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/main/nemotron-speech-streaming-en-0.6b.q8_0.gguf", nem)
-    # The app adds SentencePiece metadata after download; the raw file is fine for timing.
     wav = TMP / "clip.wav"
     sh(f"say -v Samantha -o {TMP}/clip.aiff 'Please schedule the quarterly review with Priya on Tuesday at three PM and send the agenda.'")
     sh(f"afconvert -f WAVE -d LEI16@16000 -c 1 {TMP}/clip.aiff {wav}")
+    # 1. bundled v0.1.0 as shipped, sampled to see where the time goes
+    RESULTS["v010_bundled_sampled"] = nemo_run("v010-bundled", NEMO, nem, wav, quick=True, sample=True)
     save()
-    RESULTS["nemo_cpu_alone"] = nemo_run("cpu-alone", NEMO, nem, wav)
+    # 2. same libs with the BLAS backend stubbed out
+    stub_dir = TMP / "v010-noblas"
+    sh(f"rm -rf {stub_dir}; cp -R '{NEMO.parent}' {stub_dir}")
+    build_blas_stub(stub_dir)
+    RESULTS["v010_noblas"] = nemo_run("v010-noblas", stub_dir / "libnemo_speech_asr_c.dylib", nem, wav, quick=False)
     save()
-    # Metal build of the same release, for comparison.
-    sh(f"cd {TMP} && curl -fsSL -o metal.tgz https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v0.1.0/nemo-speech-0.1.0-macos-aarch64-metal.tar.gz && mkdir -p metal && tar xzf metal.tgz -C metal")
-    mdl = next(iter(TMP.glob("metal/**/libnemo_speech_asr_c.dylib")), None)
-    if mdl:
-        sh(f"xattr -cr {TMP}/metal; for f in $(find {TMP}/metal -name '*.dylib' -type f); do codesign -f -s - $f; done")
-        RESULTS["nemo_metal_gpu0"] = nemo_run("metal-gpu0", mdl, nem, wav, gpu=0)
-        RESULTS["nemo_metal_cpu"] = nemo_run("metal-cpu", mdl, nem, wav, gpu=-1)
-    save()
-    port = 18080
-    for name, extra in [
-        ("app-exact", ["-c", "4096", "-ngl", "0", "-t", "3"]),
-        ("app-exact-2nd", ["-c", "4096", "-ngl", "0", "-t", "3"]),
-        ("dev-none", ["-c", "4096", "-ngl", "0", "-t", "3", "-dev", "none"]),
-        ("ctx1024-dev-none", ["-c", "1024", "-ngl", "0", "-t", "3", "-dev", "none", "--no-warmup"]),
-        ("metal-ngl99", ["-c", "4096", "-ngl", "99", "-t", "3"]),
-    ]:
-        port += 1
-        RESULTS[f"llama_{name}"] = llama_variant(name, extra, s1, port)
+    # 3. v0.2.0 prebuilt CPU
+    sh(f"cd {TMP} && curl -fsSL -o v020.tgz https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v0.2.0/nemo-speech-0.2.0-macos-aarch64-cpu.tar.gz && mkdir -p v020 && tar xzf v020.tgz -C v020 && xattr -cr v020")
+    d020 = next(iter(TMP.glob("v020/**/lib/libnemo_speech_asr_c.dylib")), None)
+    if d020:
+        RESULTS["v020_libs"] = sh(f"ls -la {d020.parent}")[1]
+        RESULTS["v020"] = nemo_run("v020", d020, nem, wav, quick=True)
         save()
-    # Contention: llama-server resident (idle) while NeMo runs.
-    port += 1
-    errf = open(EV / "diag-llama-bg.txt", "w")
-    bg = subprocess.Popen([str(LLAMA), "-m", str(s1), "--host", "127.0.0.1", "--port", str(port), "--alias", "bg",
-                           "-c", "4096", "-ngl", "0", "-t", "3"], stdout=subprocess.DEVNULL, stderr=errf)
-    time.sleep(40)
-    RESULTS["nemo_cpu_with_idle_llama"] = nemo_run("cpu-with-idle-llama", NEMO, nem, wav)
-    bg.terminate()
-    save()
+        blas = next(iter(d020.parent.glob("libggml-blas.*.*.*.dylib")), None)
+        if blas:
+            v020nb = TMP / "v020-noblas"
+            sh(f"rm -rf {v020nb}; cp -R '{d020.parent}' {v020nb}")
+            build_blas_stub(v020nb)
+            # the stub is named for 0.12.0; point the versioned name used by v0.2.0 at it
+            sh(f"cd {v020nb} && mv libggml-blas.0.12.0.dylib _stub && rm -f {blas.name} && mv _stub {blas.name}")
+            RESULTS["v020_noblas"] = nemo_run("v020-noblas", v020nb / "libnemo_speech_asr_c.dylib", nem, wav, quick=False)
+            save()
     RESULTS["vm_stat"] = sh("vm_stat; sysctl vm.swapusage")[1]
     save()
-    log("diag done")
+    log("diag2 done")
 
 
 if __name__ == "__main__":
