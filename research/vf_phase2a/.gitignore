@@ -1,5 +1,0 @@
-tokenizers/*/tokenizer.json
-tokenizers/*/vocab.json
-tokenizers/*/merges.txt
-__pycache__/
-*/__pycache__/

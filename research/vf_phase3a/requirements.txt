@@ -1,9 +1,0 @@
-# Versions the trainer was verified with (CPU, Oct 12 2026). On Colab keep the preinstalled CUDA torch.
-torch==2.14.1
-transformers==5.19.0
-peft==0.21.2
-accelerate==1.15.0
-tokenizers==0.23.3
-jinja2
-jsonschema
-pytest
