@@ -302,8 +302,9 @@ def main():
             quit_check("Quit with a running helper child (Audio Summary player) ends everything",
                        lambda: sh(f"osascript -e 'tell application id \"{BUNDLE_ID}\" to quit'", timeout=25), "after-child-quit")
             left = [p for p in child_pids if sh(f"kill -0 {p} 2>/dev/null", quiet=True)[0] == 0]
+            qlog = sh("grep -h 'QUIT\\]' ~/.voice_flow/logs/*.log | tail -4", quiet=True)[1]
             record(A, "helper child spawned by the engine is gone after Quit", "ok" if not left else "fail",
-                   json.dumps({**child_note, "child_pids": child_pids, "still_alive": left}, indent=1)[:2500])
+                   json.dumps({**child_note, "child_pids": child_pids, "still_alive": left, "quit_log": qlog}, indent=1)[:2500])
         else:
             record(A, "helper child spawned by the engine is gone after Quit", "error",
                    "could not start a helper child: " + json.dumps(child_note)[:2000])
