@@ -446,35 +446,51 @@ def test_quit_stops_watchdog_parent_only(monkeypatch):
 
 # ---------------------------------------------------------------- bar right-click
 
-class _FakeBarWin:
-    def winfo_viewable(self): return True
-    def winfo_rootx(self): return 488
-    def winfo_rooty(self): return 687
-    def winfo_width(self): return 48
-    def winfo_height(self): return 10
-
-
 def test_right_click_on_bar_opens_menu_via_cocoa_monitor(monkeypatch):
-    """Aqua does not hand a right-click on the bar to Tk; the NSEvent monitor does."""
+    """Aqua does not hand a right-click on the bar to Tk; the NSEvent monitor does.
+
+    The monitor runs inside Tcl_DoOneEvent with the Tcl lock held, so it must
+    not call Tk (a winfo/after call there deadlocked the engine on a real Mac);
+    it only queues the menu for the UI pump."""
+    import queue
     import voice_flow.overlay as ov
 
     bar = ov.FloatingOverlayBar.__new__(ov.FloatingOverlayBar)
-    bar.win = _FakeBarWin()
-    scheduled, shown = [], []
 
-    class Root:
-        def after(self, ms, fn): scheduled.append(fn)
+    class NoTk:
+        def __getattr__(self, name):
+            raise AssertionError(f"Tk call {name} from inside the Cocoa monitor")
 
-    bar.root = Root()
+    bar.win = NoTk()
+    bar.root = NoTk()
+    bar._ui_dispatcher = SimpleNamespace(pending=queue.Queue())
+    shown = []
     monkeypatch.setattr(bar, "_show_app_menu", lambda ev: shown.append((ev.x_root, ev.y_root)), raising=False)
-    assert bar._mac_secondary_click(512, 692) is True       # on the pill: swallow, open menu
-    assert bar._mac_secondary_click(100, 100) is False      # elsewhere: pass through
-    assert len(scheduled) == 1
-    scheduled[0]()
+    assert bar._mac_secondary_click(512, 692, True) is True     # on the pill: swallow, queue menu
+    assert bar._mac_secondary_click(100, 100, False) is False   # elsewhere: pass through
+    assert bar._ui_dispatcher.pending.qsize() == 1
+    bar._ui_dispatcher.pending.get_nowait()()
     assert shown == [(512, 692)]
     src = (SRC / "voice_flow" / "overlay.py").read_text()
     assert "addLocalMonitorForEventsMatchingMask_handler_" in src
     assert "self._mac_install_menu_monitor()" in src
+    handler_src = src[src.index("def _handler(event):"):src.index("self._mac_menu_handler = _handler")]
+    for forbidden in ("winfo", ".after(", "self.root", "self.win.", "submit("):
+        assert forbidden not in handler_src
+
+
+def test_audio_player_quit_ends_whole_app_and_is_reaped(monkeypatch):
+    import voice_flow.audio_summary_player as asp
+
+    observed = []
+    monkeypatch.setattr(ml, "install_terminate_observer", lambda cb: observed.append(cb) or True)
+    posts = []
+    monkeypatch.setattr(ml, "notify_engine_quit", lambda **k: posts.append(k) or True)
+    assert asp._install_mac_player_quit("http://127.0.0.1:8991") is True
+    observed[0]()
+    assert posts == [{"port": 8991, "reason": "player-quit"}]
+    src = (SRC / "voice_flow" / "audio_summary_player.py").read_text()
+    assert "reap_when_done(proc)" in src
 
 
 def test_bar_menu_not_opened_twice_for_one_click(monkeypatch):

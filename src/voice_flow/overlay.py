@@ -616,34 +616,22 @@ class FloatingOverlayBar:
     _NS_MASK_RIGHT_MOUSE_DOWN = 1 << 3
     _NS_MASK_OTHER_MOUSE_DOWN = 1 << 25
 
-    def _mac_point_on_bar(self, x: float, y: float) -> bool:
-        """True when Tk screen point (x, y) lies on the visible floating bar."""
-        win = getattr(self, "win", None)
-        if win is None:
-            return False
-        try:
-            if not win.winfo_viewable():
-                return False
-            left, top = int(win.winfo_rootx()), int(win.winfo_rooty())
-            w, h = int(win.winfo_width()), int(win.winfo_height())
-        except Exception:
-            return False
-        return left <= x < left + w and top <= y < top + h
-
-    def _mac_secondary_click(self, x: float, y: float) -> bool:
+    def _mac_secondary_click(self, x: float, y: float, on_bar: bool) -> bool:
         """Handle a Cocoa right/other mouse-down at Tk screen point (x, y).
 
-        Returns True when the click was on the bar and the Open/Quit menu was
-        scheduled (the caller then swallows the event so Tk never sees it)."""
-        on_bar = self._mac_point_on_bar(x, y)
+        Runs inside an NSEvent monitor, i.e. inside Tcl_DoOneEvent while
+        _tkinter holds the Tcl lock: calling ANY Tcl/Tk command here (winfo,
+        after, ...) deadlocks the main thread. So it only queues the menu for
+        the UI pump and returns True when the caller should swallow the event."""
         logging.getLogger(__name__).info("[MAC] Secondary click at %d,%d (on floating bar: %s)", int(x), int(y), on_bar)
-        if not on_bar or self.root is None:
+        if not on_bar:
+            return False
+        dispatcher = getattr(self, "_ui_dispatcher", None)
+        pending = getattr(dispatcher, "pending", None)
+        if pending is None:
             return False
         ev = SimpleNamespace(x_root=int(x), y_root=int(y))
-        try:
-            self.root.after(0, lambda: self._show_app_menu(ev))
-        except Exception:
-            return False
+        pending.put(lambda: self._show_app_menu(ev))
         return True
 
     def _mac_install_menu_monitor(self) -> None:
@@ -656,11 +644,15 @@ class FloatingOverlayBar:
             return
 
         def _handler(event):
+            # Cocoa only in here: no Tcl/Tk calls (see _mac_secondary_click).
             try:
+                bar = getattr(self, "_mac_nswindow", None)
+                target = event.window()
+                on_bar = bar is not None and target is not None and bool(target == bar)
                 loc = NSEvent.mouseLocation()
                 screens = NSScreen.screens()
                 primary_h = float(screens[0].frame().size.height) if screens else 0.0
-                if self._mac_secondary_click(float(loc.x), primary_h - float(loc.y)):
+                if self._mac_secondary_click(float(loc.x), primary_h - float(loc.y), on_bar):
                     return None
             except Exception as exc:
                 logging.getLogger(__name__).debug("bar menu monitor error: %s", exc)
