@@ -47,7 +47,7 @@ SENTENCES = [
     ("numbers", "I paid five hundred rupees for two tickets at three p.m.", [("has", "tickets")]),
     ("email", "Hey voice flow, make this an email to Priya about the launch on Sunday.", [("has", "launch")]),
     ("summarize", "We discussed pricing, the launch date, and hiring. Hey voice flow, summarize this.", [("has", "pricing")]),
-    ("react_word", "I will react to the email later today.", [("lacks", "React to")]),
+    ("react_word", "I will react to the email later today.", [("lacks_cs", "React to")]),
     ("short5", "Thanks.", []),
     ("short6", "See you tomorrow.", [("has", "tomorrow")]),
 ]
@@ -246,9 +246,12 @@ def run_set(area: str, files: dict, ids: list[str], label: str, mode: str = "api
         ok_status = status in ("success", "completed", "pasted")
         failed_checks = []
         for kind, val in checks:
-            hit = val.lower() in final.lower()
-            if (kind == "has" and not hit) or (kind == "lacks" and hit):
+            hit = (val in final) if kind.endswith("_cs") else (val.lower() in final.lower())
+            if (kind == "has" and not hit) or (kind in ("lacks", "lacks_cs") and hit):
                 failed_checks.append(f"{kind} {val!r}")
+        # Whisper silence hallucination: a trailing "you" the speaker never said.
+        if not re.search(r"(?i)\byou[.!?]*\s*$", text) and re.search(r"(?i)\byou[.!?]*\s*$", final):
+            failed_checks.append("stray trailing 'you'")
         sim = similarity(text, final)
         after_te = textedit_text(te_pid) if te_pid else ""
         pasted = bool(te_pid) and len(after_te) > len(before_te)
