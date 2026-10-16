@@ -56,6 +56,83 @@ _SETTINGS_URLS = {
 _LAUNCH_AGENT_LABEL = "com.voiceflow.app"
 
 
+# Accessibility roles whose AXSelectedText answer is authoritative (an empty
+# answer really means "nothing selected"), so no Cmd+C probe is sent.
+_NATIVE_TEXT_ROLES = frozenset({"AXTextArea", "AXTextField", "AXComboBox"})
+# Apps where a synthetic Cmd+C after a drag copies files/objects, not text.
+_NO_COPY_FALLBACK_APPS = frozenset({"Finder", "Dock", "SystemUIServer", "Screenshot", "screencaptureui"})
+_FILE_PASTEBOARD_TYPES = frozenset({"public.file-url", "NSFilenamesPboardType", "com.apple.pasteboard.promised-file-url"})
+_OWN_APP_NAMES = frozenset({"ai productivity flow", "voice flow", "voiceflow"})
+_selection_ax_warned = False
+
+
+def _warn_selection_needs_accessibility() -> None:
+    global _selection_ax_warned
+    if _selection_ax_warned:
+        return
+    _selection_ax_warned = True
+    log.warning(
+        "[MACOS] Reading selected text for Audio Flow needs Accessibility. Enable AI Productivity Flow in "
+        "System Settings > Privacy & Security > Accessibility."
+    )
+
+
+def _general_pasteboard():
+    try:
+        from AppKit import NSPasteboard
+    except Exception:
+        return None
+    try:
+        return NSPasteboard.generalPasteboard()
+    except Exception:
+        return None
+
+
+class _NullContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _autorelease_pool():
+    try:
+        import objc
+
+        return objc.autorelease_pool()
+    except Exception:
+        return _NullContext()
+
+
+def _pasteboard_snapshot(pasteboard) -> list[dict]:
+    """Copy every item/type currently on the pasteboard (text, images, files...)."""
+    items: list[dict] = []
+    for item in list(pasteboard.pasteboardItems() or []):
+        entry: dict = {}
+        for kind in list(item.types() or []):
+            data = item.dataForType_(kind)
+            if data is not None:
+                entry[str(kind)] = data
+        if entry:
+            items.append(entry)
+    return items
+
+
+def _pasteboard_restore(pasteboard, snapshot: list[dict]) -> None:
+    from AppKit import NSPasteboardItem
+
+    pasteboard.clearContents()
+    restored = []
+    for entry in snapshot:
+        item = NSPasteboardItem.alloc().init()
+        for kind, data in entry.items():
+            item.setData_forType_(data, kind)
+        restored.append(item)
+    if restored:
+        pasteboard.writeObjects_(restored)
+
+
 def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0):
     """Run a short-lived helper process. Returns CompletedProcess or None."""
     try:
@@ -97,14 +174,29 @@ class MacOSBackend:
     # ------------------------------------------------------------------
     # synthetic input
     # ------------------------------------------------------------------
+    def can_post_events(self) -> bool:
+        """Whether macOS will deliver our synthetic Cmd+V / Cmd+C to other apps."""
+        return native.can_post_events()
+
     def send_paste(self) -> bool:
-        """Cmd+V. Requires Accessibility trust; returns False when untrusted."""
+        """Cmd+V. Returns False when macOS would silently drop the event.
+
+        Without Accessibility (or the post-event grant) ``CGEventPost`` still
+        "succeeds" but no app ever receives the keystroke, so reporting True
+        there turned a lost paste into a fake success.
+        """
+        if not native.can_post_events():
+            return False
         return native.send_key_combo(native.KEY_V, native.kCGEventFlagMaskCommand)
 
     def send_copy(self) -> bool:
+        if not native.can_post_events():
+            return False
         return native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand)
 
     def send_enter(self) -> bool:
+        if not native.can_post_events():
+            return False
         return native.send_return_key()
 
     # ------------------------------------------------------------------
@@ -134,37 +226,111 @@ class MacOSBackend:
         app = str(info.get("app", "")).lower()
         return "voice flow" in app or "voiceflow" in app or "python" in app
 
+    def is_own_app(self, info: dict | None) -> bool:
+        """True when a window-owner record belongs to AI Productivity Flow.
+
+        The engine (floating bar, Audio Flow widget) and the main window run
+        in separate processes of the same app, so match the app name too."""
+        if not info:
+            return False
+        pid = info.get("pid")
+        if isinstance(pid, int) and pid > 0 and pid == os.getpid():
+            return True
+        app = str(info.get("app", "")).strip().lower()
+        return bool(app) and app in _OWN_APP_NAMES
+
     # ------------------------------------------------------------------
     # selection
     # ------------------------------------------------------------------
     def get_selected_text(self) -> str:
-        """Read the selection via the Accessibility API.
+        """Read the user's current selection without disturbing their clipboard.
 
-        Falls back to a clipboard round-trip (Cmd+C, read, restore) when the
-        Accessibility query returns nothing — many Electron and Java apps do
-        not expose ``AXSelectedText``. The original clipboard is restored so
-        the user's copy buffer is not silently clobbered.
+        1. Accessibility ``AXSelectedText`` of the focused element. Native text
+           views (TextEdit, Notes, Mail, Safari fields, ...) answer this
+           directly; when such a view answers "no selection" we trust it and
+           never send a keystroke.
+        2. Otherwise (Electron, Chrome web content, Java apps) fall back to a
+           synthetic Cmd+C, read the copied text and restore every pasteboard
+           item that was there before, so the user's clipboard (including
+           images and files) is unchanged. Nothing is restored or touched when
+           Cmd+C copied nothing.
+
+        Without Accessibility neither path works (macOS drops synthetic keys),
+        so this returns "" and logs once instead of pretending.
         """
-        direct = native.focused_selected_text()
-        if direct:
-            return direct
-
-        if not native.accessibility_trusted():
+        info = native.focused_selection_info()
+        if not info.get("trusted"):
+            _warn_selection_needs_accessibility()
             return ""
+        text = str(info.get("text") or "")
+        if text.strip():
+            return text
+        if info.get("status") == 0 and str(info.get("role") or "") in _NATIVE_TEXT_ROLES:
+            return ""
+        owner = native.frontmost_window_owner()
+        if self.is_own_app(owner) or str(owner.get("app", "")) in _NO_COPY_FALLBACK_APPS:
+            return ""
+        return self._copy_selection_preserving_clipboard()
 
+    def _copy_selection_preserving_clipboard(self) -> str:
+        if not native.can_post_events():
+            return ""
+        pasteboard = _general_pasteboard()
+        if pasteboard is None:
+            return self._copy_selection_via_pbcopy()
         import time
 
-        saved = self.read_clipboard()
-        try:
-            if not self.send_copy():
+        with _autorelease_pool():
+            try:
+                before = int(pasteboard.changeCount())
+                snapshot = _pasteboard_snapshot(pasteboard)
+            except Exception as exc:
+                log.debug("[MACOS] pasteboard snapshot failed: %s", exc)
                 return ""
-            time.sleep(0.12)
-            grabbed = self.read_clipboard()
-            if grabbed and grabbed != saved:
-                return grabbed
+            if not native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand):
+                return ""
+            deadline = time.monotonic() + 0.4
+            while time.monotonic() < deadline and int(pasteboard.changeCount()) == before:
+                time.sleep(0.02)
+            after = int(pasteboard.changeCount())
+            if after == before:
+                return ""  # nothing was selected/copied; clipboard untouched
+            text = ""
+            try:
+                types = {str(t) for t in (pasteboard.types() or [])}
+                if not types.intersection(_FILE_PASTEBOARD_TYPES):
+                    text = str(pasteboard.stringForType_("public.utf8-plain-text") or "")
+            finally:
+                # Restore unless something else (the user) wrote meanwhile.
+                if int(pasteboard.changeCount()) == after:
+                    try:
+                        _pasteboard_restore(pasteboard, snapshot)
+                    except Exception as exc:
+                        log.warning("[MACOS] could not restore clipboard after selection read: %s", exc)
+            return text
+
+    def _copy_selection_via_pbcopy(self) -> str:
+        """Fallback without AppKit: sentinel round-trip through pbcopy/pbpaste."""
+        import time
+        import uuid
+
+        saved = self.read_clipboard()
+        sentinel = f"__apf_selection_probe_{uuid.uuid4().hex}__"
+        if not self.copy_to_clipboard(sentinel):
             return ""
+        grabbed = ""
+        try:
+            if not native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand):
+                return ""
+            for _ in range(10):
+                time.sleep(0.04)
+                grabbed = self.read_clipboard()
+                if grabbed and grabbed != sentinel:
+                    break
+            return grabbed if grabbed and grabbed != sentinel else ""
         finally:
-            if saved:
+            current = self.read_clipboard()
+            if current in (sentinel, grabbed):
                 self.copy_to_clipboard(saved)
 
     # ------------------------------------------------------------------

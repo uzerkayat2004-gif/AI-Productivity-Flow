@@ -580,6 +580,25 @@ def _dictionary_bias_terms() -> list[str]:
         return []
 
 
+_PASTE_FAILED_MESSAGE = "Could not paste transcript into the original target; retrieve the text from history."
+
+
+def _paste_failure_details() -> tuple[str, str]:
+    """(history error message, insertion_status) for the last failed paste.
+
+    On macOS a paste without Accessibility leaves the text on the clipboard;
+    report exactly that instead of a generic failure (or a fake success)."""
+    if sys.platform == "darwin":
+        try:
+            from voice_flow.injector import PASTE_PERMISSION_MESSAGE, last_injection_outcome
+
+            if last_injection_outcome() == "copied_needs_permission":
+                return PASTE_PERMISSION_MESSAGE, "copied_to_clipboard"
+        except Exception:
+            pass
+    return _PASTE_FAILED_MESSAGE, "failed"
+
+
 class VoiceFlowApp:
     """Core Coordinator for Voice Flow Dictation System."""
 
@@ -680,7 +699,9 @@ class VoiceFlowApp:
             on_cancel=self._on_dictation_cancel,
             on_paste_last=self._paste_last_transcript,
             on_copy_last=self._copy_last_transcript,
-            on_audio_flow=self._process_audio_flow_pipeline,
+            # The Audio Flow hotkey (macOS: Ctrl+Option+L) reads the current
+            # selection with the user's default mode (Read unless changed).
+            on_audio_flow=lambda: self._process_audio_flow_pipeline(mode="default"),
             on_mouse_release=self._on_mouse_release,
             has_pending_deferred_paste=lambda: self.has_pending_deferred_paste,
         )
@@ -1732,6 +1753,8 @@ class VoiceFlowApp:
             self._overlay_call("show_done", f"Pasted: {text_to_paste[:60]}")
         else:
             log.error("Could not paste last transcript; it remains on the clipboard.")
+            if _paste_failure_details()[1] == "copied_to_clipboard":
+                self._overlay_call("show_error", "Copied — press Cmd+V (allow Accessibility to auto-paste)")
         return success
 
     def _history_update(self, record_id: int | None, **fields) -> None:
@@ -2598,15 +2621,16 @@ class VoiceFlowApp:
                         if len(recent) > 100:
                             self.recent_dictations = set(list(recent)[-50:])
                     self._history_update(record_id, insertion_status="pasted")
-                elif not success:
-                    self._history_update(record_id, status="paste_failed", error_message="Could not paste transcript into the original target; retrieve the text from history.", insertion_status="failed")
+                failure_message, failure_insertion = _paste_failure_details()
+                if not success:
+                    self._history_update(record_id, status="paste_failed", error_message=failure_message, insertion_status=failure_insertion)
 
                 self._defer_history_insert(
                     recovery, session, duration, raw_text=raw_transcript,
                     polished_text=polished_text,
                     status="success" if success else "paste_failed",
-                    error_message=outcome_note if success else "Could not paste transcript into the original target; retrieve the text from history.",
-                    insertion_status="pasted" if success else "failed",
+                    error_message=outcome_note if success else failure_message,
+                    insertion_status="pasted" if success else failure_insertion,
                     processing_metadata=processing_metadata,
                 )
 
@@ -2630,6 +2654,8 @@ class VoiceFlowApp:
                     else:
                         prefix = _polish_outcome_label(polish_outcome["value"])
                         self._overlay_call("show_done", prefix)
+                elif failure_insertion == "copied_to_clipboard":
+                    self._overlay_call("show_error", "Copied — press Cmd+V (allow Accessibility to auto-paste)")
                 else:
                     self._overlay_call("show_error", "Paste failed — retrieve text from history")
 
@@ -2746,6 +2772,10 @@ class VoiceFlowApp:
             audio_flow_widget.hide()
             return
 
+        if sys.platform == "darwin":
+            self._on_mouse_release_macos(x, y, drag_distance, selection_generation)
+            return
+
         # Distinguish intentional text selection drags (>= 16px) from normal clicks
         # or micro-movement click jitter (< 16px). Normal clicks never capture text.
         if drag_distance < 16.0:
@@ -2838,6 +2868,78 @@ class VoiceFlowApp:
             _check()
         else:
             threading.Thread(target=_check, daemon=True).start()
+
+    # macOS keeps a captured selection on the floating bar longer than Windows
+    # (6 s): the bar sits above the Dock, further from the text than on Windows.
+    MAC_SELECTION_TIMEOUT_MS = 15000
+
+    def _on_mouse_release_macos(self, x: int, y: int, drag_distance: float, selection_generation: int) -> None:
+        """macOS equivalent of the Win32 selection capture in _on_mouse_release.
+
+        Runs on the mouse hook's workers. Never touches Tk directly: the
+        click-on-our-own-window test uses the window server (CGWindowList) and
+        UI updates go through the overlay/widget dispatchers."""
+        from voice_flow.mouse_hook import selection_event_is_current
+        from voice_flow.platform import get_backend
+        from voice_flow.platform import macos_native
+
+        backend = get_backend()
+        is_own_app = getattr(backend, "is_own_app", None)
+
+        if drag_distance < 16.0:
+            # A plain click: keep the selection when it landed on our floating
+            # bar / Audio Flow widget (so clicking them can act on it), clear it
+            # anywhere else, exactly like Windows.
+            try:
+                hit = macos_native.window_owner_at_point(x, y)
+            except Exception:
+                hit = {}
+            own_click = bool(hit) and (hit.get("pid") == os.getpid() or (callable(is_own_app) and is_own_app(hit)))
+            if not own_click:
+                self.overlay.clear_selected_text()
+                audio_flow_widget.hide()
+            return
+
+        def _still_current() -> bool:
+            return (
+                selection_generation == self._selection_generation
+                and selection_event_is_current()
+                and getattr(self, "state", DictationState.IDLE) == DictationState.IDLE
+                and not self.is_recording
+            )
+
+        def _check() -> None:
+            try:
+                if not _still_current():
+                    return
+                owner = macos_native.frontmost_window_owner()
+                if callable(is_own_app) and is_own_app(owner):
+                    return  # never read our own windows
+                app_name = str(owner.get("app", "")).lower()
+                if any(kw in app_name for kw in ("screenshot", "screencapture")):
+                    return
+                # Let the target app finish handling the mouse-up first.
+                time.sleep(0.08)
+                selected = self.injector.get_selected_text_strict()
+                if not _still_current():
+                    return
+                if selected and len(selected.strip()) > 1:
+                    log.info("[AUDIO FLOW] Selection captured on macOS (%d chars) from %s.", len(selected.strip()), owner.get("app") or "frontmost app")
+                    self.overlay.set_selected_text(selected, timeout_ms=self.MAC_SELECTION_TIMEOUT_MS)
+                    audio_flow_widget.show_at(x, y, selected)
+                else:
+                    self.overlay.clear_selected_text()
+                    audio_flow_widget.hide()
+            except Exception as exc:
+                log.debug("[AUDIO FLOW] macOS selection capture failed: %s", exc)
+                if _still_current():
+                    self.overlay.clear_selected_text()
+                    audio_flow_widget.hide()
+
+        if threading.current_thread().name == "Win32MouseHookSelectionWorker":
+            _check()
+        else:
+            threading.Thread(target=_check, name="AudioFlowSelectionCapture", daemon=True).start()
 
     def _normalize_for_comparison(self, s: str) -> str:
         if not s:

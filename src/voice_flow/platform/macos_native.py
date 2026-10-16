@@ -200,6 +200,24 @@ def cfstring_to_python(ref: int) -> str:
     return buf.value.decode("utf-8", errors="replace")
 
 
+def cf_is_string(ref: int) -> bool:
+    """True when ``ref`` is a CFStringRef (guards AX values of other types)."""
+    if not ref:
+        return False
+    type_fn = _loader.symbol("CoreFoundation", "CFGetTypeID", optional=True)
+    str_type_fn = _loader.symbol("CoreFoundation", "CFStringGetTypeID", optional=True)
+    if type_fn is None or str_type_fn is None:
+        return False
+    type_fn.restype = ctypes.c_ulong
+    type_fn.argtypes = [ctypes.c_void_p]
+    str_type_fn.restype = ctypes.c_ulong
+    str_type_fn.argtypes = []
+    try:
+        return int(type_fn(ref)) == int(str_type_fn())
+    except Exception:
+        return False
+
+
 def cf_release(ref: int) -> None:
     if not ref:
         return
@@ -456,6 +474,98 @@ def frontmost_window_owner() -> dict[str, Any]:
     return {}
 
 
+class _CGPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+
+class _CGSize(ctypes.Structure):
+    _fields_ = [("width", ctypes.c_double), ("height", ctypes.c_double)]
+
+
+class _CGRect(ctypes.Structure):
+    _fields_ = [("origin", _CGPoint), ("size", _CGSize)]
+
+
+def window_owner_at_point(x: float, y: float) -> dict[str, Any]:
+    """Return {'app', 'pid', 'layer'} of the topmost on-screen window under (x, y).
+
+    Coordinates are global display points with a top-left origin (the same
+    space Quartz mouse events and Tk use). Needs no permission. Used to tell
+    whether a click landed on one of our own floating windows without calling
+    into Tk from a background thread. Returns {} when unknown.
+    """
+    if not IS_MACOS:
+        return {}
+    list_fn = _loader.symbol("CoreGraphics", "CGWindowListCopyWindowInfo")
+    rect_fn = _loader.symbol("CoreGraphics", "CGRectMakeWithDictionaryRepresentation", optional=True)
+    count_fn = _loader.symbol("CoreFoundation", "CFArrayGetCount")
+    at_fn = _loader.symbol("CoreFoundation", "CFArrayGetValueAtIndex")
+    dict_get_fn = _loader.symbol("CoreFoundation", "CFDictionaryGetValue")
+    num_fn = _loader.symbol("CoreFoundation", "CFNumberGetValue", optional=True)
+    if None in (list_fn, rect_fn, count_fn, at_fn, dict_get_fn, num_fn):
+        return {}
+    list_fn.restype = ctypes.c_void_p
+    list_fn.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    rect_fn.restype = ctypes.c_bool
+    rect_fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(_CGRect)]
+    count_fn.restype = ctypes.c_long
+    count_fn.argtypes = [ctypes.c_void_p]
+    at_fn.restype = ctypes.c_void_p
+    at_fn.argtypes = [ctypes.c_void_p, ctypes.c_long]
+    dict_get_fn.restype = ctypes.c_void_p
+    dict_get_fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    num_fn.restype = ctypes.c_bool
+    num_fn.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p]
+
+    keys = {
+        name: _loader.data_symbol("CoreGraphics", sym, optional=True) or 0
+        for name, sym in (
+            ("bounds", "kCGWindowBounds"),
+            ("pid", "kCGWindowOwnerPID"),
+            ("owner", "kCGWindowOwnerName"),
+            ("layer", "kCGWindowLayer"),
+        )
+    }
+    if not keys["bounds"] or not keys["pid"]:
+        return {}
+
+    def _int(entry: int, key: str) -> int:
+        ref = keys.get(key)
+        if not ref:
+            return 0
+        value = dict_get_fn(entry, ctypes.c_void_p(ref))
+        out = ctypes.c_int(0)
+        if value and num_fn(value, kCFNumberIntType, ctypes.byref(out)):
+            return out.value
+        return 0
+
+    arr = list_fn(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID)
+    if not arr:
+        return {}
+    try:
+        for index in range(min(count_fn(arr), 200)):
+            entry = at_fn(arr, index)
+            if not entry:
+                continue
+            bounds = dict_get_fn(entry, ctypes.c_void_p(keys["bounds"]))
+            rect = _CGRect()
+            if not bounds or not rect_fn(bounds, ctypes.byref(rect)):
+                continue
+            if not (rect.origin.x <= x <= rect.origin.x + rect.size.width
+                    and rect.origin.y <= y <= rect.origin.y + rect.size.height):
+                continue
+            owner = ""
+            if keys["owner"]:
+                ref = dict_get_fn(entry, ctypes.c_void_p(keys["owner"]))
+                owner = cfstring_to_python(ref) if ref else ""
+            return {"app": owner, "pid": _int(entry, "pid"), "layer": _int(entry, "layer")}
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("[MACOS] window_owner_at_point failed: %s", exc)
+    finally:
+        cf_release(arr)
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # ApplicationServices — Accessibility trust
 # ---------------------------------------------------------------------------
@@ -502,6 +612,28 @@ def accessibility_trusted(prompt: bool = False) -> bool:
         return False
     finally:
         cf_release(key)
+
+
+def can_post_events() -> bool:
+    """True when synthetic key events (Cmd+V / Cmd+C) will actually reach apps.
+
+    macOS silently drops ``CGEventPost`` events from a process that has neither
+    Accessibility trust nor the "post events" grant, while the call itself
+    still "succeeds". Callers must check this before claiming a paste worked.
+    """
+    if not IS_MACOS:
+        return False
+    if accessibility_trusted(prompt=False):
+        return True
+    fn = _loader.symbol("CoreGraphics", "CGPreflightPostEventAccess", optional=True)
+    if fn is None:
+        return False
+    fn.restype = ctypes.c_bool
+    fn.argtypes = []
+    try:
+        return bool(fn())
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +761,73 @@ def request_microphone_access(callback: Any = None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+# AXError codes (HIServices/AXError.h)
+kAXErrorSuccess = 0
+kAXErrorAttributeUnsupported = -25205
+kAXErrorNoValue = -25212
+
+
+def focused_selection_info() -> dict[str, Any]:
+    """Accessibility view of the focused element's selection.
+
+    Returns ``{"trusted": bool, "status": int | None, "role": str, "text": str}``.
+    ``status`` is the AXError of the ``AXSelectedText`` read (0 = the element
+    answered, even if the selection is empty); ``None`` when no focused element
+    could be read at all. Never raises.
+    """
+    info: dict[str, Any] = {"trusted": False, "status": None, "role": "", "text": ""}
+    if not IS_MACOS:
+        return info
+    if not accessibility_trusted():
+        return info
+    info["trusted"] = True
+    create_fn = _loader.symbol("ApplicationServices", "AXUIElementCreateSystemWide", optional=True)
+    copy_fn = _loader.symbol("ApplicationServices", "AXUIElementCopyAttributeValue", optional=True)
+    if create_fn is None or copy_fn is None:
+        return info
+    create_fn.restype = ctypes.c_void_p
+    copy_fn.restype = ctypes.c_int
+    copy_fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+
+    owned: list[int] = []
+
+    def _copy(element: int, name: str) -> tuple[int, int]:
+        key = cfstring_from_python(name)
+        if not key:
+            return -1, 0
+        try:
+            held = ctypes.c_void_p(0)
+            status = int(copy_fn(element, key, ctypes.byref(held)))
+        finally:
+            cf_release(key)
+        if held.value:
+            owned.append(held.value)
+        return status, int(held.value or 0)
+
+    try:
+        system_wide = create_fn()
+        if not system_wide:
+            return info
+        owned.append(system_wide)
+        status, focused = _copy(system_wide, "AXFocusedUIElement")
+        if status != 0 or not focused:
+            return info
+        role_status, role_ref = _copy(focused, "AXRole")
+        if role_status == 0 and cf_is_string(role_ref):
+            info["role"] = cfstring_to_python(role_ref)
+        sel_status, sel_ref = _copy(focused, "AXSelectedText")
+        info["status"] = sel_status
+        if sel_status == 0 and cf_is_string(sel_ref):
+            info["text"] = cfstring_to_python(sel_ref)
+        return info
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("[MACOS] focused_selection_info failed: %s", exc)
+        return info
+    finally:
+        for ref in reversed(owned):
+            cf_release(ref)
+
+
 def focused_selected_text() -> str:
     """Read the focused element's selected text via the Accessibility API.
 
@@ -700,6 +899,9 @@ __all__ = [
     "microphone_status",
     "request_microphone_access",
     "focused_selected_text",
+    "focused_selection_info",
+    "can_post_events",
+    "window_owner_at_point",
     "cfstring_from_python",
     "cfstring_to_python",
     "cf_release",

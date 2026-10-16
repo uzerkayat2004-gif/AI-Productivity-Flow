@@ -185,11 +185,17 @@ class AudioFlowFloatingWidget:
         self.win.attributes("-topmost", True)
 
         self._trans_color = "#010101"
+        if sys.platform == "darwin":
+            # Aqua has no -transparentcolor (#010101 would show as a black
+            # square). Paint the card colour and clip the window to a circle /
+            # rounded card with a Core Animation mask (_mac_apply_shape).
+            self._trans_color = "#20201f" if self._is_theme_dark() else WHITE
         self.win.config(bg=self._trans_color)
-        try:
-            self.win.attributes("-transparentcolor", self._trans_color)
-        except Exception:
-            pass
+        if sys.platform != "darwin":
+            try:
+                self.win.attributes("-transparentcolor", self._trans_color)
+            except Exception:
+                pass
 
         try:
             from voice_flow.installer import get_icon_path
@@ -240,8 +246,60 @@ class AudioFlowFloatingWidget:
         except Exception:
             pass
 
+    def _mac_find_nswindow(self, w: int, h: int):
+        """Locate the NSWindow backing this Toplevel (Tk exposes no handle)."""
+        cached = getattr(self, "_mac_nswindow", None)
+        if cached is not None:
+            return cached
+        try:
+            from AppKit import NSApplication
+
+            want_x = int(self.win.winfo_x())
+            for nswin in NSApplication.sharedApplication().windows():
+                frame = nswin.frame()
+                if abs(frame.size.width - w) > 1 or abs(frame.size.height - h) > 1:
+                    continue
+                if abs(frame.origin.x - want_x) > 2:
+                    continue
+                self._mac_nswindow = nswin
+                return nswin
+        except Exception:
+            return None
+        return None
+
+    def _mac_apply_shape(self, w: int, h: int) -> None:
+        """Clip the widget window to a circle (idle) or rounded card on macOS."""
+        if sys.platform != "darwin" or not self.win:
+            return
+        fill = "#20201f" if self._is_theme_dark() else WHITE
+        try:
+            self.win.config(bg=fill)
+            if self.canvas:
+                self.canvas.config(bg=fill)
+        except Exception:
+            pass
+        nswin = self._mac_find_nswindow(w, h)
+        if nswin is None:
+            return
+        radius = (min(w, h) / 2.0) if self._stage == self.STAGE_MINIMAL else 14.0
+        try:
+            from AppKit import NSColor
+
+            nswin.setOpaque_(False)
+            nswin.setBackgroundColor_(NSColor.clearColor())
+            nswin.setHasShadow_(False)
+            view = nswin.contentView()
+            view.setWantsLayer_(True)
+            layer = view.layer()
+            layer.setCornerRadius_(float(radius))
+            layer.setMasksToBounds_(True)
+        except Exception:
+            self._mac_nswindow = None
+
     def _apply_window_shape(self, w: int, h: int) -> None:
         """Natively clip the window boundary via Win32 SetWindowRgn for cards, or clear for transparent circle."""
+        if sys.platform == "darwin":
+            return  # applied after layout by _mac_apply_shape
         if sys.platform != "win32" or not self.win:
             return
         try:
@@ -388,6 +446,7 @@ class AudioFlowFloatingWidget:
             self.win.update_idletasks()
         except Exception:
             pass
+        self._mac_apply_shape(w, h)
 
     def hide(self) -> None:
         """Hide button, reset state, and invalidate a pre-Tk selection."""
