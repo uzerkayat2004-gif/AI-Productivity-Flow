@@ -553,14 +553,19 @@ def _candidate_preserves_content(
     dropped word. Anything else is judged against the source and, failing
     that, against the deterministic stutter-collapsed source.
     """
-    if candidate and candidate.strip() and source and source.strip():
-        if _only_removes_stutter_fragments(_tokenize_for_fidelity(source), _tokenize_for_fidelity(candidate)):
-            log.info("[POLISH SAFETY] Candidate only removed stutter fragments; accepted.")
-            return True
     if _candidate_preserves_content_strict(
         source, candidate, lenient, task=task,
         allow_compression=allow_compression, command_format=command_format,
     ):
+        return True
+    if not candidate or not candidate.strip() or not source or not source.strip():
+        return False
+    from voice_flow.text_processing import _PROTECTED_CLEANUP_SPAN_RE
+    if _PROTECTED_CLEANUP_SPAN_RE.search(source):
+        # Code, links and quoted literals are never "stutters".
+        return False
+    if _only_removes_stutter_fragments(_tokenize_for_fidelity(source), _tokenize_for_fidelity(candidate)):
+        log.info("[POLISH SAFETY] Candidate only removed stutter fragments; accepted.")
         return True
     try:
         from voice_flow.text_processing import collapse_stutter_fragments
