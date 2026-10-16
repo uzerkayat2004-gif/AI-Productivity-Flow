@@ -535,6 +535,25 @@ word words term terms symbol key character
 _SPOKEN_NOUN_DETERMINERS = frozenset(
     "a an the this that these those my your his her its our their each every any no".split()
 )
+# Measures of time and counts make "period" a noun ("a two week period").
+_SPOKEN_PERIOD_NOUN_MODIFIERS = frozenset("""
+week weeks month months year years quarter quarters hour hours
+minute minutes second seconds decade decades season seasons semester term
+two three four five six seven eight nine ten twelve fifteen thirty ninety
+sales holiday notice transition review reporting payment free cool off
+""".split())
+# ASR rarely capitalizes after a spoken mark ("today period then call me
+# comma please"), so a lowercase next word is accepted only for the marks
+# that end a clause, and only when that word opens a new clause. The noun
+# readings ("the trial period ends", "a comma separated list") are rejected
+# earlier by the blocker words, and none of their usual continuations
+# ("ends", "separated", "of", "is") is a clause opener.
+_SPOKEN_CLAUSE_MARKS = frozenset({".", ",", "?", "!"})
+_SPOKEN_CLAUSE_OPENERS = frozenset("""
+then and but so also please thanks thank i i'm i'll i've we we're we'll you
+you're he she they it it's let's lets after afterwards next finally okay ok
+now hi hello dear regards cheers see call send
+""".split())
 _SPOKEN_LITERAL_RE = re.compile(
     r"\b(?:write|say|type)\s+the\s+words?\s+(?:question mark|comma|period|colon|new line)\b", re.I
 )
@@ -558,11 +577,28 @@ def _spoken_term_replacement(part: str, match: re.Match) -> str:
         prev2 = re.search(r"([\w']+)[^\w]+[\w']+[^\w]*$", before)
         if prev2 is not None and prev2.group(1).lower() in _SPOKEN_NOUN_DETERMINERS:
             return match.group(0)
+    if term in ("period", "full stop"):
+        prev_word = prev.group(1).lower()
+        if prev_word in _SPOKEN_PERIOD_NOUN_MODIFIERS:
+            return match.group(0)
+        if prev_word in ("day", "days"):
+            # "a 30 day period" / "a two day period" is a noun phrase, while
+            # "send it to day period" is ASR splitting "today".
+            prev2 = re.search(r"([\w'-]+)[^\w]+[\w']+[^\w]*$", before)
+            if prev2 is not None and (
+                prev2.group(1)[:1].isdigit() or prev2.group(1).lower() in _SPOKEN_PERIOD_NOUN_MODIFIERS
+            ):
+                return match.group(0)
     at_end = not after.strip(" \t\r\n.,!?;:")
     attached = bool(match.group(2))
     nxt = re.match(r"\s*([^\s]+)", after)
     sentence_start = bool(nxt and nxt.group(1)[:1].isupper())
-    if not (at_end or attached or sentence_start):
+    clause_opener = bool(
+        nxt
+        and symbol in _SPOKEN_CLAUSE_MARKS
+        and re.sub(r"[^\w']", "", nxt.group(1)).lower() in _SPOKEN_CLAUSE_OPENERS
+    )
+    if not (at_end or attached or sentence_start or clause_opener):
         return match.group(0)
     if symbol.startswith("\n"):
         return _CMD_BREAK + symbol
@@ -585,6 +621,12 @@ def _spoken_punctuation(text: str) -> str:
             part = part[:match.start()] + replacement + part[match.end():]
             pos = match.start() + len(replacement)
         if _CMD_PUNCT in part:
+            # A spoken sentence end starts a new sentence ("today. Then").
+            part = re.sub(
+                _CMD_PUNCT + r"([.!?])([ \t]+)([a-z])",
+                lambda m: _CMD_PUNCT + m.group(1) + m.group(2) + m.group(3).upper(),
+                part,
+            )
             # The spoken mark replaces whatever the recognizer guessed there.
             part = re.sub(r"[ \t]*[,.;:!?]*[ \t]*" + _CMD_PUNCT + r"([,.;:!?])", r"\1", part)
         if _CMD_BREAK in part:

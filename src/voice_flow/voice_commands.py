@@ -785,6 +785,52 @@ def detect_voice_command(transcript: str, activation=None) -> CommandDetection:
     return CommandDetection(content=content, command=command)
 
 
+def remove_activation_phrases(transcript: str, activation=None) -> str:
+    """The user's dictation with only the wake phrase(s) taken out.
+
+    Used when a command was recognised but nothing could perform it (no AI
+    polish model, offline provider failure, fidelity rejection): the app must
+    never paste a fragment of what the user said. Every other word, including
+    the spoken instruction itself, is kept, and the punctuation around the
+    removed wake phrase is repaired:
+
+    ``"Hey voice flow, make this an email to Priya about the launch."``
+    -> ``"Make this an email to Priya about the launch."``
+
+    ``"We discussed pricing and hiring, hey voice flow, summarize this."``
+    -> ``"We discussed pricing and hiring. Summarize this."``
+    """
+    if transcript is None:
+        return ""
+    text = str(transcript).strip()
+    if not text:
+        return ""
+    if activation is not None and not getattr(activation, "enabled", True):
+        return text
+    if activation is None or getattr(activation, "legacy_voice_flow", False):
+        finder = _find_legacy_wake
+    else:
+        finder = _make_custom_finder(activation)
+    for _round in range(4):
+        wake = finder(text, _mask_quoted(text))
+        if wake is None:
+            break
+        before = text[:wake.start()]
+        after = text[wake.end():].lstrip(" ,.:;!-—")
+        if after:
+            after = after[0].upper() + after[1:]
+        if _starts_as_beginning(text, wake.start()):
+            text = after
+            continue
+        before = before.rstrip(" ,;:-—")
+        if not after:
+            text = before
+            continue
+        joiner = " " if before.endswith((".", "!", "?")) else ". "
+        text = before + joiner + after
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
 def _detect_once(transcript: str, finder) -> CommandDetection:
     """One wake-phrase pass (the historical detector, with a pluggable finder)."""
     if transcript is None:

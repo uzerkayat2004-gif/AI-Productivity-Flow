@@ -53,3 +53,34 @@ def test_real_words_are_never_rewritten(text: str) -> None:
 ])
 def test_standalone_commands_still_convert(text: str, expected: str) -> None:
     assert apply_spoken_punctuation(text) == expected
+
+
+# Mac QA 2026-10-16 (voice_a2/voice_b2): every recognizer returned the spoken
+# marks in lower case mid-sentence, so the strict sentence-boundary guard never
+# fired. A clause-opening next word now counts as a boundary for . , ? !
+@pytest.mark.parametrize("text,expected", [
+    ("Send the report to day period then call me comma please.", "Send the report to day. Then call me, please."),
+    ("Send the report to date period then call me comma please", "Send the report to date. Then call me, please"),
+    ("Send the report today period then call me comma please", "Send the report today. Then call me, please"),
+    ("Is it done question mark then ship it", "Is it done? Then ship it"),
+    ("Hello Sam comma please call me", "Hello Sam, please call me"),
+])
+def test_lowercase_spoken_marks_before_a_clause_opener_convert(text: str, expected: str) -> None:
+    assert apply_spoken_punctuation(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "After a two week period we review it.",
+    "After a 30 day period we review it.",
+    "After a two day period we review it.",
+    "During this period we grew.",
+    "The waiting period and the fee apply.",
+    "The grace period then ends.",
+    "I need a comma please",
+    "Oxford comma and semicolons",
+    "Please send a comma separated list of names.",
+    "We launched a new line of products this week.",
+    "He had a question mark on his face.",
+])
+def test_noun_uses_before_a_clause_opener_stay_words(text: str) -> None:
+    assert apply_spoken_punctuation(text) == text
