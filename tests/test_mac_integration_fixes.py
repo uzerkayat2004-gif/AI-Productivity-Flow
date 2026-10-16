@@ -267,3 +267,67 @@ def test_restore_focus_leaves_another_active_app_alone(monkeypatch):
     backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
     assert backend.restore_paste_target_focus(timeout=0.2)["restored"] is False
     assert apps[target].activated == 0
+
+
+# ---------------------------------------------------------------------------
+# frontmost_window_owner must look past menu-bar extras / overlays
+# ---------------------------------------------------------------------------
+
+def _fake_window_list(monkeypatch, windows):
+    """Fake CoreGraphics/CoreFoundation for frontmost_window_owner()."""
+    from voice_flow.platform import macos_native as native
+
+    keys = {"kCGWindowOwnerName": 101, "kCGWindowName": 102, "kCGWindowOwnerPID": 103, "kCGWindowLayer": 104}
+    field = {101: "owner", 102: "title", 103: "pid", 104: "layer"}
+    tokens: dict[int, object] = {}
+
+    class _Fn:
+        def __init__(self, fn):
+            self.fn = fn
+
+        def __call__(self, *args):
+            return self.fn(*args)
+
+    def dict_get(entry, ref):
+        win = windows[entry - 1]
+        name = field[ref.value]
+        if name not in win:
+            return 0
+        token = 1000 + entry * 10 + (ref.value - 100)
+        tokens[token] = win[name]
+        return token
+
+    def number_get(value, _type, out_ref):
+        out_ref._obj.value = int(tokens[value])
+        return True
+
+    symbols = {
+        "CGWindowListCopyWindowInfo": _Fn(lambda *_a: 1),
+        "CFArrayGetCount": _Fn(lambda _arr: len(windows)),
+        "CFArrayGetValueAtIndex": _Fn(lambda _arr, i: i + 1),
+        "CFDictionaryGetValue": _Fn(dict_get),
+        "CFNumberGetValue": _Fn(number_get),
+    }
+    monkeypatch.setattr(native, "IS_MACOS", True)
+    monkeypatch.setattr(native._loader, "symbol", lambda _fw, name, optional=False: symbols.get(name))
+    monkeypatch.setattr(native._loader, "data_symbol", lambda _fw, name, optional=False: keys.get(name))
+    monkeypatch.setattr(native, "cfstring_to_python", lambda token: str(tokens[token]))
+    monkeypatch.setattr(native, "cf_release", lambda _ref: None)
+    return native
+
+
+def test_frontmost_window_owner_skips_many_overlay_windows(monkeypatch):
+    """macOS 14 CI: >20 menu-bar extras / Dock / our bar, widget, menu, toast sat
+    above TextEdit's window; the old 20-entry cap returned {} so paste focus
+    restore and AX reads silently gave up (Cmd+V landed nowhere)."""
+    overlays = [{"owner": f"Extra{i}", "title": "Item-0", "pid": 300 + i, "layer": 25} for i in range(24)]
+    overlays += [{"owner": "AI Productivity Flow", "title": "", "pid": 5291, "layer": 19} for _ in range(4)]
+    windows = overlays + [{"owner": "TextEdit", "title": "af.txt", "pid": 5740, "layer": 0}]
+    native = _fake_window_list(monkeypatch, windows)
+    assert native.frontmost_window_owner() == {"app": "TextEdit", "title": "af.txt", "pid": 5740}
+
+
+def test_frontmost_window_owner_empty_when_no_normal_window(monkeypatch):
+    windows = [{"owner": "Dock", "title": "Dock", "pid": 324, "layer": 20}]
+    native = _fake_window_list(monkeypatch, windows)
+    assert native.frontmost_window_owner() == {}

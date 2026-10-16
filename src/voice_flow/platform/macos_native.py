@@ -460,7 +460,11 @@ def frontmost_window_owner() -> dict[str, Any]:
         return {}
     try:
         total = count_fn(arr)
-        for index in range(min(total, 20)):
+        # Scan the whole list: menu-bar extras, the Dock, our own floating bar,
+        # widget, menu and toasts all sit above layer 0, and with enough of
+        # them (macOS 14 runner, Oct 2026) the first 20 entries held no normal
+        # window at all -- focus restore and AX reads then silently gave up.
+        for index in range(min(total, 1000)):
             entry = at_fn(arr, index)
             if not entry:
                 continue
