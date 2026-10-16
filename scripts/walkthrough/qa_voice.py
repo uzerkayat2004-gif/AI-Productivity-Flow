@@ -281,9 +281,27 @@ def start_app_fresh(area: str) -> bool:
     up = wait_api(120)
     time.sleep(12)
     record(area, "fresh launch for voice tests", "ok" if up else "fail", f"api after {up}s", shot("voice-fresh-launch"))
-    # dismiss onboarding so it does not steal focus
+    # Dismiss onboarding so it does not steal focus -- and, on this rig, so its
+    # auto-playing narration does not leak into the BlackHole loopback "mic"
+    # (it3 voice_a 38974393518: tour narration "turn any content into a video",
+    # "zero copy-pasting" ended up in dictations). The live tour in the native
+    # window ignores a settings change, so save the seen flags and relaunch
+    # (flags come from the backend; the ui phase verifies the tour stays away).
+    flags = {"hasViewedOnboarding": "true", "vf_onboarding.done": "1", "vf_onboarding.v2_seen": "1",
+             "vf_onboarding.af_guided": "1", "vf_onboarding.vf_guided": "1", "vf_onboarding.vf_voice_guided": "1",
+             "vf_onboarding.firstDictation": "1"}
     api("/api/settings/update", {"key": "has_viewed_onboarding", "value": True})
-    return bool(up)
+    api("/api/settings/update", {"key": "onboarding_seen_flags", "value": flags})
+    q = quit_app()
+    if not q["all_gone"]:
+        kill_all()
+    launch_open(APP)
+    up2 = wait_api(120)
+    time.sleep(12)
+    seen = api("/api/settings/get?key=onboarding_seen_flags")[1]
+    record(area, "relaunch with onboarding marked seen (no tour narration into the loopback mic)", "ok" if up2 else "fail",
+           f"api after {up2}s flags={seen}", shot("voice-relaunch-no-tour"))
+    return bool(up and up2)
 
 
 def select_mic(area: str, name: str | None):
