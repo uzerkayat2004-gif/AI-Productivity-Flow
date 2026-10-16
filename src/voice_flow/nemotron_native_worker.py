@@ -33,6 +33,13 @@ class NativeOwner:
         refs = []
         if values.get("streaming"):
             opts.interim_results = False
+        eou_ms = values.get("stop_history_eou_ms")
+        if eou_ms is not None:
+            # Whole-recording decodes raise the end-of-utterance history so a
+            # short hesitation is not finalized as its own punctuated segment.
+            if not isinstance(eou_ms, int) or not 0 < eou_ms <= 60000:
+                raise ValueError("invalid end-of-utterance history")
+            opts.stop_history_eou_ms = eou_ms
         language = values.get("language")
         if language:
             if not isinstance(language, str) or len(language) > 32:

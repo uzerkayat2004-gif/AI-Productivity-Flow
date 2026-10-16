@@ -320,6 +320,176 @@ def collapse_echo_repeats(text: str) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Stutter fragments
+# ---------------------------------------------------------------------------
+# The native streaming endpointer finalizes each false start of a stutter as
+# its own punctuated segment ("My. Ag. My agent", "Q? Q. Quest? Question.",
+# "So the plan is. Is to ship. Ship on Friday."). The collapser below removes
+# only words that are immediately repeated (or are a prefix of the word that
+# follows); it never removes a word that is not said again right after it.
+
+# A segment ending in one of these is grammatically unfinished, so a restart
+# that repeats it is a stutter rather than a new sentence.
+_UNFINISHED_ENDINGS = frozenset("""
+a an the is are was were am be been to of and but or nor so for with from in
+on at by into onto my your our their his its will would can could should must
+shall may might have has i we they if because than as
+""".split())
+# Immediate duplicates of these are disfluencies ("the the plan"); content
+# words ("very very", "no no") and grammatical doubles ("had had", "that
+# that") are left alone.
+_DUPLICABLE_FUNCTION_WORDS = frozenset(
+    "the a an to of and i in on at for my we our your is are it".split()
+)
+_STUTTER_MAX_FRAGMENT_WORDS = 2
+_STUTTER_MAX_RUN_WORDS = 4
+
+
+def _stutter_norm(word: str) -> str:
+    return re.sub(r"[^\w']", "", word).lower()
+
+
+def _stutter_segments(line: str) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in line.split():
+        current.append(token)
+        if token[-1] in ".?!":
+            segments.append(current)
+            current = []
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _words_restart(fragment: list[str], following: list[str]) -> bool:
+    """True when *fragment* is an aborted start of *following*."""
+    if not fragment or len(following) <= len(fragment) - 1:
+        return False
+    for index, word in enumerate(fragment):
+        if not word or index >= len(following):
+            return False
+        nxt = following[index]
+        if index < len(fragment) - 1:
+            if word != nxt:
+                return False
+        elif not (word == nxt or (len(word) < len(nxt) and nxt.startswith(word))):
+            return False
+    # The restart must continue: an exact, complete repeat ("Okay. Okay.")
+    # is deliberate and kept.
+    return len(following) > len(fragment) or following[len(fragment) - 1] != fragment[-1]
+
+
+def _collapse_stutter_line(line: str) -> str:
+    segments = _stutter_segments(line)
+    if len(segments) < 2 and not any(
+        _stutter_norm(a) == _stutter_norm(b) and _stutter_norm(a) in _DUPLICABLE_FUNCTION_WORDS
+        for a, b in zip(line.split(), line.split()[1:])
+    ):
+        return line
+    changed = False
+    question_lost = False
+
+    # 1. Drop runs of short punctuated fragments that restart the following text.
+    out: list[list[str]] = []
+    i = 0
+    while i < len(segments):
+        dropped = False
+        for k in range(1, 4):
+            run = segments[i:i + k]
+            if len(run) < k or i + k >= len(segments):
+                break
+            if any(len(seg) > _STUTTER_MAX_FRAGMENT_WORDS or seg[-1][-1] not in ".?!" for seg in run):
+                break
+            words = [_stutter_norm(w) for seg in run for w in seg]
+            if len(words) > _STUTTER_MAX_RUN_WORDS:
+                break
+            following = [_stutter_norm(w) for seg in segments[i + k:] for w in seg][:len(words) + 1]
+            if _words_restart(words, following):
+                question_lost = question_lost or any(seg[-1].endswith("?") for seg in run)
+                i += k
+                dropped = changed = True
+                break
+        if not dropped:
+            out.append(list(segments[i]))
+            i += 1
+    segments = out
+
+    # 2. Merge a segment boundary where the next segment restarts with the
+    #    last words of an unfinished (or already-restarted) segment.
+    merged: list[list[str]] = []
+    restarted: list[bool] = []
+    for seg in segments:
+        if merged:
+            prev = merged[-1]
+            prev_words = [_stutter_norm(w) for w in prev]
+            seg_words = [_stutter_norm(w) for w in seg]
+            for k in (3, 2, 1):
+                if len(prev) < k or len(seg) <= k:
+                    continue
+                if prev_words[-k:] != seg_words[:k] or not all(prev_words[-k:]):
+                    continue
+                # A capitalised word mid-segment is a name ("call Bob. Bob
+                # will know"); never merge on it.
+                start = len(prev) - k
+                if any(w[:1].isupper() and j > 0 and w != "I" for j, w in enumerate(prev[start:], start)):
+                    continue
+                if not (prev_words[-1] in _UNFINISHED_ENDINGS or restarted[-1]):
+                    continue
+                prev[-1] = prev[-1].rstrip(".?!")
+                prev.extend(seg[k:])
+                restarted[-1] = True
+                changed = True
+                break
+            else:
+                merged.append(list(seg))
+                restarted.append(False)
+                continue
+            continue
+        merged.append(list(seg))
+        restarted.append(False)
+    segments = merged
+
+    # 3. Immediate duplicate function words inside a segment ("the the").
+    for seg in segments:
+        j = 1
+        while j < len(seg):
+            a, b = _stutter_norm(seg[j - 1]), _stutter_norm(seg[j])
+            if a == b and a in _DUPLICABLE_FUNCTION_WORDS and seg[j - 1][-1:].isalnum():
+                if j - 1 == 0 and seg[0][:1].isupper() and seg[1][:1].islower():
+                    seg[1] = seg[1][:1].upper() + seg[1][1:]
+                del seg[j - 1]
+                changed = True
+            else:
+                j += 1
+
+    if not changed:
+        return line
+    if question_lost and len(segments) == 1 and segments[0][-1].endswith("."):
+        # The recognizer heard question intonation on the false starts.
+        segments[0][-1] = segments[0][-1][:-1] + "?"
+    if segments and segments[0] and segments[0][0][:1].islower() and line.lstrip()[:1].isupper():
+        segments[0][0] = segments[0][0][:1].upper() + segments[0][0][1:]
+    return " ".join(w for seg in segments for w in seg)
+
+
+def collapse_stutter_fragments(text: str) -> str:
+    """Collapse endpointer stutter fragments without dropping any unrepeated word.
+
+    "My. Ag. My agent" -> "My agent"; "Q? Q. Quest? Question." -> "Question?";
+    "So the the plan is. Is to ship. Ship on Friday." -> "So the plan is to
+    ship on Friday." Deliberate complete repeats ("Okay. Okay.") and short
+    sentences that do not restart the next one ("I. Am.") are kept.
+    """
+    if not text or not text.strip():
+        return text
+    try:
+        return "\n".join(_collapse_stutter_line(line) if line.strip() else line for line in text.split("\n"))
+    except Exception:
+        return text
+
+
 # Spoken punctuation is a *command*, not a word substitution. "period",
 # "comma", "new line" and friends are ordinary English words ("the trial
 # period ends in May", "a comma separated list", "a new line of products"),

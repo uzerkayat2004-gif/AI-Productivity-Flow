@@ -92,6 +92,20 @@ from voice_flow.nemotron_abi import (
 )
 from voice_flow.nemotron_worker_client import NativeASRClient, NativeASRWorkerError, NativeASRBusyError
 
+# Trailing silence appended before stream_finish and before a whole-recording
+# decode. A tight key release otherwise leaves the last word without the
+# right context the recognizer needs ("Uzair" -> "Uz. Ar.", "Priya" -> "Priy");
+# 500 ms fixed it in real-model tests.
+TRAILING_SILENCE_SECONDS = 0.5
+# Whole-recording decodes run through the warmed cache-aware (streaming)
+# encoder. The native library also has an offline path
+# (nemo_speech_asr_recognize_f32), but it allocates a second encoder (~+750 MB
+# worker RSS measured on the q8_0 model) and did not merge stutter false
+# starts any better in tests, so it is not used. A longer end-of-utterance
+# history keeps short hesitations from being finalized as their own
+# punctuated segments in that whole-recording pass.
+WHOLE_RECORDING_EOU_HISTORY_MS = 2000
+
 _FAILED_MODELS: dict[str, NativeASRWorkerError] = {}
 _FAILED_AT: dict[str, float] = {}
 _RETRY_ACTIONS = deque(maxlen=16)
@@ -313,6 +327,7 @@ class NemotronGGUFEngine:
         self.last_latency_ms: float = 0.0
         self.total_transcriptions: int = 0
         self.total_audio_seconds: float = 0.0
+        self.total_decode_seconds: float = 0.0
 
         self._load_and_warm()
 
@@ -533,6 +548,13 @@ class NemotronGGUFEngine:
             self.close()
         notify_models_available("speech")
 
+    def realtime_factor(self) -> float | None:
+        """Observed whole-recording decode seconds per audio second, if known."""
+        audio = float(getattr(self, "total_audio_seconds", 0.0) or 0.0)
+        if audio < 1.0:
+            return None
+        return float(getattr(self, "total_decode_seconds", 0.0) or 0.0) / audio
+
     def touch(self) -> None:
         # Advisory recency only: stream/model leases own lifetime. Cache getters
         # must not wait behind an in-flight native call while holding _CACHE_LOCK.
@@ -691,6 +713,7 @@ class NemotronGGUFEngine:
             vocabulary=tuple(vocabulary or ()) if self.metadata.get("speech_context_supported", False) else (),
             audio=np.ascontiguousarray(wav_segment, dtype=np.float32).tobytes(),
             count=len(wav_segment), rate=self.sample_rate, deadline=deadline,
+            stop_history_eou_ms=WHOLE_RECORDING_EOU_HISTORY_MS,
         )
         if response.get("busy"):
             raise NativeASRBusyError("Previous speech stream is still closing; recording retained")
@@ -735,6 +758,12 @@ class NemotronGGUFEngine:
         wav = np.nan_to_num(audio.flatten(), nan=0.0, posinf=0.0, neginf=0.0)
         if wav.dtype != np.float32:
             wav = wav.astype(np.float32, copy=False)
+        # Whole recordings end with padded silence so a tight release keeps
+        # the last word; only the final decoded segment receives it.
+        tail_pad = (
+            np.zeros(int(TRAILING_SILENCE_SECONDS * self.sample_rate), dtype=np.float32)
+            if not is_chunk and TRAILING_SILENCE_SECONDS > 0 else None
+        )
 
         if self.fatal_error:
             raise self.fatal_error
@@ -752,7 +781,8 @@ class NemotronGGUFEngine:
                 self._last_used = time.monotonic()
                 # If audio is short or is a stream chunk, transcribe directly in-process
                 if is_chunk or duration <= 12.0:
-                    result = self._transcribe_segment(wav, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
+                    segment = wav if tail_pad is None else np.concatenate([wav, tail_pad])
+                    result = self._transcribe_segment(segment, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                 else:
                     # Long whole-buffer audio (> 12.0s): chunk into ~4s segments at silence points
                     # to avoid FastConformer O(T^2) quadratic self-attention blowup on CPU.
@@ -792,6 +822,8 @@ class NemotronGGUFEngine:
                             seg = wav[offset:split_point]
                             offset = split_point
 
+                        if offset >= n_samples and tail_pad is not None:
+                            seg = np.concatenate([seg, tail_pad])
                         if seg.size >= int(0.2 * self.sample_rate):
                             part_txt = self._transcribe_segment(seg, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                             if part_txt:
@@ -810,6 +842,7 @@ class NemotronGGUFEngine:
         self.last_latency_ms = elapsed_ms
         self.total_transcriptions += 1
         self.total_audio_seconds += duration
+        self.total_decode_seconds = getattr(self, "total_decode_seconds", 0.0) + elapsed_ms / 1000.0
 
         log.info(
             "[NEMOTRON] Transcribed %.2fs audio in %.1fms (is_chunk=%s, warm=True): '%s'",
@@ -1052,6 +1085,7 @@ class NemotronStreamTranscriber:
         stream_acquired = False
         committed_transcripts: list[str] = []
         interim_latest = ""
+        last_sr = 0
         t0 = time.perf_counter()
         mic_profile = "auto"
         try:
@@ -1095,6 +1129,7 @@ class NemotronStreamTranscriber:
                     break
 
                 frame, sr = item
+                last_sr = sr
                 if frame.ndim > 1:
                     frame = np.mean(frame, axis=1)
                 mono = np.nan_to_num(frame, nan=0.0, posinf=0.0, neginf=0.0)
@@ -1133,6 +1168,22 @@ class NemotronStreamTranscriber:
                     self._failed = True
                     return
                 raise TimeoutError("Stream deadline elapsed before all audio was consumed")
+
+            # Pad the tail so the last word gets right context before finish.
+            if TRAILING_SILENCE_SECONDS > 0 and self._accepted:
+                pad_sr = int(last_sr or 16000)
+                pad = np.zeros(int(TRAILING_SILENCE_SECONDS * pad_sr), dtype=np.float32)
+                response = self._native_call("stream_push_next", handle=stream.value,
+                                             audio=pad.tobytes(), count=len(pad), rate=pad_sr)
+                result = response.get("result")
+                if result:
+                    t = result["text"].decode("utf-8", errors="replace").strip()
+                    if result["final"]:
+                        if t:
+                            committed_transcripts.append(t)
+                            interim_latest = ""
+                    elif t:
+                        interim_latest = t
 
             # Finalize audio stream and drain tail
             t_finish = time.perf_counter()
@@ -1184,10 +1235,17 @@ class NemotronStreamTranscriber:
                 self._accepted,
                 self._text[:60] if self._text else "<empty>",
             )
-        except (NativeASRWorkerError, NativeASRBusyError) as exc:
+        except NativeASRWorkerError as exc:
+            # Only a dead/poisoned worker is fatal for the recording. A soft
+            # cancel/deadline (NativeASRBusyError) just ends this stream; the
+            # worker stays alive so whole-recording recovery can still run.
             self.fatal_error = exc
             self._failed = True
             self._text = ""
+        except NativeASRBusyError as exc:
+            self._failed = True
+            self._text = ""
+            log.info("[NEMOTRON STREAM] Stream ended without a complete result (%s); whole-recording recovery owns the transcript", exc)
         except Exception as exc:
             if committed_transcripts or interim_latest:
                 if interim_latest and not committed_transcripts:

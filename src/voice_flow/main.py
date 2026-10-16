@@ -45,7 +45,7 @@ from voice_flow.overlay import FloatingOverlayBar
 from voice_flow.polisher import polisher, AI_POLISH_DETERMINISTIC_RESERVE_SECONDS
 from voice_flow.storage import storage
 from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
-from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
+from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, collapse_stutter_fragments, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
@@ -136,6 +136,14 @@ NEMOTRON_CLOUD_POLISH_WARM_SECONDS = 600.0
 # fragments that streaming finalized separately ("Q? Q. Quest? Question.").
 FULL_REDECODE_MAX_SECONDS = 30.0
 FULL_REDECODE_BUDGET_SECONDS = 2.5
+# The re-decode is optional: its deadline is soft (the worker is never killed
+# for it) and it is skipped when the observed decode speed says the clip
+# cannot finish inside the budget. Until a speed is observed, assume this
+# real-time factor (decode seconds per audio second).
+FULL_REDECODE_DEFAULT_RTF = 0.35
+# Keep capturing briefly after key release so a tight release does not clip
+# the last word. Runs on the hotkey worker thread, never the UI thread.
+RELEASE_POST_ROLL_SECONDS = 0.3
 _S1_WARM_GATE = threading.Lock()
 # Cloud transcription keeps the full recovery window, while optional cleanup
 # shares a separate two-second interactive release target.
@@ -1045,15 +1053,35 @@ class VoiceFlowApp:
                 post_release_deadline - INJECTION_RESERVE_SECONDS,
                 time.monotonic() + FULL_REDECODE_BUDGET_SECONDS,
             )
-            if deadline - time.monotonic() <= 0.2:
+            available = deadline - time.monotonic()
+            if available <= 0.2:
+                return ""
+            rtf = self._redecode_realtime_factor()
+            # +0.5 s for the trailing silence the engine appends.
+            expected = (float(duration) + 0.5) * rtf
+            if expected > available * 0.9:
+                log.info("[STT REDECODE] skipped: %.1fs clip needs ~%.1fs at RTF %.2f, only %.1fs left.",
+                         float(duration), expected, rtf, available)
                 return ""
             started = time.perf_counter()
-            text = _call_with_optional_deadline(
-                self.transcriber.transcribe,
-                audio_buffer,
-                deadline=deadline,
-                model_ref=model_ref,
-            ) or ""
+            try:
+                text = _call_with_optional_deadline(
+                    self.transcriber.transcribe,
+                    audio_buffer,
+                    deadline=deadline,
+                    model_ref=model_ref,
+                ) or ""
+            except Exception as exc:
+                from voice_flow.nemotron_worker_client import NativeASRBusyError
+                if isinstance(exc, NativeASRBusyError):
+                    # Soft deadline: the worker finishes in the background and
+                    # stays alive. Remember that this machine is slower.
+                    elapsed = time.perf_counter() - started
+                    self._redecode_rtf_floor = max(
+                        float(getattr(self, "_redecode_rtf_floor", 0.0) or 0.0),
+                        elapsed / max(0.5, float(duration) + 0.5),
+                    )
+                raise
             text = str(text).strip()
             if not text or time.monotonic() > deadline + 0.25:
                 log.info("[STT REDECODE] full-context pass gave no usable text; keeping stream text.")
@@ -1064,6 +1092,20 @@ class VoiceFlowApp:
         except Exception as exc:
             log.warning("[STT REDECODE] failed (%s); keeping stream text.", exc)
             return ""
+
+    def _redecode_realtime_factor(self) -> float:
+        """Best known decode speed for the optional re-decode budget check."""
+        rtf = None
+        try:
+            engine = getattr(getattr(self, "transcriber", None), "nemotron_engine", None)
+            probe = getattr(engine, "realtime_factor", None)
+            if callable(probe):
+                rtf = probe()
+        except Exception:
+            rtf = None
+        if not isinstance(rtf, (int, float)) or rtf <= 0:
+            rtf = FULL_REDECODE_DEFAULT_RTF
+        return max(float(rtf), float(getattr(self, "_redecode_rtf_floor", 0.0) or 0.0))
 
     def _on_stream_chunk_closed(self, chunk: Any, native_sr: int, *, overlap_prefix_seconds: float = 0.0) -> None:
         """Audio-callback thread -> background transcription of a closed chunk."""
@@ -1383,6 +1425,23 @@ class VoiceFlowApp:
             self._overlay_call("show_error", f"Dictation could not start: {exc}"[:90])
             return False
 
+    def _release_post_roll(self) -> None:
+        """Keep the microphone open ~300 ms after release (tight-release clipping).
+
+        Only the built-in recorder supports it, and never on the UI thread:
+        the overlay Finish button runs there and must not freeze.
+        """
+        seconds = RELEASE_POST_ROLL_SECONDS
+        if seconds <= 0 or threading.current_thread() is threading.main_thread():
+            return
+        post_roll = getattr(getattr(self, "audio", None), "post_roll", None)
+        if not callable(post_roll):
+            return
+        try:
+            post_roll(seconds)
+        except Exception:
+            log.debug("[AUDIO] post-roll skipped", exc_info=True)
+
     def _finish_if_current(self, session) -> None:
         with self._state_lock:
             if session is None or getattr(self, "session", None) is not session or self.state != DictationState.RECORDING:
@@ -1444,6 +1503,7 @@ class VoiceFlowApp:
                         session["app_title"] = new_style.app_name
                         session["app_category"] = new_style.category
                         session["style_id"] = new_style.style_id
+            self._release_post_roll()
             # Capture this once at release so the tail worker, stream harvest,
             # whole-buffer fallback, and polish all share one absolute clock.
             post_release_deadline = time.monotonic() + POST_RELEASE_WORK_BUDGET_SECONDS
@@ -2236,6 +2296,13 @@ class VoiceFlowApp:
                 # any previously armed command so it cannot affect a later run.
                 # A settings read failure is deliberately fail-closed here.
                 polishing_enabled = _polishing_enabled()
+                # The streaming endpointer finalizes stutter false starts as
+                # punctuated segments ("My. Ag. My agent"). Collapse only
+                # repeated/prefix fragments, in both polish ON and OFF modes.
+                try:
+                    raw_transcript = collapse_stutter_fragments(raw_transcript) or raw_transcript
+                except Exception:
+                    log.debug("[STT] stutter collapse skipped", exc_info=True)
                 command = None
                 command_content = raw_transcript
                 if polishing_enabled:
