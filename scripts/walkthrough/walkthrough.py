@@ -17,6 +17,9 @@ if phase == "install":
 elif phase in ("voice_a", "voice_b"):
     import qa_voice
     qa_voice.main(phase)
+elif phase == "life":
+    import qa_life
+    qa_life.main()
 elif phase == "site":
     import runpy
     runpy.run_path(str(here / "qa_site.py"), run_name="__main__")
