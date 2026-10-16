@@ -2,7 +2,9 @@
 
 Strict privacy rules:
 - Completely opt-in: disabled by default (zero network calls, zero SDK overhead when disabled).
-- Never sends audio data, transcripts, dictation, clipboard text, or request payloads.
+- Never sends audio data, transcripts, dictation, clipboard text, or request payloads:
+  no local variables, no breadcrumbs, no log events, and exception messages are
+  replaced by '[redacted]' (only the exception type and code location are kept).
 - Redacts local usernames in system file paths (/Users/<username> and C:\\Users\\<username>).
 - Redacts all environment tokens and API keys (OPENAI_*, ANTHROPIC_*, GROQ_*, GEMINI_*, DEEPGRAM_*, SENTRY_*, AWS_*, etc.).
 - Performance tracing and profiling are completely disabled (0% sample rate).
@@ -102,72 +104,78 @@ def _scrub_object(obj: Any) -> Any:
     return obj
 
 
-def before_send_scrubber(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
-    """Privacy scrubber hook invoked prior to sending any event to Sentry."""
-    try:
-        # 1. Drop request bodies, query params, cookies
-        if "request" in event and isinstance(event["request"], dict):
-            req = event["request"]
-            req.pop("data", None)
-            req.pop("query_string", None)
-            req.pop("cookies", None)
-            if "headers" in req and isinstance(req["headers"], dict):
-                req["headers"] = {
-                    k: ("[REDACTED]" if any(s in str(k).lower() for s in ("auth", "cookie", "token", "key")) else _scrub_string(str(v)))
-                    for k, v in req["headers"].items()
-                }
+REDACTED = "[redacted]"
+TEST_CRASH_MESSAGE = f"Test crash report from AI Productivity Flow v{VERSION}"
+# The only free-text messages allowed to leave the machine: fixed strings we wrote.
+_SAFE_MESSAGES = frozenset({TEST_CRASH_MESSAGE})
 
-        # 2. Drop user PII fields if present
+
+def _safe_message(value: Any) -> str:
+    return value if isinstance(value, str) and value in _SAFE_MESSAGES else REDACTED
+
+
+def _strip_frames(stacktrace: Any) -> None:
+    """Drop local variables from frames and scrub usernames from file paths."""
+    if not isinstance(stacktrace, dict):
+        return
+    for frame in stacktrace.get("frames", []) or []:
+        if not isinstance(frame, dict):
+            continue
+        frame.pop("vars", None)
+        for key in ("filename", "abs_path"):
+            if key in frame:
+                frame[key] = _scrub_string(str(frame[key]))
+
+
+def before_send_scrubber(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+    """Privacy scrubber hook invoked prior to sending any event to Sentry.
+
+    Allow-list approach: anything that could carry user text (dictation,
+    documents, clipboard, prompts) is dropped rather than pattern-scrubbed.
+    What remains is exception *types*, code locations, and runtime context.
+    """
+    try:
+        # Free-form containers that can hold user text: drop entirely.
+        for key in ("breadcrumbs", "extra", "request", "server_name", "spans", "fingerprint"):
+            event.pop(key, None)
         if "user" in event:
             event["user"] = {"id": "[ANONYMOUS]"}
 
-        # 3. Redact environment variables in event contexts
         if "contexts" in event and isinstance(event["contexts"], dict):
             event["contexts"] = _scrub_object(event["contexts"])
+        if "tags" in event and isinstance(event["tags"], dict):
+            event["tags"] = _scrub_object(event["tags"])
 
-        # 4. Scrub message, logentry, and breadcrumbs
-        if "message" in event and isinstance(event["message"], str):
-            event["message"] = _scrub_string(event["message"])
+        # Messages (capture_message / logging events): fixed allow-list only.
+        if "message" in event:
+            event["message"] = _safe_message(event["message"])
+        if isinstance(event.get("logentry"), dict):
+            entry = event["logentry"]
+            safe = _safe_message(entry.get("formatted") or entry.get("message"))
+            event["logentry"] = {"message": safe, "formatted": safe}
 
-        if "logentry" in event and isinstance(event["logentry"], dict):
-            if "message" in event["logentry"]:
-                event["logentry"]["message"] = _scrub_string(event["logentry"]["message"])
-            if "formatted" in event["logentry"]:
-                event["logentry"]["formatted"] = _scrub_string(event["logentry"]["formatted"])
-
-        if "breadcrumbs" in event:
-            breadcrumbs = event["breadcrumbs"]
-            if isinstance(breadcrumbs, dict) and "values" in breadcrumbs:
-                breadcrumbs["values"] = _scrub_object(breadcrumbs["values"])
-            elif isinstance(breadcrumbs, list):
-                event["breadcrumbs"] = _scrub_object(breadcrumbs)
-
-        # 5. Scrub exception values, types, and stacktrace frames
-        if "exception" in event and isinstance(event["exception"], dict):
-            values = event["exception"].get("values", [])
-            for exc in values:
+        # Exceptions: keep the type and stack locations, never the message or locals.
+        if isinstance(event.get("exception"), dict):
+            for exc in event["exception"].get("values", []) or []:
                 if isinstance(exc, dict):
                     if "value" in exc:
-                        exc["value"] = _scrub_string(str(exc["value"]))
-                    stacktrace = exc.get("stacktrace")
-                    if isinstance(stacktrace, dict):
-                        for frame in stacktrace.get("frames", []):
-                            if isinstance(frame, dict):
-                                if "filename" in frame:
-                                    frame["filename"] = _scrub_string(str(frame["filename"]))
-                                if "abs_path" in frame:
-                                    frame["abs_path"] = _scrub_string(str(frame["abs_path"]))
-                                if "vars" in frame and isinstance(frame["vars"], dict):
-                                    frame["vars"] = _scrub_object(frame["vars"])
-
-        # 6. Scrub extra context tags
-        if "extra" in event and isinstance(event["extra"], dict):
-            event["extra"] = _scrub_object(event["extra"])
+                        exc["value"] = REDACTED
+                    _strip_frames(exc.get("stacktrace"))
+        if isinstance(event.get("threads"), dict):
+            for thread in event["threads"].get("values", []) or []:
+                if isinstance(thread, dict):
+                    _strip_frames(thread.get("stacktrace"))
 
         return event
     except Exception as exc:
-        log.warning("Exception during crash report scrubbing: %s", exc)
-        return event
+        # Never send an event we could not scrub.
+        log.warning("Exception during crash report scrubbing; event dropped: %s", type(exc).__name__)
+        return None
+
+
+def _drop_breadcrumb(crumb: dict[str, Any], hint: dict[str, Any]) -> None:
+    """Breadcrumbs (log lines, HTTP calls) can carry user text: never record them."""
+    return None
 
 
 def is_crash_reporting_enabled() -> bool:
@@ -207,15 +215,28 @@ def init_crash_reporting(force: bool = False) -> bool:
     release = f"ai-productivity-flow@{VERSION}"
 
     try:
+        integrations = []
+        try:
+            from sentry_sdk.integrations.logging import LoggingIntegration
+
+            # App logs can include dictated text: no log breadcrumbs, no log events.
+            integrations.append(LoggingIntegration(level=None, event_level=None))
+        except Exception:
+            pass
         sentry_sdk.init(
             dsn=dsn,
             release=release,
             environment=environment,
             send_default_pii=False,
+            include_local_variables=False,
+            max_request_body_size="never",
+            server_name="",
             traces_sample_rate=0.0,
             profiles_sample_rate=0.0,
-            max_breadcrumbs=20,
+            max_breadcrumbs=0,
+            before_breadcrumb=_drop_breadcrumb,
             attach_stacktrace=True,
+            integrations=integrations,
             before_send=before_send_scrubber,
         )
         _CRASH_REPORTING_INITIALIZED = True
@@ -229,13 +250,36 @@ def init_crash_reporting(force: bool = False) -> bool:
         return False
 
 
+def shutdown_crash_reporting() -> bool:
+    """Stop crash reporting immediately (user opted out): close the Sentry client."""
+    global _CRASH_REPORTING_INITIALIZED
+    _CRASH_REPORTING_INITIALIZED = False
+    try:
+        import sentry_sdk
+    except ImportError:
+        return False
+    try:
+        client = sentry_sdk.get_client()
+        if client.is_active():
+            client.close(timeout=2.0)
+        try:
+            sentry_sdk.get_global_scope().set_client(None)
+        except Exception:
+            pass
+        log.info("Crash reporting disabled.")
+        return True
+    except Exception as exc:
+        log.warning("Could not shut down crash reporting: %s", type(exc).__name__)
+        return False
+
+
 def capture_test_crash_report() -> bool:
     """Send a test crash report to Sentry to verify connectivity and configuration."""
     try:
         import sentry_sdk
         if not _CRASH_REPORTING_INITIALIZED:
             init_crash_reporting(force=True)
-        sentry_sdk.capture_message(f"Test crash report from AI Productivity Flow v{VERSION}")
+        sentry_sdk.capture_message(TEST_CRASH_MESSAGE)
         sentry_sdk.flush(timeout=5.0)
         return True
     except Exception as exc:

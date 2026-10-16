@@ -58,7 +58,8 @@ def test_crash_reporting_init_when_enabled(monkeypatch):
             assert kwargs["send_default_pii"] is False
             assert kwargs["traces_sample_rate"] == 0.0
             assert kwargs["profiles_sample_rate"] == 0.0
-            assert kwargs["max_breadcrumbs"] == 20
+            assert kwargs["max_breadcrumbs"] == 0
+            assert kwargs["include_local_variables"] is False
             assert kwargs["attach_stacktrace"] is True
             assert kwargs["before_send"] == before_send_scrubber
     finally:
@@ -128,27 +129,16 @@ def test_before_send_scrubber_redaction():
     scrubbed = before_send_scrubber(simulated_event, {})
     assert scrubbed is not None
 
-    # 1. Path usernames must be redacted
-    assert "JohnDoe" not in scrubbed["logentry"]["message"]
-    assert "alice" not in scrubbed["message"]
-    assert "[REDACTED]" in scrubbed["message"]
-    assert "[REDACTED]" in scrubbed["logentry"]["message"]
+    # 1. Free-text messages never leave the machine (only fixed allow-listed strings).
+    assert scrubbed["message"] == "[redacted]"
+    assert scrubbed["logentry"] == {"message": "[redacted]", "formatted": "[redacted]"}
 
-    # 2. Sensitive keywords (audio, recording, transcript, dictation) must be redacted
-    assert "dictation" not in scrubbed["message"].lower()
-    assert "audio" not in scrubbed["logentry"]["message"].lower()
-    assert "recording" not in scrubbed["logentry"]["message"].lower()
-    assert "transcript" not in scrubbed["logentry"]["formatted"].lower()
+    # 2. Request, breadcrumbs and extra are dropped entirely.
+    assert "request" not in scrubbed
+    assert "breadcrumbs" not in scrubbed
+    assert "extra" not in scrubbed
 
-    # 3. Request payloads and query params must be dropped
-    req = scrubbed["request"]
-    assert "data" not in req
-    assert "query_string" not in req
-    assert "cookies" not in req
-    assert req["headers"]["Authorization"] == "[REDACTED]"
-    assert req["headers"]["X-Api-Key"] == "[REDACTED]"
-
-    # 4. Sensitive environment tokens must be redacted
+    # 3. Sensitive environment tokens must be redacted
     env = scrubbed["contexts"]["env"]
     assert env["OPENAI_API_KEY"] == "[REDACTED]"
     assert env["ANTHROPIC_API_KEY"] == "[REDACTED]"
@@ -158,18 +148,31 @@ def test_before_send_scrubber_redaction():
     assert env["SENTRY_DSN"] == "[REDACTED]"
     assert env["AWS_SECRET_ACCESS_KEY"] == "[REDACTED]"
 
-    # 5. Breadcrumb message and stack frames
-    crumb = scrubbed["breadcrumbs"]["values"][0]
-    assert "JohnDoe" not in crumb["message"]
-    assert "audio" not in crumb["message"].lower()
-    assert "transcript" not in str(crumb["data"]).lower()
-
+    # 4. Exceptions keep only their type; frames lose locals and usernames.
     exc = scrubbed["exception"]["values"][0]
-    assert "alice" not in exc["value"]
-    assert "audio" not in exc["value"].lower()
+    assert exc["type"] == "RuntimeError"
+    assert exc["value"] == "[redacted]"
     frame = exc["stacktrace"]["frames"][0]
+    assert "vars" not in frame
     assert "alice" not in frame["filename"]
     assert "JohnDoe" not in frame["abs_path"]
+
+
+def test_test_crash_message_is_allow_listed():
+    from voice_flow.crash_reporting import TEST_CRASH_MESSAGE
+
+    event = {"message": TEST_CRASH_MESSAGE, "logentry": {"message": TEST_CRASH_MESSAGE}}
+    scrubbed = before_send_scrubber(event, {})
+    assert scrubbed["message"] == TEST_CRASH_MESSAGE
+    assert scrubbed["logentry"]["formatted"] == TEST_CRASH_MESSAGE
+
+
+def test_scrubber_failure_drops_event():
+    class Boom(dict):
+        def pop(self, *a, **k):
+            raise RuntimeError("boom")
+
+    assert before_send_scrubber(Boom(message="x"), {}) is None
 
 
 def _get_subprocess_env() -> dict[str, str]:
