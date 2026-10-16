@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import threading
 from typing import Any
+
+from voice_flow import child_processes
 
 # The app runs windowless (pythonw); without these flags every Windows
 # subprocess spawn flashes a console window. Mirrors main.py's convention.
@@ -37,6 +40,9 @@ class ProcessManager:
         self._cancelled: set[str] = set()
 
     def register(self, job_id: str, process: subprocess.Popen[Any]) -> None:
+        # App-lifetime registry: killed (whole tree) on app exit, and on
+        # Windows assigned to the kill-on-close job object.
+        child_processes.track(process, f"video-flow:{job_id}")
         with self._lock:
             cancelled = job_id in self._cancelled
             previous = self._processes.get(job_id)
@@ -55,6 +61,7 @@ class ProcessManager:
             current = self._processes.get(job_id)
             if process is None or current is process:
                 self._processes.pop(job_id, None)
+        child_processes.untrack(process if process is not None else current)
 
     def cancel_job(self, job_id: str) -> None:
         with self._lock:
@@ -89,6 +96,7 @@ class ProcessManager:
                 return
         except Exception:
             return
+        group = os.name != "nt" and _leads_own_group(process)
         if os.name == "nt":
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -101,14 +109,23 @@ class ProcessManager:
                 **hidden_window_kwargs(),
             )
         else:
+            # Children are started in their own session (start_new_session),
+            # so signal the whole group: node's Chromium / ffmpeg go too.
             try:
-                process.terminate()
+                if group:
+                    os.killpg(process.pid, signal.SIGTERM)
+                else:
+                    process.terminate()
             except Exception:
                 return
         try:
             process.wait(timeout=3)
+            if group:
+                _killpg_quietly(process.pid)  # stragglers outliving the leader
         except subprocess.TimeoutExpired:
             try:
+                if group:
+                    _killpg_quietly(process.pid)
                 process.kill()
             except Exception:
                 return
@@ -118,3 +135,18 @@ class ProcessManager:
                 return
         except Exception:
             return
+
+
+def _leads_own_group(process: Any) -> bool:
+    try:
+        pid = int(process.pid)
+        return os.getpgid(pid) == pid != os.getpgid(0)
+    except Exception:
+        return False
+
+
+def _killpg_quietly(pgid: int) -> None:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except Exception:
+        pass

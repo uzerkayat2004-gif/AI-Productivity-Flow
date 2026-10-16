@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 from .. import runtime_env
 from .process_manager import ProcessManager, hidden_window_kwargs
+from ..child_processes import new_tree_popen_kwargs
+from ..local_http import no_proxy_environment
 from .sandbox import EngineError
 
 
@@ -192,6 +194,7 @@ class NarovaRunner:
                 else 0
             ),
             startupinfo=hide_kwargs.get("startupinfo"),
+            **new_tree_popen_kwargs(),
         )
         manager.register(job_id, process)
         try:
@@ -241,7 +244,8 @@ def _safe_environment() -> dict[str, str]:
         path_prefixes = [str(p) for p in extra_paths if p.is_dir()]
         if path_prefixes:
             environment["PATH"] = os.pathsep.join(path_prefixes) + os.pathsep + environment.get("PATH", "")
-    return environment
+    # Local helper servers (Studio/hyperframes, API) must never be proxied.
+    return no_proxy_environment(environment)
 
 
 def _register_voiceflow_provider() -> None:
