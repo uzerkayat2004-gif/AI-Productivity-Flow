@@ -71,7 +71,38 @@ def setup_audio(area: str) -> str | None:
                  "SwitchAudioSource -c -t input; SwitchAudioSource -c -t output", timeout=30)
     ok = o1.count("BlackHole") >= 2
     record(area, "BlackHole loopback as default mic + speaker on the runner", "ok" if ok else "fail", (out[-800:] + "\n" + o1)[-1500:])
+    grant_tcc(area)
     return "BlackHole 2ch" if ok else None
+
+
+def grant_tcc(area: str) -> None:
+    """Pre-approve mic / Accessibility / Input Monitoring for the bundle id (CI only), like a user clicking Allow."""
+    bid = "com.uzerkayat.aiproductivityflow"
+    out_all = []
+    for db in (str(HOME / "Library/Application Support/com.apple.TCC/TCC.db"), "/Library/Application Support/com.apple.TCC/TCC.db"):
+        for svc in ("kTCCServiceMicrophone", "kTCCServiceAccessibility", "kTCCServiceListenEvent", "kTCCServicePostEvent"):
+            q = (f"INSERT OR REPLACE INTO access (service,client,client_type,auth_value,auth_reason,auth_version,flags,indirect_object_identifier) "
+                 f"VALUES ('{svc}','{bid}',0,2,3,1,0,'UNUSED');")
+            rc, o = sh(f"sudo sqlite3 {shlex.quote(db)} {shlex.quote(q)}", quiet=True)
+            out_all.append(f"{db.split('/')[1]} {svc}: rc={rc} {o.strip()[:120]}")
+    sh("sudo killall tccd 2>/dev/null; killall tccd 2>/dev/null; sleep 2", quiet=True)
+    rows = sh(f"sudo sqlite3 {shlex.quote(str(HOME / 'Library/Application Support/com.apple.TCC/TCC.db'))} \"select service,client,auth_value from access where client like '%aiproductivity%'\"; "
+              f"sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' \"select service,client,auth_value from access where client like '%aiproductivity%'\"", quiet=True)[1]
+    record(area, "CI-only: pre-approve TCC (mic, Accessibility, Input Monitoring) for the bundle id", "info", "\n".join(out_all) + "\n" + rows)
+
+
+def click_allow_if_prompt(area: str) -> None:
+    try:
+        wins = json.loads(helper("windows") or "[]")
+    except Exception:
+        wins = []
+    prompts = [w for w in wins if w.get("owner") in ("UserNotificationCenter", "tccd", "universalAccessAuthWarn", "CoreServicesUIAgent", "SecurityAgent") and w.get("h", 0) > 100]
+    if prompts:
+        w = prompts[0]
+        s = shot("tcc-prompt-before-allow")
+        helper("click", str(w["x"] + w["w"] * 0.73), str(w["y"] + w["h"] - 30))
+        time.sleep(2)
+        record(area, "system permission prompt seen; clicked Allow", "info", f"prompt window={w}", s)
 
 
 def make_clips(area: str) -> dict:
@@ -184,24 +215,31 @@ def dictate(cid: str, clip: str, mode: str = "api", tail: float = 0.8) -> tuple[
         helper("cmdopt", "up")
     else:
         api("/api/record/toggle", {"recording": False})
-    row = history_after(last, 45)
+    row = history_after(last, 30)
     return row, round(time.time() - t_release, 2)
 
 
 def run_set(area: str, files: dict, ids: list[str], label: str, mode: str = "api", te_pid: int | None = None) -> dict:
     stats = {"total": 0, "success": 0, "failed": 0, "no_history": 0, "check_fail": 0, "pasted": 0}
     rows = []
+    misses = 0
     for cid in ids:
+        if misses >= 3:
+            record(area, f"{label}: stopped after 3 dictations in a row produced no history", "fail", "see earlier rows / app log")
+            break
         text, checks = next((t, c) for i, t, c in SENTENCES if i == cid)
         before_te = textedit_text(te_pid) if te_pid else ""
         row, latency = dictate(cid, files[cid][0], mode)
         stats["total"] += 1
         if not row:
             stats["no_history"] += 1
+            misses += 1
+            click_allow_if_prompt(area)
             st = api("/api/overlay/status")[1]
             record(area, f"{label}: {cid}", "fail", f"no history entry within 45s; overlay={st}", shot(f"{label}-{cid}-nohistory"))
             rows.append({"id": cid, "result": None})
             continue
+        misses = 0
         final = str(row.get("polished_text") or row.get("raw_text") or "")
         raw = str(row.get("raw_text") or "")
         status = str(row.get("status"))
@@ -252,6 +290,13 @@ def select_mic(area: str, name: str | None):
     record(area, "select BlackHole as the app microphone", "ok" if res[0] == 200 else "fail", f"devices={names}; select -> {res}")
     perm = api("/api/platform/permissions")[1]
     record(area, "permission report on runner", "info", json.dumps(perm)[:1500])
+    api("/api/record/toggle", {"recording": True})
+    time.sleep(3)
+    click_allow_if_prompt(area)
+    api("/api/record/toggle", {"recording": False})
+    time.sleep(5)
+    s = shot("after-probe-recording")
+    record(area, "probe recording (surfaces any mic prompt)", "info", f"overlay={api('/api/overlay/status')[1]}\nlog tail: {sh('tail -5 ~/.voice_flow/logs/voice_flow_debug.log', quiet=True)[1][-800:]}", s)
 
 
 # ----------------------------------------------------------------------------
