@@ -17,6 +17,9 @@ if phase == "install":
 elif phase in ("voice_a", "voice_b"):
     import qa_voice
     qa_voice.main(phase)
+elif phase == "native_diag":
+    import qa_native_diag
+    qa_native_diag.main()
 elif phase == "life":
     import qa_life
     qa_life.main()
