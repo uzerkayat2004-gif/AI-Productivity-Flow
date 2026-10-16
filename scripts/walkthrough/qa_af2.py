@@ -163,7 +163,7 @@ def phase_hotkey_read() -> None:
     state, played = reading_started()
     s = shot("af2-hotkey-read")
     record(A, "Audio Flow hotkey (Ctrl+Option+L) with text selected reads it aloud", "ok" if state and played else "fail",
-           f"overlay state={state} afplay={played}\nlog: {log_lines('Audio Flow hotkey|Audio Flow reading|Select text|Audio Flow:')}", s)
+           f"overlay state={state} afplay={played}\nlog: {log_lines('Audio Flow hotkey|Audio Flow reading|Select text|Audio Flow:|AUDIO FLOW|MACOS')}", s)
     stop_reading()
     time.sleep(1.5)
 
@@ -241,12 +241,40 @@ def phase_summary() -> None:
            f"history newest={json.dumps(newest, default=str)[:1200]}\noverlay={overlay()}\nlog: {log_lines('summary|NotebookLM|AUDIO FLOW', 12)}", s2)
 
 
-def phase_paste_honesty() -> None:
+def revoke_paste_tcc() -> str:
+    """Never-granted state for paste: drop Accessibility + PostEvent from BOTH TCC databases."""
+    out = []
+    for db in (str(Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"), "/Library/Application Support/com.apple.TCC/TCC.db"):
+        q = (f"DELETE FROM access WHERE client='{BUNDLE_ID}' AND service IN ('kTCCServiceAccessibility','kTCCServicePostEvent');"
+             f"SELECT service||'='||auth_value FROM access WHERE client='{BUNDLE_ID}';")
+        rc, o = sh(f"sudo sqlite3 {shlex.quote(db)} {shlex.quote(q)}", quiet=True)
+        out.append(f"{db.split('/')[1]} rc={rc} left={o.strip().replace(chr(10), ',')}")
+    sh(f"tccutil reset Accessibility {BUNDLE_ID}; tccutil reset PostEvent {BUNDLE_ID}; sudo killall tccd 2>/dev/null; killall tccd 2>/dev/null; sleep 2", quiet=True)
+    return "\n".join(out)
+
+
+def restart_app(mic: str | None) -> float | None:
+    kill_all()
+    time.sleep(2)
+    launch_open(APP)
+    up = wait_api(120)
+    time.sleep(10)
+    qa_voice.click_allow_if_prompt(A)
+    if mic:
+        api("/api/microphones/select", {"name": mic})
+    return up
+
+
+def phase_paste_honesty(mic: str | None = None) -> None:
     clip = str(qa_voice.CLIPS / "af2-paste.aiff")
     sh(f"say -r 175 -o {shlex.quote(clip)} 'Send the report today.'", quiet=True)
-    # 1) without Accessibility / post-event permission
-    rc, out = sh(f"tccutil reset Accessibility {BUNDLE_ID}; tccutil reset PostEvent {BUNDLE_ID}")
-    time.sleep(3)
+    # 1) never granted: no Accessibility / PostEvent rows anywhere, fresh app process
+    tcc = revoke_paste_tcc()
+    up = restart_app(mic)
+    perm = api("/api/platform/permissions")[1]
+    ax = next((p for p in (perm.get("permissions") or []) if p.get("key") == "accessibility"), {}) if isinstance(perm, dict) else {}
+    record(A, "no-Accessibility state: TCC rows removed from both databases, app restarted", "ok" if up and ax.get("granted") is False else "fail",
+           f"{tcc}\napi after {up}s\naccessibility={ax}")
     pid = qa_voice.textedit_open(A)
     before = qa_voice.textedit_text(pid)
     sh("printf 'ORIGINAL-CLIPBOARD' | pbcopy", quiet=True)
@@ -259,11 +287,12 @@ def phase_paste_honesty() -> None:
     kept = bool(final) and final.strip() == clipboard.strip()
     record(A, "paste WITHOUT Accessibility: honest status, text kept on clipboard, TextEdit untouched",
            "ok" if honest and kept and after == before else "fail",
-           f"tccutil: {out.strip()[:200]}\nrow={json.dumps(row, default=str)[:700]}\nclipboard={clipboard!r}\nTextEdit before={before!r} after={after!r}\n"
+           f"row={json.dumps(row, default=str)[:700]}\nclipboard={clipboard!r}\nTextEdit before={before!r} after={after!r}\n"
            "log: " + log_lines(PASTE_LOG_PATTERN, 6), shot("af2-paste-no-ax"))
-    # 2) with Accessibility again: real paste + clipboard restored
+    # 2) with Accessibility again (fresh process): real paste + clipboard restored
     qa_voice.grant_tcc(A)
-    time.sleep(3)
+    restart_app(mic)
+    pid = qa_voice.textedit_open(A)
     sh("printf 'ORIGINAL-CLIPBOARD-2' | pbcopy", quiet=True)
     before = qa_voice.textedit_text(pid)
     row, _ = qa_voice.dictate("af2-paste", clip, "api")
@@ -272,7 +301,8 @@ def phase_paste_honesty() -> None:
     clipboard = sh("pbpaste", quiet=True)[1]
     ok = bool(row) and row.get("insertion_status") == "pasted" and len(after) > len(before) and clipboard.strip() == "ORIGINAL-CLIPBOARD-2"
     record(A, "paste WITH Accessibility: pasted into TextEdit and user clipboard restored", "ok" if ok else "fail",
-           f"row={json.dumps(row, default=str)[:600]}\nclipboard={clipboard!r}\nTextEdit after={after[-200:]!r}", shot("af2-paste-with-ax"))
+           f"row={json.dumps(row, default=str)[:600]}\nclipboard={clipboard!r}\nTextEdit after={after[-200:]!r}\n"
+           "log: " + log_lines(PASTE_LOG_PATTERN, 6), shot("af2-paste-with-ax"))
 
 
 def main():
@@ -296,7 +326,7 @@ def main():
                 record(A, f"{step.__name__} crashed", "error", traceback.format_exc()[-1500:])
         try:
             qa_voice.select_mic(A, mic)
-            phase_paste_honesty()
+            phase_paste_honesty(mic)
         except Exception:
             import traceback
             record(A, "paste honesty crashed", "error", traceback.format_exc()[-1500:])
