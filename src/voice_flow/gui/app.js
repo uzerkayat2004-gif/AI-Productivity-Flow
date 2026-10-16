@@ -839,18 +839,29 @@ function toggleVoiceFlowMenu(event) {
   const group = document.getElementById("voiceflow-nav-group");
   const isChevron = event && event.target && event.target.classList.contains("nav-chevron");
 
-  if (isChevron && currentPageId === "home" && group) {
+  if (isChevron && group) {
     group.classList.toggle("open");
     return;
   }
 
   if (group) group.classList.add("open");
-  switchPage("home", { userInitiated: true });
-  setTimeout(() => {
-    if (typeof startVoiceFlowGuide === "function") {
-      startVoiceFlowGuide();
-    }
-  }, 60);
+
+  const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+  const isFirstTime = !vfVoiceGuided && !isExistingUserOrOnboardingDone();
+
+  if (isFirstTime) {
+    switchPage("home", { userInitiated: true });
+    setTimeout(() => {
+      if (typeof startVoiceFlowGuide === "function") {
+        startVoiceFlowGuide();
+      }
+    }, 60);
+    return;
+  }
+
+  if (currentPageId !== "home" && !VOICEFLOW_CHILD_PAGES.includes(currentPageId)) {
+    switchPage("home", { userInitiated: true });
+  }
 }
 
 function setVoiceFlowMenuOpen(open) {
@@ -867,6 +878,14 @@ function updateVoiceFlowParentState(pageId) {
   if (isChild) setVoiceFlowMenuOpen(true);
 }
 
+function isExistingUserOrOnboardingDone() {
+  const localDone = onboardingFlag("hasViewedOnboarding") === "true" || onboardingFlag("vf_onboarding.done") === "1";
+  const afGuided = onboardingFlag("vf_onboarding.af_guided") === "1";
+  const vfGuided = onboardingFlag("vf_onboarding.vf_guided") === "1";
+  const voiceGuided = onboardingFlag("vf_onboarding.vf_voice_guided") === "1";
+  return localDone || (afGuided && vfGuided && voiceGuided);
+}
+
 function initNavigation() {
   const navItems = document.querySelectorAll(".sidebar .nav-item[data-page]");
   navItems.forEach(item => {
@@ -875,9 +894,10 @@ function initNavigation() {
       const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];
       const isVoiceFlowFeature = voiceFlowPages.includes(pageId);
       const vfVoiceGuided = (onboardingFlag("vf_onboarding.vf_voice_guided") === "1");
+      const isFirstTime = !isExistingUserOrOnboardingDone();
 
-      if (isVoiceFlowFeature && !vfVoiceGuided) {
-        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide
+      if (isVoiceFlowFeature && !vfVoiceGuided && isFirstTime) {
+        // First-time user clicking ANY Voice Flow feature is redirected to home and launches the exploration guide once
         switchPage("home", { userInitiated: true });
         setTimeout(() => {
           if (typeof startVoiceFlowGuide === "function") {
@@ -889,6 +909,10 @@ function initNavigation() {
 
       const isSwitching = (currentPageId !== pageId);
       switchPage(pageId, { userInitiated: true });
+
+      if (!isFirstTime) {
+        return;
+      }
 
       if (pageId === "videoflow") {
         const vfSeen = (onboardingFlag("vf_onboarding.vf_guided") === "1");
@@ -1021,7 +1045,22 @@ function resetAllSubViews() {
   } catch (_) {}
 }
 
+function loadPageWhilePending(pageId, loader) {
+  const pendingLoads = loadPageWhilePending.pendingLoads || (loadPageWhilePending.pendingLoads = new Map());
+  if (pendingLoads.has(pageId)) return pendingLoads.get(pageId);
+  const pending = Promise.resolve(loader());
+  pendingLoads.set(pageId, pending);
+  const release = () => {
+    if (pendingLoads.get(pageId) === pending) pendingLoads.delete(pageId);
+  };
+  pending.then(release, release);
+  return pending;
+}
+
 function switchPage(pageId, options = {}) {
+  // Invalidate corrections from every earlier navigation, including revisits.
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   const previousPageId = currentPageId;
   currentPageId = pageId;
   document.body.classList.toggle("flow-workspace-active", ["audioflow", "videoflow", "providers", "dictionary"].includes(pageId));
@@ -1054,29 +1093,34 @@ function switchPage(pageId, options = {}) {
     }
 
     if (pageId === "home") {
-      loadHome();
-      loadExecVoiceFlowPolicy();
-      loadVoiceFlowPolishSettings();
-      loadFeatureToggleStates();
+      loadPageWhilePending(pageId, () => Promise.allSettled([
+        loadHome(),
+        loadExecVoiceFlowPolicy(),
+        loadVoiceFlowPolishSettings(),
+        loadFeatureToggleStates(),
+      ]));
     }
-    if (pageId === "insights") loadInsights();
-    if (pageId === "dictionary") loadDictionary();
+    if (pageId === "insights") loadPageWhilePending(pageId, loadInsights);
+    if (pageId === "dictionary") loadPageWhilePending(pageId, loadDictionary);
     if (pageId === "style") {
-      loadStyleSettings();
+      loadPageWhilePending(pageId, loadStyleSettings);
       renderStyleCategory(currentStyleCategory);
     }
-    if (pageId === "providers") loadProvidersOverview();
-    if (pageId === "audioflow") loadAudioFlowPage();
+    if (pageId === "providers") loadPageWhilePending(pageId, loadProvidersOverview);
+    if (pageId === "audioflow") loadPageWhilePending(pageId, loadAudioFlowPage);
     if (pageId === "videoflow") {
-      if (typeof loadVideoFlow === "function") loadVideoFlow();
+      if (typeof loadVideoFlow === "function") loadPageWhilePending(pageId, loadVideoFlow);
       else if (typeof loadVideoCatalog === "function") loadVideoCatalog();
     }
 
     if (!options.skipScrollReset) {
-      requestAnimationFrame(() => resetPageScroll(target));
-      setTimeout(() => resetPageScroll(target), 50);
-      setTimeout(() => resetPageScroll(target), 150);
-      setTimeout(() => resetPageScroll(target), 300);
+      const correctCurrentPageScroll = () => {
+        if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll(target);
+      };
+      requestAnimationFrame(correctCurrentPageScroll);
+      setTimeout(correctCurrentPageScroll, 50);
+      setTimeout(correctCurrentPageScroll, 150);
+      setTimeout(correctCurrentPageScroll, 300);
     }
   }
 }
@@ -2638,7 +2682,7 @@ function renderDictionaryFilteredChips() {
         <span class="dict-empty-icon" aria-hidden="true">${DICT_EMPTY_SVG}</span>
         <div>
           <div class="dict-empty-title">Your dictionary is empty</div>
-          <p class="dict-empty-sub">Flow learns useful words as you dictate. You can also add a word above.</p>
+          <p class="dict-empty-sub">Add a name or term above. Flow spells that word your way and leaves your other words alone.</p>
         </div>
       </div>
       `;
@@ -2784,7 +2828,7 @@ async function addDictionaryWordFromInput() {
     inputEl.value = "";
     if (heardAsEl) heardAsEl.value = "";
     setDictionaryAddError(null);
-    showToast(`“${word}” saved — Flow will hear it next time.`, "✅");
+    showToast(`“${word}” saved. Flow will listen for it and spell it this way.`, "✅");
     loadDictionary();
   } catch (err) {
     console.error("Error adding dictionary word:", err);
@@ -6448,13 +6492,16 @@ function initAudioLandingMotion() {
 
 function loadAudioFlowPage() {
   initAudioLandingMotion();
-  loadAudioProvidersOverview();
-  loadExecAudioFlowPolicy();
-  loadAudioSummarySettings();
-  loadAudioFlowSummaryStyle();
+  const pendingLoads = [
+    loadAudioProvidersOverview(),
+    loadExecAudioFlowPolicy(),
+    loadAudioSummarySettings(),
+    loadAudioFlowSummaryStyle(),
+  ];
   initAudioSpeedSelect();
   updateAudioSummaryConnectionUI();
-  loadAudioSummaryHistory();
+  pendingLoads.push(loadAudioSummaryHistory());
+  return Promise.allSettled(pendingLoads);
 }
 
 function applyAudioFlowSummaryStyleUI(style) {
@@ -7398,13 +7445,6 @@ async function maybeShowOnboarding() {
 
   // Display upgraded Scene 1 onboarding hero on user's desktop app
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
-  setOnboardingFlag("hasViewedOnboarding", "true");
-  setOnboardingFlag("vf_onboarding.done", "1");
-  fetch("/api/settings/update", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: "has_viewed_onboarding", value: true }),
-  }).catch(() => {});
 
   const overlay = document.getElementById("onboarding-overlay");
   if (!overlay) return;
@@ -7865,6 +7905,12 @@ function finishOnboarding(options) {
   const source = document.getElementById("onboarding-source");
   if (source && source.value) setOnboardingFlag("vf_onboarding.source", source.value);
   setOnboardingFlag("vf_onboarding.done", "1");
+  setOnboardingFlag("hasViewedOnboarding", "true");
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "has_viewed_onboarding", value: true }),
+  }).catch(() => {});
   const overlay = document.getElementById("onboarding-overlay");
   if (overlay) {
     overlay.classList.add("hidden");
@@ -8516,6 +8562,10 @@ function startAudioFlowGuide(options) {
     console.warn("[Audio Flow guide] Guide styles are missing; not starting the guide.");
     return;
   }
+  // Mark the guide as seen once it actually starts, so switching features
+  // never replays it. If the card turns out to be invisible, the unusable
+  // release path clears this again so the guide stays pending.
+  setOnboardingFlag("vf_onboarding.af_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("audioflow", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -8570,12 +8620,10 @@ function _onAfGuideResize() {
   }
 }
 
-function stopAudioFlowGuide(options) {
+function stopAudioFlowGuide(markCompleted = false) {
   let unusable = false;
-  let markCompleted = false;
-  if (typeof options === "boolean") {
-    markCompleted = options;
-  } else if (options && typeof options === "object") {
+  if (typeof markCompleted === "object" && markCompleted !== null) {
+    const options = markCompleted;
     unusable = !!options.unusable;
     if (Object.prototype.hasOwnProperty.call(options, "markCompleted")) {
       markCompleted = !!options.markCompleted;
@@ -8583,8 +8631,7 @@ function stopAudioFlowGuide(options) {
       markCompleted = !unusable;
     }
   } else {
-    // no-arg call (main): mark complete
-    markCompleted = true;
+    markCompleted = Boolean(markCompleted);
   }
   stopAudioFlowGuideAudio();
   window.removeEventListener("resize", _onAfGuideResize);
@@ -8636,6 +8683,9 @@ function stopAudioFlowGuide(options) {
   }
   if (markCompleted && !unusable) {
     setOnboardingFlag("vf_onboarding.af_guided", "1");
+  } else if (unusable) {
+    // The user never saw the guide: keep it pending for a later visit.
+    setOnboardingFlag("vf_onboarding.af_guided", "");
   }
 }
 
@@ -9193,6 +9243,7 @@ function prevVideoFlowGuideStep() {
 }
 
 function startVideoFlowGuide() {
+  setOnboardingFlag("vf_onboarding.vf_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -9874,6 +9925,7 @@ function prevVoiceFlowGuideStep() {
 }
 
 function startVoiceFlowGuide() {
+  setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("home", { skipGuideTrigger: true, fromGuide: true });
   }
@@ -9984,6 +10036,14 @@ function stopVoiceFlowGuide(markCompleted = false) {
 function replayOnboarding() {
   setOnboardingFlag("vf_onboarding.done", "");
   setOnboardingFlag("hasViewedOnboarding", "");
+  setOnboardingFlag("vf_onboarding.af_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_guided", "");
+  setOnboardingFlag("vf_onboarding.vf_voice_guided", "");
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "has_viewed_onboarding", value: false }),
+  }).catch(() => {});
   if (typeof closeSettings === "function") closeSettings();
   onboardingSlide = 0;
   renderOnboardingSlide();
@@ -13002,6 +13062,10 @@ async function handleGoogleAccountSignIn() {
 }
 
 function reloadAllApplicationMemory() {
+  // An account reset must never reuse the previous account's pending page load.
+  loadPageWhilePending.pendingLoads?.clear();
+  const navigationGeneration = (switchPage.scrollGeneration || 0) + 1;
+  switchPage.scrollGeneration = navigationGeneration;
   if(typeof loadDashboardTheme === "function")loadDashboardTheme();
   ++_settingsGeneration;
   for(const key of Object.keys(_settingConfirmed))delete _settingConfirmed[key];
@@ -13020,8 +13084,11 @@ function reloadAllApplicationMemory() {
   try { if (typeof loadAudioFlow === "function") loadAudioFlow(); } catch (_) {}
   try { if (typeof vfLoadProviders === "function") vfLoadProviders(); } catch (_) {}
   try { if (typeof vfGoogleLoadAccount === "function") vfGoogleLoadAccount(); } catch (_) {}
-  requestAnimationFrame(() => resetPageScroll());
-  setTimeout(() => resetPageScroll(), 100);
+  const correctAccountResetScroll = () => {
+    if (switchPage.scrollGeneration === navigationGeneration) resetPageScroll();
+  };
+  requestAnimationFrame(correctAccountResetScroll);
+  setTimeout(correctAccountResetScroll, 100);
 }
 
 // Background utility functions for vault export/import

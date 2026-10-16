@@ -40,9 +40,15 @@ class ModelUseLease:
     def release(self) -> None:
         self._release(0.0)
 
-    def release_after_idle(self, seconds: float) -> None:
-        """Keep a small model warm briefly; explicit cleanup still wins."""
-        self._release(max(0.0, min(30.0, float(seconds))))
+    def release_after_idle(self, seconds: float, max_seconds: float = 30.0) -> None:
+        """Keep a model warm briefly; explicit cleanup still wins.
+
+        ``max_seconds`` lets a caller that has checked memory pressure (e.g. a
+        cloud polish model, so no local LLM competes for RAM) keep the speech
+        model resident longer between dictations.
+        """
+        ceiling = max(0.0, float(max_seconds))
+        self._release(max(0.0, min(ceiling, float(seconds))))
 
     def _release(self, idle_grace: float) -> None:
         with self._release_lock:

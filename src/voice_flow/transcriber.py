@@ -28,6 +28,35 @@ from voice_flow.voice_enhance import enhance_for_stt, vad_threshold_for, calibra
 
 log = logging.getLogger(__name__)
 
+
+def dictionary_bias_terms(limit: int = 50) -> list[str]:
+    """The user's dictionary Words and Replacement targets for recognizer biasing.
+
+    Only names and special terms are returned (ordinary words are refused by
+    the dictionary). Never raises: biasing is optional, dictation is not.
+    """
+    try:
+        from voice_flow.dictionary import dictionary_engine
+
+        return list(dictionary_engine.get_stt_hint_terms(limit=limit))
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("Dictionary bias terms unavailable: %s", exc)
+        return []
+
+
+def _whisper_hotwords_kwargs(model, terms: list[str]) -> dict:
+    """faster-whisper ``hotwords`` when supported; nothing otherwise."""
+    if not terms:
+        return {}
+    try:
+        import inspect
+
+        if "hotwords" in inspect.signature(model.transcribe).parameters:
+            return {"hotwords": ", ".join(terms)}
+    except (TypeError, ValueError):
+        pass
+    return {}
+
 # Guards the cloud-STT circuit-breaker counters. The stream worker and the
 # dictation pipeline both call into transcribe() concurrently, so the
 # check-and-update of the model-scoped breaker map must be atomic (the unlocked
@@ -517,7 +546,7 @@ class Transcriber:
                         # corrections, not acoustic evidence. Passing them to
                         # the provider can make an unspoken name appear in the
                         # raw transcript and later become false learning data.
-                        kwargs = {"vocabulary": []}
+                        kwargs = {"vocabulary": dictionary_bias_terms(limit=15)}
                         if deadline is not None:
                             kwargs["deadline"] = deadline
                         try:
@@ -747,7 +776,7 @@ class Transcriber:
                         clean_audio,
                         is_chunk=is_chunk,
                         deadline=deadline,
-                        vocabulary=None,
+                        vocabulary=dictionary_bias_terms() or None,
                         language=getattr(config, "language", "en") or "en",
                     )
                 except TypeError:
@@ -835,8 +864,10 @@ class Transcriber:
             if model is None:
                 return ""
             try:
+                bias_kwargs = _whisper_hotwords_kwargs(model, dictionary_bias_terms(limit=30))
                 segments, _ = model.transcribe(
                     clean_audio,
+                    **bias_kwargs,
                     beam_size=config.beam_size,
                     temperature=config.temperature,
                     language=config.language,
@@ -874,6 +905,7 @@ class Transcriber:
                 try:
                     fallback_segments, _ = model.transcribe(
                         clean_audio,
+                        **_whisper_hotwords_kwargs(model, dictionary_bias_terms(limit=30)),
                         beam_size=config.beam_size,
                         temperature=config.temperature,
                         language=config.language,

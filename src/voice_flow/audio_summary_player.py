@@ -592,8 +592,7 @@ def player_url(token: str, *, base_url: str = "http://127.0.0.1:8991", depth: st
         params["title"] = title
     if style:
         params["style"] = style
-    if autoplay:
-        params["autoplay"] = "1"
+    params["autoplay"] = "1" if autoplay else "0"
     try:
         from voice_flow.storage import storage
         theme = str(storage.get_setting("on_screen_ui_theme", "light") or "light").strip().lower()
@@ -620,7 +619,6 @@ def launch_summary_audio_player(
     if close_existing:
         close_summary_audio_player()
     token = register_summary_audio(audio_path, depth=depth, token=token)
-    url = player_url(token, base_url=base_url, depth=depth, title=title, style=style, autoplay=autoplay)
     env = os.environ.copy()
     env["VOICE_FLOW_API_BASE"] = base_url.rstrip("/")
 
@@ -631,26 +629,16 @@ def launch_summary_audio_player(
         new_pythonpath_parts.append(curr_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(new_pythonpath_parts)
 
-    python_bin = sys.executable
-    if sys.platform.startswith("win"):
-        candidates = [
-            Path(_project_root) / ".venv" / "Scripts" / "pythonw.exe",
-            Path(_project_root) / ".venv" / "Scripts" / "python.exe",
-            Path(r"C:\Users\Asus\.gemini\antigravity\scratch\voice-flow\.venv\Scripts\pythonw.exe"),
-            Path(r"C:\Users\Asus\.gemini\antigravity\scratch\voice-flow\.venv\Scripts\python.exe"),
-            Path(r"C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow\.venv\Scripts\pythonw.exe"),
-            Path(r"C:\Users\Asus\.zcode\workspace\default\AI-Productivity-Flow\.venv\Scripts\python.exe"),
-            Path(sys.executable).with_name("pythonw.exe"),
-            Path(sys.executable),
-        ]
-        for cand in candidates:
-            if cand.is_file():
-                python_bin = str(cand)
-                break
+    from voice_flow.runtime_env import python_executable, pythonw_executable
+    python_bin = pythonw_executable() or python_executable()
+    if sys.platform.startswith("win") and not pythonw_executable():
+        local_pythonw = Path(python_bin).with_name("pythonw.exe")
+        if local_pythonw.is_file():
+            python_bin = str(local_pythonw)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         proc = subprocess.Popen(
-            [python_bin, "-m", "voice_flow.audio_summary_player", token, depth, title],
+            [python_bin, "-m", "voice_flow.audio_summary_player", token, depth, title, style, "1" if autoplay else "0"],
             cwd=_src_dir,
             creationflags=flags,
             close_fds=True,
@@ -662,10 +650,12 @@ def launch_summary_audio_player(
     except OSError as exc:
         try:
             log_file = Path(data_dir()) / "audio_player_error.log"
-            log_file.write_text(f"Failed to spawn audio player: {exc}\n", encoding="utf-8")
+            log_file.write_text("Failed to spawn audio player. Please try Play again.\n", encoding="utf-8")
         except Exception:
             pass
-        return token
+        with _media_lock:
+            _media.pop(token, None)
+        raise RuntimeError("Could not launch audio player. Please try Play again.") from exc
 
 
 CLASSIC_PLAYER_HTML = r"""<!doctype html>
@@ -1792,7 +1782,9 @@ def main() -> None:
     depth = sys.argv[2] if len(sys.argv) >= 3 else "balanced"
     title = sys.argv[3] if len(sys.argv) >= 4 else ""
     base_url = os.environ.get("VOICE_FLOW_API_BASE", "http://127.0.0.1:8991").rstrip("/")
-    url = player_url(token, base_url=base_url, depth=depth, title=title)
+    style = sys.argv[4] if len(sys.argv) >= 5 else ""
+    autoplay = sys.argv[5] != "0" if len(sys.argv) >= 6 else True
+    url = player_url(token, base_url=base_url, depth=depth, title=title, style=style, autoplay=autoplay)
 
     ico_str = None
     try:
@@ -1838,9 +1830,9 @@ def main() -> None:
             pass
 
         if ico_str:
-            webview.start(icon=ico_str, debug=False, private_mode=False)
+            webview.start(icon=ico_str, debug=False, private_mode=False, http_server=False)
         else:
-            webview.start(debug=False, private_mode=False)
+            webview.start(debug=False, private_mode=False, http_server=False)
     except Exception as exc:
         try:
             import traceback

@@ -89,7 +89,11 @@ _QUOTED_SPAN_RE = re.compile(
 # explicit prefix so ordinary mentions of a voice log remain dictation.
 _WAKE_RE = re.compile(
     r"(?<![\w])(?:"
-    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice[\s-]?low|voice)"
+    # Further ASR mishearings of "Voice Flow" ("why slow", "boys flow",
+    # "voice flo"). Only with an explicit hey/ok prefix and, in _is_wake_at,
+    # only when a known command verb follows immediately.
+    r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-]{0,3}(?:slow|flo|flu|flows?)"
+    r"|(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:voice[\s\-]{0,3}flows?|voice\s+log|voice\s+law|voice[\s-]?low|voice)"
     # A verified STT error for "Hey Voice Flow".  Keep this deliberately
     # literal and require a command continuation below; it is not fuzzy wake
     # matching for arbitrary speech that happens to contain similar words.
@@ -216,6 +220,12 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
     ):
         # "Vice Flow" is a specific ASR substitution. Require an explicit
         # wake prefix and a known imperative immediately after the alias.
+        return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
+    if re.fullmatch(
+        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-]{0,3}(?:slow|flo|flu|flows?)",
+        matched,
+        re.IGNORECASE,
+    ) and not re.search(r"voice[\s\-]{0,3}flows?$", matched):
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.match(r"^\s*(?:hay|hey)\s+voiced\s+what\b", matched):
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))

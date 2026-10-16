@@ -51,10 +51,11 @@ test('opening the dictionary GETs active words and corrections without a suggest
   assert.equal(h.getElement('dict-active-count').textContent, '2');
   assert.doesNotMatch(source, /loadDictionarySuggestions|decideDictionarySuggestion|approveDictionaryWord|suggestions\/decide/);
   assert.doesNotMatch(page, /dictionary-suggestions-card|Suggested words|Approve words Flow should learn/);
-  assert.match(page, /Useful names and technical terms are added automatically after repeated use/);
+  assert.match(page, /Add names and special terms Flow should spell your way/);
   assert.match(page, /polishing on or off/i);
-  assert.match(page, /manual add is optional/i);
-  assert.match(source, /Flow learns useful words as you dictate\. You can also add a word above\./);
+  assert.match(page, /Nothing is added automatically/);
+  assert.doesNotMatch(page, /added automatically after repeated use/);
+  assert.match(source, /Flow spells that word your way and leaves your other words alone/);
 });
 
 test('saved active word displays its escaped heard-as correction and edit control', () => {

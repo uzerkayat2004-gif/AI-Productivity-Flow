@@ -20,6 +20,7 @@ strictly separate from per-dictation overrides (spec §13, §47).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from voice_flow.storage import storage
@@ -106,6 +107,37 @@ def _extra_instruction(category: str) -> str:
     return extra.strip()
 
 
+def _standing_instruction() -> str:
+    """Global saved instruction that applies to every category."""
+    try:
+        value = str(storage.get_setting("style_standing_instruction", "") or "")
+    except Exception:
+        return ""
+    return value.strip()
+
+
+# Words that make a saved sentence a register/casing rule. Only these
+# sentences can conflict with an explicit one-off register command.
+_REGISTER_RULE_RE = re.compile(
+    r"\b(?:casual|formal|informal|professional|relaxed|register|tone|lower-?case|"
+    r"upper-?case|capitali[sz]\w*|slang|contractions?|excited|exclamation)\b",
+    re.IGNORECASE,
+)
+
+
+def _non_register_rules(extra: str) -> str:
+    """Keep saved rules that do not fight an explicit register command.
+
+    "Always write in lowercase" conflicts with a one-off "make it
+    professional"; "Never use emoji" does not, and must survive.
+    """
+    if not extra:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", extra)
+    kept = [s for s in sentences if s.strip() and not _REGISTER_RULE_RE.search(s)]
+    return _compose(kept)
+
+
 def _compose(parts: list[str]) -> str:
     return " ".join(p.strip() for p in parts if p and p.strip())
 
@@ -174,9 +206,10 @@ def resolve_effective_style(base, command) -> EffectiveStyle:
         base_instruction = str(base_instruction)
 
     extra = _extra_instruction(base_category)
+    standing = _standing_instruction()
 
     if command is None:
-        instruction = _compose([base_instruction, extra])
+        instruction = _compose([base_instruction, extra, standing])
         return EffectiveStyle(
             instruction=instruction,
             style_id=base_style_id,
@@ -258,11 +291,13 @@ def resolve_effective_style(base, command) -> EffectiveStyle:
     # Do not let it undo an explicit per-dictation professional/casual card.
     # Persistent commands still update storage separately in
     # ``apply_persistent_change``.
-    effective_extra = "" if explicit_profile_id else (
+    category_extra = (
         _extra_instruction(effective_category) if effective_category != base_category else extra
     )
+    effective_extra = _non_register_rules(category_extra) if explicit_profile_id else category_extra
+    effective_standing = _non_register_rules(standing) if explicit_profile_id else standing
 
-    instruction = _compose(parts + [effective_extra] + override_parts)
+    instruction = _compose(parts + [effective_extra, effective_standing] + override_parts)
     requires_ai = bool(
         fmt or overrides or ctx
         or operation in ("summarize", "prompt_generation")

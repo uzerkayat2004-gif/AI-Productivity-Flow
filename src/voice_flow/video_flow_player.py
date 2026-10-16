@@ -25,18 +25,18 @@ def _sanitize_video_id(raw: str) -> str | None:
 
 class PlayerApi:
     def __init__(self) -> None:
-        self.window = None
+        self._window = None
 
     def toggle_fullscreen(self) -> bool:
-        if not self.window:
+        if not self._window:
             return False
-        self.window.toggle_fullscreen()
+        self._window.toggle_fullscreen()
         return True
 
     def close(self) -> bool:
-        if not self.window:
+        if not self._window:
             return False
-        self.window.destroy()
+        self._window.destroy()
         return True
 
 
@@ -51,13 +51,14 @@ def main() -> None:
     video_id = _sanitize_video_id(sys.argv[1]) if len(sys.argv) >= 2 else None
     if not video_id:
         return
-    url = "http://127.0.0.1:8991/video-player.html?id=" + urllib.parse.quote(video_id)
+    base_url = os.environ.get("VOICE_FLOW_API_BASE", "http://127.0.0.1:8991").rstrip("/")
+    url = base_url + "/video-player.html?id=" + urllib.parse.quote(video_id)
 
     # Try launching standalone lightweight webview player
     try:
         import webview
         api = PlayerApi()
-        api.window = webview.create_window(
+        api._window = webview.create_window(
             "Video Flow",
             url=url,
             width=720,
@@ -67,7 +68,7 @@ def main() -> None:
             on_top=True,
             js_api=api,
         )
-        webview.start(debug=False, private_mode=False)
+        webview.start(debug=False, private_mode=False, http_server=False)
         return
     except Exception as e:
         print(f"[Video Flow Player] Pywebview failed ({e}), trying fallback player...")

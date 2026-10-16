@@ -16,6 +16,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+import threading
 import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable
@@ -778,6 +779,15 @@ class AudioFlowSettingsDialog:
                     _bind_click(widget_item)
 
 
-def open_audio_flow_settings(parent: tk.Tk | tk.Toplevel | None = None, on_speed_change: Callable[[float], None] | None = None, on_voice_change: Callable[[str], None] | None = None) -> AudioFlowSettingsDialog:
-    """Convenience helper to show the settings dialog."""
+def open_audio_flow_settings(parent: tk.Tk | tk.Toplevel | None = None, on_speed_change: Callable[[float], None] | None = None, on_voice_change: Callable[[str], None] | None = None) -> AudioFlowSettingsDialog | None:
+    """Open on the root owner; worker callers enqueue without touching Tk."""
+    root = getattr(parent, "root", None) or getattr(tk, "_default_root", None)
+    dispatcher = getattr(parent, "_ui_dispatcher", None) or getattr(parent, "_voice_flow_dispatcher", None) or getattr(root, "_voice_flow_dispatcher", None)
+    if dispatcher is not None and not dispatcher.is_owner():
+        dispatcher.submit(lambda: AudioFlowSettingsDialog.show_dialog(parent, on_speed_change, on_voice_change))
+        return None
+    if dispatcher is None and threading.current_thread() is not threading.main_thread():
+        # The runtime always attaches a root before exposing settings actions.
+        log.warning("Settings requested before UI root attachment")
+        return None
     return AudioFlowSettingsDialog.show_dialog(parent, on_speed_change, on_voice_change)
