@@ -2891,10 +2891,10 @@ class VoiceFlowApp:
             # bar / Audio Flow widget (so clicking them can act on it), clear it
             # anywhere else, exactly like Windows.
             try:
-                hit = macos_native.window_owner_at_point(x, y)
+                hit = macos_native.window_owner_at_point(x, y, only_pids={os.getpid()})
             except Exception:
                 hit = {}
-            own_click = bool(hit) and (hit.get("pid") == os.getpid() or (callable(is_own_app) and is_own_app(hit)))
+            own_click = bool(hit)
             if not own_click:
                 self.overlay.clear_selected_text()
                 audio_flow_widget.hide()
@@ -3015,6 +3015,15 @@ class VoiceFlowApp:
         if not text_to_read:
             target_hwnd = getattr(self, "target_hwnd", None)
             text_to_read = self.injector.get_selected_text(target_hwnd=target_hwnd)
+            if sys.platform == "darwin" and (not text_to_read or not str(text_to_read).strip()):
+                # The Mac hotkey fires while Ctrl+Option are still held, so a
+                # live read can come back empty. The selection the mouse hook
+                # captured moments ago (kept on the bar for 15 s and cleared on
+                # any click elsewhere) is the same text: use it.
+                cached = str(getattr(self.overlay, "selected_text", "") or "").strip()
+                if cached:
+                    log.info("[AUDIO FLOW] Using the selection captured from the mouse (%d chars).", len(cached))
+                    text_to_read = cached
         if not text_to_read or not text_to_read.strip():
             if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
                 audio_flow_widget.set_playing(False)

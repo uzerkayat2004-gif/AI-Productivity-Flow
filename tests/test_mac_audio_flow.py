@@ -268,7 +268,13 @@ def _mac_app(monkeypatch, injector, owner, hit=None):
     monkeypatch.setattr(main_module.audio_flow_widget, "show_at", lambda x, y, text: shown.append((x, y, text)))
     monkeypatch.setattr(main_module.audio_flow_widget, "hide", lambda: hidden.append(True))
     monkeypatch.setattr(macos_native, "frontmost_window_owner", lambda: dict(owner))
-    monkeypatch.setattr(macos_native, "window_owner_at_point", lambda x, y: dict(hit or {}))
+    def _window_at(x, y, only_pids=None):
+        found = dict(hit or {})
+        if only_pids is not None and found.get("pid") not in only_pids:
+            return {}
+        return found
+
+    monkeypatch.setattr(macos_native, "window_owner_at_point", _window_at)
     backend = macos_backend_module.MacOSBackend()
     monkeypatch.setattr("voice_flow.platform.get_backend", lambda: backend)
     return app, shown, hidden
@@ -303,6 +309,25 @@ def test_mac_click_on_own_floating_window_keeps_selection(monkeypatch):
 
     app, _shown, hidden = _mac_app(monkeypatch, object(), {"app": "TextEdit", "pid": 4242}, hit={"pid": os.getpid(), "app": "tk"})
     app._on_mouse_release(20, 700, 0.0, 20, 700)
+    assert app.overlay.cleared == 0 and hidden == []
+
+
+def test_mac_click_where_dock_overlay_sits_above_our_window_still_counts_as_ours(monkeypatch):
+    """The Dock owns an invisible full-screen window above floating windows:
+    the own-window test must ask only about our pid, not the topmost window."""
+    import os
+    from voice_flow.platform import macos_native
+
+    app, _shown, hidden = _mac_app(monkeypatch, object(), {"app": "TextEdit", "pid": 4242})
+    calls = []
+
+    def window_at(x, y, only_pids=None):
+        calls.append(only_pids)
+        return {"pid": os.getpid(), "app": "tk"} if only_pids == {os.getpid()} else {"pid": 378, "app": "Dock"}
+
+    monkeypatch.setattr(macos_native, "window_owner_at_point", window_at)
+    app._on_mouse_release(720, 180, 0.0, 720, 180)
+    assert calls == [{os.getpid()}]
     assert app.overlay.cleared == 0 and hidden == []
 
 
@@ -369,6 +394,8 @@ def mac_native(monkeypatch):
     monkeypatch.setattr(macos_native, "send_key_combo", send_key_combo)
     monkeypatch.setattr(macos_native, "frontmost_window_owner", lambda: dict(state.owner))
     monkeypatch.setattr(macos_native, "can_post_events", lambda: state.can_post)
+    state.modifiers_released = True
+    monkeypatch.setattr(macos_native, "wait_for_modifiers_released", lambda timeout=1.0: state.modifiers_released)
     monkeypatch.setattr(macos_backend_module, "_general_pasteboard", lambda: state.pasteboard)
     monkeypatch.setattr(macos_backend_module, "_pasteboard_snapshot", lambda pb: list(pb.items))
 
@@ -420,6 +447,14 @@ def test_cmd_c_copying_files_is_not_read_as_text(mac_native):
     mac_native.pasteboard = _Pasteboard([], copy_result=("report.pdf", ["public.file-url", "public.utf8-plain-text"]))
     assert macos_backend_module.MacOSBackend().get_selected_text() == ""
     assert mac_native.pasteboard.restored == []
+
+
+def test_cmd_c_waits_for_hotkey_modifiers_and_skips_if_still_held(mac_native):
+    mac_native.info = {"trusted": True, "status": -25205, "role": "AXGroup", "text": ""}
+    mac_native.pasteboard = _Pasteboard([], copy_result=("x", ["public.utf8-plain-text"]))
+    mac_native.modifiers_released = False  # user still holds Ctrl+Option
+    assert macos_backend_module.MacOSBackend().get_selected_text() == ""
+    assert mac_native.keys == []
 
 
 def test_finder_and_own_app_never_get_cmd_c(mac_native):
@@ -526,6 +561,73 @@ def test_history_reports_copied_to_clipboard_on_mac(monkeypatch, fake_backend):
     assert main_module._paste_failure_details()[1] == "failed"
 
 
+def _ax_snapshots(monkeypatch, snapshots):
+    from voice_flow.platform import macos_native
+
+    seq = list(snapshots)
+    monkeypatch.setattr(injector_module.sys, "platform", "darwin")
+    monkeypatch.setattr(macos_native, "accessibility_trusted", lambda prompt=False: True)
+    monkeypatch.setattr(macos_native, "preflight_post_event_access", lambda: True)
+    monkeypatch.setattr(macos_native, "focused_value_snapshot", lambda: dict(seq.pop(0) if len(seq) > 1 else seq[0]))
+
+
+def test_paste_with_stale_trust_but_ax_disabled_is_reported_as_copied(monkeypatch, fake_backend):
+    """AXIsProcessTrusted can stay True after Accessibility is revoked; the live
+    AX error (-25211 API disabled) wins and no Cmd+V is sent."""
+    backend = fake_backend(_Backend(can_post=True, clipboard="older copy"))
+    _ax_snapshots(monkeypatch, [{"focus_status": -25211, "value_status": None, "value": None}])
+    assert injector_module._inject_text_non_windows("dictated words") is False
+    assert backend.pastes == 0 and backend.clipboard == "dictated words"
+    assert injector_module.last_injection_outcome() == "copied_needs_permission"
+
+
+def test_paste_that_does_not_change_the_field_is_reported_as_copied(monkeypatch, fake_backend):
+    backend = fake_backend(_Backend(can_post=True, clipboard="older copy"))
+    _ax_snapshots(monkeypatch, [{"focus_status": 0, "value_status": 0, "value": "before"}])
+    assert injector_module._inject_text_non_windows("dictated words") is False
+    assert backend.pastes == 1
+    time.sleep(0.35)
+    assert backend.clipboard == "dictated words"  # no restore: the text must stay for Cmd+V
+    assert injector_module.last_injection_outcome() == "copied_needs_permission"
+
+
+def test_paste_that_changes_the_field_is_reported_as_pasted(monkeypatch, fake_backend):
+    backend = fake_backend(_Backend(can_post=True, clipboard="older copy"))
+    _ax_snapshots(monkeypatch, [
+        {"focus_status": 0, "value_status": 0, "value": "before"},
+        {"focus_status": 0, "value_status": 0, "value": "before dictated words"},
+    ])
+    assert injector_module._inject_text_non_windows("dictated words") is True
+    assert _wait_until(lambda: backend.clipboard == "older copy", 1.0)
+    assert injector_module.last_injection_outcome() == "pasted"
+
+
+def test_paste_into_unreadable_field_is_trusted(monkeypatch, fake_backend):
+    fake_backend(_Backend(can_post=True, clipboard="older copy"))
+    _ax_snapshots(monkeypatch, [{"focus_status": 0, "value_status": -25205, "value": None}])
+    assert injector_module._inject_text_non_windows("dictated words") is True
+    assert injector_module.last_injection_outcome() == "pasted"
+
+
+def test_mac_hotkey_falls_back_to_selection_captured_by_mouse(monkeypatch):
+    class Injector:
+        def get_selected_text(self, target_hwnd=None):
+            return ""  # live read failed (modifiers still held)
+
+    app, _shown, _hidden = _mac_app(monkeypatch, Injector(), {"app": "TextEdit", "pid": 4242})
+    app.overlay.selected_text = "Photosynthesis turns sunlight into sugar."
+    app._read_generation_lock = threading.RLock()
+    app._active_summary_player_token = None
+    app._read_active = False
+    errors = []
+    app.overlay.show_error = lambda msg: errors.append(msg)
+    monkeypatch.setattr(main_module.tts_engine, "is_speaking", lambda: False)
+    submitted = []
+    app._submit_audio_summary = lambda text, depth: submitted.append(text)
+    app._process_audio_flow_pipeline(mode="summary")
+    assert submitted == ["Photosynthesis turns sunlight into sugar."] and errors == []
+
+
 # ---------------------------------------------------------------------------
 # Read playback on macOS: progressive Edge path plays with afplay, not winmm
 # ---------------------------------------------------------------------------
@@ -569,3 +671,68 @@ def test_progressive_read_on_mac_plays_each_sentence_without_winmm(monkeypatch, 
     assert ok is True
     assert len(played) == 2 and "First" in played[0] and "Second" in played[1]
     assert started == [True]
+
+
+# ---------------------------------------------------------------------------
+# Widget: Tk 9 Aqua repaint after a resize (menu was invisible and deaf)
+# ---------------------------------------------------------------------------
+
+
+def test_widget_resize_on_mac_schedules_one_pixel_repaint(monkeypatch):
+    from voice_flow import audio_flow_widget as widget_module
+
+    monkeypatch.setattr(widget_module.sys, "platform", "darwin")
+    widget = widget_module.AudioFlowFloatingWidget()
+    scheduled = []
+    geometries = []
+
+    class Root:
+        def after(self, ms, fn):
+            scheduled.append((ms, fn))
+
+        def winfo_screenwidth(self):
+            return 1440
+
+        def winfo_screenheight(self):
+            return 900
+
+    class Win:
+        def geometry(self, g):
+            geometries.append(g)
+
+        def config(self, **_k):
+            pass
+
+        def deiconify(self):
+            pass
+
+        def lift(self):
+            pass
+
+        def attributes(self, *_a):
+            pass
+
+        def update_idletasks(self):
+            pass
+
+        def winfo_x(self):
+            return 0
+
+    class Canvas:
+        def config(self, **_k):
+            pass
+
+    widget.root = Root()
+    widget.win = Win()
+    widget.canvas = Canvas()
+    widget._draw = lambda: None
+    widget._ensure_animation = lambda: None
+    widget._mac_apply_shape = lambda w, h: None
+    widget._is_visible = True
+    widget._stage = widget.STAGE_MODE_SELECT
+    widget._update_geometry_and_draw()
+    assert len(scheduled) == 1
+    scheduled[0][1]()  # run the deferred repaint
+    assert geometries[-2].startswith("287x32") and geometries[-1].startswith("286x32")
+    widget._update_geometry_and_draw()  # same size again: no second nudge
+    assert len(scheduled) == 1

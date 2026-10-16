@@ -335,6 +335,43 @@ def _event_flags() -> int:
     return 0  # no source event to query without a tap
 
 
+kCGEventSourceStateCombinedSessionState = 0
+_MODIFIER_MASK = (
+    kCGEventFlagMaskShift | kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand
+)
+
+
+def current_modifier_flags() -> int:
+    """Modifier keys the user is physically holding right now (CGEventFlags)."""
+    if not IS_MACOS:
+        return 0
+    fn = _loader.symbol("CoreGraphics", "CGEventSourceFlagsState", optional=True)
+    if fn is None:
+        return 0
+    fn.restype = ctypes.c_uint64
+    fn.argtypes = [ctypes.c_int32]
+    try:
+        return int(fn(kCGEventSourceStateCombinedSessionState)) & _MODIFIER_MASK
+    except Exception:
+        return 0
+
+
+def wait_for_modifiers_released(timeout: float = 1.0) -> bool:
+    """Wait until no modifier key is held (e.g. after a Ctrl+Option+L hotkey).
+
+    A synthetic Cmd+C sent while the user still holds Ctrl+Option reaches the
+    app as Cmd+Ctrl+Option+C and copies nothing. Returns True when released."""
+    import time
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if not current_modifier_flags():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+
+
 def send_key_combo(keycode: int, flags: int = 0, *, key_delay: float = 0.012) -> bool:
     """Post a key chord such as Cmd+V (keycode=KEY_V, flags=kCGEventFlagMaskCommand).
 
@@ -486,11 +523,12 @@ class _CGRect(ctypes.Structure):
     _fields_ = [("origin", _CGPoint), ("size", _CGSize)]
 
 
-def window_owner_at_point(x: float, y: float) -> dict[str, Any]:
+def window_owner_at_point(x: float, y: float, only_pids: set[int] | None = None) -> dict[str, Any]:
     """Return {'app', 'pid', 'layer'} of the topmost on-screen window under (x, y).
 
     Coordinates are global display points with a top-left origin (the same
-    space Quartz mouse events and Tk use). Needs no permission. Used to tell
+    space Quartz mouse events and Tk use). Needs no permission. With
+    ``only_pids`` only windows of those processes are considered. Used to tell
     whether a click landed on one of our own floating windows without calling
     into Tk from a background thread. Returns {} when unknown.
     """
@@ -554,6 +592,11 @@ def window_owner_at_point(x: float, y: float) -> dict[str, Any]:
             if not (rect.origin.x <= x <= rect.origin.x + rect.size.width
                     and rect.origin.y <= y <= rect.origin.y + rect.size.height):
                 continue
+            if only_pids is not None and _int(entry, "pid") not in only_pids:
+                # e.g. the Dock owns an invisible full-screen window above
+                # floating windows; callers asking "is this one of ours?" pass
+                # their pids and skip everything else.
+                continue
             owner = ""
             if keys["owner"]:
                 ref = dict_get_fn(entry, ctypes.c_void_p(keys["owner"]))
@@ -614,17 +657,10 @@ def accessibility_trusted(prompt: bool = False) -> bool:
         cf_release(key)
 
 
-def can_post_events() -> bool:
-    """True when synthetic key events (Cmd+V / Cmd+C) will actually reach apps.
-
-    macOS silently drops ``CGEventPost`` events from a process that has neither
-    Accessibility trust nor the "post events" grant, while the call itself
-    still "succeeds". Callers must check this before claiming a paste worked.
-    """
+def preflight_post_event_access() -> bool:
+    """CGPreflightPostEventAccess(): the live "may post events" TCC check."""
     if not IS_MACOS:
         return False
-    if accessibility_trusted(prompt=False):
-        return True
     fn = _loader.symbol("CoreGraphics", "CGPreflightPostEventAccess", optional=True)
     if fn is None:
         return False
@@ -634,6 +670,18 @@ def can_post_events() -> bool:
         return bool(fn())
     except Exception:
         return False
+
+
+def can_post_events() -> bool:
+    """True when synthetic key events (Cmd+V / Cmd+C) will actually reach apps.
+
+    macOS silently drops ``CGEventPost`` events from a process that has neither
+    Accessibility trust nor the "post events" grant, while the call itself
+    still "succeeds". Callers must check this before claiming a paste worked.
+    """
+    if not IS_MACOS:
+        return False
+    return accessibility_trusted(prompt=False) or preflight_post_event_access()
 
 
 # ---------------------------------------------------------------------------
@@ -805,13 +853,29 @@ def focused_selection_info() -> dict[str, Any]:
         return status, int(held.value or 0)
 
     try:
-        system_wide = create_fn()
-        if not system_wide:
-            return info
-        owned.append(system_wide)
-        status, focused = _copy(system_wide, "AXFocusedUIElement")
-        if status != 0 or not focused:
-            return info
+        # Ask the frontmost app directly first: the system-wide element's
+        # AXFocusedUIElement fails on some systems (seen on macOS 15 runners)
+        # while the per-app query works.
+        focused = 0
+        app_fn = _loader.symbol("ApplicationServices", "AXUIElementCreateApplication", optional=True)
+        pid = int((frontmost_window_owner() or {}).get("pid") or 0)
+        if app_fn is not None and pid > 0:
+            app_fn.restype = ctypes.c_void_p
+            app_fn.argtypes = [ctypes.c_int]
+            app_element = app_fn(pid)
+            if app_element:
+                owned.append(app_element)
+                status, focused = _copy(app_element, "AXFocusedUIElement")
+                if status != 0:
+                    focused = 0
+        if not focused:
+            system_wide = create_fn()
+            if not system_wide:
+                return info
+            owned.append(system_wide)
+            status, focused = _copy(system_wide, "AXFocusedUIElement")
+            if status != 0 or not focused:
+                return info
         role_status, role_ref = _copy(focused, "AXRole")
         if role_status == 0 and cf_is_string(role_ref):
             info["role"] = cfstring_to_python(role_ref)
@@ -823,6 +887,74 @@ def focused_selection_info() -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("[MACOS] focused_selection_info failed: %s", exc)
         return info
+    finally:
+        for ref in reversed(owned):
+            cf_release(ref)
+
+
+kAXErrorAPIDisabled = -25211
+
+
+def focused_value_snapshot() -> dict[str, Any]:
+    """Raw Accessibility read of the focused element's text value.
+
+    Unlike :func:`focused_selection_info` this does not trust the in-process
+    ``AXIsProcessTrusted`` answer (it can stay stale after the user revokes
+    Accessibility); the AX error code itself says whether we may read.
+    Returns ``{"focus_status": int | None, "value_status": int | None,
+    "value": str | None}``; ``focus_status == kAXErrorAPIDisabled`` means
+    Accessibility is really off for this process. Never raises.
+    """
+    snap: dict[str, Any] = {"focus_status": None, "value_status": None, "value": None}
+    if not IS_MACOS:
+        return snap
+    copy_fn = _loader.symbol("ApplicationServices", "AXUIElementCopyAttributeValue", optional=True)
+    app_fn = _loader.symbol("ApplicationServices", "AXUIElementCreateApplication", optional=True)
+    create_fn = _loader.symbol("ApplicationServices", "AXUIElementCreateSystemWide", optional=True)
+    if copy_fn is None or (app_fn is None and create_fn is None):
+        return snap
+    copy_fn.restype = ctypes.c_int
+    copy_fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    owned: list[int] = []
+
+    def _copy(element: int, name: str) -> tuple[int, int]:
+        key = cfstring_from_python(name)
+        if not key:
+            return -1, 0
+        try:
+            held = ctypes.c_void_p(0)
+            status = int(copy_fn(element, key, ctypes.byref(held)))
+        finally:
+            cf_release(key)
+        if held.value:
+            owned.append(held.value)
+        return status, int(held.value or 0)
+
+    try:
+        element = 0
+        pid = int((frontmost_window_owner() or {}).get("pid") or 0)
+        if app_fn is not None and pid > 0:
+            app_fn.restype = ctypes.c_void_p
+            app_fn.argtypes = [ctypes.c_int]
+            element = app_fn(pid) or 0
+        if not element and create_fn is not None:
+            create_fn.restype = ctypes.c_void_p
+            element = create_fn() or 0
+        if not element:
+            return snap
+        owned.append(element)
+        status, focused = _copy(element, "AXFocusedUIElement")
+        snap["focus_status"] = status
+        if status != 0 or not focused:
+            return snap
+        v_status, v_ref = _copy(focused, "AXValue")
+        snap["value_status"] = v_status
+        if v_status == 0 and cf_is_string(v_ref):
+            snap["value"] = cfstring_to_python(v_ref)
+        return snap
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("[MACOS] focused_value_snapshot failed: %s", exc)
+        return snap
     finally:
         for ref in reversed(owned):
             cf_release(ref)
@@ -901,6 +1033,11 @@ __all__ = [
     "focused_selected_text",
     "focused_selection_info",
     "can_post_events",
+    "preflight_post_event_access",
+    "focused_value_snapshot",
+    "kAXErrorAPIDisabled",
+    "current_modifier_flags",
+    "wait_for_modifiers_released",
     "window_owner_at_point",
     "cfstring_from_python",
     "cfstring_to_python",

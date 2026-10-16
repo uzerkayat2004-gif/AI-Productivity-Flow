@@ -878,6 +878,32 @@ def _notify_paste_needs_permission() -> None:
 _last_permission_notice = 0.0
 
 
+def _mac_paste_landed(before: dict, timeout: float = 1.0) -> bool:
+    """After Cmd+V on macOS, check the focused field's AXValue changed.
+
+    Only decides "not landed" when the field's text value was readable both
+    before and after and stayed identical; anything we cannot read (web views,
+    terminals, custom controls) is given the benefit of the doubt."""
+    before_value = before.get("value")
+    if before.get("value_status") != 0 or not isinstance(before_value, str):
+        return True
+    try:
+        from voice_flow.platform import macos_native
+    except Exception:
+        return True
+    deadline = time.monotonic() + timeout
+    readable_after = False
+    while True:
+        time.sleep(0.05)
+        after = macos_native.focused_value_snapshot()
+        if after.get("value_status") == 0 and isinstance(after.get("value"), str):
+            readable_after = True
+            if after.get("value") != before_value:
+                return True
+        if time.monotonic() >= deadline:
+            return not readable_after
+
+
 def _inject_text_non_windows(text: str, press_enter: bool = False) -> bool:
     """macOS paste: never report success for a keystroke the OS will drop."""
     _set_injection_outcome("failed")
@@ -892,7 +918,26 @@ def _inject_text_non_windows(text: str, press_enter: bool = False) -> bool:
             _set_injection_outcome("copied_internal")
             return False
         can_post = getattr(backend, "can_post_events", None)
-        if callable(can_post) and not can_post():
+        before_snapshot: dict | None = None
+        ax_disabled = False
+        if sys.platform == "darwin":
+            try:
+                from voice_flow.platform import macos_native
+
+                if text:
+                    before_snapshot = macos_native.focused_value_snapshot()
+                    # The live AX error is the truth; AXIsProcessTrusted() can
+                    # stay True in-process after Accessibility is revoked.
+                    ax_disabled = before_snapshot.get("focus_status") == macos_native.kAXErrorAPIDisabled
+                log.info(
+                    "[INJECTOR] macOS paste permission check: accessibility=%s post_events=%s ax_read=%s",
+                    macos_native.accessibility_trusted(prompt=False),
+                    macos_native.preflight_post_event_access(),
+                    (before_snapshot or {}).get("focus_status"),
+                )
+            except Exception:
+                before_snapshot = None
+        if ax_disabled or (callable(can_post) and not can_post()):
             # Cmd+V would be silently discarded. Leave the dictation on the
             # clipboard (no restore: restoring is what lost the text) and say so.
             if text and backend.copy_to_clipboard(text):
@@ -914,6 +959,13 @@ def _inject_text_non_windows(text: str, press_enter: bool = False) -> bool:
         if press_enter:
             time.sleep(0.05)
             backend.send_enter()
+        if ok and text and before_snapshot is not None and not _mac_paste_landed(before_snapshot):
+            ok = False
+            log.warning(
+                "[INJECTOR] Cmd+V was sent but the focused field did not change; the paste did not land "
+                "(Accessibility likely revoked). Text left on the clipboard (%d chars).",
+                len(text),
+            )
         if not ok:
             log.warning("[INJECTOR] Cmd+V could not be sent; text left on the clipboard.")
             if text:

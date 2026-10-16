@@ -296,6 +296,35 @@ class AudioFlowFloatingWidget:
         except Exception:
             self._mac_nswindow = None
 
+    def _mac_schedule_repaint(self, delay_ms: int = 30) -> None:
+        """Tk 9 Aqua leaves a freshly resized toplevel unpainted and deaf to clicks
+        until its geometry changes again (the Read/Summary menu stayed invisible).
+        Nudge the size by a pixel and back, then redraw (same fix as the bar)."""
+        if self.root is None or getattr(self, "_mac_repaint_pending", False):
+            return
+        try:
+            self.root.after(delay_ms, self._mac_force_repaint)
+            self._mac_repaint_pending = True
+        except Exception:
+            pass
+
+    def _mac_force_repaint(self) -> None:
+        self._mac_repaint_pending = False
+        if not self.win or not self.canvas or not self._is_visible:
+            return
+        w, h = self._get_current_dimensions()
+        try:
+            self.win.geometry(f"{w + 1}x{h}+{self._pos_x}+{self._pos_y}")
+            self.win.update_idletasks()
+            self.win.geometry(f"{w}x{h}+{self._pos_x}+{self._pos_y}")
+            self.canvas.config(width=w, height=h)
+            self.win.update_idletasks()
+        except Exception:
+            return
+        self._mac_painted_size = (w, h)
+        self._mac_apply_shape(w, h)
+        self._draw()
+
     def _apply_window_shape(self, w: int, h: int) -> None:
         """Natively clip the window boundary via Win32 SetWindowRgn for cards, or clear for transparent circle."""
         if sys.platform == "darwin":
@@ -447,6 +476,8 @@ class AudioFlowFloatingWidget:
         except Exception:
             pass
         self._mac_apply_shape(w, h)
+        if sys.platform == "darwin" and getattr(self, "_mac_painted_size", None) != (w, h):
+            self._mac_schedule_repaint()
 
     def hide(self) -> None:
         """Hide button, reset state, and invalidate a pre-Tk selection."""
@@ -462,6 +493,7 @@ class AudioFlowFloatingWidget:
             self._stage = self.STAGE_MINIMAL
             self._current_text = ""
             self._hover = None
+            self._mac_painted_size = None
             self._stop_anim_loop()
             if self.win:
                 try:

@@ -275,6 +275,11 @@ class MacOSBackend:
     def _copy_selection_preserving_clipboard(self) -> str:
         if not native.can_post_events():
             return ""
+        # After a hotkey such as Ctrl+Option+L the user may still hold the
+        # modifiers; Cmd+C would then arrive as Cmd+Ctrl+Option+C.
+        if not native.wait_for_modifiers_released(1.0):
+            log.debug("[MACOS] modifiers still held; skipping Cmd+C selection probe")
+            return ""
         pasteboard = _general_pasteboard()
         if pasteboard is None:
             return self._copy_selection_via_pbcopy()
