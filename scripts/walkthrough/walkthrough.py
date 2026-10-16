@@ -23,6 +23,9 @@ elif phase == "life":
 elif phase == "af":
     import qa_af
     qa_af.main()
+elif phase == "af2":
+    import qa_af2
+    qa_af2.main()
 elif phase == "site":
     import runpy
     runpy.run_path(str(here / "qa_site.py"), run_name="__main__")

@@ -83,6 +83,39 @@ case "key":
         usleep(50_000)
     }
     print("ok")
+case "chord":
+    // chord <keycode> <mods>: hold modifiers (ctrl,alt,shift,cmd) as real flagsChanged events,
+    // tap the key, release modifiers. pynput tracks modifiers only from flagsChanged.
+    guard args.count >= 4, let kc = UInt16(args[2]) else { exit(2) }
+    let src = CGEventSource(stateID: .hidSystemState)
+    let names = args[3].split(separator: ",").map { String($0) }
+    let table: [String: (CGKeyCode, CGEventFlags)] = [
+        "ctrl": (0x3B, .maskControl), "alt": (0x3A, .maskAlternate),
+        "shift": (0x38, .maskShift), "cmd": (0x37, .maskCommand)]
+    var flags: CGEventFlags = []
+    for n in names {
+        guard let (code, f) = table[n] else { continue }
+        flags.insert(f)
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true) {
+            e.type = .flagsChanged; e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(40_000)
+    }
+    for down in [true, false] {
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kc), keyDown: down) {
+            e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(60_000)
+    }
+    for n in names.reversed() {
+        guard let (code, f) = table[n] else { continue }
+        flags.remove(f)
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) {
+            e.type = .flagsChanged; e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(40_000)
+    }
+    print("ok")
 case "drag":
     guard args.count >= 6, let x1 = Double(args[2]), let y1 = Double(args[3]), let x2 = Double(args[4]), let y2 = Double(args[5]) else { exit(2) }
     let a = CGPoint(x: x1, y: y1), b = CGPoint(x: x2, y: y2)
