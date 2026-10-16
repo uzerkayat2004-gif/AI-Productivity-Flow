@@ -47,26 +47,32 @@ def synthesize_speech_wav(text: str, output_wav_path: str) -> None:
 @pytest.fixture(scope="module")
 def whisper_model():
     """Load Faster-Whisper base.en model once for the test module."""
-    model = WhisperModel("base.en", device="cpu", compute_type="int8")
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    bundled_path = Path.home() / "apf-release-build" / "staging" / "runtime" / "models" / "whisper" / "base.en"
+    model_path = str(bundled_path) if bundled_path.is_dir() else "base.en"
+    model = WhisperModel(model_path, device="cpu", compute_type="int8", cpu_threads=2)
     return model
 
 
 @pytest.fixture(scope="module")
 def vf1_engine():
     """Connect to live local S1-mini GGUF llama-server."""
-    config = VF1EngineConfig(
-        backend="native",
-        server_host="127.0.0.1",
-        server_port=8080,
-        model_id="superwhisper/s1-mini",
-        use_lora=False,
-        temperature=0.0,
-        max_new_tokens=256,
-    )
-    engine = VF1Engine(config)
-    if not engine.is_server_healthy():
-        pytest.skip("Local llama-server is not running on 127.0.0.1:8080")
-    return engine
+    for port in (8090, 8080):
+        config = VF1EngineConfig(
+            backend="native",
+            server_host="127.0.0.1",
+            server_port=port,
+            model_id="superwhisper/s1-mini",
+            use_lora=False,
+            temperature=0.0,
+            max_new_tokens=256,
+        )
+        engine = VF1Engine(config)
+        if engine.is_server_healthy():
+            return engine
+    pytest.skip("Local llama-server is not running on 127.0.0.1:8090 or 8080")
+
 
 
 @pytest.fixture(scope="module")

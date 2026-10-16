@@ -26,12 +26,13 @@ from voice_flow.vf_checks import (
     canonical_source,
     check_output,
     expand_contractions,
+    normalize_canonical_equivalences,
     normalize_decimal_scales,
     number_values,
 )
 
-# Alphanumeric identifier codes: e.g. PR-94821, TRK-88204-X, INV-2026-99
-IDENTIFIER_RE = re.compile(r"\b[A-Z]{1,6}-\d+(?:-[A-Za-z0-9]+)?\b")
+# Alphanumeric identifier codes: e.g. PR-94821, TRK-88204-X, INV-2026-99, SEC 10-K
+IDENTIFIER_RE = re.compile(r"\b(?:[A-Z]{1,6}-\d+(?:-[A-Za-z0-9]+)?|[A-Z]{1,6}\s+\d+-[A-Za-z0-9]+)\b")
 
 # Email addresses and URLs
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
@@ -82,15 +83,23 @@ def check_numerical_preservation(source: str, candidate: str, task: str = "clean
     """Check that all numbers in source exist with matching value in candidate."""
     failures: List[str] = []
     src_canon, _ = canonical_source(source)
+    if task == "prompt":
+        src_canon = re.sub(
+            r"^(?:can you\s+)?(?:make|create|write|give|generate)\s+(?:me\s+)?(?:a\s+)?prompt(?:\s+(?:for|in)\s+[^,:]+?)?\s+(?:that\s+asks\s+(?:it\s+)?to|that\s+asks\s+to|to)\s*[:\s]*",
+            "",
+            src_canon,
+            flags=re.IGNORECASE,
+        ).strip()
     src_nums = number_values(src_canon)
 
     # Strip prompt metadata tags before numerical extraction so that metadata tags
     # like [VF-1], [Task: cleanup], [Transcript], etc. do not pollute numerical analysis
     # (the '1' in VF-1 is a tag echo, not a corrupted numerical amount).
+    cleaned_candidate = normalize_canonical_equivalences(candidate or "")
     cleaned_candidate = re.sub(
         r"\[(?:VF-1|Task:\s*\w+|Transcript|Rules|Instruction|Draft|Sender:[^\]]+|Recipient:[^\]]+)\]",
         "",
-        candidate or "",
+        cleaned_candidate,
         flags=re.IGNORECASE,
     )
     cleaned_candidate = re.sub(r"^cleanup(?:,\s*task:\s*\w+)?\.?\s*", "", cleaned_candidate, flags=re.IGNORECASE)
@@ -120,20 +129,50 @@ def check_numerical_preservation(source: str, candidate: str, task: str = "clean
     return len(failures) == 0, failures
 
 
-def check_identifier_preservation(source: str, candidate: str) -> tuple[bool, List[str]]:
-    """Check that all structured codes (PR-94821, TRK-88204-X) remain intact."""
+_PROMPT_DESTINATION_MODELS = {
+    "GPT4", "GPT4O", "GPT35", "GPT3",
+    "CLAUDE", "CLAUDE3", "CLAUDE35",
+    "GEMINI", "LLAMA", "LLAMA3", "MISTRAL", "QWEN"
+}
+
+
+def check_identifier_preservation(source: str, candidate: str, task: str = "cleanup") -> tuple[bool, List[str]]:
+    """Check that all structured codes (PR-94821, TRK-88204-X) remain intact.
+    
+    For prompt synthesis tasks, separates destination-model metadata (e.g. 'for GPT-4')
+    from mandatory domain constraints (e.g. 'SEC 10-K').
+    """
     failures: List[str] = []
-    src_ids = extract_identifiers(source)
-    cand_ids = extract_identifiers(candidate)
+    norm_source = normalize_canonical_equivalences(source)
+    norm_cand = normalize_canonical_equivalences(candidate)
+
+    if task in ("prompt", "format:prompt"):
+        norm_source = re.sub(
+            r"^(?:can you\s+)?(?:make|create|write|give|generate)\s+(?:me\s+)?(?:a\s+)?prompt(?:\s+(?:for|in)\s+[^,:]+?)?\s+(?:that\s+asks\s+(?:it\s+)?to|that\s+asks\s+to|to)\s*[:\s]*",
+            "",
+            norm_source,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    src_ids = extract_identifiers(norm_source)
+    cand_ids = extract_identifiers(norm_cand)
+
+    cand_normalized_tokens = {re.sub(r"[-_\s]", "", w).upper() for w in re.findall(r"\b[A-Za-z0-9_-]+\b", norm_cand or "")}
 
     for sid in src_ids:
-        if sid not in cand_ids:
-            # Check if mutated or truncated
-            matching = [cid for cid in cand_ids if cid.startswith(sid[:3])]
-            if matching:
-                failures.append(f"identifier_mutated:{sid}->{matching[0]}")
-            else:
-                failures.append(f"identifier_missing:{sid}")
+        norm_sid = re.sub(r"[-_\s]", "", sid).upper()
+        if task in ("prompt", "format:prompt") and norm_sid in _PROMPT_DESTINATION_MODELS:
+            continue
+        if sid in cand_ids:
+            continue
+        if norm_sid in cand_normalized_tokens:
+            continue
+        # Check if mutated or truncated
+        matching = [cid for cid in cand_ids if cid.startswith(sid[:3])]
+        if matching:
+            failures.append(f"identifier_mutated:{sid}->{matching[0]}")
+        else:
+            failures.append(f"identifier_missing:{sid}")
 
     return len(failures) == 0, failures
 
@@ -156,6 +195,8 @@ def validate_and_gate_output(
     candidate_text: str,
     *,
     task: str = "cleanup",
+    format: str | None = None,
+    fmt: str | None = None,
     instruction: str | None = None,
     allow_fallback: bool = True,
 ) -> SafetyGateDecision:
@@ -167,11 +208,14 @@ def validate_and_gate_output(
     rejection_reasons: List[str] = []
     details: Dict[str, Any] = {}
 
+    effective_fmt = fmt or format
+
     # Run check_output from vf_checks
     base_check: CheckResult = check_output(
         source=transcript,
         output=candidate_text,
         task=task,
+        fmt=effective_fmt,
         instruction=instruction,
     )
     if not base_check.ok:
@@ -185,7 +229,7 @@ def validate_and_gate_output(
     details["numerical_failures"] = num_fails
 
     # Specific identifier preservation gate
-    ids_ok, id_fails = check_identifier_preservation(transcript, candidate_text)
+    ids_ok, id_fails = check_identifier_preservation(transcript, candidate_text, task=task)
     if not ids_ok:
         rejection_reasons.extend(id_fails)
     details["identifiers_ok"] = ids_ok

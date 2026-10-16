@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from native_fixture_client import bind_native
+
 import sys
 import ctypes
 import threading
@@ -44,7 +46,7 @@ def test_nemotron_model_switch_evicts_inactive_native_engine(tmp_path: Path, mon
     created = []
 
     class FakeEngine:
-        def __init__(self, path, spec=None):
+        def __init__(self, path, spec=None, **_kwargs):
             self.model_path = Path(path)
             self.spec = spec
             self.is_warm = True
@@ -76,8 +78,8 @@ def test_active_nemotron_lease_defers_destroy_until_stream_finalizes() -> None:
     engine._is_warm = True
     engine._active_streams = 0
     engine._evict_when_idle = False
-    original = nemotron_engine.get_nemo_dll
-    nemotron_engine.get_nemo_dll = lambda: Dll()
+    engine._streams_idle = threading.Event()
+    bind_native(engine, Dll())
     try:
         engine.acquire_stream()
         engine.close()
@@ -87,14 +89,14 @@ def test_active_nemotron_lease_defers_destroy_until_stream_finalizes() -> None:
         assert destroyed == [99]
         assert not engine.rec_handle.value
     finally:
-        nemotron_engine.get_nemo_dll = original
+        engine.close()
 
 
 def test_failed_replacement_keeps_old_nemotron_cache_entry(tmp_path: Path, monkeypatch) -> None:
     first, second = tmp_path / "first.gguf", tmp_path / "second.gguf"
     first.write_bytes(b"x"); second.write_bytes(b"x")
     class Engine:
-        def __init__(self, path, spec=None):
+        def __init__(self, path, spec=None, **_kwargs):
             if Path(path) == second:
                 raise RuntimeError("load failed")
             self.is_warm = True
@@ -128,7 +130,7 @@ def test_stream_open_failure_closes_partial_native_handle_and_releases_lease(mon
         def nemo_speech_asr_last_error(self): return b"open failed"
         def nemo_speech_asr_stream_close(self, _stream): self.closed += 1
     dll = Dll()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
+    bind_native(engine, dll)
     stream = nemotron_engine.NemotronStreamTranscriber(engine=engine)
     stream.start_session()
     assert stream._done.wait(1.0)
@@ -144,7 +146,7 @@ def test_worker_start_failure_closes_native_stream_and_releases_lease(monkeypatc
         def nemo_speech_asr_streaming_recognize(self, _handle, _opts, output): output._obj.value = 88; return 0
         def nemo_speech_asr_stream_close(self, _stream): self.closed += 1
     dll = Dll()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
+    bind_native(engine, dll)
     monkeypatch.setattr(threading.Thread, "start", lambda _self: (_ for _ in ()).throw(RuntimeError("no worker")))
     stream = nemotron_engine.NemotronStreamTranscriber(engine=engine)
     stream.start_session()

@@ -137,6 +137,19 @@ class VF1Engine:
         task = (request.task or "cleanup").strip().lower()
         fmt = (request.format or request.default_format() or "prose").strip().lower()
 
+        # Follow-up draft edit requires canonical universal contract (P0-3)
+        if task == "edit" or request.draft:
+            if task == "edit" and not request.instruction:
+                request.instruction = request.transcript
+            from voice_flow.vf_contract import render_vf1
+            system_text, user_text = render_vf1(request)
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\n{user_text}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+            return system_text, user_text, prompt_text
+
         if fmt == "email" or task == "email":
             system_text = (
                 "You are a professional voice-to-text email composer. Convert the dictated transcript into a structured professional email with:\n"
@@ -154,9 +167,20 @@ class VF1Engine:
         elif task == "prompt" or fmt == "prompt":
             system_text = (
                 "You are an AI prompt engineer. Extract and synthesize the actual prompt being requested by the user. "
-                "Remove any spoken meta-command wrappers (such as 'make this a prompt:', 'create a prompt for:', 'write a prompt:'). "
-                "Output an actionable direct instruction prompt starting with an imperative verb (such as 'Design', 'Create', 'Write', 'Build') "
-                "while faithfully preserving the speaker's requested topic and technical constraints. Output only the final usable prompt."
+                "Remove any spoken meta-command wrappers (such as 'can you make me a prompt for...', 'tell claude to...', 'make this a prompt:', 'create a prompt for:', 'write a prompt:'). "
+                "Output an actionable direct instruction prompt starting with an imperative verb (such as 'Extract', 'Design', 'Create', 'Write', 'Build') "
+                "while faithfully preserving the speaker's requested topic, constraints, and target format. Output only the final usable prompt."
+            )
+            prompt_text = (
+                f"<|im_start|>system\n{system_text}<|im_end|>\n"
+                f"<|im_start|>user\n{request.transcript}<|im_end|>\n"
+                f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            )
+        elif request.tone and request.tone != "neutral":
+            system_text = (
+                f"You are a professional voice-writing editor. Rewrite the transcript with a {request.tone} and constructive tone. "
+                "De-escalate any aggressive, harsh, or frustrated language while strictly preserving all factual details, issue descriptions, and counts. "
+                "Output only the rewritten text."
             )
             prompt_text = (
                 f"<|im_start|>system\n{system_text}<|im_end|>\n"
@@ -221,11 +245,31 @@ class VF1Engine:
         # 1. Prompt task: remove spoken meta-command wrappers and ensure actionable imperative form
         if task == "prompt" or fmt == "prompt":
             text = re.sub(
+                r"^(?:can you\s+)?(?:make|create|write|give|generate)\s+(?:me\s+)?(?:a\s+)?prompt(?:\s+(?:for|in)\s+[^,:]+?)?\s+(?:that\s+asks\s+(?:it\s+)?to|that\s+asks\s+to|to)\s*[:\s]*",
+                "",
+                text,
+                flags=re.I,
+            ).strip()
+            text = re.sub(
+                r"^(?:tell|ask)\s+[\w\s.-]+\s+to[:\s]+",
+                "",
+                text,
+                flags=re.I,
+            ).strip()
+            text = re.sub(
+                r"^(?:i\s+want\s+(?:an?\s+)?(?:instruction|prompt)\s+(?:for\s+[\w\s.-]+?)?\s+to)[:\s]+",
+                "",
+                text,
+                flags=re.I,
+            ).strip()
+            text = re.sub(
                 r"^(?:make this a prompt|create a prompt for|write a prompt|generate a prompt)[:\s]+",
                 "",
                 text,
                 flags=re.I,
             ).strip()
+            if text.endswith("?") and not text.lower().startswith(("how", "what", "why", "when", "where", "who")):
+                text = text[:-1].rstrip() + "."
             # Convert opening gerunds to direct imperative action verbs (e.g. "designing" -> "Design")
             gerund_to_imperative = {
                 "designing": "Design",
@@ -259,6 +303,24 @@ class VF1Engine:
                 "the", "a", "an", "this", "that", "these", "those", "we", "i", "you",
                 "our", "my", "it", "here", "just", "please", "today", "as", "is", "are", "was", "were"
             }
+            _NON_SENDER_WORDS = {
+                # Timezones & temporal markers
+                "est", "pst", "cst", "mst", "edt", "pdt", "cdt", "mdt", "gmt", "utc", "bst", "cet", "cest", "ist", "jst", "aest",
+                # Adverbs, relative time & adjectives
+                "sharp", "promptly", "instead", "today", "tomorrow", "tonight", "yesterday", "soon", "now", "later", "daily",
+                "weekly", "monthly", "early", "late", "approx", "approximately", "roughly", "around", "tentative",
+                # Status, verbs & common email endings
+                "confirmed", "scheduled", "pending", "required", "mandatory", "optional", "already", "also", "then", "there",
+                "here", "again", "either", "neither", "too", "well", "done", "complete", "completed", "delivered", "sent",
+                "finished", "ready", "ok", "okay", "yes", "no", "sure", "fine", "good", "great", "fast", "quick", "quickly",
+                "directly", "immediately", "urgent", "urgently", "priority", "critical", "blocking", "blocked", "please",
+                "team", "all", "everyone", "thanks", "thank", "asap",
+                # Days of week & months
+                "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+                # Common prepositions / pronouns
+                "in", "at", "on", "by", "for", "to", "from", "with", "without", "before", "after", "it", "this", "that",
+            }
             if not re.match(r"^Subject:\s*", text, re.I):
                 m_subj = re.search(r"\bsubject\s+([^,\n]+?)(?:\s+(?:hi|hello|dear|the|team|executives|client)\b|\n|$)", text, re.I)
                 if not m_subj:
@@ -290,19 +352,43 @@ class VF1Engine:
                         else:
                             body = text
 
-                    m_sign = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", body, re.I)
+                    m_sign = re.search(r"\b(regards|best regards|warm regards|kind regards|thanks|thank you|sincerely|cheers|from|signed),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", body, re.I)
                     signoff = ""
                     if m_sign:
                         sal = m_sign.group(1).capitalize()
+                        if sal.lower() in ("from", "signed"):
+                            sal = "Best regards"
+                        elif sal.lower() in ("thanks", "thank you"):
+                            sal = "Thanks"
                         sender_name = m_sign.group(2).strip().title()
                         signoff = f"{sal},\n{sender_name}"
                         body = body[:m_sign.start()].strip()
                     else:
-                        m_sign_t = re.search(r"\b(regards|best regards|warm regards|thanks|thank you|sincerely),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", transcript, re.I)
+                        m_sign_t = re.search(r"\b(regards|best regards|warm regards|kind regards|thanks|thank you|sincerely|cheers|from|signed),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", transcript, re.I)
                         if m_sign_t:
                             sal = m_sign_t.group(1).capitalize()
+                            if sal.lower() in ("from", "signed"):
+                                sal = "Best regards"
+                            elif sal.lower() in ("thanks", "thank you"):
+                                sal = "Thanks"
                             sender_name = m_sign_t.group(2).strip().title()
                             signoff = f"{sal},\n{sender_name}"
+                            m_trailing_time_name = re.search(r"(\d+\s*(?:pm|am|utc))\s+" + re.escape(sender_name) + r"\.?$", body, re.I)
+                            if m_trailing_time_name:
+                                prefix = m_trailing_time_name.group(1)
+                                body = body[:m_trailing_time_name.start()] + prefix
+                        else:
+                            # Detect spoken trailing sender name directly after time boundary (e.g. '5pm Marcus')
+                            # STRICT: Only when trailing word is at the very end of transcript, not in _NON_SENDER_WORDS, and not a stopword
+                            m_trailing_time_name = re.search(r"(\d+\s*(?:pm|am|utc))\s+([A-Za-z]+)\.?$", body, re.I)
+                            if m_trailing_time_name:
+                                cand_name = m_trailing_time_name.group(2).strip().title()
+                                if (cand_name.lower() not in _NON_SENDER_WORDS
+                                        and cand_name.lower() not in _GREETING_STOPWORDS
+                                        and re.search(r"\b" + re.escape(cand_name) + r"\b\.?$", transcript.strip(), re.I)):
+                                    signoff = f"Best regards,\n{cand_name}"
+                                    prefix = m_trailing_time_name.group(1)
+                                    body = body[:m_trailing_time_name.start()] + prefix
 
                     if body:
                         body = body.rstrip(",; ")
@@ -326,6 +412,37 @@ class VF1Engine:
                     text,
                     flags=re.I,
                 )
+                # Ensure proper formal sign-off if trailing spoken name is present without sign-off
+                if not re.search(r"(?im)^(?:best|regards|best regards|kind regards|thanks|thank you|sincerely|warmly),?\s*\n+\s*([^\n]+)\s*$", text):
+                    m_sign_t = re.search(r"\b(regards|best regards|warm regards|kind regards|thanks|thank you|sincerely|cheers|from|signed),?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\.?$", transcript, re.I)
+                    if m_sign_t:
+                        sal = m_sign_t.group(1).capitalize()
+                        if sal.lower() in ("from", "signed"):
+                            sal = "Best regards"
+                        elif sal.lower() in ("thanks", "thank you"):
+                            sal = "Thanks"
+                        sender_name = m_sign_t.group(2).strip().title()
+                        m_trailing_time_name = re.search(r"(\d+\s*(?:pm|am|utc))\s+" + re.escape(sender_name) + r"\.?$", text, re.I)
+                        if m_trailing_time_name:
+                            prefix = m_trailing_time_name.group(1)
+                            clean_lead = text[:m_trailing_time_name.start()] + prefix
+                            if not clean_lead.endswith((".", "!", "?")):
+                                clean_lead += "."
+                            text = f"{clean_lead}\n\n{sal},\n{sender_name}"
+                        else:
+                            text = f"{text.rstrip()}\n\n{sal},\n{sender_name}"
+                    else:
+                        m_trailing_time_name = re.search(r"(\d+\s*(?:pm|am|utc))\s+([A-Za-z]+)\.?$", text, re.I)
+                        if m_trailing_time_name:
+                            cand_name = m_trailing_time_name.group(2).strip().title()
+                            if (cand_name.lower() not in _NON_SENDER_WORDS
+                                    and cand_name.lower() not in _GREETING_STOPWORDS
+                                    and re.search(r"\b" + re.escape(cand_name) + r"\b\.?$", transcript.strip(), re.I)):
+                                prefix = m_trailing_time_name.group(1)
+                                clean_lead = text[:m_trailing_time_name.start()] + prefix
+                                if not clean_lead.endswith((".", "!", "?")):
+                                    clean_lead += "."
+                                text = f"{clean_lead}\n\nBest regards,\n{cand_name}"
             return text
 
         # 3. Bullets / Lists task: ensure items are on separate bullet lines
@@ -545,10 +662,11 @@ class VF1Engine:
 
         # 1. Build contract request
         norm_format = None if format in (None, "auto") else format
+        norm_instruction = instruction or (transcript.strip() if task == "edit" else None)
         req = VF1Request(
             task=task,
             format=norm_format,
-            instruction=instruction,
+            instruction=norm_instruction,
             draft=draft,
             rules=rules,
             context=context,
@@ -584,25 +702,32 @@ class VF1Engine:
             transcript=transcript,
             candidate_text=postprocessed_candidate,
             task=task,
+            format=norm_format,
             instruction=instruction,
             allow_fallback=allow_fallback,
         )
 
-        # Multi-sentence draft preservation barrier (P0-3):
+        # Multi-sentence draft preservation barrier (P0-3 & P0-5):
         # If task is edit and candidate dropped the draft context, do NOT silently emit just the instruction!
+        # P0-5: On failed generation, leave draft byte-for-byte unchanged without appended note.
         if task == "edit" and draft:
             draft_clean = draft.strip()
-            draft_words = set(draft_clean.lower().split())
-            cand_words = set(postprocessed_candidate.lower().split())
-            overlap = len(draft_words.intersection(cand_words))
-            if overlap < min(4, max(1, len(draft_words) // 2)):
-                log.warning("[VF-1] Candidate dropped draft context during edit. Preserving draft.")
+            _DRAFT_STOPWORDS = {"the", "a", "an", "is", "are", "was", "were", "to", "at", "in", "on", "for", "of", "and", "or", "am", "pm", "it", "this", "that", "be"}
+            draft_content_words = {w.strip(".,;:!?()[]\"'") for w in draft_clean.lower().split() if w.strip(".,;:!?()[]\"'") and w.strip(".,;:!?()[]\"'") not in _DRAFT_STOPWORDS}
+            cand_content_words = {w.strip(".,;:!?()[]\"'") for w in postprocessed_candidate.lower().split() if w.strip(".,;:!?()[]\"'") and w.strip(".,;:!?()[]\"'") not in _DRAFT_STOPWORDS}
+            overlap = len(draft_content_words.intersection(cand_content_words))
+            required_overlap = max(2, int(len(draft_content_words) * 0.35))
+            if len(draft_content_words) >= 3 and overlap < required_overlap:
+                log.warning("[VF-1] Candidate dropped draft context during edit (overlap %d/%d). Preserving draft.", overlap, len(draft_content_words))
                 gate_decision = SafetyGateDecision(
                     accepted=False,
-                    final_text=f"{draft_clean}\n\n[Voice Flow Note: Spoken instruction '{transcript}' was not merged into draft. Preserving original draft.]",
+                    final_text=draft,
                     source_preserved=True,
                     rejection_reasons=["draft_context_dropped"],
                 )
+            elif not gate_decision.accepted:
+                gate_decision.final_text = draft
+                gate_decision.source_preserved = True
 
         # 4. User-Facing Review Barrier (P0-3):
         # Flag uncertain names, currencies, technical IDs, dates/times, or draft mutations

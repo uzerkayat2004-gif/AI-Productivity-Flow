@@ -190,11 +190,29 @@ def resolve_corrections(text: str) -> tuple[str, list[str]]:
     return text, removed
 
 
+def normalize_canonical_equivalences(text: str) -> str:
+    """Normalize recognized format and designation equivalences.
+
+    Equivalences handled:
+    - Time representations: '11.30am', '11.30 am', '11.30pm', '11.30 pm' -> '11:30 am', '11:30 pm'
+    - Model designations: 'GPT4', 'GPT 4' -> 'GPT-4'
+    - Document designations: 'SEC 10K', 'SEC 10 K' -> 'SEC 10-K'
+    """
+    if not text:
+        return ""
+    text = re.sub(r"\b(\d{1,2})\.(\d{2})\s*(am|pm|utc)\b", r"\1:\2 \3", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bGPT\s*4\b", "GPT-4", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bGPT\s*3\.?5\b", "GPT-3.5", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bSEC\s*10[\s-]*K\b", "SEC 10-K", text, flags=re.IGNORECASE)
+    return text
+
+
 def canonical_source(text: str) -> tuple[str, list[str]]:
     """Fillers removed, repeats collapsed, corrections applied, contractions expanded."""
     t = strip_fillers(text or "")
     t = collapse_repeats(t)
     t, removed = resolve_corrections(t)
+    t = normalize_canonical_equivalences(t)
     return expand_contractions(t), removed
 
 
@@ -445,6 +463,81 @@ class CheckResult:
         return self.ok
 
 
+def validate_subject_line(
+    source: str,
+    output: str,
+    *,
+    task: str = "cleanup",
+    fmt: str | None = None,
+    instruction: str | None = None,
+    allowed_numbers: set[Any] | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate that a Subject header in output is legitimate and semantically faithful.
+
+    Permits task-required structure for email requests while blocking:
+    - Subject headers when no email was requested
+    - Unsupported numbers or amounts in the subject line
+    - Unsupported deadlines or dates in the subject line
+    - Unmentioned commitments or unsupported claims
+    - Subject lines unrelated to the dictated content
+    """
+    if not SUBJECT_RE.search(output):
+        return True, []
+
+    is_email = (
+        task in ("email", "rewrite")
+        and (
+            fmt == "email"
+            or bool(re.search(r"\b(?:email|write an email|send an email|draft an email)\b", source or "", re.I))
+            or bool(re.search(r"\bemail\b", instruction or "", re.I))
+        )
+    ) or bool(re.search(r"\bsubject\b", source or "", re.I))
+
+    if not is_email:
+        return False, ["invented_subject"]
+
+    m_full = re.search(r"(?im)^\s*subject\s*:\s*(.+)$", output)
+    if not m_full:
+        return True, []
+    subj_text = m_full.group(1).strip()
+
+    fails: list[str] = []
+
+    # 1. Numerical checks: numbers in subject must be in allowed_numbers
+    subj_nums = _output_numbers(subj_text)
+    if allowed_numbers is not None and subj_nums:
+        for n in subj_nums:
+            if not any(n == a or (isinstance(a, float) and int(a) == n) for a in allowed_numbers):
+                fails.append(f"invented_subject_number:{n}")
+
+    # 2. Unsupported deadlines or dates: check for time/date patterns in subject
+    datetime_re = re.compile(
+        r"\b(?:\d{4}\s*UTC|\d{1,2}:\d{2}\s*(?:UTC|AM|PM|am|pm)?|\d{1,2}\s*(?:am|pm)|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))\b",
+        re.I,
+    )
+    for dt in datetime_re.findall(subj_text):
+        if not re.search(re.escape(dt), source or "", re.I):
+            fails.append(f"invented_subject_deadline:{dt}")
+
+    # 3. Unsupported commitments / commercial terms
+    commitment_terms = ["refund", "refunded", "guaranteed", "terminated", "termination", "lawsuit", "settlement", "penalty"]
+    for term in commitment_terms:
+        if re.search(rf"\b{term}\b", subj_text, re.I) and not re.search(rf"\b{term}\b", source or "", re.I):
+            fails.append(f"invented_subject_commitment:{term}")
+
+    # 4. Semantic grounding: Subject line content words must connect to source or body
+    stopwords = {"and", "the", "for", "with", "regarding", "about", "our", "your", "from", "update", "notice", "alert", "report", "timeline"}
+    subj_words = [w.lower() for w in re.findall(r"[a-zA-Z]{3,}", subj_text) if w.lower() not in stopwords]
+    src_words = set(re.findall(r"[a-zA-Z]{3,}", (source or "").lower()))
+
+    if subj_words:
+        grounded = any(w in src_words or any(w in sw or sw in w for sw in src_words) for w in subj_words)
+        if not grounded:
+            fails.append("invented_subject_unrelated")
+
+    return (len(fails) == 0), fails
+
+
 def check_output(
     source: str,
     output: str,
@@ -459,7 +552,14 @@ def check_output(
     """Return named failures for an output given its transcript."""
     failures: list[str] = []
     src_canon, removed = canonical_source(source)
-    out = output or ""
+    out = normalize_canonical_equivalences(output or "")
+    if task == "prompt":
+        src_canon = re.sub(
+            r"^(?:can you\s+)?(?:make|create|write|give|generate)\s+(?:me\s+)?(?:a\s+)?prompt(?:\s+(?:for|in)\s+[^,:]+?)?\s+(?:that\s+asks\s+(?:it\s+)?to|that\s+asks\s+to|to)\s*[:\s]*",
+            "",
+            src_canon,
+            flags=re.IGNORECASE,
+        ).strip()
     authorised = " ".join(x for x in (instruction or "", sender or "", recipient or "") if x)
 
     if not out.strip() and src_canon.strip(" .,!?"):
@@ -470,13 +570,24 @@ def check_output(
         failures.append("assistant_preamble")
     if PLACEHOLDER_RE.search(out):
         failures.append("placeholder")
-    if SUBJECT_RE.search(out) and not re.search(r"\bsubject\b", source or "", re.I):
-        failures.append("invented_subject")
 
     # Numbers: every number the speaker kept must survive (except in
     # summaries, which may drop minor numbers but never invent or change).
     src_nums = number_values(src_canon)
     auth_nums = number_values(authorised)
+    allowed = set().union(*src_nums, *auth_nums) if (src_nums or auth_nums) else set()
+
+    # Task-aware email subject validation
+    subj_ok, subj_fails = validate_subject_line(
+        source,
+        out,
+        task=task,
+        fmt=fmt,
+        instruction=instruction,
+        allowed_numbers=allowed,
+    )
+    if not subj_ok:
+        failures.extend(subj_fails)
     out_nums = _output_numbers(out)
     out_counter = Counter(out_nums)
     if task not in ("summarize",) and not allow_number_change:

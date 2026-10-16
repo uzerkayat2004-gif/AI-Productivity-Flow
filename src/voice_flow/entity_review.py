@@ -114,9 +114,10 @@ def soundex(name: str) -> str:
 class CriticalEntity:
     """A detected entity requiring user verification or phonetic resolution."""
 
-    entity_type: str  # "name", "financial", "id", "email"
+    entity_type: str  # "name", "financial", "id", "email", "datetime"
     original: str
     suggested: Optional[str] = None
+    alternatives: List[str] = field(default_factory=list)
     requires_review: bool = True
     confidence: float = 1.0
     reason: str = ""
@@ -250,23 +251,36 @@ def detect_critical_entities(
         first_word = words[0]
         first_low = first_word.lower()
 
-        # Check known phonetic pairs (e.g. Devon <-> Devin)
+        # Grounded user dictionary / contact pool takes priority
         suggested = None
         reason = ""
-        if first_low in PHONETIC_NAME_PAIRS:
-            suggested_first = PHONETIC_NAME_PAIRS[first_low]
-            suggested = f"{suggested_first} {' '.join(words[1:])}".strip()
-            reason = f"Phonetic name homophone detected: '{token}' sounds like '{suggested}'."
+        alternatives: List[str] = []
 
-        # Check Soundex against user dictionary / contacts
-        if not suggested and known_pool:
+        if known_pool:
             token_soundex = soundex(first_word)
             for candidate in known_pool:
                 cand_first = candidate.split()[0]
-                if soundex(cand_first) == token_soundex and cand_first.lower() != first_low:
-                    suggested = candidate
-                    reason = f"Sound-alike match found in user dictionary: '{token}' -> '{candidate}'."
+                if (soundex(cand_first) == token_soundex or cand_first.lower() == PHONETIC_NAME_PAIRS.get(first_low, "").lower()) and cand_first.lower() != first_low:
+                    if len(words) == 1 and cand_first in known_pool:
+                        suggested = cand_first
+                    else:
+                        suggested = candidate
+                    alternatives = [suggested]
+                    if candidate not in alternatives:
+                        alternatives.append(candidate)
+                    if cand_first not in alternatives:
+                        alternatives.append(cand_first)
+                    if token not in alternatives:
+                        alternatives.append(token)
+                    reason = f"Grounded contact dictionary phonetic match: '{token}' sounds like '{suggested}'. User confirmation required."
                     break
+
+        # Fallback to general phonetic homophone pair if not in contact pool
+        if not suggested and first_low in PHONETIC_NAME_PAIRS:
+            suggested_first = PHONETIC_NAME_PAIRS[first_low]
+            suggested = f"{suggested_first} {' '.join(words[1:])}".strip()
+            alternatives = [suggested, token]
+            reason = f"Phonetic name homophone detected: '{token}' sounds like '{suggested}'. User confirmation required."
 
         if suggested and suggested != token:
             entities.append(
@@ -274,6 +288,7 @@ def detect_critical_entities(
                     entity_type="name",
                     original=token,
                     suggested=suggested,
+                    alternatives=alternatives,
                     requires_review=True,
                     confidence=0.85,
                     reason=reason,
@@ -354,6 +369,111 @@ def apply_review_decision(
     if target in text:
         return text.replace(target, replacement, 1)
     return text
+
+
+@dataclass
+class ReviewResolution:
+    """Outcome of the user-facing review barrier check before target application insertion."""
+
+    approved: bool
+    action: str  # "approved", "corrected", "cancelled", "ignored", "closed"
+    final_text: str  # Text to insert; empty if cancelled or closed
+    insertion_permitted: bool = False
+    corrections: Dict[str, str] = field(default_factory=dict)
+    reason: str = ""
+
+
+class BlockingReviewManager:
+    """Enforces blocking review for high-risk content prior to application insertion.
+
+    Core P0-1 Guarantees:
+    1. Text CANNOT reach target window before explicit approval.
+    2. User can correct names, amounts, times, identifiers, or the full text.
+    3. Final inserted text exactly matches the approved correction.
+    4. Cancel leaves target application unchanged (insertion_permitted=False).
+    5. Closing or ignoring the review interface NEVER silently approves text.
+    """
+
+    def __init__(self) -> None:
+        self._custom_resolver: Optional[Any] = None
+        self._last_resolution: Optional[ReviewResolution] = None
+
+    def set_resolver(
+        self,
+        resolver_fn: Optional[Any],
+    ) -> None:
+        """Set a custom/test review resolver function."""
+        self._custom_resolver = resolver_fn
+
+    def resolve_review(
+        self,
+        text: str,
+        entities: List[CriticalEntity],
+        *,
+        task: str = "cleanup",
+        draft: Optional[str] = None,
+    ) -> ReviewResolution:
+        """Run blocking review barrier resolution.
+
+        If custom resolver is registered, delegates to it.
+        Otherwise, attempts to present desktop GUI dialog or fails closed (safe default).
+        """
+        if not entities and not (task == "edit" and draft):
+            # No review needed
+            res = ReviewResolution(
+                approved=True,
+                action="approved",
+                final_text=text,
+                insertion_permitted=True,
+                reason="No high-risk entities detected.",
+            )
+            self._last_resolution = res
+            return res
+
+        if self._custom_resolver is not None:
+            res = self._custom_resolver(text, entities, task, draft)
+            self._last_resolution = res
+            return res
+
+        import os
+        import sys
+        if ("pytest" in sys.modules or os.environ.get("VOICE_FLOW_HEADLESS") == "1") and self._custom_resolver is None:
+            res = ReviewResolution(
+                approved=False,
+                action="closed",
+                final_text="",
+                insertion_permitted=False,
+                reason="Automated test environment without affirmative resolver; failing closed.",
+            )
+            self._last_resolution = res
+            return res
+
+        # Default desktop interactive path
+        try:
+            from voice_flow.review_barrier_dialog import show_review_barrier_dialog
+            res = show_review_barrier_dialog(text, entities, task=task, draft=draft)
+            self._last_resolution = res
+            return res
+        except Exception as exc:
+            log.warning("[REVIEW BARRIER] GUI dialog unavailable (%s); failing closed for safety.", exc)
+            # FAIL-CLOSED: Closing, ignoring, or missing UI never silently approves text!
+            res = ReviewResolution(
+                approved=False,
+                action="closed",
+                final_text="",
+                insertion_permitted=False,
+                reason=f"Review interface unavailable or closed: {exc}",
+            )
+            self._last_resolution = res
+            return res
+
+
+_global_review_manager = BlockingReviewManager()
+
+
+def get_review_manager() -> BlockingReviewManager:
+    """Return the global blocking review manager instance."""
+    return _global_review_manager
 
 
 def create_diagnostic_trace(

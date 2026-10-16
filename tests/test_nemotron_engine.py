@@ -1,6 +1,8 @@
 """Comprehensive tests for NVIDIA Nemotron Speech ASR GGUF Engine and Voice Flow integration."""
 from __future__ import annotations
 
+from native_fixture_client import bind_native
+
 import ctypes
 import threading
 import time
@@ -383,10 +385,10 @@ def test_nemotron_stream_applies_far_mic_conditioning_before_native_push(monkeyp
             pass
 
     dll = _FakeDll()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
     monkeypatch.setattr(storage, "get_setting", lambda key, default=None: "far" if key == "voice_flow_mic_profile" else default)
     session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    bind_native(session._engine, dll, opened=True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: setattr(session._stream, "value", 42) or True)
     session.start_session()
 
     sr = 16000
@@ -494,9 +496,9 @@ def test_nemotron_finalization_does_not_publish_hello_without_welcome(
             pass
 
     dll = _FakeDll()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
     session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    bind_native(session._engine, dll, opened=True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: setattr(session._stream, "value", 42) or True)
     session.start_session()
 
     # Include a very short, quiet leading frame and quiet ending samples. The
@@ -568,9 +570,10 @@ def test_nemotron_final_drain_keeps_the_normal_success_path(monkeypatch):
         def nemo_speech_asr_stream_close(self, _stream):
             pass
 
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: _FakeDll())
+    dll = _FakeDll()
     session = nemotron_engine.NemotronStreamTranscriber(engine=_FakeEngine())
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    bind_native(session._engine, dll, opened=True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: setattr(session._stream, "value", 42) or True)
     session.start_session()
     session.submit_frame(np.ones(160, dtype=np.float32), 16000)
     session.end_session()
@@ -599,7 +602,10 @@ def test_nemotron_long_buffer_segmentation_keeps_short_final_tail(monkeypatch):
         begin = int(start * engine.sample_rate)
         audio[begin : begin + 1600] = 0.001
 
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: object())
+    engine._native = object()
+    engine.fatal_error = None
+    engine._streams_idle = threading.Event()
+    engine._streams_idle.set()
 
     def record_segment(samples: np.ndarray, **_kwargs) -> str:
         segments.append(samples.copy())
@@ -617,8 +623,7 @@ def test_nemotron_stream_transcriber_fallback_when_invalid_model(monkeypatch):
     """Verify NemotronStreamTranscriber gracefully marks failure if model cannot be loaded."""
     from voice_flow.nemotron_engine import NemotronStreamTranscriber
 
-    monkeypatch.setattr(nemotron_engine, "get_nemotron_engine", lambda _ref: None)
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: None)
+    monkeypatch.setattr(nemotron_engine, "get_nemotron_engine", lambda _ref, **_kwargs: None)
     streamer = NemotronStreamTranscriber()
     streamer.start_session(model_ref="nonexistent/fake-model-12345")
     assert streamer._done.wait(1.0)

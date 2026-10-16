@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import logging
 import queue
 import sys
 import threading
@@ -102,6 +103,66 @@ class _ThemeColor:
         return self.light_val
 
 
+class _VoiceClickDispatcher:
+    """One serial worker, with at most one pending terminal voice action."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = None
+        self._pending = None
+        self._closed = False
+        self._thread = None
+
+    def starting(self) -> bool:
+        with self._lock:
+            return self._active == "start" and self._pending is None
+
+    def submit(self, action: str, callback: Callable[[], None]) -> bool:
+        with self._lock:
+            if self._closed:
+                return False
+            if self._active is not None:
+                if action == "start" or action == self._active:
+                    return False
+                # Cancel wins over an unstarted finish; repeated clicks coalesce.
+                if self._pending is None or action == "cancel":
+                    self._pending = (action, callback)
+                    return True
+                return False
+            self._active = action
+            self._thread = threading.Thread(
+                target=self._run, args=(callback,), name="overlay-voice-click", daemon=True,
+            )
+            try:
+                self._thread.start()
+            except Exception:
+                self._active = None
+                self._thread = None
+                logging.getLogger(__name__).exception("Could not dispatch floating bar voice action")
+                return False
+            return True
+
+    def _run(self, callback: Callable[[], None]) -> None:
+        while True:
+            try:
+                callback()
+            except Exception:
+                logging.getLogger(__name__).exception("Floating bar voice action failed")
+            with self._lock:
+                if self._closed or self._pending is None:
+                    self._active = None
+                    self._thread = None
+                    return
+                self._active, callback = self._pending
+                self._pending = None
+
+    def close(self) -> None:
+        # Never join a backend worker from Tk shutdown. In-flight work stays daemonized.
+        with self._lock:
+            self._closed = True
+            self._pending = None
+
+
 class FloatingOverlayBar:
     """Always-on-top, non-activating floating pill bar that mirrors Wispr Flow's UI."""
 
@@ -174,6 +235,7 @@ class FloatingOverlayBar:
         self.on_start = (lambda: None)
         self.get_audio_level = get_audio_level or (lambda: 0.0)
 
+        self._voice_clicks = _VoiceClickDispatcher()
         self.on_start_click = None
         self.on_cancel_click = None
         self.on_finish_click = None
@@ -555,6 +617,8 @@ class FloatingOverlayBar:
                 self.root.mainloop()
             finally:
                 self._mainloop_running = False
+                if sys.exc_info()[0] is None:
+                    self._voice_clicks.close()
 
     # ------------------------------------------------------------------
     # macOS (Tk 9 / Aqua) helpers. Windows never reaches these.
@@ -1353,6 +1417,18 @@ class FloatingOverlayBar:
             return "cancel"
         return "finish"
 
+    def _dispatch_voice_click(self, action: str) -> None:
+        # A second Voice click during startup means finish, even before Tk has
+        # received the recording-state repaint from the controller worker.
+        if action == "start" and self._voice_clicks.starting():
+            action = "finish"
+        callback = {
+            "start": self.on_start_click or self.on_start,
+            "finish": self.on_finish_click or self.on_finish,
+            "cancel": self.on_cancel_click or self.on_cancel,
+        }[action]
+        self._voice_clicks.submit(action, callback)
+
     def _on_press(self, event: tk.Event) -> None:
         self.drag_x = event.x
         self.drag_y = event.y
@@ -1373,7 +1449,7 @@ class FloatingOverlayBar:
             self._press_window_xy[1] + offset_y + main_h,
         )
         if zone == "summary_voice":
-            (self.on_start_click or self.on_start)()
+            self._dispatch_voice_click("start")
         elif zone and zone.startswith("summary_cancel:"):
             self._handle_summary_row_click(zone, activate=False)
         elif zone and zone.startswith("summary_dismiss:"):
@@ -1422,20 +1498,14 @@ class FloatingOverlayBar:
                 self.clear_selected_text()
                 self.on_listen_selected(selected)
             elif zone == "speak" and self.on_start_click:
-                self.on_start_click()
+                self._dispatch_voice_click("start")
             elif zone == "speak" and self.on_start:
-                self.on_start()
+                self._dispatch_voice_click("start")
         elif self.state == "RECORDING":
             if zone == "cancel":
-                if self.on_cancel_click:
-                    self.on_cancel_click()
-                else:
-                    self.on_cancel()
+                self._dispatch_voice_click("cancel")
             else:
-                if self.on_finish_click:
-                    self.on_finish_click()
-                else:
-                    self.on_finish()
+                self._dispatch_voice_click("finish")
 
         was_mouse_over = self._is_mouse_over
         if zone not in ("grip", "video_flow", "settings", "audio_settings", "audio_pause"):

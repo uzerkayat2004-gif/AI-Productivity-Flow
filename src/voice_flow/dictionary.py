@@ -733,3 +733,4 @@ class DictionaryEngine:
 
 # Singleton instance
 dictionary_engine = DictionaryEngine()
+dictionary = dictionary_engine
