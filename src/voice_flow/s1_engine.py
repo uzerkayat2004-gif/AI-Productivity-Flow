@@ -143,32 +143,56 @@ def _s1_runtime_batch_settings() -> dict[str, int]:
     }
 
 
+def _stop_s1_server(*, force: bool) -> None:
+    """Stop the llama-server fallback with the same idle rule as in-process S1."""
+    try:
+        from voice_flow import vf1_engine
+
+        vf1_engine.stop_idle_llama_server(LOCAL_MODEL_IDLE_SECONDS, force=force)
+    except Exception:
+        log.debug("[S1] Could not stop idle llama-server", exc_info=True)
+
+
 def _release_idle_s1(now: float) -> bool:
     if not _LLM_LOCK.acquire(blocking=False):
         return False
     try:
         last_used = getattr(polish_with_s1, "_last_used", now)
         llm = getattr(polish_with_s1, "_cached_llm", None)
-        if llm is not None and (
-            cleanup_is_forced("polish") or now - last_used >= LOCAL_MODEL_IDLE_SECONDS
-        ):
+        idle = cleanup_is_forced("polish") or now - last_used >= LOCAL_MODEL_IDLE_SECONDS
+        if llm is not None and idle:
             _release_cached_s1(llm)
             setattr(polish_with_s1, "_cached_llm", None)
             setattr(polish_with_s1, "_cached_llm_path", None)
             log.info("[S1] Released inactive S1-mini model memory")
+        if idle:
+            # The server path keeps the model resident in a child process;
+            # release it on the same schedule (it restarts on next use).
+            _stop_s1_server(force=True)
         return True
     finally:
         _LLM_LOCK.release()
 
 
 def unload_s1_model() -> None:
-    """Explicitly unload cached S1 model instance from memory."""
+    """Explicitly unload cached S1 model instance (and S1 llama-server) from memory."""
     with _LLM_LOCK:
         llm = getattr(polish_with_s1, "_cached_llm", None)
         if llm is not None:
             _release_cached_s1(llm)
             setattr(polish_with_s1, "_cached_llm", None)
             setattr(polish_with_s1, "_cached_llm_path", None)
+        _stop_s1_server(force=True)
+
+
+def _s1_server_ready() -> bool:
+    """Start (or reuse) the app's own llama-server for S1."""
+    from voice_flow import vf1_engine
+
+    engine = vf1_engine.get_vf1_engine()
+    return bool(engine.is_server_healthy() or (
+        engine._find_llama_server_binary() and engine.ensure_server_running()
+    ))
 
 
 def build_s1_control_line(
@@ -801,9 +825,18 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
         return False
     try:
         register_idle_cleanup("s1", _release_idle_s1, kind="polish")
-        if getattr(polish_with_s1, "_cached_llm_path", None) == str(model_path):
+        if (
+            getattr(polish_with_s1, "_cached_llm", None) is not None
+            and getattr(polish_with_s1, "_cached_llm_path", None) == str(model_path)
+        ):
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
+        if getattr(polish_with_s1, "_s1_server_backend_path", None) == str(model_path):
+            # In-process load already failed this session: one backend only.
+            if _s1_server_ready():
+                setattr(polish_with_s1, "_last_used", idle_time())
+                return True
+            return False
         try:
             from llama_cpp import Llama  # type: ignore
 
@@ -820,16 +853,14 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
                 _release_cached_s1(old_llm)
             setattr(polish_with_s1, "_cached_llm", llm)
             setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            setattr(polish_with_s1, "_s1_server_backend_path", None)
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
         except Exception:
-            from voice_flow import vf1_engine
-
-            engine = vf1_engine.get_vf1_engine()
-            if engine.is_server_healthy() or (
-                engine._find_llama_server_binary() and engine.ensure_server_running()
-            ):
-                setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            # Fall back to llama-server. Do not mark the in-process cache as
+            # loaded (that made later polishes skip loading with llm=None).
+            setattr(polish_with_s1, "_s1_server_backend_path", str(model_path))
+            if _s1_server_ready():
                 setattr(polish_with_s1, "_last_used", idle_time())
                 return True
             return False
@@ -1089,11 +1120,13 @@ def _polish_with_s1_impl(
         use_server = False
         llm = getattr(polish_with_s1, "_cached_llm", None)
         if llm is None:
-            try:
-                from llama_cpp import Llama  # type: ignore
+            # One backend per session: once the in-process load failed, use
+            # only the app's llama-server (never both copies of the model).
+            in_process_failed = getattr(polish_with_s1, "_s1_server_backend_path", None) == str(model_path)
+            if not in_process_failed:
+                try:
+                    from llama_cpp import Llama  # type: ignore
 
-                cached_path = getattr(polish_with_s1, "_cached_llm_path", None)
-                if cached_path != str(model_path):
                     gpu_layers = -1 if sys.platform == "darwin" else 0
                     replacement = Llama(
                         model_path=str(model_path),
@@ -1105,13 +1138,12 @@ def _polish_with_s1_impl(
                     llm = replacement
                     setattr(polish_with_s1, "_cached_llm", llm)
                     setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-            except Exception:
-                from voice_flow import vf1_engine
-
-                engine = vf1_engine.get_vf1_engine()
-                if engine.is_server_healthy() or (
-                    engine._find_llama_server_binary() and engine.ensure_server_running()
-                ):
+                    setattr(polish_with_s1, "_s1_server_backend_path", None)
+                except Exception:
+                    in_process_failed = True
+                    setattr(polish_with_s1, "_s1_server_backend_path", str(model_path))
+            if llm is None:
+                if _s1_server_ready():
                     use_server = True
                 else:
                     log.info("[S1] llama-cpp runtime and llama-server unavailable; S1 cannot run.")
