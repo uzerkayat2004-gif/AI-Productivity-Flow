@@ -308,8 +308,23 @@ class AudioFlowFloatingWidget:
         except Exception:
             pass
 
-    def _mac_force_repaint(self) -> None:
-        self._mac_repaint_pending = False
+    # Follow-up nudges after a stage resize (ms after the first one). On the
+    # macOS 14 runner one 30 ms nudge sometimes landed before WindowServer had
+    # applied the first resize: the Summary depth picker stayed a black,
+    # click-deaf rectangle (it4 af2 38978839867). Later passes are cheap and a
+    # no-op visually once the window is painted.
+    MAC_REPAINT_FOLLOWUPS_MS = (180, 450)
+
+    def _mac_force_repaint_followup(self, size: tuple[int, int]) -> None:
+        if not self.win or not self.canvas or not self._is_visible:
+            return
+        if tuple(self._get_current_dimensions()) != tuple(size):
+            return  # a newer resize scheduled its own passes
+        self._mac_force_repaint(followup=True)
+
+    def _mac_force_repaint(self, followup: bool = False) -> None:
+        if not followup:
+            self._mac_repaint_pending = False
         if not self.win or not self.canvas or not self._is_visible:
             return
         w, h = self._get_current_dimensions()
@@ -324,6 +339,12 @@ class AudioFlowFloatingWidget:
         self._mac_painted_size = (w, h)
         self._mac_apply_shape(w, h)
         self._draw()
+        if not followup and self.root is not None:
+            for delay in self.MAC_REPAINT_FOLLOWUPS_MS:
+                try:
+                    self.root.after(delay, lambda size=(w, h): self._mac_force_repaint_followup(size))
+                except Exception:
+                    break
 
     def _apply_window_shape(self, w: int, h: int) -> None:
         """Natively clip the window boundary via Win32 SetWindowRgn for cards, or clear for transparent circle."""

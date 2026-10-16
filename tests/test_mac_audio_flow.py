@@ -734,5 +734,16 @@ def test_widget_resize_on_mac_schedules_one_pixel_repaint(monkeypatch):
     assert len(scheduled) == 1
     scheduled[0][1]()  # run the deferred repaint
     assert geometries[-2].startswith("287x32") and geometries[-1].startswith("286x32")
+    # plus the follow-up passes (macOS 14: one early nudge could leave it black)
+    assert [ms for ms, _fn in scheduled[1:]] == list(widget.MAC_REPAINT_FOLLOWUPS_MS)
     widget._update_geometry_and_draw()  # same size again: no second nudge
-    assert len(scheduled) == 1
+    assert len(scheduled) == 1 + len(widget.MAC_REPAINT_FOLLOWUPS_MS)
+    before = len(geometries)
+    scheduled[1][1]()  # a follow-up pass nudges again and schedules nothing more
+    assert geometries[before].startswith("287x32") and geometries[-1].startswith("286x32")
+    assert len(scheduled) == 1 + len(widget.MAC_REPAINT_FOLLOWUPS_MS)
+    # a follow-up for a size that is no longer current does nothing
+    widget._stage = widget.STAGE_DEPTH_SELECT
+    before = len(geometries)
+    scheduled[2][1]()
+    assert len(geometries) == before
