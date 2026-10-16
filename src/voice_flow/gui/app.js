@@ -836,6 +836,10 @@ const VOICEFLOW_CHILD_PAGES = ["home", "insights", "dictionary", "style", "provi
 
 let _onboardingAccountEpoch = 0;
 let _onboardingStatusPromise = null;
+// Persisted onboarding flag mirror (see PERSISTED_ONBOARDING_FLAGS).
+let _onboardingFlagMirror = {};
+let _onboardingFlagsHydration = null;
+let _onboardingFlagsSaveTimer = null;
 let _onboardingEligible = null;
 let _onboardingWelcomeShown = false;
 let _pendingAutomaticGuide = null;
@@ -852,6 +856,7 @@ function loadOnboardingEligibility() {
   const accountEpoch = _onboardingAccountEpoch;
   _onboardingStatusPromise = (async () => {
     let eligible = null;
+    await hydrateOnboardingFlags();
     try {
       const res = await fetch("/api/onboarding/status", { cache: "no-store" });
       const data = await res.json();
@@ -877,6 +882,8 @@ function resetOnboardingSession() {
   ++_onboardingAccountEpoch;
   cancelAutomaticGuide();
   _onboardingStatusPromise = null;
+  _onboardingFlagsHydration = null;
+  _onboardingFlagMirror = {};
   _onboardingEligible = null;
   _onboardingWelcomeShown = false;
   _automaticGuideAttempts.clear();
@@ -907,6 +914,11 @@ function scheduleAutomaticGuide(feature, pageId) {
     currentPageId === pending.pageId;
   loadOnboardingEligibility().then(eligible => {
     if (!isCurrent()) return;
+    // Re-check after the persisted flags were hydrated from the backend.
+    if (seenFlag && onboardingFlag(seenFlag) === "1") {
+      _pendingAutomaticGuide = null;
+      return;
+    }
     if (eligible !== true || isOnboardingAccountChanging() || isFeatureGuideVisible("onboarding-overlay")) {
       _pendingAutomaticGuide = null;
       return;
@@ -7483,11 +7495,66 @@ function initOnboardingConfetti() {
 let onboardingSlide = 0;
 let onboardingNarrationPaused = false;
 
+// Onboarding "seen" flags live in WebView localStorage and are mirrored to the
+// backend settings (key ONBOARDING_FLAGS_SETTING_KEY) so they survive a
+// WebView profile reset. "Replay onboarding" writes "" for each, clearing both.
+const ONBOARDING_FLAGS_SETTING_KEY = "onboarding_seen_flags";
+const PERSISTED_ONBOARDING_FLAGS = [
+  "hasViewedOnboarding",
+  "vf_onboarding.done",
+  "vf_onboarding.v2_seen",
+  "vf_onboarding.source",
+  "vf_onboarding.af_guided",
+  "vf_onboarding.vf_guided",
+  "vf_onboarding.vf_voice_guided",
+  "vf_onboarding.firstDictation",
+];
+
+function hydrateOnboardingFlags() {
+  if (_onboardingFlagsHydration) return _onboardingFlagsHydration;
+  _onboardingFlagsHydration = (async () => {
+    try {
+      const res = await fetch("/api/settings/get?key=" + encodeURIComponent(ONBOARDING_FLAGS_SETTING_KEY), { cache: "no-store" });
+      const data = await res.json();
+      const saved = data && data.success && data.value && typeof data.value === "object" ? data.value : null;
+      if (!saved) return;
+      PERSISTED_ONBOARDING_FLAGS.forEach(key => {
+        if (!Object.prototype.hasOwnProperty.call(saved, key)) return;
+        const value = saved[key] == null ? "" : String(saved[key]);
+        _onboardingFlagMirror[key] = value;
+        try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+      });
+    } catch (_) { /* Backend unavailable: localStorage alone. */ }
+  })();
+  return _onboardingFlagsHydration;
+}
+
+function persistOnboardingFlagsSoon() {
+  if (_onboardingFlagsSaveTimer) clearTimeout(_onboardingFlagsSaveTimer);
+  _onboardingFlagsSaveTimer = setTimeout(() => {
+    _onboardingFlagsSaveTimer = null;
+    fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: ONBOARDING_FLAGS_SETTING_KEY, value: { ..._onboardingFlagMirror } }),
+    }).catch(() => {});
+  }, 120);
+}
+
 function onboardingFlag(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  let value = null;
+  try { value = localStorage.getItem(key); } catch { value = null; }
+  if (value === null && Object.prototype.hasOwnProperty.call(_onboardingFlagMirror, key)) {
+    value = _onboardingFlagMirror[key];
+  }
+  return value;
 }
 function setOnboardingFlag(key, value) {
   try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+  if (PERSISTED_ONBOARDING_FLAGS.includes(key)) {
+    _onboardingFlagMirror[key] = value == null ? "" : String(value);
+    persistOnboardingFlagsSoon();
+  }
   const completedFeature = {
     "vf_onboarding.vf_voice_guided": "voice",
     "vf_onboarding.af_guided": "audio",
