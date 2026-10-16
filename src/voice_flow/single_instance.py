@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 import urllib.request
 import urllib.error
+import voice_flow.local_http  # noqa: F401  loopback urllib calls bypass HTTP(S) proxies
 
 PORT = 8991
 

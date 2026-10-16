@@ -14,6 +14,8 @@ from typing import Any, Callable
 from voice_flow.video_flow_contracts import validate_no_executable_code
 
 from .process_manager import ProcessManager, hidden_window_kwargs
+from ..child_processes import new_tree_popen_kwargs
+from ..local_http import no_proxy_environment
 from .sandbox import EngineError
 
 # Planning prompts ride a model gateway whose provider may enforce a tight
@@ -236,6 +238,7 @@ class Code2VideoRunner:
                     else 0
                 ),
                 startupinfo=hidden_window_kwargs().get("startupinfo"),
+                **new_tree_popen_kwargs(),
             )
             manager.register(job_id, process)
             try:
@@ -536,7 +539,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _safe_environment() -> dict[str, str]:
     allowed = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA")
-    return {name: os.environ[name] for name in allowed if name in os.environ}
+    return no_proxy_environment({name: os.environ[name] for name in allowed if name in os.environ})
 
 
 def _deterministic_storyboard(source_text: str, duration_seconds: float, options: dict[str, Any]) -> dict[str, Any]:

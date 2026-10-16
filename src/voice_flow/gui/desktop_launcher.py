@@ -142,7 +142,8 @@ except Exception as _import_exc:  # broken/partial install must never die silent
 
     def runtime_is_compatible(*, host: str = "127.0.0.1", port: int = PORT, timeout: float = 1.0) -> bool:
         try:
-            with _urlreq.urlopen(f"http://{host}:{port}/api/runtime", timeout=timeout) as response:
+            _opener = _urlreq.build_opener(_urlreq.ProxyHandler({}))  # loopback: never via proxy
+            with _opener.open(f"http://{host}:{port}/api/runtime", timeout=timeout) as response:
                 return response.status == 200
         except Exception:
             return False
@@ -198,6 +199,7 @@ def _poke_overlay_show() -> None:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
+            # Loopback: runtime_guard's import installed the no-proxy-for-loopback opener.
             with urllib.request.urlopen(req, timeout=1.0) as res:
                 if res.status == 200:
                     _launcher_log(f"Sent {endpoint} to restore floating bar & refresh UI")
@@ -216,7 +218,7 @@ def _poke_keepalive_refresh() -> None:
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=2.0):
+        with urllib.request.urlopen(req, timeout=2.0):  # loopback: never proxied (local_http)
             pass
         _launcher_log("Sent /api/video-flow/notebooklm/keepalive/refresh on window open/focus")
     except Exception as e:
@@ -717,11 +719,13 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         except Exception:
             pass
 
-        # Start pywebview loop with custom icon
+        # Start pywebview loop with custom icon. private_mode=False keeps the
+        # WebView profile (localStorage: onboarding flags, theme) across
+        # launches; pywebview defaults to a throwaway private profile.
         if ico_path:
-            webview.start(icon=ico_path, http_server=False)
+            webview.start(icon=ico_path, private_mode=False, http_server=False)
         else:
-            webview.start(http_server=False)
+            webview.start(private_mode=False, http_server=False)
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
         _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)

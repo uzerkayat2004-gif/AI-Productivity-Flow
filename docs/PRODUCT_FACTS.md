@@ -15,14 +15,14 @@ Concise, checkable facts about AI Productivity Flow (v1.0.0 Public Release). Pub
   - Downloadable streaming models: NVIDIA Nemotron Speech Streaming English 0.6B and Nemotron 3.5 ASR Streaming 0.6B.
   - Cloud STT providers: Deepgram, Groq, OpenAI Whisper, Gemini STT.
 - **AI text polishing & rewriting**:
-  - Downloadable on-device Liquid LFM 1.3B/3B via llama.cpp.
+  - Downloadable on-device S1-mini by Superwhisper and Liquid LFM 2.5 350M via llama.cpp (cleanup only; voice commands need a cloud polish model).
   - Windows AI Text Rewriter where supported by hardware.
   - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Ollama.
 - **Audio Flow**:
   - **Read Mode**: Spoken reader that articulates selected text with human cadence.
   - **Summary Mode**: Multi-depth summaries (Short, Balanced, Deep Dive).
-  - Voices: Microsoft Edge Neural (default, free), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
-- **Video Flow**:
+  - Voices: Microsoft Edge Neural (default, free, online: text is sent to Microsoft), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
+- **Video Flow** (Windows only for now; Mac support coming later):
   - Source input → AI planning → Creative Director & scene authoring → dynamic layout solver → controlled rendering (Code2Video / Narova / WebGL) + synchronized narration.
   - Direct 1080p MP4 compilation automatically exported to user Downloads.
   - Google NotebookLM research synchronization.

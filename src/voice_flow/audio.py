@@ -254,6 +254,25 @@ class AudioRecorder:
             log.info("[AUDIO] Started hardware input stream (%d Hz, %d ch)", self._native_sr, self._native_ch)
             return True
 
+    def post_roll(self, seconds: float) -> None:
+        """Keep capturing for *seconds* after the user's release.
+
+        A tight key release otherwise clips the final phoneme ("Priya" ->
+        "Priy"). Device callbacks keep appending frames while this waits; it
+        returns early if capture already stopped.
+        """
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            return
+        if seconds <= 0 or not self.is_recording:
+            return
+        end = time.monotonic() + min(seconds, 1.0)
+        while time.monotonic() < end:
+            if not self.is_recording:
+                return
+            time.sleep(min(0.02, max(0.0, end - time.monotonic())))
+
     def stop(self) -> NDArray[np.float32]:
         """Stop recording and return the resampled 16kHz 1-D float32 audio array."""
         audio, _tail, _overlap = self._stop_capture(take_open_chunk=False)

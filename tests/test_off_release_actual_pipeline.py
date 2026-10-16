@@ -251,7 +251,7 @@ def replay(monkeypatch, *, incomplete=False, next_cost=0.0025, load_cost=0.0):
 def test_actual_off_release_path_reports_pending_cold_first_use_load(monkeypatch):
     result = replay(monkeypatch, next_cost=0.0, load_cost=1.25)
     print("cold_first_use_metrics=" + repr(result))
-    assert result["native_frame_pushes"] == 32
+    assert result["native_frame_pushes"] == 32 + 1  # + trailing-silence pad before finish
     assert result["fallback_calls"] == 0
     assert result["simulated_load_ms"] == 1250
     assert result["release_to_paste_ms"] == 1250
@@ -261,7 +261,7 @@ def test_actual_off_release_path_reports_pending_cold_first_use_load(monkeypatch
 def test_actual_off_release_path_with_warm_native_stream_is_fast(monkeypatch):
     result = replay(monkeypatch, next_cost=0.0, load_cost=0.0)
     print("warm_stream_metrics=" + repr(result))
-    assert result["native_frame_pushes"] == 32
+    assert result["native_frame_pushes"] == 32 + 1  # + trailing-silence pad before finish
     assert result["fallback_calls"] == 0
     assert result["dictionary_calls"] == 2  # names before polish + shortcuts after
     assert result["processing_metadata"]["polish"]["outcome"] == "disabled"

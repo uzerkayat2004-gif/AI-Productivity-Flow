@@ -44,11 +44,7 @@
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
   <link rel="stylesheet" href="onboarding-hero.css?v=20261011-af-guide">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="fonts.css?v=20261016-selfhosted">
 
   <script>(function(){try{var t=localStorage.getItem("vf-theme")||localStorage.getItem("voiceflow_theme")||localStorage.getItem("theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}try{if("scrollRestoration" in history){history.scrollRestoration="manual";}window.scrollTo(0,0);}catch(e){}document.addEventListener("DOMContentLoaded",function(){try{if("scrollRestoration" in history){history.scrollRestoration="manual";}window.scrollTo(0,0);var mc=document.querySelector(".main-content");if(mc){mc.scrollTop=0;mc.scrollLeft=0;}}catch(e){}});})();</script>
 
@@ -1034,14 +1030,15 @@
 <label class="flow-field-label" for="exec-audio-policy-model-picker-button">Reading voice</label>
 <button aria-haspopup="dialog" class="vf-model-picker-button af2-picker" id="exec-audio-policy-model-picker-button" onclick="openAudioVoiceModelPicker()" type="button">
 <span class="vf-model-picker-copy">
-<strong id="exec-audio-policy-model-label">Edge Ava (Calm Female)</strong>
+<strong id="exec-audio-policy-model-label">Edge Ava (Online)</strong>
 <small id="exec-audio-policy-model-detail">Click here to pick a different voice</small>
 </span>
 <span class="vf-model-picker-action">Change <b>⌄</b></span>
 </button>
+<small class="flow-model-hint" id="exec-audio-online-hint" style="font-size: 11.5px; line-height: 1.5; color: var(--flow-secondary, var(--text-muted));">Online voice: the text is sent to Microsoft's text-to-speech service. Pick an offline voice to keep it on this device.</small>
 </div>
 <div class="flow-legacy-chips" hidden="" style="display: none;">
-<span class="af2-meta-chip">🎤 <strong id="exec-audio-active-engine">Microsoft Edge Ava</strong></span>
+<span class="af2-meta-chip">🎤 <strong id="exec-audio-active-engine">Microsoft Edge Ava (Online)</strong></span>
 <span class="af2-meta-chip" id="exec-audio-model-specialty">🧠 Brain</span>
 <span class="af2-meta-chip" id="exec-audio-failover-count">Edge Free Engine</span>
 </div>
@@ -1953,13 +1950,15 @@
 
                     <button id="vf-voice-picker-button" class="vf-model-picker-button" type="button" onclick="openVideoModelPicker('video_flow_voice')" aria-haspopup="dialog" style="width: 100%;">
 
-                      <span class="vf-model-picker-copy"><strong id="vf-active-voice-label">Microsoft Edge Neural &#8212; Ava</strong> <small id="vf-active-voice-detail" style="color: var(--text-muted); margin-left: 6px;">edge/en-US-AvaNeural</small></span>
+                      <span class="vf-model-picker-copy"><strong id="vf-active-voice-label">Microsoft Edge Neural (Online) &#8212; Ava</strong> <small id="vf-active-voice-detail" style="color: var(--text-muted); margin-left: 6px;">edge/en-US-AvaNeural</small></span>
 
                       <span class="vf-model-picker-action" style="font-size: 12px; color: var(--primary-orange); font-weight: 700;">Change <b>&#8964;</b></span>
 
                     </button>
 
-                    <div class="flow-model-meta">Narration voice engine: <strong id="vf-active-voice-engine-label">Edge TTS (free)</strong></div>
+                    <div class="flow-model-meta">Narration voice engine: <strong id="vf-active-voice-engine-label">Edge TTS (online, free)</strong></div>
+
+                    <small class="flow-model-hint" id="vf-online-voice-hint">Online voice: the text is sent to Microsoft's text-to-speech service. Pick an offline voice to keep it on this device.</small>
 
                     <small class="flow-model-hint">Same catalog as Audio Flow &#8212; this choice only narrates videos. Audio Flow keeps its own voice.</small>
 

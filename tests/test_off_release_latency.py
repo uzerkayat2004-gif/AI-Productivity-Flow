@@ -149,7 +149,10 @@ def test_native_frames_preserve_conditioned_pcm_and_short_final_tail(monkeypatch
         stream.submit_frame(frame, rate)
     stream.end_session()
     stream._run()
-    np.testing.assert_array_equal(np.concatenate(received), expected)
+    # The last push is the trailing-silence pad added before stream_finish.
+    pad = received[-1]
+    assert pad.size == int(native.TRAILING_SILENCE_SECONDS * rates[-1]) and not np.any(pad)
+    np.testing.assert_array_equal(np.concatenate(received[:-1]), expected)
     assert stream.collect(timeout=0.) == 'beginning middle ending'
 
 

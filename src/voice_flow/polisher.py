@@ -495,7 +495,92 @@ def _prompt_restructure_preserves_anchors(source: str, candidate: str) -> bool:
     return True
 
 
+_NEVER_STUTTER_DELETABLE = frozenset({"not", "no", "never", "without", "neither", "nor"})
+
+
+def _only_removes_stutter_fragments(source_tokens: list[str], candidate_tokens: list[str]) -> bool:
+    """True when candidate == source minus repeated or prefix false starts.
+
+    A run ``source[i:i+m]`` (m <= 3) may be deleted only when the very next
+    tokens restart it: ``source[i+m:i+2m-1]`` repeats all but its last word
+    and its last word equals, or is a prefix of, ``source[i+2m-1]``
+    ("my ag my agent", "q q quest question", "is is", "ship ship"). Negations
+    and numbers are never deletable, so this cannot flip meaning.
+    """
+    if not candidate_tokens or len(candidate_tokens) >= len(source_tokens):
+        return False
+    n, c = len(source_tokens), len(candidate_tokens)
+
+    def deletable(i: int, m: int) -> bool:
+        run = source_tokens[i:i + m]
+        nxt = source_tokens[i + m:i + 2 * m]
+        if len(run) < m or len(nxt) < m:
+            return False
+        if any(tok in _NEVER_STUTTER_DELETABLE or tok.isdigit() for tok in run):
+            return False
+        return run[:-1] == nxt[:-1] and (run[-1] == nxt[-1] or nxt[-1].startswith(run[-1]))
+
+    # Forward reachability over (source index, candidate index): either the
+    # tokens match, or a valid restart run is deleted from the source.
+    reach: list[set[int]] = [set() for _ in range(n + 1)]
+    reach[0].add(0)
+    for i in range(n):
+        if not reach[i]:
+            continue
+        runs = [m for m in (1, 2, 3) if deletable(i, m)]
+        for j in reach[i]:
+            if j < c and source_tokens[i] == candidate_tokens[j]:
+                reach[i + 1].add(j + 1)
+            for m in runs:
+                reach[i + m].add(j)
+    return c in reach[n]
+
+
 def _candidate_preserves_content(
+    source: str,
+    candidate: str,
+    lenient: bool = False,
+    *,
+    task: str = "cleanup",
+    allow_compression: bool = False,
+    command_format: str | None = None,
+) -> bool:
+    """Content-fidelity gate; also accepts pure stutter-fragment removal.
+
+    The streaming recognizer can emit "Q? Q. Quest? Question." or "So the the
+    plan is. Is to ship. Ship on Friday."; a candidate whose only change is
+    removing those repeated/prefix fragments is a correct repair, not a
+    dropped word. Anything else is judged against the source and, failing
+    that, against the deterministic stutter-collapsed source.
+    """
+    if _candidate_preserves_content_strict(
+        source, candidate, lenient, task=task,
+        allow_compression=allow_compression, command_format=command_format,
+    ):
+        return True
+    if not candidate or not candidate.strip() or not source or not source.strip():
+        return False
+    from voice_flow.text_processing import _PROTECTED_CLEANUP_SPAN_RE
+    if _PROTECTED_CLEANUP_SPAN_RE.search(source):
+        # Code, links and quoted literals are never "stutters".
+        return False
+    if _only_removes_stutter_fragments(_tokenize_for_fidelity(source), _tokenize_for_fidelity(candidate)):
+        log.info("[POLISH SAFETY] Candidate only removed stutter fragments; accepted.")
+        return True
+    try:
+        from voice_flow.text_processing import collapse_stutter_fragments
+        collapsed = collapse_stutter_fragments(source)
+    except Exception:
+        return False
+    if collapsed and collapsed != source:
+        return _candidate_preserves_content_strict(
+            collapsed, candidate, lenient, task=task,
+            allow_compression=allow_compression, command_format=command_format,
+        )
+    return False
+
+
+def _candidate_preserves_content_strict(
     source: str,
     candidate: str,
     lenient: bool = False,

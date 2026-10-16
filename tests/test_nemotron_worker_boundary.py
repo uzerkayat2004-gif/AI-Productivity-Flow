@@ -59,15 +59,17 @@ def test_dynamic_deadline_tightens_already_waiting_call(client):
     def call():
         try:
             client.call("hang", deadline=lambda: limit[0])
-        except transport.NativeASRWorkerError as exc:
+        except transport.NativeASRBusyError as exc:
             caught.append(exc)
     thread = threading.Thread(target=call)
     thread.start()
     assert started.wait(2)
     limit[0] = time.monotonic() + 0.06
     thread.join(1)
+    # A soft deadline abandons the reply; it never kills the shared worker.
     assert not thread.is_alive() and caught
-    assert client._process.poll() is not None
+    assert isinstance(caught[0], transport.NativeASRAbandonedError)
+    assert client.error is None and client._process.poll() is None
 
 
 def test_parent_lifetime_eof_reaps_worker_even_during_hung_call(client):
@@ -97,9 +99,14 @@ def test_parent_lifetime_eof_reaps_worker_even_during_hung_call(client):
 def test_blocked_pipe_write_does_not_block_caller_deadline(client):
     client.call("stop_reading")
     start = time.monotonic()
-    with pytest.raises(transport.NativeASRWorkerError):
-        client.call("echo", audio=b"\0" * (8 * 1024 * 1024), deadline=time.monotonic() + 0.1)
+    with pytest.raises(transport.NativeASRBusyError):
+        client.call("echo", audio=b"\0" * (8 * 1024 * 1024), deadline=time.monotonic() + 0.1, timeout=0.4)
     assert time.monotonic() - start < 1
+    # The wedged request outlives its hard timeout: the next caller detects
+    # the stall and poisons the generation instead of waiting forever.
+    with pytest.raises(transport.NativeASRWorkerError):
+        client.call("echo", timeout=5)
+    assert time.monotonic() - start < 2
     assert client._process.poll() is not None
 
 
@@ -123,7 +130,7 @@ def test_expired_before_enqueue_preserves_healthy_worker(client):
     assert client.call("echo", audio=b"")["audio"] == b""
 
 
-def test_cancel_after_submission_invalidates_uninterruptible_owner(client):
+def test_cancel_after_submission_abandons_without_killing_worker(client):
     sent = threading.Event()
     cancel = threading.Event()
     original = client._connection.send
@@ -134,26 +141,49 @@ def test_cancel_after_submission_invalidates_uninterruptible_owner(client):
     errors = []
     def call():
         try:
-            client.call("hang", cancelled=cancel)
-        except transport.NativeASRWorkerError as exc:
+            client.call("hang", cancelled=cancel, timeout=0.5)
+        except transport.NativeASRBusyError as exc:
             errors.append(exc)
     thread = threading.Thread(target=call)
     thread.start()
     assert sent.wait(1)
     cancel.set()
     thread.join(1)
-    assert not thread.is_alive() and errors == [client.error]
-    assert client._process.poll() is not None
-
-
-def test_late_response_cannot_reactivate_failed_generation(client):
+    assert not thread.is_alive() and len(errors) == 1
+    assert isinstance(errors[0], transport.NativeASRAbandonedError)
+    assert client.error is None and client._process.poll() is None
+    # The abandoned native call is genuinely hung: once it outlives its own
+    # hard timeout, the next caller poisons the generation.
     with pytest.raises(transport.NativeASRWorkerError):
-        client.call("late", deadline=time.monotonic() + 0.05)
-    error = client.error
-    with pytest.raises(transport.NativeASRWorkerError) as caught:
-        client.call("echo", timeout=1)
-    assert caught.value is error
+        client.call("echo", timeout=5)
     assert client._process.poll() is not None
+
+
+def test_late_response_after_soft_deadline_is_discarded_and_worker_survives(client):
+    process = client._process.pid
+    with pytest.raises(transport.NativeASRAbandonedError):
+        client.call("late", deadline=time.monotonic() + 0.05)
+    assert client.error is None
+    # The next call queues behind the late reply, which is dropped; its own
+    # reply is matched by id and returned intact.
+    assert client.call("echo", audio=b"after", timeout=2)["audio"] == b"after"
+    assert client._process.pid == process and client._process.poll() is None
+
+
+def test_abandoned_request_never_reaches_the_worker(client):
+    sent = []
+    original = client._connection.send
+    client._connection.send = lambda value: sent.append(value["op"]) or original(value)
+    blocker = threading.Thread(target=lambda: client.call("late", timeout=2))
+    blocker.start()
+    end = time.monotonic() + 1
+    while "late" not in sent and time.monotonic() < end:
+        time.sleep(0.005)
+    with pytest.raises(transport.NativeASRAbandonedError):
+        client.call("echo", audio=b"skip", deadline=time.monotonic() + 0.05)
+    blocker.join(2)
+    assert client.call("echo", audio=b"ok", timeout=2)["audio"] == b"ok"
+    assert sent.count("echo") == 1
 
 
 def test_warm_client_is_persistent_and_float32_payload_exact(client):
@@ -395,7 +425,7 @@ def test_queue_saturation_wakes_concurrent_callers_without_respawn(client):
     client._connection.send = send
     def call(op):
         try:
-            client.call(op, timeout=3, audio=b"1234")
+            client.call(op, timeout=0.5, audio=b"1234")
         except transport.NativeASRWorkerError as exc:
             errors.append(exc)
     first = threading.Thread(target=call, args=("hang",))
@@ -407,8 +437,10 @@ def test_queue_saturation_wakes_concurrent_callers_without_respawn(client):
     while client._requests.empty() and time.monotonic() < end:
         time.sleep(0.005)
     assert not client._requests.empty()
-    with pytest.raises(transport.NativeASRWorkerError):
+    # A full request queue is back-pressure, not a dead worker.
+    with pytest.raises(transport.NativeASRBusyError):
         client.call("echo", audio=b"1234")
+    assert client.error is None
     first.join(1)
     second.join(1)
     assert not first.is_alive() and not second.is_alive()
@@ -604,8 +636,8 @@ def test_audio_budget_releases_cancelled_and_drained_requests(client, monkeypatc
     errors = []
     def invoke(op, audio, cancel=None):
         try:
-            client.call(op, audio=audio, cancelled=cancel, timeout=2)
-        except transport.NativeASRWorkerError as exc:
+            client.call(op, audio=audio, cancelled=cancel, timeout=0.5)
+        except (transport.NativeASRWorkerError, transport.NativeASRBusyError) as exc:
             errors.append(exc)
     first = threading.Thread(target=invoke, args=("hang", b"1234", cancelled))
     second = threading.Thread(target=invoke, args=("echo", b"5678"))
