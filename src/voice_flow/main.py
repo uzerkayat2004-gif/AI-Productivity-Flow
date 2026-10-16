@@ -3845,6 +3845,7 @@ class VoiceFlowApp:
             except Exception:
                 pass
             macos_lifecycle.terminate_descendants(timeout=1.0)
+            macos_lifecycle.stop_supervisor_parent()
             log.info("[QUIT] AI Productivity Flow stopped.")
             watchdog_timer.cancel()
             self._final_exit()

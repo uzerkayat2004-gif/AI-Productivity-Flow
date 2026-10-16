@@ -302,6 +302,24 @@ def terminate_descendants(timeout: float = 1.5) -> list[int]:
     return pids
 
 
+def stop_supervisor_parent() -> bool:
+    """On Quit, also end a voice_flow.watchdog parent so it cannot respawn us."""
+    try:
+        import psutil
+
+        parent = psutil.Process(os.getppid())
+        cmd = " ".join(parent.cmdline())
+    except Exception:
+        return False
+    if "voice_flow.watchdog" not in cmd:
+        return False
+    try:
+        parent.terminate()
+        return True
+    except Exception:
+        return False
+
+
 # --------------------------------------------------------------------------
 # Window process: control socket so a second launch can raise the window.
 # --------------------------------------------------------------------------

@@ -425,3 +425,20 @@ def test_floating_bar_menu_offers_open_and_quit(monkeypatch):
     src = (SRC / "voice_flow" / "overlay.py").read_text()
     for seq in ("<ButtonPress-2>", "<ButtonPress-3>", "<Control-ButtonPress-1>", "<Control-ButtonRelease-1>"):
         assert f'self.canvas.bind("{seq}"' in src
+
+
+def test_quit_stops_watchdog_parent_only(monkeypatch):
+    import psutil
+
+    terminated = []
+
+    class P:
+        def __init__(self, cmd): self._cmd = cmd
+        def cmdline(self): return self._cmd
+        def terminate(self): terminated.append(self._cmd)
+
+    monkeypatch.setattr(psutil, "Process", lambda pid: P(["launcher", "-m", "voice_flow.watchdog"]))
+    assert ml.stop_supervisor_parent() is True
+    monkeypatch.setattr(psutil, "Process", lambda pid: P(["/sbin/launchd"]))
+    assert ml.stop_supervisor_parent() is False
+    assert terminated == [["launcher", "-m", "voice_flow.watchdog"]]
