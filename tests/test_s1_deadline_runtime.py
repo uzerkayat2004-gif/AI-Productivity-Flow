@@ -153,6 +153,7 @@ def test_command_metadata_is_checked_without_command_object():
     ("source", "candidate"),
     [
         ("Meet me Friday, no wait, Thursday.", "Meet me Thursday."),
+        ("Meet me Friday, sorry, Thursday.", "Meet me Thursday."),
         ("There are twenty five seats.", "There are 25 seats."),
         ("It costs ten or twenty dollars.", "It costs $10 or $20."),
     ],
@@ -165,7 +166,10 @@ def test_canonical_fidelity_accepts_known_s1_normalizations(source, candidate):
     ("source", "candidate"),
     [
         ("Meet me Friday, no wait, Thursday.", "Meet me Monday."),
-        ("Meet me Friday, sorry, Thursday.", "Meet me Thursday."),
+        # Phase 1.1 (VF-1): "Friday, sorry, Thursday" is a spoken self-correction
+        # and "Meet me Thursday." is now accepted (see the accept list above and
+        # tests/test_vf1_regressions.py). The rejected variant keeps the wrong day.
+        ("Meet me Friday, sorry, Thursday.", "Meet me Friday."),
         ("There are twenty five seats.", "There are 25 tables."),
         ("It costs ten or twenty dollars.", "It costs $20."),
         ("Open https://example.com/file/123", "Open https://example.com/file/124"),

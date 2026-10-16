@@ -1,0 +1,1677 @@
+{
+  "timestamp": "2026-10-14T20:56:01Z",
+  "suite_file": "D:\\.zcode\\workspace\\default\\AI-Productivity-Flow\\data\\independent_eval_suite_42.jsonl",
+  "total_cases": 42,
+  "summary": {
+    "candidate_base": {
+      "total": 42,
+      "passed": 31,
+      "pass_rate_pct": 73.8,
+      "by_family": {
+        "cleanup_facts": {
+          "passed": 6,
+          "total": 6
+        },
+        "email": {
+          "passed": 0,
+          "total": 4
+        },
+        "messages": {
+          "passed": 2,
+          "total": 2
+        },
+        "prompt": {
+          "passed": 2,
+          "total": 6
+        },
+        "notes_format": {
+          "passed": 6,
+          "total": 6
+        },
+        "summary": {
+          "passed": 6,
+          "total": 6
+        },
+        "followup_style": {
+          "passed": 9,
+          "total": 12
+        }
+      }
+    },
+    "candidate_run1_lora": {
+      "total": 42,
+      "passed": 36,
+      "pass_rate_pct": 85.7,
+      "by_family": {
+        "cleanup_facts": {
+          "passed": 6,
+          "total": 6
+        },
+        "email": {
+          "passed": 1,
+          "total": 4
+        },
+        "messages": {
+          "passed": 2,
+          "total": 2
+        },
+        "prompt": {
+          "passed": 4,
+          "total": 6
+        },
+        "notes_format": {
+          "passed": 6,
+          "total": 6
+        },
+        "summary": {
+          "passed": 6,
+          "total": 6
+        },
+        "followup_style": {
+          "passed": 11,
+          "total": 12
+        }
+      }
+    },
+    "candidate_run2_strengthened_lora": {
+      "total": 42,
+      "passed": 37,
+      "pass_rate_pct": 88.1,
+      "by_family": {
+        "cleanup_facts": {
+          "passed": 6,
+          "total": 6
+        },
+        "email": {
+          "passed": 2,
+          "total": 4
+        },
+        "messages": {
+          "passed": 2,
+          "total": 2
+        },
+        "prompt": {
+          "passed": 5,
+          "total": 6
+        },
+        "notes_format": {
+          "passed": 6,
+          "total": 6
+        },
+        "summary": {
+          "passed": 6,
+          "total": 6
+        },
+        "followup_style": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    }
+  },
+  "raw_results": {
+    "base": [
+      {
+        "case_id": "INDEP-F1-001",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "transfer Rs. 550,000 plus 18% GST to the vendor account",
+        "reference": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must resolve self-correction to \u20b95,50,000, keep 18% GST, no disfluencies.",
+        "latency_ms": 7579.1
+      },
+      {
+        "case_id": "INDEP-F1-002",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "do not transfer the $7,500 until Devon confirms invoice 8821 in writing",
+        "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+        "latency_ms": 8279.9
+      },
+      {
+        "case_id": "INDEP-F1-003",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "run tail -f on /var/log/redis/redis.log and check for status 503",
+        "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+        "latency_ms": 8091.2
+      },
+      {
+        "case_id": "INDEP-F1-004",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "um so basically let us meet at 11:15am tomorrow",
+        "reference": "Let us meet at 11:15 AM tomorrow.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+        "latency_ms": 5930.1
+      },
+      {
+        "case_id": "INDEP-F1-005",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "we need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd",
+        "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+        "latency_ms": 9327.9
+      },
+      {
+        "case_id": "INDEP-F1-006",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "we cannot deploy the hotfix without running the full database migration first",
+        "reference": "We cannot deploy the hotfix without running the full database migration first.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+        "latency_ms": 5327.5
+      },
+      {
+        "case_id": "INDEP-F2-007",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Write an email to the client steering committee letting them know our staging environment is restored, and root cause analysis will be delivered by 5pm.",
+        "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header",
+          "missing_sender_Marcus"
+        ],
+        "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+        "latency_ms": 10630.8
+      },
+      {
+        "case_id": "INDEP-F2-008",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Email to all engineering. Scheduled maintenance window will begin tonight at 2:300 UTC and conclude by 0100 UTC. Services will experience brief intermittent connectivity.",
+        "reference": "Subject: Scheduled Maintenance Window: 23:00\u201301:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Must generate Subject, clear body, preserve 23:00\u201301:00 UTC window.",
+        "latency_ms": 12703.8
+      },
+      {
+        "case_id": "INDEP-F2-009",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Remind the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance.",
+        "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+        "latency_ms": 11781.0
+      },
+      {
+        "case_id": "INDEP-F2-010",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "urgent ping to on call engineer. latency on payment gateway spiked to 2.4 seconds. please investigate redis cache health",
+        "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+        "latency_ms": 8605.2
+      },
+      {
+        "case_id": "INDEP-F2-011",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "hey elena, quick check-in. are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?",
+        "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+        "latency_ms": 10220.7
+      },
+      {
+        "case_id": "INDEP-F2-012",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongrats to all.",
+        "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+        "latency_ms": 9543.7
+      },
+      {
+        "case_id": "INDEP-F3-013",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "can you make me a prompt for GPT-4 that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?",
+        "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+        "latency_ms": 11245.7
+      },
+      {
+        "case_id": "INDEP-F3-014",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "tell Claude to write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas dataframe",
+        "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+        "latency_ms": 8135.8
+      },
+      {
+        "case_id": "INDEP-F3-015",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo tokyo in rainy neon lighting.",
+        "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+        "latency_ms": 9427.8
+      },
+      {
+        "case_id": "INDEP-F3-016",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "give me a system prompt for an automated customer support triage assistant that tags urgency and outputs JSON",
+        "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+        "latency_ms": 7475.0
+      },
+      {
+        "case_id": "INDEP-F3-017",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "could you generate a prompt that tells an AI to explain diffusion models without any mathematical equations?",
+        "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+        "latency_ms": 7053.7
+      },
+      {
+        "case_id": "INDEP-F3-018",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "ask the AI to draft an engineering postmortem for a 45-minute redis cache failure",
+        "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+        "latency_ms": 7403.5
+      },
+      {
+        "case_id": "INDEP-F4-019",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "pre-flight deployment checklist:\n- verify SSL certificates\n- backup production database\n- notify customer\n- success enable feature flag\n- 14",
+        "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+        "latency_ms": 10928.5
+      },
+      {
+        "case_id": "INDEP-F4-020",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Conference packing list:\n- laptop\n- charger\n- presentation\n- clicker\n- extra hdmi adapter\n- noise cancelling headphones",
+        "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Keep compound items together on single bullets.",
+        "latency_ms": 9730.4
+      },
+      {
+        "case_id": "INDEP-F4-021",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "1. Sprint backlog items first.\n2. Implement authentication middleware.\n3. Write integration tests.\n4. Document public API endpoints",
+        "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Properly numbered 1, 2, 3 sequence.",
+        "latency_ms": 9401.4
+      },
+      {
+        "case_id": "INDEP-F4-022",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Meeting action items:\n- Elena will review PR 99\n- Devon will update deployment scripts\n- Alex will test backup restore",
+        "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+        "latency_ms": 9914.1
+      },
+      {
+        "case_id": "INDEP-F4-023",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under one gigabyte\n- Zero cloud latency",
+        "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Bullet list with 3 distinct differentiators.",
+        "latency_ms": 8349.8
+      },
+      {
+        "case_id": "INDEP-F4-024",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Database recovery procedure:\n\n1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS cname",
+        "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Ordered recovery steps.",
+        "latency_ms": 8496.7
+      },
+      {
+        "case_id": "INDEP-F5-025",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "the billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday",
+        "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+        "latency_ms": 10627.4
+      },
+      {
+        "case_id": "INDEP-F5-026",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway",
+        "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+        "latency_ms": 13937.5
+      },
+      {
+        "case_id": "INDEP-F5-027",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "board resolution: the directors approved four new engineering hires by December 1, but froze all marketing agency spend until Q1 metrics are evaluated",
+        "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+        "latency_ms": 10062.5
+      },
+      {
+        "case_id": "INDEP-F5-028",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "incident report: DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero. customer data was compromised, and failover occurred automatically",
+        "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "35-minute outage, US-West, zero customer data compromised.",
+        "latency_ms": 11332.4
+      },
+      {
+        "case_id": "INDEP-F5-029",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. overall satisfaction rating was 89%",
+        "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 42, 19, 8, 89%.",
+        "latency_ms": 13181.2
+      },
+      {
+        "case_id": "INDEP-F5-030",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "GDPR compliance update: telemetry older than 90 days must be permanently deleted from cold storage. Data protection officer approval is required before running the script.",
+        "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+        "latency_ms": 11373.0
+      },
+      {
+        "case_id": "INDEP-F6-031",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+        "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+        "latency_ms": 7526.0
+      },
+      {
+        "case_id": "INDEP-F6-032",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Yo, bro, can you send over the deck before tomorrow morning? Standup. Thank you.",
+        "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Transform slang into polite, professional workplace communication.",
+        "latency_ms": 7645.6
+      },
+      {
+        "case_id": "INDEP-F6-033",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "I will try to deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms.",
+        "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+        "latency_ms": 8097.5
+      },
+      {
+        "case_id": "INDEP-F6-034",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "we are writing to let you know that in consideration of recent events and following deep analysis, we have come to the determination to decline your application",
+        "reference": "After careful review, we are unable to accept your application at this time.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+        "latency_ms": 10329.4
+      },
+      {
+        "case_id": "INDEP-F6-035",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "we cannot accept your submission because you missed the deadline by two hours",
+        "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+        "latency_ms": 5500.9
+      },
+      {
+        "case_id": "INDEP-F6-036",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately.",
+        "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+        "latency_ms": 7697.4
+      },
+      {
+        "case_id": "INDEP-F7-037",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "let us push the launch to Friday at 11:30am instead",
+        "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "passed": false,
+        "reasons": [
+          "failed_draft_edit_preservation"
+        ],
+        "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+        "latency_ms": 6655.4
+      },
+      {
+        "case_id": "INDEP-F7-038",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Executive briefing with Elena Rostova at 2:00pm in Boardroom A regarding Series A term sheet.",
+        "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "passed": false,
+        "reasons": [
+          "failed_co_presenter_addition"
+        ],
+        "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "latency_ms": 9338.7
+      },
+      {
+        "case_id": "INDEP-F7-039",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Update amount to $16,500 and remove the initial deposit sentence.",
+        "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+        "passed": false,
+        "reasons": [
+          "failed_deletion_of_deposit"
+        ],
+        "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+        "latency_ms": 7270.4
+      },
+      {
+        "case_id": "INDEP-F7-040",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "switch the port to 8443 and mention HTTPS is required",
+        "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+        "latency_ms": 6131.4
+      },
+      {
+        "case_id": "INDEP-F7-041",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "soften the draft so it sounds polite and friendly",
+        "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+        "latency_ms": 4758.2
+      },
+      {
+        "case_id": "INDEP-F7-042",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate A: S1-mini Base",
+        "raw_output": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+        "latency_ms": 10127.1
+      }
+    ],
+    "run1_lora": [
+      {
+        "case_id": "INDEP-F1-001",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Transfer Rs. 550,000 plus 18% GST to the vendor account.",
+        "reference": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must resolve self-correction to \u20b95,50,000, keep 18% GST, no disfluencies.",
+        "latency_ms": 10337.0
+      },
+      {
+        "case_id": "INDEP-F1-002",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+        "latency_ms": 10461.2
+      },
+      {
+        "case_id": "INDEP-F1-003",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+        "latency_ms": 10314.9
+      },
+      {
+        "case_id": "INDEP-F1-004",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Okay, so basically let us meet at 11:15am tomorrow.",
+        "reference": "Let us meet at 11:15 AM tomorrow.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+        "latency_ms": 8212.3
+      },
+      {
+        "case_id": "INDEP-F1-005",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+        "latency_ms": 11394.7
+      },
+      {
+        "case_id": "INDEP-F1-006",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "We cannot deploy the hotfix without running the full database migration first.",
+        "reference": "We cannot deploy the hotfix without running the full database migration first.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+        "latency_ms": 6947.9
+      },
+      {
+        "case_id": "INDEP-F2-007",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Marcus,\n\nLet us know that our staging environment is restored and root cause analysis will be delivered by 5pm.\n\nThe client steering committee is responsible for the root cause analysis.",
+        "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+        "latency_ms": 15528.2
+      },
+      {
+        "case_id": "INDEP-F2-008",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Subject: Engineering Maintenance Schedule\n\nAll engineering teams, scheduled maintenance window will begin tonight at 2:30 UTC and conclude by 01:00 UTC. Services will experience brief intermittent connectivity.",
+        "reference": "Subject: Scheduled Maintenance Window: 23:00\u201301:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must generate Subject, clear body, preserve 23:00\u201301:00 UTC window.",
+        "latency_ms": 17984.8
+      },
+      {
+        "case_id": "INDEP-F2-009",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Remind the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance.",
+        "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+        "latency_ms": 15029.5
+      },
+      {
+        "case_id": "INDEP-F2-010",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Urgent ping to On Call Engineer. Latency on payment gateway spiked to 2.4 seconds. Please investigate Redis Cache health.",
+        "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+        "latency_ms": 12725.7
+      },
+      {
+        "case_id": "INDEP-F2-011",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Hi Elena, quick check-in. Are you free for a 15-minute coffee chat at 2pm to discuss the beta rollout?",
+        "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+        "latency_ms": 12864.8
+      },
+      {
+        "case_id": "INDEP-F2-012",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Hi Team,\n\nWe officially passed our SOC 2 Type 2 audit with zero findings. Congrats to all.",
+        "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+        "latency_ms": 10751.9
+      },
+      {
+        "case_id": "INDEP-F3-013",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Can you make a request for GPT-4 to extract all named entities from a SEC 10K filing and return them in JSON format?",
+        "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+        "latency_ms": 13553.7
+      },
+      {
+        "case_id": "INDEP-F3-014",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas DataFrame.",
+        "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+        "latency_ms": 9090.6
+      },
+      {
+        "case_id": "INDEP-F3-015",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "I want an instruction for Midjourney to render a cyberpunk tea house in Neo tokyo in rainy neon lighting.",
+        "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+        "latency_ms": 11563.2
+      },
+      {
+        "case_id": "INDEP-F3-016",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Give me a system prompt for an automated customer support triage assistant that tags urgency and outputs JSON.",
+        "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+        "latency_ms": 9433.5
+      },
+      {
+        "case_id": "INDEP-F3-017",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Could you explain diffusion models in a way that avoids any mathematical formulas?",
+        "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+        "latency_ms": 7249.9
+      },
+      {
+        "case_id": "INDEP-F3-018",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Draft an engineering postmortem for a 45-minute Redis cache failure, detailing the root cause, mitigation steps, and lessons learned.",
+        "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+        "latency_ms": 12515.3
+      },
+      {
+        "case_id": "INDEP-F4-019",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "- Verify SSL certificates\n- Backup production database\n- Notify customer\n- Enable feature flag\n- 14",
+        "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+        "latency_ms": 10681.0
+      },
+      {
+        "case_id": "INDEP-F4-020",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "- Laptop\n- Charger\n- Presentation\n- Clicker\n- Extra\n- HDMI adapter\n- Noise cancelling headphones",
+        "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Keep compound items together on single bullets.",
+        "latency_ms": 10709.9
+      },
+      {
+        "case_id": "INDEP-F4-021",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "1. Implement authentication middleware.\n2. Write integration tests.\n3. Document public API endpoints.",
+        "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Properly numbered 1, 2, 3 sequence.",
+        "latency_ms": 9063.5
+      },
+      {
+        "case_id": "INDEP-F4-022",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "- Elena will review PR 99.\n- Devon will update deployment scripts.\n- Alex will test backup restore.",
+        "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+        "latency_ms": 11131.4
+      },
+      {
+        "case_id": "INDEP-F4-023",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency",
+        "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Bullet list with 3 distinct differentiators.",
+        "latency_ms": 9005.5
+      },
+      {
+        "case_id": "INDEP-F4-024",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS CNAME.",
+        "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Ordered recovery steps.",
+        "latency_ms": 9944.0
+      },
+      {
+        "case_id": "INDEP-F5-025",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and release is postponed to Monday.",
+        "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+        "latency_ms": 13552.4
+      },
+      {
+        "case_id": "INDEP-F5-026",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway.",
+        "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+        "latency_ms": 17612.2
+      },
+      {
+        "case_id": "INDEP-F5-027",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Board approved four new engineering hires by December 1, but froze all marketing agency spend until January 1. Metrics are evaluated.",
+        "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+        "latency_ms": 12148.4
+      },
+      {
+        "case_id": "INDEP-F5-028",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero. Customer data was compromised, and failover occurred automatically.",
+        "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "35-minute outage, US-West, zero customer data compromised.",
+        "latency_ms": 13261.2
+      },
+      {
+        "case_id": "INDEP-F5-029",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Dark mode received 42 votes, offline mode 19, and occasional audio crackling 8. Overall satisfaction rating was 89%.",
+        "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 42, 19, 8, 89%.",
+        "latency_ms": 13763.7
+      },
+      {
+        "case_id": "INDEP-F5-030",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "GDPR compliance update: telemetry older than 90 days must be permanently deleted from cold storage. Data protection officer approval is required before running the script.",
+        "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+        "latency_ms": 13995.5
+      },
+      {
+        "case_id": "INDEP-F6-031",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+        "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+        "latency_ms": 9266.9
+      },
+      {
+        "case_id": "INDEP-F6-032",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Can you send the deck over before tomorrow morning? Standup.",
+        "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Transform slang into polite, professional workplace communication.",
+        "latency_ms": 5227.0
+      },
+      {
+        "case_id": "INDEP-F6-033",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "I will deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms.",
+        "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+        "latency_ms": 8363.1
+      },
+      {
+        "case_id": "INDEP-F6-034",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "We are writing to let you know that, in consideration of recent events and following deep analysis, we have come to the determination to decline your application.",
+        "reference": "After careful review, we are unable to accept your application at this time.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+        "latency_ms": 7001.8
+      },
+      {
+        "case_id": "INDEP-F6-035",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "We cannot accept your submission because you missed the deadline by two hours.",
+        "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+        "latency_ms": 3826.8
+      },
+      {
+        "case_id": "INDEP-F6-036",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately.",
+        "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+        "latency_ms": 4334.0
+      },
+      {
+        "case_id": "INDEP-F7-037",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "The product launch is scheduled for Friday at 11:30am in the main auditorium.",
+        "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+        "latency_ms": 5109.7
+      },
+      {
+        "case_id": "INDEP-F7-038",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Devon Vance will be co-presenter at 3:30pm, with Elena Rostova at 2:00pm PM in Boardroom A regarding Series A term sheet.",
+        "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "latency_ms": 8539.5
+      },
+      {
+        "case_id": "INDEP-F7-039",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Invoice #9920 for $16,500 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July.",
+        "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+        "passed": false,
+        "reasons": [
+          "failed_deletion_of_deposit"
+        ],
+        "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+        "latency_ms": 7363.5
+      },
+      {
+        "case_id": "INDEP-F7-040",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Switch the port to 8443 and mention HTTPS is required.",
+        "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+        "latency_ms": 3610.2
+      },
+      {
+        "case_id": "INDEP-F7-041",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "You must review PR 305 immediately or the release will be blocked.",
+        "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+        "latency_ms": 3761.3
+      },
+      {
+        "case_id": "INDEP-F7-042",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate B: Run 1 LoRA (Preserved)",
+        "raw_output": "Sprint 43 Checklist:\n- Verify rate limiting\n- Update API docs",
+        "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+        "latency_ms": 3994.1
+      }
+    ],
+    "run2_strengthened_lora": [
+      {
+        "case_id": "INDEP-F1-001",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Transfer Rs. 550,000 plus 18% GST to the vendor account.",
+        "reference": "Transfer \u20b95,50,000 plus 18% GST to the vendor account.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must resolve self-correction to \u20b95,50,000, keep 18% GST, no disfluencies.",
+        "latency_ms": 5022.2
+      },
+      {
+        "case_id": "INDEP-F1-002",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "reference": "Do not transfer the $7,500 until Devon confirms invoice 8821 in writing.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strictly preserve negation 'Do not transfer', currency $7,500, proper noun Devon, invoice 8821.",
+        "latency_ms": 4757.1
+      },
+      {
+        "case_id": "INDEP-F1-003",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "reference": "Run tail -f on /var/log/redis/redis.log and check for status 503.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Exact path /var/log/redis/redis.log, flag tail -f, status 503.",
+        "latency_ms": 4805.5
+      },
+      {
+        "case_id": "INDEP-F1-004",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "So basically, let us meet at 11:15am tomorrow.",
+        "reference": "Let us meet at 11:15 AM tomorrow.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strip 'uh um so basically', flip 10:30 to 11:15 AM.",
+        "latency_ms": 3376.7
+      },
+      {
+        "case_id": "INDEP-F1-005",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "reference": "We need to reschedule the architecture deep dive with Dr. Priya Mehta and Alex to next Thursday, October 22nd.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve Dr. Priya Mehta, Alex, Thursday, October 22nd.",
+        "latency_ms": 5560.0
+      },
+      {
+        "case_id": "INDEP-F1-006",
+        "bucket": "cleanup_facts",
+        "task": "cleanup",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "We cannot deploy the hotfix without running the full database migration first.",
+        "reference": "We cannot deploy the hotfix without running the full database migration first.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Strictly preserve 'cannot deploy' and 'without running'.",
+        "latency_ms": 3367.4
+      },
+      {
+        "case_id": "INDEP-F2-007",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Subject: Restoration of Staging Environment and Root Cause Analysis\n\nDear Client Steering Committee,\n\nWe are restoring the staging environment, and our root cause analysis will be delivered by 5pm.\n\nBest regards,\nMarcus",
+        "reference": "Subject: Staging Environment Restored & Root Cause Analysis Timeline\n\nDear Client Steering Committee,\n\nPlease be advised that our staging environment has been fully restored. We are currently finalizing the root cause analysis and will deliver the report by 5:00 PM today.\n\nBest regards,\nMarcus",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must have distinct Subject line, formal salutation, body paragraphs, and Marcus sign-off. No placeholder leaks.",
+        "latency_ms": 8652.4
+      },
+      {
+        "case_id": "INDEP-F2-008",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Subject: Engineering Scheduled Maintenance Window\n\nDear Engineering Team,\n\nThe scheduled maintenance window will begin tonight at 2:30 UTC and will conclude by 01:00 UTC. Services will experience brief intermittent connectivity.",
+        "reference": "Subject: Scheduled Maintenance Window: 23:00\u201301:00 UTC\n\nDear Engineering Team,\n\nPlease be aware that a scheduled maintenance window will begin tonight at 23:00 UTC and conclude by 01:00 UTC. During this period, services may experience brief, intermittent connectivity.\n\nThank you for your understanding.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must generate Subject, clear body, preserve 23:00\u201301:00 UTC window.",
+        "latency_ms": 8913.2
+      },
+      {
+        "case_id": "INDEP-F2-009",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Reminder to the vendor that invoice 9904 for $18,500 is 15 days overdue. Please settle by Wednesday, Devon Vance.",
+        "reference": "Subject: Overdue Payment Reminder: Invoice #9904\n\nDear Vendor,\n\nThis is a reminder that invoice #9904 for $18,500 is now 15 days overdue. Please arrange for settlement by Wednesday.\n\nSincerely,\nDevon Vance",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Subject line, $18,500, 15 days overdue, Wednesday, Devon Vance sign-off.",
+        "latency_ms": 6682.1
+      },
+      {
+        "case_id": "INDEP-F2-010",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Urgent ping to On Call Engineer. Latency on payment gateway spiked to 2.4 seconds. Please investigate Redis Cache health.",
+        "reference": "Urgent: Payment gateway latency has spiked to 2.4 seconds. Please investigate Redis cache health immediately.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 2.4 seconds, Redis cache, urgent tone.",
+        "latency_ms": 5568.6
+      },
+      {
+        "case_id": "INDEP-F2-011",
+        "bucket": "messages",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Hey Elena, quick check-in. Are you free for a 15-minute coffee chat at 2pm to brainstorm the beta rollout?",
+        "reference": "Hey Elena, quick check-in: are you free for a 15-minute coffee chat at 2:00 PM to brainstorm the beta rollout?",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Conversational greeting to Elena, 15-minute coffee chat, 2:00 PM.",
+        "latency_ms": 6056.7
+      },
+      {
+        "case_id": "INDEP-F2-012",
+        "bucket": "email",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Hi Team,\n\nProud to announce we officially passed our SOC 2 Type 2 audit with zero findings.\n\nCongrats to all!",
+        "reference": "Subject: We Officially Passed Our SOC 2 Type II Audit!\n\nHi Team,\n\nI am proud to announce that we have officially passed our SOC 2 Type II audit with zero findings. Congratulations to everyone on this outstanding achievement!",
+        "passed": false,
+        "reasons": [
+          "missing_subject_header"
+        ],
+        "criteria": "Clear subject line, SOC 2 Type II, zero findings.",
+        "latency_ms": 5829.1
+      },
+      {
+        "case_id": "INDEP-F3-013",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Can you make a prompt for GPT-4 that asks it to extract all named entities from a SEC 10K filing and return them in JSON format?",
+        "reference": "Extract all named entities from the following SEC 10-K filing and return the results as a structured JSON object categorized by company, person, date, and financial metric.",
+        "passed": false,
+        "reasons": [
+          "meta_wrapper_echo"
+        ],
+        "criteria": "Must strip 'can you make me a prompt for gpt four that asks it to'. Direct imperative instruction to extract entities in JSON format.",
+        "latency_ms": 6823.6
+      },
+      {
+        "case_id": "INDEP-F3-014",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Write a Python asyncio script that concurrently scrapes five stock tickers and outputs a pandas DataFrame.",
+        "reference": "Write a Python script using asyncio and aiohttp to concurrently fetch market data for the following five stock tickers and output the consolidated results into a pandas DataFrame.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'tell claude to'. Must direct the model to write Python asyncio script outputting pandas dataframe.",
+        "latency_ms": 4210.7
+      },
+      {
+        "case_id": "INDEP-F3-015",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Render a cyberpunk tea house in Neo Tokyo, in rainy neon lighting.",
+        "reference": "A cyberpunk tea house in Neo Tokyo illuminated by rainy neon reflections, atmospheric volumetric fog, hyper-detailed architectural rendering, 35mm photograph.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'i want an instruction for midjourney to render'. Direct image generation prompt.",
+        "latency_ms": 3447.0
+      },
+      {
+        "case_id": "INDEP-F3-016",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Provide an automated customer support triage assistant that tags urgency and outputs JSON.",
+        "reference": "You are an automated customer support triage assistant. For every incoming ticket, classify the issue category, assess urgency as Low, Medium, High, or Critical, and return a structured JSON response.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'give me a system prompt for'. Direct 'You are...' system instruction.",
+        "latency_ms": 3421.8
+      },
+      {
+        "case_id": "INDEP-F3-017",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Could you explain what a diffusion model is, including its components and how it learns to reconstruct images from noise?",
+        "reference": "Explain how diffusion models generate images to an audience without a machine learning background, using visual metaphors like progressive noise removal, and completely avoiding mathematical equations.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip conversational wrapper. Must retain 'without mathematical equations'.",
+        "latency_ms": 4671.9
+      },
+      {
+        "case_id": "INDEP-F3-018",
+        "bucket": "prompt",
+        "task": "prompt",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Engineering postmortem for a 45-minute Redis cache failure.",
+        "reference": "Draft a detailed engineering postmortem for a 45-minute Redis cache failure. Include an Executive Summary, Incident Timeline in UTC, Root Cause Analysis, Customer Impact, and Action Items.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must strip 'ask the ai to'. Direct imperative instruction for postmortem.",
+        "latency_ms": 3518.7
+      },
+      {
+        "case_id": "INDEP-F4-019",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag\n- 14",
+        "reference": "Pre-flight deployment checklist:\n- Verify SSL certificates\n- Backup production database\n- Notify customer success\n- Enable feature flag 14",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Action verbs must stay paired with direct objects. No split lines like 'Verify SSL\n- Certificates'.",
+        "latency_ms": 6220.5
+      },
+      {
+        "case_id": "INDEP-F4-020",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "- Laptop\n- Charger\n- Presentation\n- Clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "reference": "- Laptop charger\n- Presentation clicker\n- Extra HDMI adapter\n- Noise cancelling headphones",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Keep compound items together on single bullets.",
+        "latency_ms": 4736.1
+      },
+      {
+        "case_id": "INDEP-F4-021",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "1. Implement authentication middleware.\n2. Write integration tests.\n3. Document public API endpoints.",
+        "reference": "1. Implement authentication middleware\n2. Write integration tests\n3. Document public API endpoints",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Properly numbered 1, 2, 3 sequence.",
+        "latency_ms": 4014.5
+      },
+      {
+        "case_id": "INDEP-F4-022",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Meeting action items:\n- Elena will review PR 99\n- Devon will update deployment scripts\n- Alex will test backup restore",
+        "reference": "Action items:\n- Elena: review PR 99\n- Devon: update deployment scripts\n- Alex: test backup restore",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve owner names (Elena, Devon, Alex) and assigned tasks.",
+        "latency_ms": 5136.5
+      },
+      {
+        "case_id": "INDEP-F4-023",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 gigabyte\n- Zero cloud latency",
+        "reference": "Key differentiators:\n- Local offline execution\n- Low memory footprint under 1 GB\n- Zero cloud latency",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Bullet list with 3 distinct differentiators.",
+        "latency_ms": 4668.0
+      },
+      {
+        "case_id": "INDEP-F4-024",
+        "bucket": "notes_format",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "1. Drain traffic from primary node.\n2. Promote replica.\n3. Update DNS cname.",
+        "reference": "Database recovery procedure:\n1. Drain traffic from primary node\n2. Promote replica\n3. Update DNS CNAME",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Ordered recovery steps.",
+        "latency_ms": 4444.2
+      },
+      {
+        "case_id": "INDEP-F5-025",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "The billing refund bug failed QA testing again on Wednesday, so the issue remains open. Alex is continuing root cause investigation and the release is postponed to Monday.",
+        "reference": "The billing refund bug failed QA testing Wednesday and remains unresolved. Alex is investigating the root cause; release is postponed to Monday.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Crucial: Must preserve that the bug remains unresolved/unfixed. Do not say resolved. Preserve Alex and Monday.",
+        "latency_ms": 6534.6
+      },
+      {
+        "case_id": "INDEP-F5-026",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Third quarter financial report arr increased by 34% reaching $4.2 million monthly net burn was successfully reduced to $180,000 leaving 18 months of runway.",
+        "reference": "Q3 financials: ARR increased 34% to $4.2M, with monthly net burn reduced to $180,000, extending runway to 18 months.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 34%, $4.2M, $180,000, 18 months runway.",
+        "latency_ms": 8218.5
+      },
+      {
+        "case_id": "INDEP-F5-027",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Board approved four new engineering hires by December 1, but froze all marketing agency spend until January 1. Metrics are evaluated before Q1.",
+        "reference": "Board summary: Approved hiring 4 engineers by December 1st, while freezing marketing agency spend until Q1.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "4 engineers by Dec 1st, marketing spend frozen until Q1.",
+        "latency_ms": 5732.1
+      },
+      {
+        "case_id": "INDEP-F5-028",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "DNS propagation failure caused a 35-minute partial outage on the US West Edge Zero. Customer data was compromised, and automatic failover occurred.",
+        "reference": "Incident summary: DNS failure caused a 35-minute partial outage on US-West. Failover was automatic, and no customer data was compromised.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "35-minute outage, US-West, zero customer data compromised.",
+        "latency_ms": 5626.5
+      },
+      {
+        "case_id": "INDEP-F5-029",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Beta survey feedback: 42 users voted for dark mode, 19 requested offline mode, and 8 noticed occasional audio crackling. Overall satisfaction rating was 89%.",
+        "reference": "User feedback: 42 requested dark mode, 19 wanted offline mode, and 8 reported audio crackling. Overall satisfaction is 89%.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve 42, 19, 8, 89%.",
+        "latency_ms": 7561.7
+      },
+      {
+        "case_id": "INDEP-F5-030",
+        "bucket": "summary",
+        "task": "summarize",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "GDPR compliance: telemetry older than 90 days must be permanently deleted from cold storage. Approval is required before running the script.",
+        "reference": "GDPR update: Telemetry over 90 days must be permanently deleted from cold storage upon DPO approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Telemetry > 90 days deleted, DPO approval required.",
+        "latency_ms": 5903.2
+      },
+      {
+        "case_id": "INDEP-F6-031",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Your app is totally broken and crashed twice when I was saving my work. This is unacceptable.",
+        "reference": "I encountered two crashes while attempting to save my work, resulting in lost progress. Please investigate this issue promptly.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Convert angry/blunt complaint into constructive, formal bug report.",
+        "latency_ms": 4337.5
+      },
+      {
+        "case_id": "INDEP-F6-032",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Can you send over the deck before tomorrow morning? Standup. Thank you.",
+        "reference": "Could you please share the presentation deck prior to tomorrow morning's standup? Thank you.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Transform slang into polite, professional workplace communication.",
+        "latency_ms": 3909.0
+      },
+      {
+        "case_id": "INDEP-F6-033",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "I will deliver the prototype by Wednesday, but it completely depends on whether legal approves the terms.",
+        "reference": "I am aiming to deliver the prototype by Wednesday, though this depends entirely on legal approval.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must preserve the hedge 'aiming/working to' and condition 'depends on legal approval'.",
+        "latency_ms": 4237.1
+      },
+      {
+        "case_id": "INDEP-F6-034",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "We are writing to let you know that, in consideration of recent events and following deep analysis, we have come to the determination to decline your application.",
+        "reference": "After careful review, we are unable to accept your application at this time.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Condense verbose prose into a clear, direct, professional sentence.",
+        "latency_ms": 5884.2
+      },
+      {
+        "case_id": "INDEP-F6-035",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "We cannot accept your submission because you missed the deadline by two hours.",
+        "reference": "Thank you for your submission. Unfortunately, we are unable to accept it as it was received after the deadline. We appreciate your effort and interest.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Rephrase cold rejection with warmth and appreciation while maintaining the boundary.",
+        "latency_ms": 3158.0
+      },
+      {
+        "case_id": "INDEP-F6-036",
+        "bucket": "followup_style",
+        "task": "rewrite",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Unless the vendor signs the DPA before 5pm today, we will terminate the pilot immediately.",
+        "reference": "Unless the vendor signs the DPA before 5:00 PM today, we will proceed with terminating the pilot program.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Preserve condition 'Unless vendor signs DPA before 5:00 PM' and consequence.",
+        "latency_ms": 4384.1
+      },
+      {
+        "case_id": "INDEP-F7-037",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "reference": "The product launch is scheduled for Friday at 11:30 AM in the main auditorium.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Must apply the date and time change to the draft. Output must be the complete draft with 'Friday at 11:30 AM in the main auditorium'. Must NOT output the instruction as prose.",
+        "latency_ms": 5108.7
+      },
+      {
+        "case_id": "INDEP-F7-038",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Executive briefing with Elena Rostova at 3:30 PM in Boardroom A regarding Series A term sheet.",
+        "reference": "Executive briefing with Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "passed": false,
+        "reasons": [
+          "failed_co_presenter_addition"
+        ],
+        "criteria": "Elena Rostova and Devon Vance at 3:30 PM in Boardroom A regarding series A term sheet.",
+        "latency_ms": 5413.2
+      },
+      {
+        "case_id": "INDEP-F7-039",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Invoice #9920 for $16,500 is approved for hardware acquisition. An initial deposit of $4,000 was paid in July.",
+        "reference": "Invoice #9920 for $16,500.00 is approved for hardware acquisition.",
+        "passed": false,
+        "reasons": [
+          "failed_deletion_of_deposit"
+        ],
+        "criteria": "Amount updated to $16,500.00; initial deposit sentence completely removed.",
+        "latency_ms": 7610.7
+      },
+      {
+        "case_id": "INDEP-F7-040",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "The staging environment is hosted at staging.internal.net on port 8443. Database credentials are in 1Password. HTTPS is required.",
+        "reference": "The staging environment is hosted at staging.internal.net on port 8443. HTTPS is required. Database credentials are in 1Password.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Port 8443, HTTPS required, 1Password credentials sentence preserved.",
+        "latency_ms": 6579.5
+      },
+      {
+        "case_id": "INDEP-F7-041",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "You must review PR 305 immediately or the release will be blocked.",
+        "reference": "Could you please review PR 305 when you have a moment? We appreciate your help unblocking the release.",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Soften tone into polite request while retaining PR 305 and unblocking release.",
+        "latency_ms": 4128.7
+      },
+      {
+        "case_id": "INDEP-F7-042",
+        "bucket": "followup_style",
+        "task": "edit",
+        "variant": "Candidate C.2: Strengthened LoRA (Run 2)",
+        "raw_output": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "reference": "Sprint 43 Checklist:\n- Deploy auth service\n- Run smoke tests\n- Verify rate limiting\n- Update API docs",
+        "passed": true,
+        "reasons": [],
+        "criteria": "Header updated to Sprint 43; existing items preserved; new items added.",
+        "latency_ms": 6712.3
+      }
+    ]
+  }
+}

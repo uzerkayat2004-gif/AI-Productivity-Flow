@@ -81,7 +81,7 @@ def session_for(lease, model_ref="local/nvidia/nemotron-speech-streaming-en-0.6b
     return SimpleNamespace(model_resource_lease=lease, stt_model_ref=model_ref)
 
 
-def test_off_nemotron_reuses_cache_inside_burst_and_evicts_after_ten_seconds(monkeypatch, fake_speech_cache):
+def test_off_nemotron_reuses_cache_inside_burst_and_evicts_after_idle_window(monkeypatch, fake_speech_cache):
     install_settings(monkeypatch, polishing_enabled=False)
     first_engine = fake_speech_cache.get(fake_speech_cache.model_ref)
     lease = resources.acquire_model_use("speech")
@@ -90,7 +90,7 @@ def test_off_nemotron_reuses_cache_inside_burst_and_evicts_after_ten_seconds(mon
     VoiceFlowApp._release_session_model_resource(session)
 
     assert session.model_resource_lease is None
-    assert resources._cleanup_not_before["speech"] == pytest.approx(1010.0)
+    assert resources._cleanup_not_before["speech"] == pytest.approx(1000.0 + main_module.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
     fake_speech_cache.clock.now = 1005.0
     resources.cleanup_idle_models()
     second_engine = fake_speech_cache.get(fake_speech_cache.model_ref)
@@ -98,7 +98,7 @@ def test_off_nemotron_reuses_cache_inside_burst_and_evicts_after_ten_seconds(mon
     assert len(fake_speech_cache.constructed) == 1
     assert first_engine.close_count == 0
 
-    fake_speech_cache.clock.now = 1011.0
+    fake_speech_cache.clock.now = 1000.0 + main_module.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS + 1.0
     resources.cleanup_idle_models()
     assert first_engine.close_count == 1
     assert fake_speech_cache.cache == {}

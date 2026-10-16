@@ -5,7 +5,11 @@ on Windows 11 Copilot+ hardware with 0 MB installer footprint.
 """
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
+import time
+from pathlib import Path
 import os
 import sys
 import threading
@@ -24,72 +28,175 @@ WINDOWS_AI_ALIASES = {
 
 _STATE_LOCK = threading.Lock()
 _CACHED_READY_STATE: str | None = None
+_CACHED_READY_AT = 0.0
+_CACHE_SECONDS = 60.0
+_PROBE_LOCK = threading.Lock()
+_READY_STATES = frozenset({"Ready", "NotReady", "Disabled", "Unavailable"})
 _MOCK_READY_STATE: str | None = None
 
 
 def set_mock_ready_state(state: str | None) -> None:
     """Set mock ready state for testing ('Ready', 'NotReady', 'Disabled', None)."""
-    global _MOCK_READY_STATE, _CACHED_READY_STATE
+    global _MOCK_READY_STATE, _CACHED_READY_STATE, _CACHED_READY_AT
     with _STATE_LOCK:
         _MOCK_READY_STATE = state
         _CACHED_READY_STATE = state
+        _CACHED_READY_AT = time.monotonic() if state is not None else 0.0
+
+
+def _normalize_ready_state(state: Any) -> str:
+    # Enum string forms may be qualified; match the tail exactly so NotReady
+    # can never be mistaken for Ready.
+    tail = str(state).rsplit(".", 1)[-1].strip().lower()
+    return {value.lower(): value for value in _READY_STATES}.get(tail, "Unavailable")
+
+
+def _native_language_model_ready_state() -> str:
+    """Native discovery runs only in the disposable readiness child."""
+    try:
+        import clr  # type: ignore
+        clr.AddReference("Microsoft.Windows.AI.Generative")  # type: ignore
+        from Microsoft.Windows.AI.Generative import LanguageModel  # type: ignore
+        return _normalize_ready_state(LanguageModel.GetReadyState())
+    except Exception:
+        pass
+    try:
+        import winrt.microsoft.windows.ai.generative as win_gen  # type: ignore
+        if hasattr(win_gen, "LanguageModel"):
+            return _normalize_ready_state(win_gen.LanguageModel.get_ready_state())
+    except Exception:
+        pass
+    return "NotReady"
+
+
+def _has_probe_memory() -> bool:
+    """Do not start optional native discovery under Windows commit pressure."""
+    try:
+        import ctypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+                (name, ctypes.c_ulonglong) for name in (
+                    "physical_total", "physical_available", "commit_limit",
+                    "commit_available", "virtual_total", "virtual_available", "extended")]
+
+        status = MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        return bool(ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))) and status.commit_available >= 1024 * 1024 * 1024
+    except Exception:
+        return False
+
+
+def _acquire_probe_mutex() -> tuple[Any, Any] | None:
+    """Serialize optional native discovery across the app's processes."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
+        kernel32.ReleaseMutex.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.CreateMutexW(None, False, "Local\\AIProductivityFlow.WindowsAIReadinessProbe")
+        if not handle:
+            return None
+        try:
+            if kernel32.WaitForSingleObject(handle, 0) in (0, 128):
+                return kernel32, handle
+        except BaseException:
+            kernel32.CloseHandle(handle)
+            raise
+        kernel32.CloseHandle(handle)
+    except (OSError, AttributeError, MemoryError):
+        pass
+    return None
+
+
+def _release_probe_mutex(lease: tuple[Any, Any]) -> None:
+    kernel32, handle = lease
+    try:
+        kernel32.ReleaseMutex(handle)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _run_readiness_child() -> str:
+    from voice_flow.runtime_env import python_executable
+
+    command = [python_executable(), "-I", "-B", "-u", str(Path(__file__).resolve()), "--native-readiness-probe"]
+    # -I excludes the caller's import paths. Forward only existing dependency
+    # directories, never the application package or its initializer.
+    for entry in sys.path:
+        directory = Path(entry)
+        if directory.name.lower() == "site-packages" and directory.is_dir():
+            command.extend(["--site-packages", str(directory.resolve())])
+    try:
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", timeout=3, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0:
+            return "NotReady"
+        state = json.loads(result.stdout)
+        return state if isinstance(state, str) and state in _READY_STATES else "NotReady"
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, MemoryError):
+        return "NotReady"
+
+
+def _probe_language_model_ready_state() -> str:
+    lease = _acquire_probe_mutex()
+    if lease is None:
+        return "NotReady"
+    try:
+        # Recheck after taking the cross-process gate: another process may
+        # have consumed headroom while this caller was reaching the gate.
+        if not _has_probe_memory():
+            return "NotReady"
+        return _run_readiness_child()
+    except MemoryError:
+        return "NotReady"
+    finally:
+        _release_probe_mutex(lease)
 
 
 def get_language_model_ready_state() -> str:
-    """Query Microsoft.Windows.AI.Generative.LanguageModel.GetReadyState().
-
-    Returns:
-        'Ready': Model is available on hardware (NPU Copilot+) and ready for rewriting.
-        'NotReady': Windows AI or hardware is present but model is not downloaded or initialising.
-        'Disabled': Windows AI feature is disabled in OS settings.
-        'Unavailable': Platform is not Windows or Windows AI APIs are not present.
-    """
-    global _CACHED_READY_STATE
+    """Read bounded, cached native availability without loading CLR here."""
+    global _CACHED_READY_STATE, _CACHED_READY_AT
     with _STATE_LOCK:
         if _MOCK_READY_STATE is not None:
             return _MOCK_READY_STATE
-
-    # Allow environment variable override for testing or manual flag
     env_state = os.environ.get("VOICE_FLOW_WINDOWS_AI_READY_STATE")
     if env_state:
         return env_state.strip()
-
     if sys.platform != "win32":
         return "Unavailable"
-
-    # Try inspecting Windows App SDK WinRT LanguageModel
+    with _STATE_LOCK:
+        cached = _CACHED_READY_STATE
+        if cached is not None and time.monotonic() - _CACHED_READY_AT < _CACHE_SECONDS:
+            return cached
+    if not _PROBE_LOCK.acquire(blocking=False):
+        return cached or "NotReady"
     try:
-        # Check pythonnet or winrt if present
-        try:
-            import clr  # type: ignore
-            clr.AddReference("Microsoft.Windows.AI.Generative")  # type: ignore
-            from Microsoft.Windows.AI.Generative import LanguageModel  # type: ignore
-            state = LanguageModel.GetReadyState()
-            state_str = str(state)
-            if "ready" in state_str.lower():
-                return "Ready"
-            if "notready" in state_str.lower():
-                return "NotReady"
-            if "disabled" in state_str.lower():
-                return "Disabled"
-            return state_str
-        except Exception:
-            pass
-
-        # Try winrt / winsdk runtime inspection if available
-        try:
-            import winrt.microsoft.windows.ai.generative as win_gen  # type: ignore
-            if hasattr(win_gen, "LanguageModel"):
-                state = win_gen.LanguageModel.get_ready_state()
-                return "Ready" if "ready" in str(state).lower() else "NotReady"
-        except Exception:
-            pass
-
-        # On non-Copilot+ PCs or when package identity is not present
-        return "NotReady"
-    except Exception as exc:
-        log.debug("[WINDOWS_AI] LanguageModel.GetReadyState() check failed: %s", exc)
-        return "Unavailable"
+        # Another caller can populate the cache between our checks.
+        with _STATE_LOCK:
+            if _CACHED_READY_STATE is not None and time.monotonic() - _CACHED_READY_AT < _CACHE_SECONDS:
+                return _CACHED_READY_STATE
+        state = _probe_language_model_ready_state()
+        with _STATE_LOCK:
+            # A test/explicit override during the probe remains authoritative.
+            if _MOCK_READY_STATE is not None:
+                return _MOCK_READY_STATE
+            _CACHED_READY_STATE = state
+            _CACHED_READY_AT = time.monotonic()
+        return state
+    finally:
+        _PROBE_LOCK.release()
 
 
 def _extract_transcript(text: str) -> tuple[str, str | None]:
@@ -194,3 +301,19 @@ def get_catalog_entry() -> dict[str, Any]:
         "is_default": ready,
         "description": "Native Windows 11 Copilot+ local AI model. 0 MB download, hardware-accelerated on NPU.",
     }
+
+
+if __name__ == "__main__":
+    # Direct script execution avoids importing voice_flow.__init__ in the child.
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--native-readiness-probe", action="store_true")
+    parser.add_argument("--site-packages", action="append", default=[])
+    args = parser.parse_args()
+    if args.native_readiness_probe:
+        for entry in args.site_packages:
+            directory = Path(entry)
+            if directory.name.lower() == "site-packages" and directory.is_dir():
+                sys.path.append(str(directory.resolve()))
+        print(json.dumps(_native_language_model_ready_state()))

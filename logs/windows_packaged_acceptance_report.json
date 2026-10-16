@@ -1,0 +1,77 @@
+{
+  "timestamp": "2026-10-15T17:35:00Z",
+  "test_suite": "Task D: Windows Packaged Application & Environment Acceptance",
+  "results": {
+    "installer_and_dependencies": {
+      "status": "PASS",
+      "installer_path": "D:\\.zcode\\workspace\\default\\AI-Productivity-Flow\\dist\\AI-Productivity-Flow-Setup-x64.exe",
+      "installer_size_bytes": 636495061,
+      "installer_size_mb": 607.01,
+      "installer_sha256": "b8eacca75637b41fd80385eab23632a442dbfa2a01add644f9d048b3f3befeaf",
+      "iss_script": "D:\\.zcode\\workspace\\default\\AI-Productivity-Flow\\release\\installer\\apf-setup.iss",
+      "bundled_components": {
+        "python_runtime": true,
+        "node_runtime": true,
+        "ffmpeg": true,
+        "whisper_model": true,
+        "vcredist": true,
+        "webview2": true,
+        "runtime_manifest": true,
+        "llama_server_binary": true
+      }
+    },
+    "startup_and_shortcuts": {
+      "status": "PASS",
+      "autostart_enabled": true,
+      "task_scheduler_exists": true,
+      "task_scheduler_enabled": true,
+      "task_scheduler_matches": true,
+      "task_name": "AI Productivity Flow-S-1-5-21-3413274718-3630816037-1030189454-1001",
+      "registry_fallback_active": false,
+      "startup_folder_shortcut_active": false,
+      "vbs_launcher_exists": true,
+      "desktop_shortcuts": [
+        "C:\\Users\\Asus\\Desktop"
+      ],
+      "single_mechanism_clean": true
+    },
+    "offline_operation": {
+      "status": "PASS",
+      "server_host": "127.0.0.1",
+      "server_port": 8090,
+      "localhost_accessible": true,
+      "cloud_bypass_verified": true
+    },
+    "dual_editor_injection": {
+      "primary_editor_notepad": {
+        "status": "FAIL",
+        "hwnd": 1771108,
+        "payload": "Voice Flow Primary Editor Injection Test: 1792136017.717345",
+        "verified_received": false
+      },
+      "secondary_editor": {
+        "status": "FAIL",
+        "editor_type": "Tkinter / Native Text Window",
+        "payload": "Voice Flow Secondary Editor Injection Test: 1792136023.0163033",
+        "verified_received": false
+      },
+      "status": "FAIL"
+    },
+    "error_recovery": {
+      "status": "PASS",
+      "simulated_condition": "llama-server unreachable / process killed",
+      "recovered_without_crash": true,
+      "delivered_text": "please update the deployment script to use port 8080",
+      "source_preserved": true
+    },
+    "baseline_rollback": {
+      "status": "PASS",
+      "baseline_path": "C:\\Users\\Asus\\.voice_flow\\models\\s1-mini-q4_k_m.gguf",
+      "baseline_size_bytes": 484219808,
+      "baseline_sha256": "3b41ebe2502cbd03e811d5d16b022f5ab551eda58d62597d152f89535003c634",
+      "matches_preserved_production_hash": true,
+      "rollback_ready": true
+    }
+  },
+  "overall_status": "FAIL"
+}

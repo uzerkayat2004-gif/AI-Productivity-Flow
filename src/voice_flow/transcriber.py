@@ -7,10 +7,19 @@ import threading
 import time
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from faster_whisper import WhisperModel
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
+else:
+    def WhisperModel(*args, **kwargs):
+        """Load Whisper's native dependencies only when a model is requested."""
+        from faster_whisper import WhisperModel as model_class
+
+        return model_class(*args, **kwargs)
 
 from voice_flow.config import config
 from voice_flow import nemotron_engine
@@ -214,6 +223,24 @@ class Transcriber:
         requested = self._local_model_name(active_stt) if active_stt else None
         self._load_model_bg(requested)
 
+    def begin_native_retry(self, model_ref, action_token):
+        requested = self._local_model_name(model_ref)
+        if not nemotron_engine.is_nemotron_model(requested):
+            return
+        try:
+            granted = nemotron_engine.retry_failed_model(requested, action_token)
+        except (nemotron_engine.NativeASRWorkerError, nemotron_engine.NativeASRBusyError) as exc:
+            with self._lock:
+                if not hasattr(self, "_native_load_errors"):
+                    self._native_load_errors = {}
+                self._native_load_errors[requested] = exc
+            raise
+        if granted:
+            with self._lock:
+                getattr(self, "_native_load_errors", {}).pop(requested, None)
+                if getattr(getattr(self, "nemotron_engine", None), "fatal_error", None):
+                    self.nemotron_engine = None
+
     def prepare_model_async(
         self, model_ref: str | None, *, lease: ModelUseLease | None = None
     ) -> ModelUseLease:
@@ -222,6 +249,11 @@ class Transcriber:
         selected = str(model_ref or "").strip()
         provider, separator, _model = selected.partition("/")
         if separator and provider.casefold() != "local":
+            return demand
+        try:
+            self.begin_native_retry(model_ref, demand)
+        except (nemotron_engine.NativeASRWorkerError, nemotron_engine.NativeASRBusyError):
+            # Capture stays active; its complete recording follows normal failed recovery.
             return demand
         worker = threading.Thread(
             target=self._load_model_bg,
@@ -426,6 +458,14 @@ class Transcriber:
             )
             self._publish_whisper_model(requested_model, cache_key, model_inst)
             log.info("[MODEL] Ultra-fast speech engine ready!")
+        except (nemotron_engine.NativeASRWorkerError, nemotron_engine.NativeASRBusyError) as exc:
+            with self._lock:
+                failures = getattr(self, "_native_load_errors", None)
+                if failures is None:
+                    failures = self._native_load_errors = {}
+                failures[requested_model] = exc
+                self._finish_model_load_locked(requested_model)
+            log.warning("[MODEL] Local speech worker failed; recording recovery remains available")
         except Exception as e:
             log.error("[MODEL ERROR] Failed to load speech model: %s", e, exc_info=True)
             with self._lock:
@@ -668,12 +708,25 @@ class Transcriber:
             log.error("Speech model failed to initialize in time.")
             return ""
 
-        return self._transcribe_local(audio, deadline=deadline, model_ref=local_model, is_chunk=is_chunk)
+        return self._transcribe_local(
+            audio,
+            category=getattr(self, "category_hint", None),
+            deadline=deadline,
+            model_ref=local_model,
+            is_chunk=is_chunk,
+        )
 
     def _wait_for_model(self, deadline: float | None = None, model_ref: str | None = None) -> bool:
         """Wait for the background model load without crossing *deadline*."""
         requested_model = self._local_model_name(model_ref)
 
+        def check_native_failure():
+            error = getattr(self, "_native_load_errors", {}).get(requested_model)
+            eng = getattr(self, "nemotron_engine", None)
+            error = error or getattr(eng, "fatal_error", None)
+            if error and nemotron_engine.is_nemotron_model(requested_model):
+                raise error
+        check_native_failure()
         is_loading = getattr(self, "_loading", False)
         # 1. Fast path: Nemotron model already warm or in singleton cache (only if not actively loading)
         if not is_loading and nemotron_engine.is_nemotron_model(requested_model):
@@ -709,6 +762,7 @@ class Transcriber:
             first_wait_until = min(first_wait_until, deadline)
 
         def _is_ready() -> bool:
+            check_native_failure()
             if getattr(self, "_loading", False):
                 return False
             if nemotron_engine.is_nemotron_model(requested_model):
@@ -745,6 +799,7 @@ class Transcriber:
         deadline: float | None = None,
         model_ref: str | None = None,
         is_chunk: bool = False,
+        initial_prompt: str | None = None,
     ) -> str:
         """Decode local audio without injecting learned dictionary terms."""
         requested_model = self._local_model_name(model_ref)
@@ -770,6 +825,8 @@ class Transcriber:
         # method remains a truthful raw-transcript boundary.
         if nemotron_engine.is_nemotron_model(requested_model):
             eng = getattr(self, "nemotron_engine", None) or nemotron_engine.get_nemotron_engine(requested_model)
+            if getattr(eng, "fatal_error", None):
+                raise eng.fatal_error
             if eng and eng.is_warm:
                 try:
                     text = eng.transcribe(
@@ -855,6 +912,11 @@ class Transcriber:
         if not acquired:
             log.warning("[STT] Local decode skipped because its deadline elapsed while waiting for the model lock.")
             return ""
+        # Dictionary design (PR #19): saved words never become a Whisper prompt.
+        # A prompt turns stored spellings into acoustic evidence; corrections
+        # happen in finalization instead.
+        prompt_hint = initial_prompt
+
         try:
             # Hold a local reference for this entire decode.  A concurrent
             # model switch may release the transcriber's old cache entry, but
@@ -871,7 +933,7 @@ class Transcriber:
                     beam_size=config.beam_size,
                     temperature=config.temperature,
                     language=config.language,
-                    initial_prompt=None,
+                    initial_prompt=prompt_hint,
                     # Streaming chunks already have their boundaries chosen by
                     # the recorder's silence split. A second, model-internal
                     # VAD pass can trim quiet first/last words from those
@@ -909,7 +971,7 @@ class Transcriber:
                         beam_size=config.beam_size,
                         temperature=config.temperature,
                         language=config.language,
-                        initial_prompt=None,
+                        initial_prompt=prompt_hint,
                         vad_filter=False,
                         condition_on_previous_text=False,
                     )

@@ -37,6 +37,7 @@ if sys.stdout is None:
 from voice_flow.audio import AudioRecorder
 from voice_flow.config import config
 from voice_flow.dictionary import dictionary_engine
+from voice_flow.local_model_resources import LOCAL_MODEL_IDLE_SECONDS
 from voice_flow.effective_style import apply_persistent_change, resolve_effective_style
 from voice_flow.hotkeys import InputTriggerListener
 from voice_flow.injector import ClipboardInjector, get_active_window_title, get_window_class_name
@@ -48,6 +49,7 @@ from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, f
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
 from voice_flow.voice_commands import detect_voice_command
+from voice_flow.activation import DEFAULT_ACTIVATION, activation_from_settings
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
 # Hide console window on Windows immediately so the application runs silently in the background
@@ -121,9 +123,9 @@ class DictationState(str, Enum):
 # chunk (~1.5-1.8s) plus in-flight chunks to drain instead of being discarded.
 POST_RELEASE_WORK_BUDGET_SECONDS = 4.0
 INJECTION_RESERVE_SECONDS = 0.3
-# Keep the large speech model resident briefly between OFF-mode dictations so
-# the next short utterance can reuse it without overlapping AI polish memory.
-NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = 10.0
+# Keep the large speech model resident between nearby OFF-mode dictations so
+# the next short utterance can reuse it. Explicit cleanup still takes precedence.
+NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 # With a cloud polish model no local LLM competes for RAM, so keep the
 # streaming speech model resident between dictations. Reloading it on every
 # hotkey press (~1-2.5s on low-power CPUs) made the first words of each
@@ -1142,6 +1144,14 @@ class VoiceFlowApp:
         stream = getattr(self, "_stream_stt", None)
         if stream is None:
             return
+        fatal = getattr(stream, "fatal_error", None)
+        if fatal is not None and owner is not None:
+            failures = getattr(self, "_native_session_failures", None)
+            if failures is None:
+                failures = self._native_session_failures = {}
+            failures[id(owner)] = (owner, fatal)
+            while len(failures) > 16:
+                failures.pop(next(iter(failures)))
         try:
             stream.end_session()
         except Exception as exc:
@@ -1610,6 +1620,9 @@ class VoiceFlowApp:
         self._overlay_call("show_ready")
         if not was_processing and session is not None:
             cancelled.discard(id(session))
+            failures = getattr(self, "_native_session_failures", None)
+            if isinstance(failures, dict) and failures.get(id(session), (None, None))[0] is session:
+                failures.pop(id(session), None)
         return True
 
     def _copy_last_transcript(self) -> bool:
@@ -2020,6 +2033,9 @@ class VoiceFlowApp:
         return formatted
 
     def _process_dictation_pipeline(self, session: Any, audio_buffer: Any, duration: float, record_id: int | None = None, use_streaming: bool = False, recovery: dict[str, Any] | None = None) -> None:
+        from voice_flow.nemotron_worker_client import NativeASRWorkerError
+        native_stream = getattr(self, "_stream_stt", None)
+        fatal_stream_error = None
         if recovery is None:
             recovery = getattr(self, "_pending_recovery", {}).get(id(session))
         if record_id is not None:
@@ -2125,6 +2141,8 @@ class VoiceFlowApp:
                                 timeout=remaining,
                             )
                         except Exception as exc:
+                            if isinstance(exc, NativeASRWorkerError):
+                                fatal_stream_error = exc
                             log.warning("[STREAM STT] collect failed (%s); using whole-buffer transcription.", exc)
                             part = ""
                         stream_had_failures = self._stream_had_failures(self._stream_stt)
@@ -2174,6 +2192,13 @@ class VoiceFlowApp:
                 # provider owns a duration-aware bound; the short streaming
                 # target above must never turn into a transcription cutoff.
                 for attempt in range(1):
+                    saved_owner, saved_failure = getattr(self, "_native_session_failures", {}).get(id(session), (None, None))
+                    native_failure = (fatal_stream_error or getattr(native_stream, "fatal_error", None)
+                                      or (saved_failure if saved_owner is session else None))
+                    if native_failure is not None:
+                        failure = native_failure
+                        raw_transcript = ""
+                        break
                     if raw_transcript.strip():
                         break
                     try:
@@ -2217,9 +2242,31 @@ class VoiceFlowApp:
                     # Deterministic wake-phrase command detection. The raw
                     # transcript is first repaired for known mis-hearings.
                     try:
-                        detection = detect_voice_command(dictionary_engine.repair_wake_term(raw_transcript))
-                        command_content = detection.content or ""
+                        activation = activation_from_settings(storage.get_setting)
+                        # The Voice Flow ASR repair only applies to the default
+                        # wake phrase; a custom assistant name is matched as
+                        # configured.
+                        detect_input = (
+                            dictionary_engine.repair_wake_term(raw_transcript)
+                            if activation.legacy_voice_flow else raw_transcript
+                        )
+                        # Default identity keeps the historical single-argument call.
+                        detection = (
+                            detect_voice_command(detect_input)
+                            if activation == DEFAULT_ACTIVATION
+                            else detect_voice_command(detect_input, activation)
+                        )
                         command = detection.command
+                        # With no command, the repaired detection string must
+                        # never replace the user's words ("wiseflow" stays
+                        # "wiseflow" in ordinary dictation).
+                        command_content = detection.content or ""
+                        if command is None and detect_input != raw_transcript:
+                            command_content = raw_transcript
+                        if command is not None and command.operation == "unsupported":
+                            log.info("[COMMAND] unsupported voice command ignored: %r", command.raw_phrase[:80])
+                            self._overlay_call("show_done", "Unsupported voice command skipped; your text was only cleaned up.")
+                            command = None
                     except Exception:
                         log.exception("[COMMAND] detection failed; using plain dictation")
                 else:
@@ -2434,6 +2481,50 @@ class VoiceFlowApp:
                 elif effective_target is None and target_h and self._is_internal_window(target_h):
                     target_h = None
 
+                # Check user review barrier for high-risk content (P0-1)
+                try:
+                    from voice_flow.entity_review import check_user_review_barrier, get_review_manager
+                    needs_review, flagged_entities, review_summary = check_user_review_barrier(
+                        polished_text,
+                        task=task,
+                        draft=command_context,
+                    )
+                    if needs_review:
+                        log.info("[REVIEW BARRIER] High-risk content detected: %s. Holding text.", review_summary)
+                        self._overlay_call("show_done", "Review Required")
+                        review_manager = get_review_manager()
+                        resolution = review_manager.resolve_review(
+                            polished_text,
+                            flagged_entities,
+                            task=task,
+                            draft=command_context,
+                        )
+                        if not resolution.insertion_permitted:
+                            log.warning("[REVIEW BARRIER] Review was %s. Target application UNCHANGED.", resolution.action)
+                            self._history_update(
+                                record_id,
+                                status="review_rejected",
+                                error_message=f"Review {resolution.action}; insertion cancelled.",
+                                insertion_status="cancelled",
+                            )
+                            self._defer_history_insert(
+                                recovery, session, duration,
+                                raw_text=raw_transcript,
+                                polished_text=polished_text,
+                                status="review_rejected",
+                                error_message=f"Review {resolution.action}; insertion cancelled.",
+                                insertion_status="cancelled",
+                                processing_metadata=processing_metadata,
+                            )
+                            self._reset_to_idle(session)
+                            self._overlay_call("show_done", f"Review {resolution.action.title()} — Not Pasted")
+                            return
+                        # Use approved/corrected text
+                        polished_text = resolution.final_text
+                        log.info("[REVIEW BARRIER] User approved insertion. Final text: '%s'", polished_text)
+                except Exception as rev_err:
+                    log.warning("[REVIEW BARRIER] Review check error: %s", rev_err)
+
                 injection_started = time.perf_counter()
                 success = self.injector.paste_text(polished_text, target_h, press_enter=should_press_enter)
                 injection_elapsed = time.perf_counter() - injection_started
@@ -2509,6 +2600,9 @@ class VoiceFlowApp:
                 if use_streaming and not stream_closed:
                     self._end_stream_session(discard=True, owner=session)
                 self._release_session_model_resource(session)
+                failures = getattr(self, "_native_session_failures", None)
+                if isinstance(failures, dict) and failures.get(id(session), (None, None))[0] is session:
+                    failures.pop(id(session), None)
                 pending = getattr(self, "_pending_recovery", None)
                 if isinstance(pending, dict):
                     pending.pop(id(session), None)
@@ -2571,6 +2665,9 @@ class VoiceFlowApp:
             # interactive release path.  Preserve its prior completeness
             # semantics for long archived recordings instead of truncating it
             # to the 2.7s dictation deadline.
+            retry_native = getattr(self.transcriber, "begin_native_retry", None)
+            if callable(retry_native):
+                retry_native(None, object())
             raw = self.transcriber.transcribe(audio) or ""
             if not raw.strip():
                 raise RuntimeError("No text was transcribed")

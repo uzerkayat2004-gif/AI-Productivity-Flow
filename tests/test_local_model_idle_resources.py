@@ -1,6 +1,8 @@
 """Idle eviction must free native memory while leaving active models intact."""
 from __future__ import annotations
 
+from native_fixture_client import bind_native
+
 import ctypes
 import gc
 import threading
@@ -18,13 +20,17 @@ def _native_engine():
     engine._active_streams = 0
     engine._evict_when_idle = False
     engine._last_used = 10.0
+    engine._streams_idle = threading.Event()
+    engine._streams_idle.set()
+    engine._native = None
+    engine.fatal_error = None
     return engine
 
 
 def test_idle_native_cache_releases_actual_recognizer_handle(monkeypatch):
     destroyed = []
     engine = _native_engine()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: SimpleNamespace(
+    bind_native(engine, SimpleNamespace(
         nemo_speech_asr_destroy=lambda handle: destroyed.append(handle.value)))
     monkeypatch.setattr(nemotron_engine, "_NEMOTRON_CACHE", {"offline": engine})
     nemotron_engine._evict_idle_engines(10.0 + local_model_resources.LOCAL_MODEL_IDLE_SECONDS - 1)
@@ -39,7 +45,7 @@ def test_idle_cleanup_preserves_active_recording_and_resets_idle_clock(monkeypat
     destroyed = []
     clock = [20.0]
     engine = _native_engine()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: SimpleNamespace(
+    bind_native(engine, SimpleNamespace(
         nemo_speech_asr_destroy=lambda handle: destroyed.append(handle.value)))
     monkeypatch.setattr(nemotron_engine.time, "monotonic", lambda: clock[0])
     engine.acquire_stream()
@@ -58,12 +64,12 @@ def test_next_request_reloads_a_model_after_idle_cleanup(monkeypatch, tmp_path):
     replacement = _native_engine()
     constructed = []
     destroyed = []
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: SimpleNamespace(
+    bind_native(old_engine, SimpleNamespace(
         nemo_speech_asr_destroy=lambda handle: destroyed.append(handle.value)))
     monkeypatch.setattr(nemotron_engine, "_NEMOTRON_CACHE", {str(model_path.resolve()): old_engine})
     monkeypatch.setattr(nemotron_engine, "register_idle_cleanup", lambda *_args, **_kwargs: None)
 
-    def construct(path, *, spec):
+    def construct(path, *, spec, **_kwargs):
         constructed.append(path)
         return replacement
 

@@ -99,13 +99,25 @@ def is_s1_downloaded() -> bool:
 
 
 def is_s1_runtime_available() -> bool:
-    """Whether the local inference runtime (llama_cpp) is present."""
+    """Whether the local inference runtime (llama-server or llama_cpp) is present."""
     try:
         import importlib.util
 
-        return importlib.util.find_spec("llama_cpp") is not None
+        if importlib.util.find_spec("llama_cpp") is not None:
+            return True
     except Exception:
-        return False
+        pass
+
+    try:
+        from voice_flow import vf1_engine
+
+        engine = vf1_engine.get_vf1_engine()
+        if engine.is_server_healthy() or engine._find_llama_server_binary() is not None:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _release_cached_s1(llm: Any) -> None:
@@ -310,6 +322,12 @@ def s1_can_handle(
         return False
 
     # 2. Command attribute checks
+    # Free-text constraints ("without hashtags") cannot be expressed in S1's
+    # native control line; routing them to S1 would silently drop them.
+    if getattr(command, "constraints", ()):
+        return False
+    if getattr(command, "operation", None) == "unsupported":
+        return False
     if getattr(command, "persistent_change", False):
         return False
     if getattr(command, "ambiguous", False):
@@ -688,6 +706,17 @@ def normalization_preserves_content(
     """Run the shared fidelity guard after narrow S1 normalization equivalences."""
     try:
         from voice_flow.polisher import _candidate_preserves_content
+        from voice_flow.vf_checks import expand_contractions, normalize_source_for_guard
+
+        # Apply the edits a correct cleanup is expected to make (fillers,
+        # repeats, self-corrections, "dont" -> "do not", spoken price
+        # compounds) before comparing, so valid normalisations are not
+        # rejected (A16).  Number, negation, literal and retention checks
+        # below still run on the result.
+        source = normalize_source_for_guard(source, candidate)
+        candidate = expand_contractions(candidate)
+        if not re.search(r"\w", source):
+            return not re.search(r"\w", candidate or "")
 
         stutter_normalized_source = _collapse_repeated_half_quantity_prefix(source)
         has_stutter_equivalence = stutter_normalized_source != source
@@ -775,23 +804,35 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
         if getattr(polish_with_s1, "_cached_llm_path", None) == str(model_path):
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
-        from llama_cpp import Llama  # type: ignore
+        try:
+            from llama_cpp import Llama  # type: ignore
 
-        gpu_layers = -1 if sys.platform == "darwin" else 0
-        llm = Llama(
-            model_path=str(model_path),
-            n_ctx=_S1_CONTEXT_TOKENS,
-            **_s1_runtime_batch_settings(),
-            n_gpu_layers=gpu_layers,
-            verbose=False,
-        )
-        old_llm = getattr(polish_with_s1, "_cached_llm", None)
-        if old_llm is not None:
-            _release_cached_s1(old_llm)
-        setattr(polish_with_s1, "_cached_llm", llm)
-        setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-        setattr(polish_with_s1, "_last_used", idle_time())
-        return True
+            gpu_layers = -1 if sys.platform == "darwin" else 0
+            llm = Llama(
+                model_path=str(model_path),
+                n_ctx=_S1_CONTEXT_TOKENS,
+                **_s1_runtime_batch_settings(),
+                n_gpu_layers=gpu_layers,
+                verbose=False,
+            )
+            old_llm = getattr(polish_with_s1, "_cached_llm", None)
+            if old_llm is not None:
+                _release_cached_s1(old_llm)
+            setattr(polish_with_s1, "_cached_llm", llm)
+            setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            setattr(polish_with_s1, "_last_used", idle_time())
+            return True
+        except Exception:
+            from voice_flow import vf1_engine
+
+            engine = vf1_engine.get_vf1_engine()
+            if engine.is_server_healthy() or (
+                engine._find_llama_server_binary() and engine.ensure_server_running()
+            ):
+                setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+                setattr(polish_with_s1, "_last_used", idle_time())
+                return True
+            return False
     except Exception as exc:
         log.warning("[S1] Could not warm S1-mini model: %s", exc)
         return False
@@ -954,6 +995,27 @@ def _polish_chunk_with_s1(
     return cleaned or None
 
 
+def _polish_chunk_with_server(
+    chunk: str,
+    control_line: str,
+    deadline: float,
+) -> str | None:
+    """Run S1 inference on a single chunk using local llama-server."""
+    from voice_flow import vf1_engine
+
+    engine = vf1_engine.get_vf1_engine()
+    prompt = build_s1_prompt(control_line, chunk)
+    res = engine._run_llama_server_inference(prompt, deadline)
+    if not res:
+        return None
+
+    cleaned = re.sub(r"<think>.*?</think>", "", res, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.replace("<|im_end|>", "").replace("<|endoftext|>", "")
+    cleaned = cleaned.strip()
+    return cleaned or None
+
+
 def _polish_with_s1_impl(
     text: str,
     instruction: str = "",
@@ -1024,28 +1086,36 @@ def _polish_with_s1_impl(
         return None
 
     try:
-        try:
-            from llama_cpp import Llama  # type: ignore
-        except Exception:
-            log.info("[S1] llama-cpp runtime unavailable; S1 cannot run.")
-            return None
-
+        use_server = False
         llm = getattr(polish_with_s1, "_cached_llm", None)
-        cached_path = getattr(polish_with_s1, "_cached_llm_path", None)
-        if llm is None or cached_path != str(model_path):
-            gpu_layers = -1 if sys.platform == "darwin" else 0
-            replacement = Llama(
-                model_path=str(model_path),
-                n_ctx=_S1_CONTEXT_TOKENS,
-                **_s1_runtime_batch_settings(),
-                n_gpu_layers=gpu_layers,
-                verbose=False,
-            )
-            if llm is not None:
-                _release_cached_s1(llm)
-            llm = replacement
-            setattr(polish_with_s1, "_cached_llm", llm)
-            setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+        if llm is None:
+            try:
+                from llama_cpp import Llama  # type: ignore
+
+                cached_path = getattr(polish_with_s1, "_cached_llm_path", None)
+                if cached_path != str(model_path):
+                    gpu_layers = -1 if sys.platform == "darwin" else 0
+                    replacement = Llama(
+                        model_path=str(model_path),
+                        n_ctx=_S1_CONTEXT_TOKENS,
+                        **_s1_runtime_batch_settings(),
+                        n_gpu_layers=gpu_layers,
+                        verbose=False,
+                    )
+                    llm = replacement
+                    setattr(polish_with_s1, "_cached_llm", llm)
+                    setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            except Exception:
+                from voice_flow import vf1_engine
+
+                engine = vf1_engine.get_vf1_engine()
+                if engine.is_server_healthy() or (
+                    engine._find_llama_server_binary() and engine.ensure_server_running()
+                ):
+                    use_server = True
+                else:
+                    log.info("[S1] llama-cpp runtime and llama-server unavailable; S1 cannot run.")
+                    return None
 
         register_idle_cleanup("s1", _release_idle_s1, kind="polish")
         setattr(polish_with_s1, "_last_used", idle_time())
@@ -1057,7 +1127,10 @@ def _polish_with_s1_impl(
             chunks = _chunk_transcript(user_text, max_chunk_words=300)
             cleaned_pieces: list[str] = []
             for ch in chunks:
-                piece = _polish_chunk_with_s1(llm, ch, control_line, deadline, **chunk_kwargs)
+                if use_server:
+                    piece = _polish_chunk_with_server(ch, control_line, deadline)
+                else:
+                    piece = _polish_chunk_with_s1(llm, ch, control_line, deadline, **chunk_kwargs)
                 if not piece or not piece.strip() or time.monotonic() >= deadline:
                     return None
                 cleaned_pieces.append(piece)
@@ -1065,7 +1138,10 @@ def _polish_with_s1_impl(
         else:
             # Whole-text tasks run in one pass; a prompt that does not fit
             # the context is refused inside _polish_chunk_with_s1.
-            output = _polish_chunk_with_s1(llm, user_text, control_line, deadline, **chunk_kwargs)
+            if use_server:
+                output = _polish_chunk_with_server(user_text, control_line, deadline)
+            else:
+                output = _polish_chunk_with_s1(llm, user_text, control_line, deadline, **chunk_kwargs)
             if output is None:
                 return None
 

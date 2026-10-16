@@ -688,3 +688,4 @@ class DictionaryEngine:
 
 
 dictionary_engine = DictionaryEngine()
+dictionary = dictionary_engine

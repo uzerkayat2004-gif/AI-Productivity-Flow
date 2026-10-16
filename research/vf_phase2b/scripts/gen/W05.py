@@ -1,0 +1,420 @@
+"""W05 Stage 1 generator: bucket=prompt (slices prompt + multi_constraint).
+
+Task=prompt, format=prompt, behavior=not_answer. The speaker describes what they
+want from another AI; the target is the imperative prompt only.
+Re-running reproduces research/vf_phase2b/data/batches/W05_s1.jsonl exactly.
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..")))
+from p2b_kit import rec, save  # noqa: E402
+
+WID = "W05"
+OUT = os.path.abspath(os.path.join(HERE, "..", "..", "data", "batches", f"{WID}_s1.jsonl"))
+rows = []
+FULL_EXTRA = {2, 7, 15, 22, 34, 37}  # extra full-header records (~30% overall)
+
+
+def P(slice_, transcript, target, *, nums=(), one_of=(), inc=(), notinc=(), neg=0, note, instr=None,
+      pos=None, cx=0, length_class="short", waivers=None, **req):
+    n = len(rows) + 1
+    request = {"task": "prompt", "format": "prompt"}
+    if n in FULL_EXTRA:
+        request["header_style"] = "full"
+    wc = len(transcript.split())
+    length_class = "short" if wc < 20 else ("medium" if wc <= 60 else "long")
+    request.update(req)
+    if instr:
+        request["instruction"] = instr
+    request["transcript"] = transcript
+    a = {"behavior": "not_answer", "format": "prompt"}
+    if nums:
+        a["numbers"] = list(nums)
+    if one_of:
+        a["numbers_one_of"] = [list(g) for g in one_of]
+    if inc:
+        a["must_include"] = list(inc)
+    if notinc:
+        a["must_not_include"] = list(notinc)
+    if neg:
+        a["min_negations"] = neg
+    if pos is None:
+        pos = "after" if instr else "structured"
+    meta = {"command_position": pos, "instruction_complexity": cx, "length_class": length_class}
+    rows.append(rec(f"TC-{WID}-{n:03d}", "prompt", slice_, request, target, a, f"w05-sc-{n:03d}",
+                    author=WID, note=note, waivers=waivers, meta=meta))
+
+
+# ---------------------------------------------------------------- short / medium (slice prompt)
+P("prompt",
+  "write a flutter widget that shows a countdown timer from sixty seconds and turns the text red in the last ten seconds",
+  "Write a Flutter widget that shows a countdown timer starting from 60 seconds and turns the text red during the last 10 seconds.",
+  nums=("60", "10"), inc=("Flutter", "red"), length_class="medium",
+  note="facts: countdown from 60 seconds; red in last 10 seconds; Flutter widget")
+
+P("prompt",
+  "um i need a pandas snippet that drops rows where the email column is empty and uh keeps everything else the same",
+  "Write a pandas snippet that drops rows where the email column is empty and keeps everything else the same.",
+  inc=("pandas", "email column"), context="code", length_class="medium",
+  note="facts: drop only rows with empty email; everything else unchanged; pandas")
+
+P("prompt",
+  "write a google sheets formula that pulls the price from the products tab using the sku in column a but don't use vlookup use xlookup",
+  "Write a Google Sheets formula that pulls the price from the Products tab using the SKU in column A. Do not use VLOOKUP; use XLOOKUP instead.",
+  inc=("XLOOKUP", "VLOOKUP", "column A", "Products tab"), neg=1, header_style="full", length_class="medium",
+  note="facts: negation kept (no VLOOKUP); XLOOKUP required; SKU in column A; Products tab")
+
+P("prompt",
+  "so write three instagram captions for our cold pressed hair oil launch uh keep each one under twenty words and no hashtags please",
+  "Write 3 Instagram captions for our cold-pressed hair oil launch. Keep each caption under 20 words and do not use hashtags.",
+  nums=("3", "20"), inc=("Instagram", "hair oil"), notinc=("#",), neg=1, length_class="medium",
+  note="facts: 3 captions; each under 20 words; negation: no hashtags")
+
+P("prompt",
+  "my react native app crashes on android when i open the camera screen but it works fine on ios can you help me figure out why the error says permission denial",
+  "Help me figure out why my React Native app crashes on Android when I open the camera screen, even though it works fine on iOS. The error says permission denial.",
+  inc=("React Native", "Android", "iOS", "permission denial"), length_class="medium",
+  note="facts: crash only on Android camera screen; fine on iOS; error text 'permission denial'; must not diagnose")
+
+P("prompt",
+  "write a python function that reads sales dot csv no wait sales underscore q3 dot csv and plots monthly revenue as a bar chart with matplotlib",
+  "Write a Python function that reads sales_q3.csv and plots monthly revenue as a bar chart using matplotlib.",
+  inc=("sales_q3.csv", "matplotlib", "bar chart"), notinc=("sales.csv",), instr="keep my exact file names",
+  cx=1, length_class="medium",
+  note="facts: self-correction applied: file is sales_q3.csv (not sales.csv); bar chart; matplotlib")
+
+P("prompt",
+  "i want an apps script that runs every monday at nine am and emails the summary tab as a pdf to shreya",
+  "Write an Apps Script that runs every Monday at 9 a.m. and emails the Summary tab as a PDF to Shreya.",
+  nums=("9",), inc=("Apps Script", "Monday", "Shreya", "PDF"), length_class="medium",
+  note="facts: every Monday 9 a.m.; Summary tab as PDF; recipient Shreya")
+
+P("prompt",
+  "build me a jupyter notebook that loads the churn dataset trains a logistic regression and a random forest with scikit learn and compares them on f1 score dont tune hyperparameters yet",
+  "Build a Jupyter notebook that loads the churn dataset, trains a logistic regression and a random forest with scikit-learn, and compares them on F1 score. Do not tune hyperparameters yet.",
+  inc=("Jupyter", "logistic regression", "random forest", "scikit-learn", "F1"), neg=1, context="code",
+  length_class="medium",
+  note="facts: two models (logistic regression, random forest); compare on F1; negation: no hyperparameter tuning yet")
+
+P("prompt",
+  "write a product description for our oat milk protein bar for the website its vegan has twelve grams of protein and no added sugar dont say its keto because it isnt",
+  "Write a website product description for our oat milk protein bar. It is vegan, has 12 grams of protein and no added sugar. Do not say it is keto, because it is not.",
+  nums=("12",), inc=("oat milk protein bar", "vegan", "keto"), neg=3, header_style="full", length_class="medium",
+  note="facts: vegan; 12 grams protein; no added sugar; must not claim keto (it is not); 3 negations kept")
+
+P("prompt",
+  "add a dark mode toggle to the settings screen of my swiftui app it should remember the choice using app storage and default to the system setting",
+  "Add a dark mode toggle to the Settings screen of my SwiftUI app. It should remember the user's choice using AppStorage and default to the system setting.",
+  inc=("SwiftUI", "dark mode", "AppStorage", "system setting"), context="code", length_class="medium",
+  note="facts: toggle on Settings screen; persisted with AppStorage; defaults to system setting")
+
+P("prompt",
+  "how do i merge two dataframes on customer id and keep only the rows that match in both",
+  "Explain how to merge two DataFrames on customer ID and keep only the rows that match in both.",
+  inc=("merge", "customer ID"), notinc=("inner join", "how='inner'"), length_class="short",
+  note="question turned into a prompt; must not answer (no 'inner join'); two DataFrames; keep only matching rows")
+
+P("prompt",
+  "excel formula to count how many orders in column c are above five hundred rupees and were placed in march",
+  "Write an Excel formula that counts how many orders in column C are above ₹500 and were placed in March.",
+  nums=("500",), inc=("Excel", "column C", "March", "₹500"), locale="en-in", length_class="short",
+  note="facts: column C; above ₹500 (rupees spoken); placed in March; both conditions kept")
+
+P("prompt",
+  "this kotlin coroutine keeps leaking when the user rotates the phone i'm using global scope launch in the activity find the problem but dont rewrite the whole file just point at the lines",
+  "Find out why this Kotlin coroutine keeps leaking when the user rotates the phone. I'm using GlobalScope.launch in the activity. Do not rewrite the whole file; just point to the lines causing the problem.",
+  inc=("Kotlin", "GlobalScope", "activity"), notinc=("lifecycleScope", "viewModelScope"), neg=1,
+  context="code", header_style="full", length_class="medium",
+  note="facts: leak on rotation; GlobalScope.launch in activity; negation: do not rewrite the whole file; must not answer with a fix")
+
+P("prompt",
+  "write a welcome email for new subscribers of our sneaker brand mention the ten percent off code welcome ten valid for seven days and keep it playful",
+  "Write a playful welcome email for new subscribers to our sneaker brand. Mention the 10% off code WELCOME10, valid for 7 days.",
+  nums=("10", "7"), inc=("WELCOME10", "sneaker", "playful"), length_class="medium",
+  note="facts: 10% off; code WELCOME10; valid 7 days; playful tone requested by speaker")
+
+P("prompt",
+  "in my notebook i want a cell that plots the distribution of order values with seaborn using log scale on the x axis and fifty bins",
+  "Write a notebook cell that plots the distribution of order values with seaborn, using a log scale on the x-axis and 50 bins.",
+  nums=("50",), inc=("seaborn", "log scale", "x-axis"), length_class="medium",
+  note="facts: seaborn; log scale on x-axis; 50 bins")
+
+P("prompt",
+  "create a login screen in jetpack compose with email and password fields a show password icon and a disabled login button until both fields are filled no google sign in",
+  "Create a login screen in Jetpack Compose with email and password fields, a show-password icon, and a login button that stays disabled until both fields are filled. Do not include Google sign-in.",
+  inc=("Jetpack Compose", "show-password", "disabled", "Google sign-in"), neg=1, length_class="medium",
+  note="facts: button disabled until both fields filled (condition kept); negation: no Google sign-in")
+
+P("prompt",
+  "i need a formula that flags duplicate invoice numbers in column b with the word duplicate otherwise leave the cell blank",
+  "Write a formula that flags duplicate invoice numbers in column B with the word \"Duplicate\" and otherwise leaves the cell blank.",
+  inc=("column B", "Duplicate", "blank"), length_class="medium",
+  note="facts: column B; label 'Duplicate'; otherwise blank (condition kept)")
+
+P("prompt",
+  "give me five subject lines for our diwali sale email on the ayurvedic face wash range fifteen percent off sitewide no clickbait",
+  "Write 5 subject lines for our Diwali sale email on the Ayurvedic face wash range, with 15% off sitewide. Do not use clickbait.",
+  nums=("5", "15"), inc=("Diwali", "Ayurvedic face wash"), neg=1, locale="en-in", length_class="medium",
+  note="facts: 5 subject lines; 15% off sitewide; negation: no clickbait")
+
+P("prompt",
+  "my python script throws key error date when i run it on the new export i think the column got renamed help me debug it without changing the output format",
+  "Help me debug my Python script, which throws KeyError: 'date' when I run it on the new export. I think the column got renamed. Do not change the output format.",
+  inc=("KeyError", "date", "I think", "output format"), neg=1, context="code", length_class="medium",
+  note="facts: hedge 'I think' kept; KeyError on 'date'; negation: output format must not change")
+
+P("prompt",
+  "add push notifications to my expo app using expo notifications remind users at eight pm if they havent logged a workout that day",
+  "Add push notifications to my Expo app using expo-notifications. Remind users at 8 p.m. if they have not logged a workout that day.",
+  nums=("8",), inc=("Expo", "expo-notifications", "workout"), neg=1, header_style="full", length_class="medium",
+  note="facts: reminder at 8 p.m.; condition 'if they have not logged a workout that day' kept with negation")
+
+P("prompt",
+  "summarize what this swift file does in plain english for a non developer dont suggest changes",
+  "Summarize what this Swift file does in plain English for a non-developer. Do not suggest changes.",
+  inc=("Swift", "plain English", "non-developer"), neg=1, length_class="short",
+  note="facts: audience non-developer; negation: no suggested changes")
+
+P("prompt",
+  "train an xgboost model to predict delivery time in minutes use the last thirty days as the test set not a random split and report mae",
+  "Train an XGBoost model to predict delivery time in minutes. Use the last 30 days as the test set, not a random split, and report MAE.",
+  nums=("30",), inc=("XGBoost", "minutes", "MAE", "random split"), neg=1, length_class="medium",
+  note="facts: last 30 days as test set; negation: not a random split; report MAE")
+
+P("prompt",
+  "my flutter list view stutters when scrolling through about two thousand images optimize it but keep using the cached network image package",
+  "Optimize my Flutter ListView, which stutters when scrolling through about 2,000 images. Keep using the cached_network_image package.",
+  nums=("2,000",), inc=("Flutter", "ListView", "cached_network_image", "about"), context="code", length_class="medium",
+  note="facts: hedge 'about 2,000 images' kept; must keep cached_network_image package")
+
+P("prompt",
+  "rewrite our about us page copy to sound warmer we are a family run spice company from kerala started in nineteen ninety eight keep it under one fifty words",
+  "Rewrite our About Us page copy to sound warmer. We are a family-run spice company from Kerala, started in 1998. Keep it under 150 words.",
+  nums=("1998", "150"), inc=("About Us", "family-run", "Kerala", "warmer"), locale="en-in", length_class="medium",
+  note="facts: family-run spice company; Kerala; started 1998; under 150 words")
+
+P("prompt",
+  "conditional formatting rule in google sheets that highlights the whole row green when the status column says paid and red when its overdue",
+  "Write a conditional formatting rule in Google Sheets that highlights the whole row green when the Status column says \"Paid\" and red when it says \"Overdue\".",
+  inc=("Google Sheets", "whole row", "green", "red", "Paid", "Overdue"), length_class="medium",
+  note="facts: whole row; green when Paid; red when Overdue; both conditions kept")
+
+P("prompt",
+  "whats the difference between use effect and use layout effect in react native and when should i use each",
+  "Explain the difference between useEffect and useLayoutEffect in React Native and when to use each.",
+  inc=("useEffect", "useLayoutEffect", "React Native"), notinc=("synchronously", "after paint"),
+  header_style="full", context="ai", length_class="short",
+  note="question turned into a prompt; must not answer it; both hooks named")
+
+P("prompt",
+  "write a function that removes outliers from the price column using the iqr method with one point five times iqr and print how many rows were removed",
+  "Write a function that removes outliers from the price column using the IQR method with 1.5 times the IQR, and prints how many rows were removed.",
+  nums=("1.5",), inc=("IQR", "price column"), length_class="medium",
+  note="facts: IQR method with 1.5 multiplier; print number of removed rows")
+
+P("prompt",
+  "write an apps script that archives every row in the orders sheet older than ninety days into a sheet called archive twenty twenty six and then deletes them from orders only after the copy succeeds",
+  "Write an Apps Script that archives every row in the Orders sheet older than 90 days into a sheet called Archive 2026, then deletes those rows from Orders, but only after the copy succeeds.",
+  nums=("90", "2026"), inc=("Apps Script", "Orders", "Archive 2026", "only after the copy succeeds"),
+  instr="keep my sheet names exactly", cx=1, length_class="medium",
+  note="facts: older than 90 days; target sheet Archive 2026; delete only after copy succeeds (condition and order kept)")
+
+P("prompt",
+  "write code to detect anomalies in the server latency data using isolation forest contamination at zero point zero two and plot the anomalies as red dots on the time series dont use plotly",
+  "Write code to detect anomalies in the server latency data using Isolation Forest with contamination set to 0.02, and plot the anomalies as red dots on the time series. Do not use Plotly.",
+  nums=("0.02",), inc=("Isolation Forest", "red dots", "Plotly"), neg=1, context="code", length_class="medium",
+  note="facts: contamination 0.02; anomalies as red dots; negation: no Plotly")
+
+P("prompt",
+  "my google sheets importrange keeps showing a ref error saying the result was not expanded because it would overwrite data in a two i already cleared the column help me figure out whats still blocking it",
+  "Help me figure out what is still blocking my Google Sheets IMPORTRANGE formula. It keeps showing a #REF! error saying the result was not expanded because it would overwrite data in A2. I already cleared the column.",
+  inc=("IMPORTRANGE", "#REF!", "A2", "already cleared the column"), neg=1, length_class="medium",
+  note="facts: error says result not expanded (negation kept); cell A2; column already cleared; must not guess the fix")
+
+# ---------------------------------------------------------------- long rambling with self-corrections
+P("multi_constraint",
+  "okay so this is for the habit tracker app i'm building in react native um the thing i want is a streak screen so basically it shows the current streak and the longest streak and uh a calendar heat map of the last ninety days no wait make that the last sixty days and um each day should be tappable and open the details for that day oh and it has to work offline like everything is stored locally with async storage no backend calls at all and uh kunal said we shouldn't add any new npm packages for the heat map so build it with plain views",
+  "Build a streak screen for my React Native habit tracker app. It should show the current streak, the longest streak, and a calendar heat map of the last 60 days. Make each day tappable so it opens the details for that day. The screen must work offline: store everything locally with AsyncStorage and make no backend calls at all. Kunal said we should not add any new npm packages for the heat map, so build it with plain views.",
+  nums=("60",), inc=("React Native", "AsyncStorage", "Kunal", "npm", "plain views", "offline"), notinc=("90",), neg=2,
+  instr="turn my description into a detailed AI prompt, don't change the requirements and don't invent additional features",
+  cx=3, length_class="long",
+  note="facts: self-correction applied: 60 days (not 90); offline, AsyncStorage, no backend calls; Kunal: no new npm packages, plain views; no extra features")
+
+P("multi_constraint",
+  "so shreya sent me the survey export and i need a notebook for it um first load the csv it's called survey underscore final underscore v2 dot csv then uh drop the test responses those are the rows where the email ends with at example dot com and then i want the average satisfaction score by region as a horizontal bar chart sorted highest to lowest sorry lowest to highest actually no keep it highest to lowest and um don't show the respondent names anywhere in the output because of privacy and keep it to pandas and matplotlib nothing else",
+  "Create a notebook for the survey export Shreya sent me. First, load survey_final_v2.csv. Then drop the test responses, which are the rows where the email ends with @example.com. Plot the average satisfaction score by region as a horizontal bar chart sorted from highest to lowest. Do not show respondent names anywhere in the output, for privacy reasons. Use only pandas and matplotlib, nothing else.",
+  inc=("survey_final_v2.csv", "@example.com", "highest to lowest", "pandas", "matplotlib", "Shreya"),
+  notinc=("lowest to highest",), neg=2,
+  instr="make it a clear prompt for a coding AI, keep my exact file name, and apply my corrections",
+  cx=3, length_class="long", context="ai",
+  note="facts: final sort order highest to lowest (speaker reverted the 'lowest to highest' correction); survey_final_v2.csv; test rows = emails ending @example.com; no respondent names; only pandas and matplotlib")
+
+P("multi_constraint",
+  "um okay i need ad copy for our new cold brew concentrate this is for meta ads so uh three variations each with a headline under forty characters and primary text under a hundred and twenty five characters the tone is like fun but not cheesy and um yara from brand said we can't claim it has more caffeine than regular coffee because we haven't tested that so don't say that oh and mention free shipping over four ninety nine no wait over five ninety nine rupees and the code is brew twenty for twenty percent off on the first order",
+  "Write 3 variations of Meta ad copy for our new cold brew concentrate. Each variation needs a headline under 40 characters and primary text under 125 characters. The tone should be fun but not cheesy. Do not claim it has more caffeine than regular coffee: Yara from brand said we cannot claim that because we have not tested it. Mention free shipping over ₹599 and the code BREW20 for 20% off the first order.",
+  nums=("3", "40", "125", "599", "20"), inc=("Meta", "Yara", "BREW20", "first order", "caffeine"), notinc=("499",), neg=4,
+  instr="detailed prompt please, keep every number exactly and don't add any claims I didn't make",
+  locale="en-in", header_style="full", cx=3, length_class="long",
+  note="facts: self-correction: free shipping over ₹599 (not 499); 3 variations; headline <40 chars; primary text <125 chars; code BREW20 = 20% off first order; must not claim more caffeine (untested); 4 negations")
+
+P("multi_constraint",
+  "so dhruv wants the inventory sheet automated um here's what i need an apps script that every night at like eleven pm checks the stock column and if any item is below the reorder level in column f it adds that item to a tab called reorder list with today's date uh but it shouldn't add the same item twice if it's already on the list and um it should send one email to dhruv with all the low items not one email per item oh and actually make it run at eleven thirty not eleven because the sales sync finishes at eleven fifteen",
+  "Write an Apps Script that automates Dhruv's inventory sheet. Every night at 11:30 p.m. (not 11, because the sales sync finishes at 11:15), check the stock column, and if any item is below the reorder level in column F, add it to a tab called Reorder List with today's date. It should not add the same item twice if it is already on the list. Send one email to Dhruv listing all the low items, not one email per item.",
+  nums=("11:30", "11:15", "11"), inc=("Apps Script", "column F", "Reorder List", "Dhruv", "today's date"), neg=3,
+  instr="turn this into a detailed prompt, apply my time change, and don't invent extra features",
+  cx=3, length_class="long",
+  note="facts: run time corrected to 11:30 p.m., not 11 (sync ends 11:15); below reorder level in column F; no duplicates on the list; one summary email to Dhruv, not one per item")
+
+P("multi_constraint",
+  "okay so liam's ios build keeps failing on the ci and i want a prompt for debugging it the error is um command phase script execution failed with a nonzero exit code and it only happens on the github actions runner not on his mac locally we're on xcode fifteen point two no wait xcode fifteen point four and cocoapods um i don't want it to suggest switching to swift package manager because that's not happening this sprint just help find the cause and give the fix steps in order",
+  "Help debug Liam's iOS build, which keeps failing on CI with the error \"Command phase script execution failed with a nonzero exit code\". It only happens on the GitHub Actions runner, not locally on his Mac. We're on Xcode 15.4 with CocoaPods. Do not suggest switching to Swift Package Manager, because that is not happening this sprint. Just help find the cause and give the fix steps in order.",
+  nums=("15.4",), inc=("Liam", "GitHub Actions", "CocoaPods", "Swift Package Manager", "nonzero exit code"),
+  notinc=("15.2",), neg=3, context="code",
+  instr="keep the exact error text and versions, keep the restriction about Swift Package Manager",
+  cx=2, length_class="long",
+  note="facts: self-correction: Xcode 15.4 (not 15.2); fails only on GitHub Actions, not locally; negation: do not suggest SPM (not happening this sprint); fix steps in order")
+
+P("multi_constraint",
+  "so elodie wants a newsletter draft for the end of season sale on our linen shirts um it goes out on the twenty eighth sorry twenty seventh and the sale is forty percent off on linen shirts and twenty five percent on everything else um she wants a short intro two product highlights the sand linen shirt and the olive overshirt and a closing line with the shop now button uh don't use the word cheap anywhere and don't mention the sale ending date because we might extend it",
+  "Write a newsletter draft for Elodie for the end-of-season sale on our linen shirts. It goes out on the 27th. The sale is 40% off linen shirts and 25% off everything else. Include a short intro, 2 product highlights (the Sand Linen Shirt and the Olive Overshirt), and a closing line with a Shop Now button. Do not use the word \"cheap\" anywhere, and do not mention the sale end date, because we might extend it.",
+  nums=("27", "40", "25", "2"), inc=("Elodie", "Sand Linen Shirt", "Olive Overshirt", "Shop Now", "cheap", "might extend"),
+  notinc=("28th",), neg=2, locale="en-gb",
+  instr="make it a prompt, keep the dates and percentages as I said them, don't add sections",
+  cx=3, length_class="long",
+  note="facts: self-correction: goes out on the 27th (not 28th); 40% off linen shirts, 25% off everything else; 2 highlights named; never 'cheap'; no end date because they 'might' extend (hedge kept)")
+
+P("multi_constraint",
+  "um so for the forecasting notebook kunal wants weekly sales forecasts for the next twelve weeks using prophet uh the data is in a parquet file weekly underscore sales dot parquet with columns week and units and we have about three years of data um so hold out the last eight weeks for validation and report mape and also plot actual versus forecast oh and he said don't include the covid period like twenty twenty in training sorry not all of twenty twenty just march to june twenty twenty and don't add holidays yet we'll do that later",
+  "Build a forecasting notebook that produces weekly sales forecasts for the next 12 weeks using Prophet. The data is in weekly_sales.parquet, with columns week and units, and covers about 3 years. Hold out the last 8 weeks for validation, report MAPE, and plot actual versus forecast. Kunal said not to include the COVID period in training: not all of 2020, just March to June 2020. Do not add holidays yet; we'll do that later.",
+  nums=("12", "3", "8", "2020"), inc=("Prophet", "weekly_sales.parquet", "MAPE", "March to June 2020", "Kunal"),
+  neg=3, header_style="full", context="code",
+  instr="detailed prompt, keep the file name and every number, apply my correction about the date range",
+  cx=3, length_class="long",
+  note="facts: correction narrows exclusion to March to June 2020 (not all of 2020); 12-week horizon; about 3 years data (hedge); hold out last 8 weeks; MAPE; no holidays yet, 'we'll do that later' is the speaker's own statement")
+
+P("multi_constraint",
+  "okay so for the recipe app in flutter i want a shopping list feature um users can add ingredients from any recipe with one tap and the list groups items by aisle like produce dairy pantry uh and they can check items off and checked items move to the bottom and um it should sync across devices using firebase no wait we're moving off firebase use supabase instead and um yara said the list has to be shareable with one other person max not a whole family group and please no ads on this screen",
+  "Add a shopping list feature to my Flutter recipe app. Users can add ingredients from any recipe with one tap, and the list groups items by aisle, such as produce, dairy and pantry. Users can check items off, and checked items move to the bottom. The list should sync across devices using Supabase. Yara said the list must be shareable with one other person at most, not a whole family group. Do not show ads on this screen.",
+  inc=("Flutter", "Supabase", "Yara", "one other person", "aisle"), notinc=("Firebase",), neg=2,
+  instr="turn my description into a detailed AI prompt, don't change the requirements and don't invent additional features",
+  cx=3, length_class="long",
+  note="facts: self-correction: Supabase replaces Firebase; one tap; group by aisle (produce, dairy, pantry); checked items to bottom; share with max one other person, not a family group; no ads on this screen")
+
+P("multi_constraint",
+  "so i need a formula for the commission sheet um shreya's rules are if sales in column d are under fifty thousand the commission is zero if it's between fifty thousand and a lakh it's five percent and above a lakh it's eight percent sorry seven percent and it should be calculated on the full amount not just the part above the threshold oh and it has to work in both excel and google sheets so no lambda or let functions please",
+  "Write a formula for the commission sheet using Shreya's rules. If sales in column D are under 50,000, the commission is 0. If sales are between 50,000 and 1,00,000, the commission is 5%, and above 1,00,000 it is 7%. Calculate it on the full amount, not just the part above the threshold. The formula must work in both Excel and Google Sheets, so do not use LAMBDA or LET functions.",
+  nums=("50,000", "1,00,000", "0", "5", "7"), inc=("column D", "Shreya", "Excel", "Google Sheets", "LAMBDA", "LET", "full amount"),
+  notinc=("8%",), neg=2, locale="en-in",
+  instr="keep every threshold and percentage exactly, apply my correction, keep it as a prompt",
+  cx=3, length_class="long",
+  note="facts: tiers: under 50,000 -> 0; 50,000 to 1,00,000 -> 5%; above 1,00,000 -> 7% (corrected from 8%); on full amount, not just excess; Excel and Google Sheets; no LAMBDA/LET; no currency spoken so no symbol")
+
+P("multi_constraint",
+  "so we're launching a new flavour of our protein peanut butter it's called dark chocolate sea salt and i need copy for the amazon listing um five bullet points and a product description of about two hundred words the key facts are thirty grams of protein per hundred grams no palm oil no added sugar and it's made in small batches in pune um dhruv said don't compare us to any other brand by name and don't use the word healthy because of the labelling rules oh and the jar is three fifty grams not five hundred i keep saying five hundred but it's three fifty",
+  "Write copy for the Amazon listing of our new protein peanut butter flavour, Dark Chocolate Sea Salt.\nDeliverables: 5 bullet points and a product description of about 200 words.\nKey facts: 30 grams of protein per 100 grams, no palm oil, no added sugar, made in small batches in Pune.\nJar size: 350 grams, not 500 grams.\nRestrictions: Dhruv said not to compare us to any other brand by name, and do not use the word \"healthy\" because of the labelling rules.",
+  nums=("5", "200", "30", "100", "350", "500"), inc=("Dark Chocolate Sea Salt", "Amazon", "Pune", "Dhruv", "healthy", "palm oil"),
+  neg=5, locale="en-in",
+  instr="structure it with one line per group of requirements, keep my exact product name and every number, no new claims",
+  cx=3, length_class="long",
+  note="facts: jar is 350 grams, not 500 (speaker corrected repeated mistake; 500 kept only as the negated value); 5 bullets; ~200-word description (hedge 'about'); 30 g protein per 100 g; no palm oil; no added sugar; small batches in Pune; no naming competitors; never 'healthy'")
+
+P("multi_constraint",
+  "okay um so this is for elodie's data notebook it keeps running out of memory when it loads the clickstream logs uh the file is like eight gigs it's a csv and she only needs four columns user id session id event and timestamp so um i want help rewriting the loading cell to read in chunks of i think five hundred thousand rows no wait chunks of two hundred thousand rows and only those four columns and um she does not want to switch to spark or dask so don't suggest that and keep the final output a single pandas dataframe",
+  "Help me rewrite the loading cell in Elodie's data notebook, which keeps running out of memory when it loads the clickstream logs. The file is a CSV of about 8 GB, and she only needs 4 columns: user ID, session ID, event and timestamp. Read the file in chunks of 200,000 rows and load only those 4 columns. She does not want to switch to Spark or Dask, so do not suggest that. Keep the final output a single pandas DataFrame.",
+  nums=("8", "4", "200,000"), inc=("Elodie", "Spark", "Dask", "user ID", "session ID", "timestamp", "pandas DataFrame"),
+  notinc=("500,000",), neg=2, context="code",
+  instr="make it a detailed prompt, apply my correction on the chunk size, keep the no Spark or Dask rule",
+  cx=3, length_class="long",
+  note="facts: chunk size corrected to 200,000 rows (not 500,000); file about 8 GB ('like' = approximate); 4 named columns only; no Spark/Dask; single pandas DataFrame")
+
+# ---------------------------------------------------------------- multi_constraint, medium
+P("multi_constraint",
+  "write a whatsapp broadcast message for our repeat customers about the restock of the rose face mist keep it under fifty words mention it sold out in four days last time and dont use more than one emoji",
+  "Write a WhatsApp broadcast message for our repeat customers about the restock of the rose face mist. Keep it under 50 words, mention that it sold out in 4 days last time, and do not use more than one emoji.",
+  nums=("50", "4"), inc=("WhatsApp", "repeat customers", "rose face mist"), notinc=("discount", "% off"), neg=1,
+  instr="make it a clear prompt, keep the word limit and emoji rule exactly, and don't add a discount since I didn't mention one",
+  cx=3, length_class="medium",
+  note="facts: under 50 words; sold out in 4 days last time; at most one emoji; no discount invented")
+
+P("multi_constraint",
+  "um i want an onboarding flow for my kotlin app three screens with a skip button on each the last screen asks for notification permission and if they deny it dont ask again for at least seven days",
+  "Build an onboarding flow for my Kotlin app with 3 screens, each with a Skip button. The last screen asks for notification permission. If the user denies it, do not ask again for at least 7 days.",
+  nums=("3", "7"), inc=("Kotlin", "Skip button", "notification permission", "at least 7 days"), neg=1,
+  instr="detailed prompt, don't invent screens or features, keep the 7 day rule",
+  header_style="full", context="code", cx=3, length_class="medium",
+  note="facts: exactly 3 screens; Skip on each; permission on last screen; if denied, not asked again for at least 7 days")
+
+P("multi_constraint",
+  "write a google sheets formula for the marketing tracker that calculates return on ad spend as revenue in column g divided by spend in column h and shows a dash instead of an error when spend is zero round to two decimals",
+  "Write a Google Sheets formula for the marketing tracker that calculates return on ad spend as revenue in column G divided by spend in column H. Show a dash instead of an error when spend is 0, and round to 2 decimals.",
+  nums=("0", "2"), inc=("Google Sheets", "column G", "column H", "dash", "return on ad spend"),
+  instr="make it concise but keep the column letters and the zero rule",
+  length="shorter", cx=2, length_class="medium",
+  note="facts: ROAS = column G / column H; dash instead of error when spend is 0 (condition kept); round to 2 decimals")
+
+P("multi_constraint",
+  "write five short google ad headlines for our bamboo toothbrush subscription each under thirty characters mention plastic free and the first month at ninety nine rupees and dont use words like best or number one",
+  "Write 5 short Google Ads headlines for our bamboo toothbrush subscription. Keep each under 30 characters, mention plastic-free and the first month at ₹99, and do not use words like \"best\" or \"number one\".",
+  nums=("5", "30", "99"), inc=("bamboo toothbrush", "plastic-free", "₹99", "best", "number one"), neg=1,
+  instr="make it a prompt, persuasive copy is fine but keep the banned words and limits exactly",
+  locale="en-in", cx=3, length_class="medium",
+  note="facts: 5 headlines; each under 30 characters; plastic-free; first month ₹99; banned words 'best' and 'number one' kept as literals")
+
+save(OUT, rows)
+print(f"wrote {len(rows)} records to {OUT}")
+
+# ================================================================ STAGE 2 (TC-W05-101 ...)
+# Stage-1 file above is untouched. Stage 2 adds new domains (e-learning, personal finance
+# tracking, game modding, home automation, job applications) and new prompt types (image
+# generation, writing tasks, research/learning, study plans, extraction, translation prompts,
+# interview role-play, Excel/SQL, Zapier/n8n automation, coding-agent prompts).
+# Fix from stage-1 review (TC-W05-044): every "concise"/Length: shorter record has a target
+# that is visibly shorter than the dictated content while keeping every requirement.
+OUT2 = os.path.abspath(os.path.join(HERE, "..", "..", "data", "batches", f"{WID}_s2.jsonl"))
+rows2 = []
+LISTY = object()
+
+
+def Q(slice_, transcript, target, *, nums=(), one_of=(), inc=(), notinc=(), neg=0, note, instr=None,
+      pos=None, cx=None, waivers=None, afmt="prompt", full=None, **req):
+    n = 101 + len(rows2)
+    request = {"task": "prompt", "format": "prompt"}
+    if full is None:
+        full = n % 10 in (1, 4, 7)
+    if full:
+        request["header_style"] = "full"
+    wc = len(transcript.split())
+    length_class = "short" if wc < 20 else ("medium" if wc <= 60 else "long")
+    request.update(req)
+    if instr:
+        request["instruction"] = instr
+    request["transcript"] = transcript
+    a = {"behavior": "not_answer"}
+    if afmt:
+        a["format"] = afmt
+    if nums:
+        a["numbers"] = list(nums)
+    if one_of:
+        a["numbers_one_of"] = [list(g) for g in one_of]
+    if inc:
+        a["must_include"] = list(inc)
+    if notinc:
+        a["must_not_include"] = list(notinc)
+    if neg:
+        a["min_negations"] = neg
+    if pos is None:
+        pos = ("before" if n % 3 == 0 else "after") if instr else "structured"
+    if cx is None:
+        cx = (1 if instr else 0) + (1 if req.get("length") or req.get("markup") else 0)
+    meta = {"command_position": pos, "instruction_complexity": cx, "length_class": length_class}
+    rows2.append(rec(f"TC-{WID}-{n:03d}", "prompt", slice_, request, target, a, f"w05-sc-{n:03d}",
+                     author=WID, note=note, waivers=waivers, meta=meta))
+
+
+for _part in ("W05_s2_part1.py", "W05_s2_part2.py", "W05_s2_part3.py", "W05_s2_part4.py", "W05_s2_part5.py"):
+    exec(open(os.path.join(HERE, _part), encoding="utf-8").read())
+
+save(OUT2, rows2)
+print(f"wrote {len(rows2)} records to {OUT2}")

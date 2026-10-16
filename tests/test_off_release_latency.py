@@ -1,4 +1,6 @@
 """Full release-to-paste replay; all device/provider/time boundaries are fake."""
+
+from native_fixture_client import bind_native
 import threading
 from types import SimpleNamespace
 import numpy as np
@@ -123,7 +125,6 @@ def test_native_frames_preserve_conditioned_pcm_and_short_final_tail(monkeypatch
         def nemo_speech_asr_result_destroy(self, result): pass
         def nemo_speech_asr_stream_close(self, stream): pass
     dll = Dll()
-    monkeypatch.setattr(native, 'get_nemo_dll', lambda: dll)
     monkeypatch.setattr(native, 'notify_models_available', lambda *args: None)
     if conditioning in {'identity', 'rate_change'}:
         monkeypatch.setattr(native, 'LiveSpeechEnhancer', lambda **kwargs: SimpleNamespace(process=lambda audio, rate: audio))
@@ -134,7 +135,8 @@ def test_native_frames_preserve_conditioned_pcm_and_short_final_tail(monkeypatch
         monkeypatch.setattr(native, 'LiveSpeechEnhancer', lambda **kwargs: LiveSpeechEnhancer(profile=profile))
         baseline = LiveSpeechEnhancer(profile=profile)
     stream = native.NemotronStreamTranscriber(engine=Engine())
-    monkeypatch.setattr(stream, '_open_stream', lambda dll: setattr(stream._stream, 'value', 42) or True)
+    bind_native(stream._engine, dll, opened=True)
+    monkeypatch.setattr(stream, '_open_stream', lambda client: setattr(stream._stream, 'value', 42) or True)
     frames = [np.full(160, (i + 1) / 100., dtype=np.float32) for i in range(40)]
     if conditioning == 'quiet':
         frames = [frame * .002 for frame in frames]

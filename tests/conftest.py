@@ -9,7 +9,14 @@ import tempfile
 import webbrowser
 from pathlib import Path
 
+import sys
+
 import pytest
+
+# Test helpers such as native_fixture_client live beside the tests.
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
 
 # ---------------------------------------------------------------------------
 # Test data isolation: never read or write the user's real ~/.voice_flow.

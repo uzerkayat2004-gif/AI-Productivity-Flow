@@ -134,3 +134,10 @@ work/
 /*.patch
 /*.orig
 /*.rej
+
+# Model weights and merged checkpoints
+runs/**/merged_hf/
+runs/**/gguf/
+*.gguf
+tools/llama/
+

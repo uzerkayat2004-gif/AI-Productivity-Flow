@@ -1,0 +1,67 @@
+{"id": "NR-0012", "verdict": "accept", "reason": "Invented $ removed; all amounts, 'about', cancel intent kept."}
+{"id": "NR-0019", "verdict": "accept", "reason": "Hedges maybe/probably/possibly restored; condition kept."}
+{"id": "NR-0024", "verdict": "accept", "reason": "Invented #Hashtag removed; dictated punctuation/new lines/hashtags correct."}
+{"id": "NR-0031", "verdict": "accept", "reason": "Mis-split items fixed: Diyas / Rangoli colours / Sweets from the usual shop / curtains."}
+{"id": "NR-0032", "verdict": "accept", "reason": "Spoken leading 'new line' no longer written out; dictated numbering kept."}
+{"id": "NR-0033", "verdict": "accept", "reason": "Invented $ removed; all four amounts kept."}
+{"id": "NR-0043", "verdict": "accept", "reason": "4,206 restored; rupees unit restored; all other numbers kept."}
+{"id": "NR-0044", "verdict": "reject", "reason": "Leading 'Okay,' removed from CT; per policy S1's leading 'Okay,'/'So' is native style and kept (S1 output was otherwise correct). Re-attach.", "better_target": "Okay, the checklist before we go live is:\n\n- Make sure the SSL cert is valid.\n- Point the DNS to the new load balancer.\n- Run the database migration on a snapshot first.\n- Warm up the cache.\n- Turn on the monitoring alerts.\n- Keep the old servers running for at least 48 hours in case we need to roll back."}
+{"id": "NR-0045", "verdict": "accept", "reason": "Dictated inline commas honoured; spoken 'and' restored minimal."}
+{"id": "NR-0047", "verdict": "accept", "reason": "3 options under lists split into items; hedges maybe/possibly kept."}
+{"id": "NR-0052", "verdict": "accept", "reason": "Clara restored; dictated order of apology restored; Thanks on own line."}
+{"id": "NR-0056", "verdict": "accept", "reason": "600 restored."}
+{"id": "NR-0058", "verdict": "reject", "reason": "BORDERLINE: CT drops the leading 'Okay.' paragraph; speaker dictated 'okay new paragraph', so S1's 'Okay.' + break is faithful and leading 'Okay' is kept per policy. S1 output is otherwise fully correct.", "better_target": "Okay.\n\nThe first point is about the timeline, we're about two weeks behind.\n\nThe second point is the budget, which is still within limits.\n\nAnd finally, the client wants a demo before Christmas? I think that's doable."}
+{"id": "NR-0059", "verdict": "accept", "reason": "Port literals without separators; negation/except kept."}
+{"id": "NR-0060", "verdict": "accept", "reason": "Correction applied correctly (Ben->Max, Joel and Tara kept); dropping 'he's away' is part of the repair."}
+{"id": "NR-0063", "verdict": "accept", "reason": "Filler 'basically' removed, code-mixed 'yaar' kept."}
+{"id": "NR-0067", "verdict": "accept", "reason": "Four items split into bullets; numbers kept."}
+{"id": "NR-0070", "verdict": "accept", "reason": "'no onion garlic' restriction restored; Aunty spelling kept."}
+{"id": "NR-0072", "verdict": "reject", "reason": "Bullets->prose fix is right, but CT also removed leading 'So' after the greeting; policy keeps it. Re-attach.", "better_target": "Hi Joel,\n\nSo following up on our call yesterday, I have shared the updated design files in the drive folder, and the main changes are the new color palette, the simplified checkout, and the bigger buttons on mobile.\n\nI have not touched the onboarding screens yet because we are still waiting on the copy from marketing. Could you take a look before Thursday and leave comments directly in the file?\n\nThanks a lot,\nRuth"}
+{"id": "NR-0073", "verdict": "accept", "reason": "Corrections 4:30 and doctor applied; reason clause restored."}
+{"id": "NR-0074", "verdict": "accept", "reason": "5:45 removed; 'sunrise is 6:10' restored so shoot time is 6."}
+{"id": "NR-0075", "verdict": "reject", "reason": "Leading 'So' after greeting removed although policy keeps it; S1 output was fully correct.", "better_target": "Hi Clara,\n\nSo I've finished the first pass on the report. The numbers look fine, but the charts in section 3 need new labels, and the executive summary is a bit long. I'll cut it down tomorrow morning. Let me know if you want me to include the appendix or leave it out.\n\nThanks,\nFelix"}
+{"id": "NR-0078", "verdict": "accept", "reason": "Day three corrected to Goa to Hampi."}
+{"id": "NR-0079", "verdict": "accept", "reason": "Password literal 'exclamation mark' kept as words."}
+{"id": "NR-0085", "verdict": "accept", "reason": "Invented Cash item and 'Also,' removed; cash sentence kept."}
+{"id": "NR-0088", "verdict": "reject", "reason": "Leading 'So' after greeting removed although policy keeps it; S1 output was fully correct.", "better_target": "Hi Omar,\n\nSo I spoke to the building manager about the noise from the upstairs flat. They said they'll send a written notice this week, and if it continues after that they'll involve the association. I've also started keeping a log of the dates and times. Could you add any nights you noticed it too? It'll help if we need to escalate.\n\nThanks,\nZoya"}
+{"id": "NR-0089", "verdict": "accept", "reason": "Butter replaces eggs; 3 items listed."}
+{"id": "NR-0090", "verdict": "accept", "reason": "7 items split; negation kept."}
+{"id": "NR-0092", "verdict": "accept", "reason": "Ananya spelling fixed; Oscar dropped; reason kept."}
+{"id": "NR-0095", "verdict": "accept", "reason": "Alternative 7 or 7:30 restored."}
+{"id": "NR-0114", "verdict": "accept", "reason": "Elif restored in greeting; hedge kept."}
+{"id": "NR-0116", "verdict": "accept", "reason": "3 items listed under lists; leading So kept."}
+{"id": "NR-0118", "verdict": "accept", "reason": "4 items split into bullets."}
+{"id": "NR-0122", "verdict": "accept", "reason": "Invented $ removed."}
+{"id": "NR-0131", "verdict": "accept", "reason": "Code-mixed 'yaar' restored; correction 11:30 kept."}
+{"id": "NR-0138", "verdict": "reject", "reason": "Correction (Maya for newsletter, Owen dropped) is right, but leading 'Okay,' removed; policy keeps it. Re-attach.", "better_target": "Okay, the people on the committee are going to be:\n- Anita for finance\n- Joel for events\n- Sana for outreach\n- Maya for the newsletter\n\nAnd I'll be the coordinator."}
+{"id": "NR-0141", "verdict": "accept", "reason": "Alternative 1,200 for the month restored."}
+{"id": "NR-0142", "verdict": "accept", "reason": "Invented $ removed; correction kept."}
+{"id": "NR-0143", "verdict": "accept", "reason": "'ma'am extended it' and 'yaar' restored; 18th kept."}
+{"id": "NR-0152", "verdict": "accept", "reason": "Honorific 'sir' restored."}
+{"id": "NR-0153", "verdict": "accept", "reason": "'aunty' restored."}
+{"id": "NR-0154", "verdict": "accept", "reason": "Coconut/Agarbatti split; 'near the temple' rejoined."}
+{"id": "NR-0155", "verdict": "reject", "reason": "Leading 'So' after greeting removed although policy keeps it; S1 output was fully correct (25->35 applied, all numbers kept).", "better_target": "Hi Tanvi,\n\nSo the workshop is confirmed for the 12th at the innovation hub. It runs from 10 to 4 with lunch at 1. We have 35 seats, and so far 28 people have registered. Could you send a reminder to everyone on the 10th, and also check if the projector there supports HDMI?\n\nThanks,\nKabir"}
+{"id": "NR-0158", "verdict": "accept", "reason": "Invented $ removed; corrections kept."}
+{"id": "NR-0159", "verdict": "accept", "reason": "Garbled 'aroud' fixed to 'everyone'."}
+{"id": "NR-0160", "verdict": "reject", "reason": "Leading 'Okay,' removed although policy keeps it; S1 output was fully correct (neighbors spelling is S1 style).", "better_target": "Okay, title: weekend recap.\nSaturday, we finally fixed the gate. Sunday, lunch with the neighbors, and a long walk by the canal."}
+{"id": "NR-0167", "verdict": "accept", "reason": "50 notebooks restored; A4 literal fixed; corrections kept."}
+{"id": "NR-0168", "verdict": "accept", "reason": "Sentence break added; 'like' meaning approx kept."}
+{"id": "NR-0169", "verdict": "accept", "reason": "Closing moved after blank line."}
+{"id": "NR-0170", "verdict": "accept", "reason": "3 courses listed; run-on fixed."}
+{"id": "NR-0172", "verdict": "accept", "reason": "MG Road restored."}
+{"id": "NR-0180", "verdict": "accept", "reason": "Bullets removed under prose; 'Also' restored; questions kept."}
+{"id": "NR-0181", "verdict": "accept", "reason": "Corrected-away 'optician' removed."}
+{"id": "NR-0189", "verdict": "accept", "reason": "IP 10.0.0.5 restored."}
+{"id": "NR-0192", "verdict": "accept", "reason": "'only' restored."}
+{"id": "NR-0195", "verdict": "accept", "reason": "3:22am restored."}
+{"id": "NR-0210", "verdict": "accept", "reason": "Mama/Masi sentence moved out of list item."}
+{"id": "NR-0211", "verdict": "accept", "reason": "Email literal qa@example.com restored."}
+{"id": "NR-0221", "verdict": "accept", "reason": "Invented $ removed; alternative kept."}
+{"id": "NR-0225", "verdict": "accept", "reason": "Invented $ removed; final full stop added."}
+{"id": "NR-0233", "verdict": "accept", "reason": "Stale hedge 'around' removed from corrected figure."}
+{"id": "NR-0235", "verdict": "accept", "reason": "Self-correction applied (half past 4)."}
+{"id": "NR-0236", "verdict": "accept", "reason": "Role swap applied."}
+{"id": "NR-0248", "verdict": "reject", "reason": "Leading 'So' after greeting removed although policy keeps it; S1 output was fully correct.", "better_target": "Hi Freya,\n\nSo I am putting together the reading group schedule. We meet every other Thursday at 7 at my place. The first book is the one about the history of salt. Then we will vote on the next ones. Each person brings a snack. Please let me know if Thursdays do not work for you, and I will try to adjust.\n\nCheers,\nJonas"}
+{"id": "NR-0250", "verdict": "accept", "reason": "Ms. restored."}
+{"id": "NR-0255", "verdict": "accept", "reason": "Invented $ removed; 'closer to' and 'once you add the flights' restored; hedges kept."}
+{"id": "NR-0257", "verdict": "accept", "reason": "Merged actions split; 'lock' restored; 3 items listed."}

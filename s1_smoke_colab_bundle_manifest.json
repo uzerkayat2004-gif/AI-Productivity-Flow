@@ -1,0 +1,80 @@
+{
+  "bundle_file": "s1_smoke_colab_bundle.zip",
+  "sha256": "d76c40fab64d79c2e63edda1b9bf2f1d5b55ed3b73529080283fa1f9373ecf75",
+  "size_bytes": 52119,
+  "files_count": 18,
+  "manifest": {
+    "src/voice_flow/vf_contract.py": {
+      "size": 12908,
+      "sha256": "77134454e5dffadefb8c21252c20d9d59fb333fd34ce13ddcd1b390132feb761"
+    },
+    "src/voice_flow/vf_checks.py": {
+      "size": 24199,
+      "sha256": "56a419029ab96011aea866da15876fc687b7d0d3a905c399673f1ee4414ff81b"
+    },
+    "src/voice_flow/__init__.py": {
+      "size": 303,
+      "sha256": "4cab365407b98ff13f7617aff1e3d2ef009456ecb0c7c1da56e5c61b9bbed795"
+    },
+    "research/vf_phase2a/scripts/vf_render.py": {
+      "size": 2838,
+      "sha256": "1349ad4b02f030a1b0242f8a4274fb542bed80c5a3cc3d0f1b00777b68c1f3d4"
+    },
+    "research/vf_phase2b/scripts/p2b_render.py": {
+      "size": 5170,
+      "sha256": "a93ad38588d19ee224df0f335d1d95a0b99b7c7db333e494c284031cc1ab36a9"
+    },
+    "research/vf_phase3a/S1_LORA_TRAINER.py": {
+      "size": 44275,
+      "sha256": "b9ac1ad7e34da090621c371a30be6a28eeeb421c95567368e2fa52dda540bac8"
+    },
+    "research/vf_phase3a/S1_COLAB_SMOKE_TEST.ipynb": {
+      "size": 15930,
+      "sha256": "1d4c546e86d63796c96bf04f4c05fadc83ab99fb452a0511143ca1efbcdcfeb5"
+    },
+    "research/vf_phase3a/requirements.txt": {
+      "size": 215,
+      "sha256": "583e5528c3a72ddf50aa7eb1472ecb20b21b4608b5723e4c92bb883da921dee9"
+    },
+    "research/vf_phase3a/GATES_TEMPLATE.json": {
+      "size": 395,
+      "sha256": "f3b624bdcd081fe2b973113fd253bb6c74a64ea189d9daea6fe57672dbdd3cfb"
+    },
+    "research/vf_phase3a/checkpoint_persistence.py": {
+      "size": 8719,
+      "sha256": "455b63337555c6e32870f4ba122dd8b833faa99eddb12809f34d86ff4954c2c8"
+    },
+    "research/vf_phase3a/eval_harness.py": {
+      "size": 15603,
+      "sha256": "b538c255c2b7b3878e3f954d06bc2e5d7570de4db67c12a47b83a92348625885"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_corpus.jsonl": {
+      "size": 14572,
+      "sha256": "89df6983c146883dba801f71288783a549b4bb65ff9a24a30725d8f7f9069056"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_rehearsal.jsonl": {
+      "size": 5712,
+      "sha256": "5644e948a3fd8e6083c82a02e2467b86fd51d9bcb016c2e879f029a2caea3080"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_heldout.jsonl": {
+      "size": 245,
+      "sha256": "f622ca8579008f2fea79b1660fdacd1f0c710fb8bd16ac37ba4dd7446af6a7a8"
+    },
+    "research/vf_phase3a/synthetic_fixtures/synthetic_manifest.json": {
+      "size": 689,
+      "sha256": "cee5cbf55347322162be2da41ff2aee6cbb3946cee43a98564174fb1f989d7c8"
+    },
+    "research/vf_phase3a/synthetic_fixtures/gates_synthetic_smoke.json": {
+      "size": 918,
+      "sha256": "e1c69065c0e554dab72262d214c859f2d99b07a5002956e3ee994fd8b0e03ebb"
+    },
+    "research/vf_phase3a/synthetic_fixtures/independent_eval_set.jsonl": {
+      "size": 8876,
+      "sha256": "dc659b21e1ebcb7143009895957c8511a8b7dc8d3eac70c015c20573fd5bbfb6"
+    },
+    "scripts/fetch_tokenizers.py": {
+      "size": 7594,
+      "sha256": "3bdd3714baefb48175491c29134ee6251bbf97fe51d5d47efa0b2b4d8ab0e230"
+    }
+  }
+}

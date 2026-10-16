@@ -1,6 +1,8 @@
 """Demand-scoped local model residency."""
 from __future__ import annotations
 
+from native_fixture_client import bind_native
+
 import ctypes
 import threading
 import time
@@ -206,15 +208,15 @@ def test_native_stream_start_returns_while_model_loads_and_buffers_audio(monkeyp
     engine = _StreamEngine()
     dll = _StreamDll()
 
-    def load(_ref):
+    def load(_ref, **_kwargs):
         entered.set()
         assert unblock.wait(1.0)
         return engine
 
     monkeypatch.setattr(nemotron_engine, "get_nemotron_engine", load)
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
+    bind_native(engine, dll, opened=True)
     session = nemotron_engine.NemotronStreamTranscriber()
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: setattr(session._stream, "value", 42) or True)
 
     started = time.perf_counter()
     session.start_session("local.gguf")
@@ -236,15 +238,15 @@ def test_cancel_during_native_model_load_never_opens_or_retains_stream(monkeypat
     engine = _StreamEngine()
     opened = []
 
-    def load(_ref):
+    def load(_ref, **_kwargs):
         entered.set()
         assert unblock.wait(1.0)
         return engine
 
     monkeypatch.setattr(nemotron_engine, "get_nemotron_engine", load)
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: _StreamDll())
+    bind_native(engine, _StreamDll(), opened=True)
     session = nemotron_engine.NemotronStreamTranscriber()
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: opened.append(True) or True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: opened.append(True) or True)
     session.start_session("local.gguf")
     assert entered.wait(0.5)
     session.discard()
@@ -267,7 +269,7 @@ def test_concurrent_native_getters_construct_one_engine(monkeypatch, tmp_path):
     engine.close = lambda: None
     engine.touch = lambda: None
 
-    def construct(_path, *, spec):
+    def construct(_path, *, spec, **_kwargs):
         constructed.append(spec)
         entered.set()
         assert unblock.wait(1.0)
@@ -313,6 +315,9 @@ def test_native_drain_deadline_keeps_partial_text_only_for_diagnostics(monkeypat
                 return 0
             return 1
 
+        def nemo_speech_asr_result_is_final(self, _result):
+            return True
+
         def nemo_speech_asr_result_transcript(self, _result, _index):
             session._deadline = 0.0
             return b"partial opening"
@@ -321,8 +326,8 @@ def test_native_drain_deadline_keeps_partial_text_only_for_diagnostics(monkeypat
             return None
 
     dll = Dll()
-    monkeypatch.setattr(nemotron_engine, "get_nemo_dll", lambda: dll)
-    monkeypatch.setattr(session, "_open_stream", lambda _dll: setattr(session._stream, "value", 42) or True)
+    bind_native(engine, dll, opened=True)
+    monkeypatch.setattr(session, "_open_stream", lambda _client: setattr(session._stream, "value", 42) or True)
     session.start_session()
     session.submit_frame(np.ones(160, dtype=np.float32), 16000)
     session.end_session()

@@ -40,14 +40,18 @@ class ModelUseLease:
     def release(self) -> None:
         self._release(0.0)
 
-    def release_after_idle(self, seconds: float, max_seconds: float = 30.0) -> None:
+    def release_after_idle(self, seconds: float, max_seconds: float | None = None) -> None:
         """Keep a model warm briefly; explicit cleanup still wins.
 
-        ``max_seconds`` lets a caller that has checked memory pressure (e.g. a
-        cloud polish model, so no local LLM competes for RAM) keep the speech
-        model resident longer between dictations.
+        By default speech may stay resident up to ``LOCAL_MODEL_IDLE_SECONDS``
+        (two minutes) and other models up to 30 seconds. ``max_seconds`` lets a
+        caller that has checked memory pressure (e.g. cloud polish, so no local
+        LLM competes for RAM) choose its own ceiling.
         """
-        ceiling = max(0.0, float(max_seconds))
+        if max_seconds is None:
+            ceiling = LOCAL_MODEL_IDLE_SECONDS if self.kind == "speech" else 30.0
+        else:
+            ceiling = max(0.0, float(max_seconds))
         self._release(max(0.0, min(ceiling, float(seconds))))
 
     def _release(self, idle_grace: float) -> None:

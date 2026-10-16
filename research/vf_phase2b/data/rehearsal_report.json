@@ -1,0 +1,22 @@
+{
+ "inputs": 480,
+ "accepted": 472,
+ "by_origin": {
+  "s1_verbatim": 346,
+  "s1_corrected": 126
+ },
+ "quarantined": 8,
+ "quarantine_kinds": {
+  "review_reject": 5,
+  "correction_not_confirmed": 1,
+  "near_dup_with_corpus_or_heldout": 2
+ },
+ "by_control": {
+  "[Styling: formal] [Structure: prose] [Context: email]": 25,
+  "[Styling: semi-formal] [Structure: prose] [Context: general]": 204,
+  "[Styling: formal] [Structure: lists] [Context: general]": 29,
+  "[Styling: semi-formal] [Structure: lists] [Context: general]": 52,
+  "[Styling: formal] [Structure: prose] [Context: general]": 111,
+  "[Styling: semi-formal] [Structure: prose] [Context: email]": 51
+ }
+}

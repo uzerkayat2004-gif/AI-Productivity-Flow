@@ -41,6 +41,9 @@
   }
 
   function fitStage() {
+    // Skip layout work while the onboarding overlay is hidden (codex/ui-playback).
+    const overlay = document.getElementById("onboarding-overlay");
+    if (!overlay || overlay.classList.contains("hidden")) return;
     ["s1-stage", "s2-stage", "s3-stage", "s4-stage", "s5-stage"].forEach(id => {
       const stage = document.getElementById(id);
       const vp = stage && stage.parentElement;

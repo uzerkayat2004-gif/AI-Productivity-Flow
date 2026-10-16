@@ -10,11 +10,14 @@ from voice_flow import local_model_resources as lmr
 from voice_flow import main as vf_main
 
 
-def test_release_after_idle_default_cap_is_30s():
+def test_release_after_idle_default_cap_is_speech_idle_limit():
+    # Speech defaults to the two-minute idle limit (release/final-local-oct16);
+    # other models keep the 30 s default.
     lease = lmr.acquire_model_use("speech")
     before = lmr.idle_time()
     lease.release_after_idle(600.0)
-    assert lmr._cleanup_not_before["speech"] <= before + 31.0
+    assert lmr._cleanup_not_before["speech"] <= before + lmr.LOCAL_MODEL_IDLE_SECONDS + 1.0
+    lmr.acquire_model_use("speech").release()  # reset to immediate
 
 
 def test_release_after_idle_custom_cap_allows_long_warm():

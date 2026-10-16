@@ -1420,7 +1420,17 @@ class TextPolisher:
                                 if fulfilled:
                                     sanitized = self._apply_style_register(sanitized, style_id or instruction)
                                     self._record_polish_latency(s1_engine.S1_MODEL_ID, started, is_local=True)
-                                    self._notify_outcome(outcome_callback, "local_model")
+                                    # A format/prompt/constraint command that only got S1's
+                                    # cleanup pass was not performed: say so instead of
+                                    # reporting success (tone/formality are applied by the
+                                    # deterministic register pass above).
+                                    command_dropped = cleanup_only and bool(
+                                        command_format or task == "prompt"
+                                        or getattr(command, "constraints", ())
+                                    )
+                                    self._notify_outcome(
+                                        outcome_callback, "command_unfulfilled" if command_dropped else "local_model",
+                                    )
                                     return _apply_dictionary_with_trace(sanitized, dictionary_trace)
                                 self._last_attempt_status = "fidelity_reject"
                                 attempt_outcome = "command_unfulfilled" if task != "cleanup" else "fidelity_reject"
