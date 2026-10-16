@@ -3846,6 +3846,7 @@ class VoiceFlowApp:
                 pass
             macos_lifecycle.terminate_descendants(timeout=1.0)
             log.info("[QUIT] AI Productivity Flow stopped.")
+            watchdog_timer.cancel()
             self._final_exit()
 
         threading.Thread(target=_cleanup, daemon=True, name="VoiceFlowQuit").start()
@@ -3879,6 +3880,12 @@ class VoiceFlowApp:
 
         overlay = getattr(self, "overlay", None)
         root = getattr(overlay, "root", None)
+        if root is None and overlay is not None:
+            try:  # early creation failed in __init__; run_loop reuses this window
+                overlay._create_window()
+                root = getattr(overlay, "root", None)
+            except Exception as exc:
+                log.debug("[MAC] Could not create Tk root for lifecycle hooks: %s", exc)
         quit_from_ui = lambda: self.request_quit("menu")  # noqa: E731
         reopen = lambda: threading.Thread(target=self.open_desktop_window, daemon=True).start()  # noqa: E731
         show_bar = lambda: overlay.show() if overlay is not None else None  # noqa: E731
