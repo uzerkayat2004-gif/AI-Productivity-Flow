@@ -261,14 +261,34 @@ class MacOSBackend:
         try:
             from AppKit import NSApplication, NSRunningApplication, NSWorkspace
 
+            def _active(running) -> bool | None:
+                try:
+                    return bool(running.isActive()) if running is not None else False
+                except Exception:
+                    return None
+
             front = NSWorkspace.sharedWorkspace().frontmostApplication()
             front_pid = int(front.processIdentifier()) if front is not None else 0
             report["active_pid"] = front_pid
-            # Act only when we hold activation, or when nothing does (closing
-            # our widget menu with Escape can leave no active app; seen on
-            # macOS 14 CI: Cmd+V then went nowhere). Never take focus from
-            # another app the user activated (Spotlight-style panels too).
-            if front_pid not in (0, os.getpid()):
+            own = None
+            try:
+                own = NSRunningApplication.currentApplication()
+            except Exception:
+                own = None
+            own_active = _active(own)
+            if own_active is None:
+                own_active = front_pid == os.getpid()
+            front_active = _active(front)
+            if front_active is None:
+                front_active = front is not None
+            report["own_active"] = own_active
+            # Act when we hold keyboard activation -- even if frontmostApplication
+            # (the menu-bar owner) still names the user's app: macOS 14 CI, Escape
+            # on our widget menu left our accessory app active while TextEdit kept
+            # the menu bar, and Cmd+V reached us -- or when nothing is active.
+            # Never take focus from another app the user activated
+            # (Spotlight-style panels too).
+            if not own_active and front_pid not in (0, os.getpid()) and front_active:
                 return report
             target = native.frontmost_window_owner() or {}
             pid = target.get("pid")
@@ -296,8 +316,11 @@ class MacOSBackend:
             used_open = False
             while time.monotonic() < deadline:
                 time.sleep(0.04)
-                now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
-                if now_front is not None and int(now_front.processIdentifier()) == pid:
+                target_active = _active(app)
+                if target_active is None:
+                    now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
+                    target_active = now_front is not None and int(now_front.processIdentifier()) == pid
+                if target_active:
                     report["restored"] = True
                     break
                 if not used_open and time.monotonic() > deadline - timeout / 2:

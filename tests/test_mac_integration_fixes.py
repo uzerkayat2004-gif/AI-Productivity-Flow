@@ -88,7 +88,11 @@ class _App:
     def activateWithOptions_(self, _options):
         self.activated += 1
         self.registry["front"] = self
+        self.registry["active"] = self
         return True
+
+    def isActive(self):
+        return self.registry.get("active", self.registry.get("front")) is self
 
     def bundleURL(self):
         return None
@@ -111,10 +115,17 @@ def _fake_appkit(monkeypatch, front_pid, target_pid):
         def frontmostApplication():
             return registry["front"]
 
+    if os.getpid() not in apps:
+        apps[os.getpid()] = _App(os.getpid(), registry)
+
     class NSRunningApplication:
         @staticmethod
         def runningApplicationWithProcessIdentifier_(pid):
             return apps.get(pid)
+
+        @staticmethod
+        def currentApplication():
+            return apps[os.getpid()]
 
     class _NSApp:
         def yieldActivationToApplication_(self, app):
@@ -331,3 +342,28 @@ def test_frontmost_window_owner_empty_when_no_normal_window(monkeypatch):
     windows = [{"owner": "Dock", "title": "Dock", "pid": 324, "layer": 20}]
     native = _fake_window_list(monkeypatch, windows)
     assert native.frontmost_window_owner() == {}
+
+
+def test_restore_focus_when_engine_is_active_but_menu_bar_still_shows_users_app(monkeypatch):
+    """macOS 14 CI (it4 af2 38978817743): after Escape on the widget menu our
+    accessory app held keyboard activation while frontmostApplication (menu-bar
+    owner) still said TextEdit; no restore ran and Cmd+V reached us."""
+    target = os.getpid() + 1000
+    apps, _ = _fake_appkit(monkeypatch, target, target)
+    registry = apps[target].registry
+    registry["active"] = apps[os.getpid()]
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    report = backend.restore_paste_target_focus(timeout=0.3)
+    assert report["own_active"] is True
+    assert report["restored"] is True
+    assert apps[target].activated == 1
+
+
+def test_restore_focus_when_no_app_is_active_but_menu_bar_names_users_app(monkeypatch):
+    target = os.getpid() + 1000
+    apps, _ = _fake_appkit(monkeypatch, target, target)
+    apps[target].registry["active"] = None
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    report = backend.restore_paste_target_focus(timeout=0.3)
+    assert report["restored"] is True
+    assert apps[target].activated == 1
