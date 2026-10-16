@@ -320,21 +320,105 @@ def collapse_echo_repeats(text: str) -> str:
     return text
 
 
+# Spoken punctuation is a *command*, not a word substitution. "period",
+# "comma", "new line" and friends are ordinary English words ("the trial
+# period ends in May", "a comma separated list", "a new line of products"),
+# so a term is converted only when it stands alone as a command:
+#   * it ends the utterance ("send it today period"), or
+#   * it sits on a sentence boundary: the recognizer attached punctuation to
+#     it ("today period. Then") or the next word starts a new sentence
+#     ("alpha new line Beta"),
+# and in every case the word before it is not a determiner, preposition or
+# modifier that makes the term a noun ("a comma", "the colon", "long period").
+# False negatives (the literal word is kept) are much cheaper than silently
+# rewriting what the user said.
+_SPOKEN_TERMS = (
+    ("new paragraph", "\n\n"),
+    ("new line", "\n"),
+    ("next line", "\n"),
+    ("line break", "\n"),
+    ("question mark", "?"),
+    ("exclamation mark", "!"),
+    ("exclamation point", "!"),
+    ("full stop", "."),
+    ("semicolon", ";"),
+    ("period", "."),
+    ("comma", ","),
+    ("colon", ":"),
+)
+_SPOKEN_TERM_SYMBOLS = {term: symbol for term, symbol in _SPOKEN_TERMS}
+_SPOKEN_TERM_RE = re.compile(
+    r"(?<![\w'-])(" + "|".join(t.replace(" ", r"\s+") for t, _ in _SPOKEN_TERMS) + r")(?![\w'-])([.,!?;:]?)",
+    re.I,
+)
+# A term preceded by one of these is being used as a noun, never a command.
+_SPOKEN_TERM_BLOCKERS = frozenset("""
+a an the this that these those my your his her its our their whose which what
+each every any some no one another same such own other
+of for over during per in on at by with without within to from into about
+than like as is was be been being are were
+long short trial grace waiting cooling probation probationary billing
+given whole entire specific certain first last next final previous current
+time rest double single serial oxford
+word words term terms symbol key character
+""".split())
+_SPOKEN_NOUN_DETERMINERS = frozenset(
+    "a an the this that these those my your his her its our their each every any no".split()
+)
+_SPOKEN_LITERAL_RE = re.compile(
+    r"\b(?:write|say|type)\s+the\s+words?\s+(?:question mark|comma|period|colon|new line)\b", re.I
+)
+_CMD_PUNCT = "\x01"
+_CMD_BREAK = "\x02"
+
+
+def _spoken_term_replacement(part: str, match: re.Match) -> str:
+    term = re.sub(r"\s+", " ", match.group(1).lower())
+    symbol = _SPOKEN_TERM_SYMBOLS[term]
+    before = part[:match.start()]
+    after = part[match.end():]
+    prev = re.search(r"([\w']+)[^\w]*$", before)
+    if prev is None:
+        return match.group(0)  # nothing to punctuate yet
+    if prev.group(1).lower() in _SPOKEN_TERM_BLOCKERS:
+        return match.group(0)
+    if term in ("period", "colon"):
+        # "the reporting period", "the Jurassic period": a determiner two
+        # words back still makes these a noun phrase.
+        prev2 = re.search(r"([\w']+)[^\w]+[\w']+[^\w]*$", before)
+        if prev2 is not None and prev2.group(1).lower() in _SPOKEN_NOUN_DETERMINERS:
+            return match.group(0)
+    at_end = not after.strip(" \t\r\n.,!?;:")
+    attached = bool(match.group(2))
+    nxt = re.match(r"\s*([^\s]+)", after)
+    sentence_start = bool(nxt and nxt.group(1)[:1].isupper())
+    if not (at_end or attached or sentence_start):
+        return match.group(0)
+    if symbol.startswith("\n"):
+        return _CMD_BREAK + symbol
+    return _CMD_PUNCT + symbol
+
+
 def _spoken_punctuation(text: str) -> str:
     protected = re.split(r"(https?://\S+|\b\S+@\S+\b)", text)
     for i in range(0, len(protected), 2):
         part = protected[i]
-        part = re.sub(r"\bnew paragraph\b", "\n\n", part, flags=re.I)
-        part = re.sub(r"\b(?:new line|next line|line break)\b", "\n", part, flags=re.I)
-        part = re.sub(r"[ \t]*\n[ \t]*", "\n", part)
-        protected_terms = r"(?:character|symbol|key|operator|delimiter|term|word)"
-        part = re.sub(rf"\b(?:comma|period|colon|semicolon|hash|question mark|exclamation mark)\s+{protected_terms}\b", lambda m: "__" + m.group(0).replace(" ", "_") + "__", part, flags=re.I)
-        part = re.sub(r"\b(?:the\s+word\s+comma|a\s+period\s+is\s+punctuation|period\s+drama|colon\s+cancer|hash\s+table)\b", lambda m: "__" + m.group(0).replace(" ", "_") + "__", part, flags=re.I)
-        if not re.search(r"\b(?:write|say|type)\s+the\s+words?\s+(?:question mark|comma|period)\b", part, re.I):
-            for spoken, symbol in (("question mark", "?"), ("exclamation mark", "!"), ("full stop", "."), ("comma", ","), ("period", "."), ("colon", ":"), ("semicolon", ";")):
-                part = re.sub(rf"\b{spoken}\b", symbol, part, flags=re.I)
-        part = re.sub(r"\s+([,.;:?!])", r"\1", part)
-        part = re.sub(r"__(.+?)__", lambda m: m.group(1).replace("_", " "), part)
+        if not part or _SPOKEN_LITERAL_RE.search(part):
+            continue
+        # Resolve left to right so a converted term is the context for the next.
+        pos = 0
+        while True:
+            match = _SPOKEN_TERM_RE.search(part, pos)
+            if match is None:
+                break
+            replacement = _spoken_term_replacement(part, match)
+            part = part[:match.start()] + replacement + part[match.end():]
+            pos = match.start() + len(replacement)
+        if _CMD_PUNCT in part:
+            # The spoken mark replaces whatever the recognizer guessed there.
+            part = re.sub(r"[ \t]*[,.;:!?]*[ \t]*" + _CMD_PUNCT + r"([,.;:!?])", r"\1", part)
+        if _CMD_BREAK in part:
+            part = re.sub(r"[ \t]*" + _CMD_BREAK + r"(\n+)[ \t]*", r"\1", part)
         protected[i] = part
     return "".join(protected)
 

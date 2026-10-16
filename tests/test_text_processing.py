@@ -12,7 +12,7 @@ from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, c
 
 def test_spoken_punctuation_converts_explicit_terms_without_rewriting_words() -> None:
     assert apply_spoken_punctuation("what is the status question mark") == "what is the status?"
-    assert apply_spoken_punctuation("alpha new line beta") == "alpha\nbeta"
+    assert apply_spoken_punctuation("alpha new line Beta") == "alpha\nBeta"
     assert apply_spoken_punctuation("the question mark character") == "the question mark character"
 
 
