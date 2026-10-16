@@ -169,7 +169,10 @@ def fmt_rows(rows) -> str:
 
 
 def count_llama() -> int:
-    return sum(1 for r in ps_rows() if "llama-server" in r["cmd"] and "grep" not in r["cmd"])
+    # Count llama-server executables only: the app's POSIX parent-watch guard is a
+    # /bin/sh whose argv also contains the llama-server path.
+    return sum(1 for r in ps_rows()
+               if r["cmd"].split(" -m ")[0].rstrip().endswith("llama-server") and not r["cmd"].startswith("/bin/sh"))
 
 
 def plist(app: str, key: str) -> str:
