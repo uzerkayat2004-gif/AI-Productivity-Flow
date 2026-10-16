@@ -896,6 +896,7 @@ const AUTOMATIC_GUIDE_SEEN_FLAGS = {
 };
 
 function scheduleAutomaticGuide(feature, pageId) {
+  if (feature === "video" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) return;
   if (isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature)) return;
   // A guide the user has already seen never starts again by itself
   // (grokbot/combined-test); "Replay onboarding" clears these flags.
@@ -980,6 +981,10 @@ function initNavigation() {
   navItems.forEach(item => {
     item.addEventListener("click", () => {
       const pageId = item.getAttribute("data-page");
+      if (pageId === "videoflow" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
+        vfShowVideoFlowMacNote();
+        return;
+      }
       const isSwitching = currentPageId !== pageId;
       switchPage(pageId, { userInitiated: true });
       // Keep the requested page until account authority confirms a first-run guide.
@@ -7039,6 +7044,10 @@ async function toggleClickToPasteSetting(checked) {
 }
 
 async function toggleVideoFlowFeature(checked) {
+  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
+    vfShowVideoFlowMacNote();
+    return;
+  }
   try {
     await fetch("/api/settings/update", {
       method: "POST",
@@ -8915,7 +8924,7 @@ const VIDEOFLOW_GUIDE_STEPS = [
     targetId: "vf-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Screen & Windows Shortcut",
-    spotlightLabelMac: "Screen & Mac Shortcut",
+    spotlightLabelMac: "Video Flow · coming to Mac soon",
     nextLabel: "Finish & Start Creating 🚀",
     audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
     audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
@@ -8935,12 +8944,12 @@ const VIDEOFLOW_GUIDE_STEPS = [
       {
             "start": 0.5,
             "end": 4.38,
-            "text": "Finally, Video Flow works anywhere across your Mac."
+            "text": "Video Flow is coming to Mac soon, available on Windows now."
       },
       {
             "start": 4.33,
             "end": 11.04,
-            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
+            "text": "Until then, create videos from the Windows app."
       }
 ]
   }
@@ -9377,6 +9386,11 @@ function prevVideoFlowGuideStep() {
 }
 
 function startVideoFlowGuide() {
+  // No Video Flow guide on Mac until Video Flow ships there.
+  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
+    vfShowVideoFlowMacNote();
+    return;
+  }
   setOnboardingFlag("vf_onboarding.vf_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
@@ -13400,7 +13414,74 @@ function vfIsMacPlatform() {
 }
 window.vfIsMacPlatform = vfIsMacPlatform;
 
+// Video Flow is Windows-only for now: the macOS build bundles no render
+// toolchain (ffmpeg/node/Narova). On Mac the entry, page, welcome-tour card
+// and guide say so instead of offering a feature that cannot run. The page
+// itself stays reachable (disabled) because Audio Flow's NotebookLM sign-in
+// and the shared provider keys live on it.
+const VF_MAC_GATE_NOTE = "Video Flow is coming to Mac soon, available on Windows now";
+
+function vfVideoFlowGatedOnMac() {
+  return typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+}
+
+function vfShowVideoFlowMacNote() {
+  if (typeof showToast === "function") showToast(VF_MAC_GATE_NOTE);
+}
+
+function vfApplyMacVideoFlowGate() {
+  if (!vfVideoFlowGatedOnMac()) return;
+  document.body.classList.add("vf-mac-gated");
+
+  const navItem = document.querySelector('.sidebar .nav-item[data-page="videoflow"]');
+  if (navItem && !navItem.classList.contains("vf-mac-disabled")) {
+    navItem.classList.add("vf-mac-disabled");
+    navItem.setAttribute("aria-disabled", "true");
+    navItem.setAttribute("title", VF_MAC_GATE_NOTE);
+    const note = document.createElement("small");
+    note.className = "vf-mac-gate-nav-note";
+    note.textContent = VF_MAC_GATE_NOTE;
+    navItem.appendChild(note);
+  }
+
+  const page = document.getElementById("page-videoflow");
+  if (page && !document.getElementById("vf-mac-gate-note")) {
+    const banner = document.createElement("div");
+    banner.id = "vf-mac-gate-note";
+    banner.className = "vf-mac-gate-note";
+    banner.setAttribute("role", "status");
+    banner.textContent = VF_MAC_GATE_NOTE;
+    const heading = page.querySelector(".vf-page-heading");
+    if (heading && heading.parentNode === page) heading.after(banner);
+    else page.prepend(banner);
+  }
+  ["vf-generate-button", "toggle-video-flow-feature", "toggle-video-flow"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.disabled = true;
+      el.setAttribute("aria-disabled", "true");
+      el.setAttribute("title", VF_MAC_GATE_NOTE);
+    }
+  });
+  const generateSub = document.getElementById("vf-generate-subtext");
+  if (generateSub) generateSub.textContent = VF_MAC_GATE_NOTE;
+
+  // Welcome tour: the Video Flow card and its demo slide carry the note.
+  const tourCard = document.querySelector("#card-feature-1 .s1-card-titles small");
+  if (tourCard) tourCard.textContent = VF_MAC_GATE_NOTE;
+  const tourSub = document.querySelector(".s2-sub");
+  if (tourSub && !document.getElementById("vf-mac-gate-tour-note")) {
+    const tourNote = document.createElement("p");
+    tourNote.id = "vf-mac-gate-tour-note";
+    tourNote.className = "vf-mac-gate-tour-note";
+    tourNote.textContent = VF_MAC_GATE_NOTE;
+    tourSub.after(tourNote);
+  }
+}
+window.vfApplyMacVideoFlowGate = vfApplyMacVideoFlowGate;
+
 async function initPlatformAdaptation() {
+  vfApplyMacVideoFlowGate();
   try {
     const res = await fetch("/api/platform/info");
     if (!res.ok) return;
@@ -13409,6 +13490,7 @@ async function initPlatformAdaptation() {
     window.vfPlatformInfo = info;
 
     const isMac = !!info.is_macos;
+    vfApplyMacVideoFlowGate();
 
     // 0. Microphone dialog subtitle (index.html ships the Windows wording)
     const micSubtitle = document.getElementById("mic-dialog-subtitle");

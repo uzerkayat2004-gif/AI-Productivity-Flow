@@ -4,7 +4,7 @@
 > and `pyproject.toml`. Maintained alongside `docs/PRODUCT_FACTS.md`.
 
 ## 1. Video Flow — text/documents → narrated explainer video
-- **Platform**: Windows only for now; Mac support coming later.
+- **Platform**: Video Flow is coming to Mac soon, available on Windows now. (The Mac app itself is Apple Silicon only, M1 or newer.)
 - **Inputs**: Selected text, pasted text, documents (`.txt`, `.md`, `.csv`, `.json`, `.html`, `.htm`, `.xml`, `.rtf`, `.docx`, `.pdf` ≤ 8 MB), Google NotebookLM notebooks.
 - **Modes**: `summary` and `full`.
 - **Planning**: AI-driven concept extraction and pedagogical structuring via user's connected model (Groq, Gemini, OpenAI, Claude, Together, Ollama) or local fallback.

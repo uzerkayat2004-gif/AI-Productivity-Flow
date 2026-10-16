@@ -3390,6 +3390,11 @@ class VoiceFlowApp:
         return self._try_open_audio_summary_job(job_id, automatic=False)
     def _process_video_flow_pipeline(self, mode: str, text_override: str | None = None) -> None:
         """Open the primary system-wide composer for selected text."""
+        from voice_flow.video_flow_platform import VIDEO_FLOW_MAC_NOTE, video_flow_supported
+
+        if not video_flow_supported():
+            self.overlay.show_error(VIDEO_FLOW_MAC_NOTE)
+            return
         if not storage.get_setting("video_flow_enabled", True):
             self.overlay.show_error("Video Flow is disabled")
             return
@@ -3489,6 +3494,10 @@ class VoiceFlowApp:
 
     def _queue_video_from_screen(self, payload: dict) -> dict:
         """Queue a system-wide composer request and mirror progress on the bar."""
+        from voice_flow.video_flow_platform import VIDEO_FLOW_MAC_NOTE, video_flow_supported
+
+        if not video_flow_supported():
+            raise RuntimeError(VIDEO_FLOW_MAC_NOTE)
         from voice_flow.video_flow_service import get_video_flow_service
 
         payload["allow_local_fallback"] = True

@@ -504,6 +504,11 @@ class VideoFlowScreenWidget:
         self._run_on_ui(_hide)
 
     def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None) -> None:
+        from voice_flow.video_flow_platform import video_flow_supported
+
+        if not video_flow_supported():
+            log.info("[VIDEO FLOW] Composer not available on macOS yet.")
+            return
         clean = (selected_text or "").strip()
 
         def _show() -> None:
