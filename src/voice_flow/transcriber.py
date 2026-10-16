@@ -248,7 +248,9 @@ class Transcriber:
         demand = lease or acquire_model_use("speech")
         selected = str(model_ref or "").strip()
         provider, separator, _model = selected.partition("/")
-        if separator and provider.casefold() != "local":
+        # An absolute POSIX model path ("/Users/.../model.gguf") has an empty
+        # provider: it is a local model, not a cloud provider id.
+        if separator and provider and provider.casefold() != "local":
             return demand
         try:
             self.begin_native_retry(model_ref, demand)
