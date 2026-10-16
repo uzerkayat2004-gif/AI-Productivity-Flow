@@ -1,0 +1,153 @@
+{"id": "PT-001", "verdict": "accept", "codes": [], "reason": "Fillers removed, numbers and negation kept.", "checked": ["heightened: negation 'not 6' kept", "6:15 and 6 kept"]}
+{"id": "PT-002", "verdict": "accept", "codes": [], "reason": "Leading 'so' filler removed only.", "checked": ["no content change"]}
+{"id": "PT-003", "verdict": "accept", "codes": [], "reason": "Date ordinal written conventionally.", "checked": ["date 'seventh'->7th kept"]}
+{"id": "PT-004", "verdict": "accept", "codes": [], "reason": "Filler removed only.", "checked": ["no content change"]}
+{"id": "PT-005", "verdict": "accept", "codes": [], "reason": "Stutter 'i think i think' collapsed; hedge kept.", "checked": ["hedge 'I think' kept"]}
+{"id": "PT-006", "verdict": "accept", "codes": [], "reason": "Capitalisation/punctuation only.", "checked": ["quantity 'twice a day' kept"]}
+{"id": "PT-007", "verdict": "accept", "codes": [], "reason": "Capitalisation only.", "checked": ["Sunday kept", "requirement 'bring your own mat' kept"]}
+{"id": "PT-008", "verdict": "accept", "codes": [], "reason": "1.2 million with no currency symbol (none spoken).", "checked": ["heightened quantity: 1.2 million kept, no invented currency"]}
+{"id": "PT-009", "verdict": "accept", "codes": [], "reason": "Hedge 'about' and 'without' kept.", "checked": ["40 kept", "hedge 'about' kept", "negation 'without' kept"]}
+{"id": "PT-010", "verdict": "accept", "codes": [], "reason": "Time/terminal conventional.", "checked": ["Lisbon, 7:10 a.m., Terminal 2 kept"]}
+{"id": "PT-011", "verdict": "accept", "codes": [], "reason": "Leading 'you know' removed.", "checked": ["negation \"don't\" kept"]}
+{"id": "PT-012", "verdict": "accept", "codes": [], "reason": "Unchanged except caps/punct.", "checked": ["quantity 'one more take' kept"]}
+{"id": "PT-013", "verdict": "accept", "codes": [], "reason": "Leading 'basically' removed.", "checked": ["negation \"hasn't\" kept", "March kept", "'yet' kept"]}
+{"id": "PT-014", "verdict": "accept", "codes": [], "reason": "Digits used consistently.", "checked": ["11 and 3 kept"]}
+{"id": "PT-015", "verdict": "accept", "codes": [], "reason": "Comma added only.", "checked": ["noon, 5 minutes kept"]}
+{"id": "PT-016", "verdict": "accept", "codes": [], "reason": "Filler removed.", "checked": ["'sold out until next week' kept"]}
+{"id": "PT-017", "verdict": "accept", "codes": [], "reason": "Currency named (euros) so € is correct.", "checked": ["450, per person kept"]}
+{"id": "PT-018", "verdict": "accept", "codes": [], "reason": "Question cleaned, not answered.", "checked": ["Thursday kept", "ends with ?"]}
+{"id": "PT-019", "verdict": "accept", "codes": [], "reason": "₹3,00,000 is acceptable en-in rendering; negation kept. Minor: assertions.numbers requires '3,00,000' while numbers_one_of allows '3 lakh' (inconsistent strictness, not fatal for a training target).", "checked": ["heightened: amount 3 lakh -> ₹3,00,000", "negation 'does not include' kept"], "suggested_fix": "Optionally drop 'numbers' and keep only numbers_one_of so '₹3 lakh' (contract: lakh when spoken) also passes."}
+{"id": "PT-020", "verdict": "accept", "codes": [], "reason": "Date conventional.", "checked": ["Neha, 31st January kept"]}
+{"id": "PT-021", "verdict": "accept", "codes": [], "reason": "Both negations kept.", "checked": ["heightened: 'never', 'without' kept", "20 kilos kept"]}
+{"id": "PT-022", "verdict": "accept", "codes": [], "reason": "Pounds named so £ ok.", "checked": ["Vikram, £2,375 kept"]}
+{"id": "PT-023", "verdict": "accept", "codes": [], "reason": "Names and negation kept.", "checked": ["Olivia, Marcus, Zara, Camera B", "negation \"isn't\" kept"]}
+{"id": "PT-024", "verdict": "accept", "codes": [], "reason": "Units kept as spoken.", "checked": ["56 centimetres, 8.2 kilos kept"]}
+{"id": "PT-025", "verdict": "accept", "codes": [], "reason": "Time/date conventional.", "checked": ["Hiro, 5:45 a.m., 2nd of May kept"]}
+{"id": "PT-026", "verdict": "accept", "codes": [], "reason": "Unchanged except caps/punct.", "checked": ["heightened: negation/condition 'but not for professionals' kept"]}
+{"id": "PT-027", "verdict": "accept", "codes": [], "reason": "Spelled-out ID assembled correctly.", "checked": ["K922X literal"]}
+{"id": "PT-028", "verdict": "accept", "codes": [], "reason": "Spoken email assembled correctly.", "checked": ["elena.ruiz@outlook.com literal"]}
+{"id": "PT-029", "verdict": "accept", "codes": [], "reason": "Condition kept verbatim.", "checked": ["heightened: 'only applies if' kept", "48 hours kept"]}
+{"id": "PT-030", "verdict": "accept", "codes": [], "reason": "Message addressed to Omar directly; condition kept; no greeting/sign-off invented.", "checked": ["heightened: condition 'unless' kept", "$65 (dollars spoken)", "Omar kept"]}
+{"id": "PT-031", "verdict": "accept", "codes": [], "reason": "Correction applied to the right item.", "checked": ["heightened self-correction: Chloe removed, Sam kept", "must_not_include Chloe present"]}
+{"id": "PT-032", "verdict": "accept", "codes": [], "reason": "Correction 12->15 applied.", "checked": ["heightened: 12 dropped, 15 kept; must_not_include 12"]}
+{"id": "PT-033", "verdict": "accept", "codes": [], "reason": "Correcting 'i mean' applied.", "checked": ["Thursday dropped, Friday evening kept"]}
+{"id": "PT-034", "verdict": "accept", "codes": [], "reason": "Genuine alternative kept.", "checked": ["both 'road bike' and 'mountain bike' kept with 'or'"]}
+{"id": "PT-035", "verdict": "accept", "codes": [], "reason": "Both alternative prices kept; no invented currency.", "checked": ["2,000/one week and 3,500/two weeks kept"]}
+{"id": "PT-036", "verdict": "accept", "codes": [], "reason": "'scratch that' correction applied.", "checked": ["Leila removed, Ben kept"]}
+{"id": "PT-037", "verdict": "accept", "codes": [], "reason": "Correction applied; 'half past five' kept as spoken (acceptable). Assertion redundancy: must_include 'half past five' makes the one_of with '5:30' pointless and would fail a valid '5:30' output at eval.", "checked": ["five dropped, half past five kept"], "suggested_fix": "Remove 'half past five' from must_include; keep must_include_one_of [half past five, 5:30]."}
+{"id": "PT-038", "verdict": "accept", "codes": [], "reason": "Alternative and condition kept.", "checked": ["beach or pier kept", "condition 'depending on the tide' kept"]}
+{"id": "PT-039", "verdict": "accept", "codes": [], "reason": "Dictated apology kept; negation kept.", "checked": ["negation \"won't\" kept", "today kept"]}
+{"id": "PT-040", "verdict": "accept", "codes": [], "reason": "Correction room 1->2 applied.", "checked": ["Isha kept", "1 dropped, 2 kept"]}
+{"id": "PT-041", "verdict": "accept", "codes": [], "reason": "Alternative kept; dollars named so $ ok.", "checked": ["either 10% or flat $50"]}
+{"id": "PT-042", "verdict": "accept", "codes": [], "reason": "Correction 40->45; no currency added; note correct.", "checked": ["40 dropped, 45 kept", "Kofi kept"]}
+{"id": "PT-043", "verdict": "accept", "codes": [], "reason": "No recipient/sender: 'Hi,' and no sign-off; facts kept.", "checked": ["8 a.m., 6 p.m., 9th kept", "no invented closing"]}
+{"id": "PT-044", "verdict": "accept", "codes": [], "reason": "Recipient greeting and sender sign-off per §7.", "checked": ["Felix, Wednesday, Maya kept", "no added commitment"]}
+{"id": "PT-045", "verdict": "accept", "codes": [], "reason": "Formal 'Hello,' + Regards + sender name.", "checked": ["negation 'no payment is due' kept", "'today' kept"]}
+{"id": "PT-046", "verdict": "accept", "codes": [], "reason": "Dictated 'thanks' becomes closing with no name.", "checked": ["Monday kept", "no placeholder name"]}
+{"id": "PT-047", "verdict": "accept", "codes": [], "reason": "Formal greeting with recipient as given; no apology/commitment added; no sign-off (no sender).", "checked": ["'a week', 'supplier problem' kept"]}
+{"id": "PT-048", "verdict": "accept", "codes": [], "reason": "Dictated subject line used; meta 'then say' removed.", "checked": ["Kyoto, Riverside Inn, 'same dates' kept"]}
+{"id": "PT-049", "verdict": "reject", "codes": ["F6", "F4"], "reason": "No [Recipient]; §7.1 says 'Hi,' otherwise. Target invents 'Hi everyone,' while the parallel PT-046 ('let the members know') uses 'Hi,' — inconsistent greeting convention teaches the model to invent addressees. Assertion one_of [mentors, everyone] also blesses the invented greeting.", "checked": ["32 kept", "Ananya kept", "judging kept"], "suggested_fix": "Hi,\n\nThank you for judging. We had 32 teams this year.\n\nThanks,\nAnanya  (and change must_include_one_of to [['mentors','judging']] or drop it)"}
+{"id": "PT-050", "verdict": "accept", "codes": [], "reason": "Dictated apology and commitment kept, none added.", "checked": ["heightened commitment: 'we'll replace the frame' kept, no refund/discount added", "sorry kept"]}
+{"id": "PT-051", "verdict": "accept", "codes": [], "reason": "Shorter keeps all facts.", "checked": ["heightened date: 10th -> 17th kept", "reason kept"]}
+{"id": "PT-052", "verdict": "accept", "codes": [], "reason": "Recipient greeting; deadline kept; no sign-off.", "checked": ["November, Friday, sign-off requirement kept"]}
+{"id": "PT-053", "verdict": "accept", "codes": [], "reason": "Dictated 'hey' used as greeting; casual.", "checked": ["rough cut link, condition 'when it's uploaded' kept", "Ben sign-off"]}
+{"id": "PT-054", "verdict": "accept", "codes": [], "reason": "Both pickup alternatives kept.", "checked": ["Tuesday 10-12 OR Thursday after 3 kept"]}
+{"id": "PT-055", "verdict": "accept", "codes": [], "reason": "Formal request; dollars named.", "checked": ["$250,000 kept", "Elena Ruiz sign-off"]}
+{"id": "PT-056", "verdict": "accept", "codes": [], "reason": "Negation and owner kept.", "checked": ["negation \"won't\" kept", "Omar owner kept"]}
+{"id": "PT-057", "verdict": "accept", "codes": [], "reason": "Message, no greeting; facts kept.", "checked": ["5 a.m., tomorrow, north gate kept"]}
+{"id": "PT-058", "verdict": "accept", "codes": [], "reason": "Casual message; punctuation only.", "checked": ["negation 'without me' kept"]}
+{"id": "PT-059", "verdict": "reject", "codes": ["F6", "F4"], "reason": "§6.9: Format message gets no greeting unless dictated. 'Hey Maya,' is an invented greeting (friendly tone does not license one); compare PT-030 which addresses 'Omar,' without a greeting.", "checked": ["Maya, studio, Saturday kept", "ends with ?"], "suggested_fix": "Maya, could you open the studio on Saturday?"}
+{"id": "PT-060", "verdict": "accept", "codes": [], "reason": "Formal message, fact kept.", "checked": ["September kept, 'up to' kept"]}
+{"id": "PT-061", "verdict": "accept", "codes": [], "reason": "Exclamation justified by congratulatory wording (§6.7).", "checked": ["Tom, new job kept"]}
+{"id": "PT-062", "verdict": "accept", "codes": [], "reason": "Facts and negation kept.", "checked": ["negation 'no power' kept", "'until 2' kept"]}
+{"id": "PT-063", "verdict": "accept", "codes": [], "reason": "Shorter keeps change 9->10 and 'today'.", "checked": ["heightened time: 9 and 10 kept", "today kept"]}
+{"id": "PT-064", "verdict": "accept", "codes": [], "reason": "Question not answered.", "checked": ["HDMI cable kept"]}
+{"id": "PT-065", "verdict": "accept", "codes": [], "reason": "Casual repair; 'next week' as a question is a fair reading of the proposal.", "checked": ["negation \"Can't\" kept", "sorry kept (dictated)"]}
+{"id": "PT-066", "verdict": "accept", "codes": [], "reason": "Addresses Isha without greeting.", "checked": ["Isha, Studio 2 kept"]}
+{"id": "PT-067", "verdict": "accept", "codes": [], "reason": "Prompt states goal and all constraints; not answered.", "checked": ["4 weeks, 3 runs/week kept", "negation 'no run longer than 40 minutes' kept"]}
+{"id": "PT-068", "verdict": "accept", "codes": [], "reason": "All constraints kept.", "checked": ["under 50 words, friendly kept"]}
+{"id": "PT-069", "verdict": "accept", "codes": [], "reason": "Prompt, no added requirements.", "checked": ["teenager, pocket money kept"]}
+{"id": "PT-070", "verdict": "accept", "codes": [], "reason": "Prompt, quantity kept.", "checked": ["5 names, local, friendly kept"]}
+{"id": "PT-071", "verdict": "accept", "codes": [], "reason": "Code prompt, no added requirements.", "checked": ["JavaScript, weekend, true or false kept"]}
+{"id": "PT-072", "verdict": "accept", "codes": [], "reason": "Constraint as negative kept.", "checked": ["2-day, Goa, 20 people kept", "negation 'no activities after 10 p.m.' kept"]}
+{"id": "PT-073", "verdict": "accept", "codes": [], "reason": "Prompt keeps count and audience.", "checked": ["3 takeaways, investors kept"]}
+{"id": "PT-074", "verdict": "accept", "codes": [], "reason": "Question turned into prompt, not answered.", "checked": ["a week, Iceland, October kept"]}
+{"id": "PT-075", "verdict": "accept", "codes": [], "reason": "Requirement kept.", "checked": ["absolute beginners, 'mats are provided' kept"]}
+{"id": "PT-076", "verdict": "accept", "codes": [], "reason": "Question cleaned, not answered.", "checked": ["no Kilimanjaro"]}
+{"id": "PT-077", "verdict": "accept", "codes": [], "reason": "Question cleaned, not answered.", "checked": ["no duration given"]}
+{"id": "PT-078", "verdict": "accept", "codes": [], "reason": "Question cleaned, not answered.", "checked": ["no 'because'"]}
+{"id": "PT-079", "verdict": "accept", "codes": [], "reason": "Question cleaned, not answered.", "checked": ["no yes/no answer"]}
+{"id": "PT-080", "verdict": "accept", "codes": [], "reason": "Formal message; 'hey' dropped; not answered.", "checked": ["showers question kept"]}
+{"id": "PT-081", "verdict": "accept", "codes": [], "reason": "Email request, not answered; no sign-off.", "checked": ["baggage allowance, infants kept"]}
+{"id": "PT-082", "verdict": "reject", "codes": ["F1", "F2"], "reason": "Drops the time fact 'this morning' and turns 'the rental place can swap it' (possibility) into the definite 'swaps it'. A 15-word limit still allows both.", "checked": ["15-word limit met (13)", "tomorrow, Thursday kept", "'this morning' MISSING", "'can' MISSING"], "suggested_fix": "Main camera died this morning; rental can swap it tomorrow, so we shoot Thursday.  (14 words; add 'this morning' to must_include)"}
+{"id": "PT-083", "verdict": "accept", "codes": [], "reason": "Penalty omitted per instruction; everything else kept.", "checked": ["5th kept", "'still need them as soon as possible' kept", "no penalty"]}
+{"id": "PT-084", "verdict": "accept", "codes": [], "reason": "Result first; numbers kept.", "checked": ["two of six, this week, second meeting kept"]}
+{"id": "PT-085", "verdict": "accept", "codes": [], "reason": "Softened without changing facts; 'again' kept.", "checked": ["'unlocked again' kept", "requirement 'lock up properly' kept"]}
+{"id": "PT-086", "verdict": "accept", "codes": [], "reason": "Trusted instruction authorises the word swap; numbers and hedge kept; note accurate.", "checked": ["hedge 'about' kept", "80 and 50 kept", "no 'people'"]}
+{"id": "PT-087", "verdict": "accept", "codes": [], "reason": "One sentence; 'so' adds a mild link but no new fact.", "checked": ["6 kept", "all three clauses kept"]}
+{"id": "PT-088", "verdict": "accept", "codes": [], "reason": "Question added because instruction asked.", "checked": ["Tuesday at 4 kept", "'can' kept"]}
+{"id": "PT-089", "verdict": "accept", "codes": [], "reason": "No exclamation marks; interjection dropped.", "checked": ["no '!'", "both facts kept"]}
+{"id": "PT-090", "verdict": "accept", "codes": [], "reason": "Price first; list items kept.", "checked": ["$90 (dollars spoken)", "gears, brakes, wheel true kept"]}
+{"id": "PT-091", "verdict": "accept", "codes": [], "reason": "Instruction-added requirement included; nothing else added.", "checked": ["free, Sunday, garden centre kept", "'Booking is required' added per instruction"]}
+{"id": "PT-092", "verdict": "accept", "codes": [], "reason": "All four constraints met (formal, shorter, email with sender, times unchanged).", "checked": ["heightened times: 2->4 and 1->3 kept correctly paired", "Olivia sign-off"]}
+{"id": "PT-093", "verdict": "accept", "codes": [], "reason": "Excited tone justifies '!'; no hashtags/emoji.", "checked": ["10, 'this week', half price kept"]}
+{"id": "PT-094", "verdict": "accept", "codes": [], "reason": "Dictated 'hey' kept as a greeting; politeness softener 'maybe' dropped under shorter is acceptable.", "checked": ["Studio 3, signed contract kept", "ends with ?"]}
+{"id": "PT-095", "verdict": "accept", "codes": [], "reason": "Bullets, both deadlines kept.", "checked": ["heightened dates: 4th and 11th paired correctly"]}
+{"id": "PT-096", "verdict": "accept", "codes": [], "reason": "Owners and deadline kept.", "checked": ["Marcus/location, Chloe/permits, I/catering by Monday", "commitment \"I'll handle\" kept"]}
+{"id": "PT-097", "verdict": "reject", "codes": ["F2", "F8"], "reason": "Instruction only bans the word 'asap'; the urgency it carried is dropped and replaced by the neutral 'Please note:'. The message should still read as urgent.", "checked": ["boiler leaking, floor wet kept", "no 'asap'", "urgency LOST"], "suggested_fix": "Urgent: the boiler in the changing rooms is leaking, and the floor is wet."}
+{"id": "PT-098", "verdict": "accept", "codes": [], "reason": "Wording keep: only fillers and repeated 'the' removed; 'really' kept.", "checked": ["no rephrasing", "cups too kept"]}
+{"id": "PT-099", "verdict": "accept", "codes": [], "reason": "Numbered, order kept.", "checked": ["4 steps in order"]}
+{"id": "PT-100", "verdict": "accept", "codes": [], "reason": "Only greeting/closing formalised; body unchanged.", "checked": ["Neha, Tom, front desk kept"]}
+{"id": "PT-101", "verdict": "accept", "codes": [], "reason": "Facts: correct + instruction; only the date changed.", "checked": ["June 6 -> June 13", "rooftop bar kept"]}
+{"id": "PT-102", "verdict": "accept", "codes": [], "reason": "Only the named sentence removed.", "checked": ["Felix, invoice kept"]}
+{"id": "PT-103", "verdict": "accept", "codes": [], "reason": "Only the requested sentence added.", "checked": ["Friday 3 to 6 kept"]}
+{"id": "PT-104", "verdict": "accept", "codes": [], "reason": "List converted to one line; all items kept.", "checked": ["tent, stove, headlamp, paper maps"]}
+{"id": "PT-105", "verdict": "reject", "codes": ["F5", "F4"], "reason": "'Thanks for bringing the bike in!' invents a fact (the draft never mentions a bike or a visit). Friendlier must not add events.", "checked": ["$320 kept", "Kofi, Zara kept", "invented 'bringing the bike in'"], "suggested_fix": "Hi Kofi,\n\nJust a quick note: the repair estimate is $320.\n\nThanks so much,\nZara"}
+{"id": "PT-106", "verdict": "accept", "codes": [], "reason": "Requested sentence added only.", "checked": ["Monday kept", "portal added per instruction"]}
+{"id": "PT-107", "verdict": "accept", "codes": [], "reason": "Question instruction not answered; draft unchanged; note correct.", "checked": ["9 p.m. Sunday kept", "no opening time invented"]}
+{"id": "PT-108", "verdict": "accept", "codes": [], "reason": "Only the named amount changed.", "checked": ["1,480 -> 1,840", "#5521 and 21st kept"]}
+{"id": "PT-109", "verdict": "accept", "codes": [], "reason": "Grammar/spelling fixed only.", "checked": ["tomorrow kept", "question kept"]}
+{"id": "PT-110", "verdict": "accept", "codes": [], "reason": "All three decisions kept.", "checked": ["monthly plan kept", "15% student discount", "negation 'stop offering day passes from April'"]}
+{"id": "PT-111", "verdict": "accept", "codes": [], "reason": "Both issues and 'everything else fine' kept.", "checked": ["two issues, Door 2 kept"]}
+{"id": "PT-112", "verdict": "accept", "codes": [], "reason": "Each owner, date and amount kept.", "checked": ["3rd, $400, 'a week before' kept"]}
+{"id": "PT-113", "verdict": "reject", "codes": ["F9"], "reason": "'she has receipts for the laptop' becomes 'Laptop receipts provided', asserting the receipts were handed over, which the source does not say.", "checked": ["two income sources kept", "negation 'no rental income' kept", "bank statement pending kept", "'has' -> 'provided' changes meaning"], "suggested_fix": "Freelance designer with two income sources and no rental income. She has laptop receipts; bank statement pending."}
+{"id": "PT-114", "verdict": "accept", "codes": [], "reason": "Condition with both numbers kept.", "checked": ["heightened conditional: 'unless fewer than 8 ... by Friday' kept", "12th kept"]}
+{"id": "PT-115", "verdict": "accept", "codes": [], "reason": "All three outcomes, both quotes, negation and condition kept.", "checked": ["negation \"can't\" kept", "500, 420, two weeks kept"]}
+{"id": "PT-116", "verdict": "accept", "codes": [], "reason": "Open question, both alternatives and decision date kept.", "checked": ["chef or cyclist", "Monday"]}
+{"id": "PT-117", "verdict": "accept", "codes": [], "reason": "Negation and future commitment kept.", "checked": ["'not this term' kept", "'will look at it in the spring' kept"]}
+{"id": "PT-118", "verdict": "accept", "codes": [], "reason": "Spoken punctuation applied.", "checked": ["comma, new line, period applied"]}
+{"id": "PT-119", "verdict": "accept", "codes": [], "reason": "Spoken question mark applied.", "checked": ["?"]}
+{"id": "PT-120", "verdict": "accept", "codes": [], "reason": "Three items but no list cue: prose per §6.2.", "checked": ["water, snacks, rain jacket kept"]}
+{"id": "PT-121", "verdict": "accept", "codes": [], "reason": "Explicit order cue (first/second/third/fourth) -> numbered under auto (§6.3).", "checked": ["4 steps in order", "confirmation kept"]}
+{"id": "PT-122", "verdict": "accept", "codes": [], "reason": "Dictated list with explicit 'bullet point' cues -> bullets in cleanup (§6.4).", "checked": ["tripod, batteries, lens cloth"]}
+{"id": "PT-123", "verdict": "accept", "codes": [], "reason": "Dictated greeting, 'new paragraph' and 'thanks vikram' applied; nothing invented.", "checked": ["Neha, Monday, Vikram kept"]}
+{"id": "PT-124", "verdict": "accept", "codes": [], "reason": "Spoken exclamation mark applied.", "checked": ["!"]}
+{"id": "PT-125", "verdict": "accept", "codes": [], "reason": "Spoken digits assembled into the number literal.", "checked": ["8877665544 literal"]}
+{"id": "PT-126", "verdict": "accept", "codes": [], "reason": "Three items without list cue stay prose in cleanup.", "checked": ["lighting, sound, editing"]}
+{"id": "PT-127", "verdict": "accept", "codes": [], "reason": "Alternative kept, no list.", "checked": ["store credit OR full refund"]}
+{"id": "PT-128", "verdict": "accept", "codes": [], "reason": "No bold; negation kept.", "checked": ["negation 'do not park' kept"]}
+{"id": "PT-129", "verdict": "accept", "codes": [], "reason": "Terse note, both tasks kept; meta 'note to self' dropped acceptably.", "checked": ["renew the domain, email the accountant"]}
+{"id": "PT-130", "verdict": "accept", "codes": [], "reason": "British spelling rule applied; no emoji.", "checked": ["colour", "helmets"]}
+{"id": "PT-131", "verdict": "accept", "codes": [], "reason": "Rule closing 'Cheers' + sender; dictated thanks kept.", "checked": ["release forms kept", "Sam sign-off"]}
+{"id": "PT-132", "verdict": "accept", "codes": [], "reason": "Rule 'per cent' applied in cleanup.", "checked": ["5 per cent, June kept"]}
+{"id": "PT-133", "verdict": "accept", "codes": [], "reason": "Terminology rule applied; facts kept.", "checked": ["this month, first service free kept"]}
+{"id": "PT-134", "verdict": "accept", "codes": [], "reason": "Rule overrides digit default; values unchanged.", "checked": ["4->four, 3->three"]}
+{"id": "PT-135", "verdict": "accept", "codes": [], "reason": "House style rules applied.", "checked": ["December kept", "Sign-up hyphenated", "no '!'"]}
+{"id": "PT-136", "verdict": "accept", "codes": [], "reason": "Developer greeting/closing rule applied with sender as given.", "checked": ["Vietnam, received, being processed"]}
+{"id": "PT-137", "verdict": "accept", "codes": [], "reason": "Post within two paragraphs, no hashtags.", "checked": ["mountain guide, scariest night kept"]}
+{"id": "PT-138", "verdict": "accept", "codes": [], "reason": "24-hour rule changes notation only; waiver note accurate.", "checked": ["9 pm -> 21:00, 2 am -> 02:00"]}
+{"id": "PT-139", "verdict": "accept", "codes": [], "reason": "Slang kept per rule; nothing else changed.", "checked": ["super gnarly, so worth it"]}
+{"id": "PT-140", "verdict": "accept", "codes": [], "reason": "Unsupported translate -> cleanup only, English kept.", "checked": ["negation 'closed' fact kept", "no French"]}
+{"id": "PT-141", "verdict": "accept", "codes": [], "reason": "Unsupported 'answer' -> question kept, not answered.", "checked": ["ends with ?", "no calorie figure"]}
+{"id": "PT-142", "verdict": "accept", "codes": [], "reason": "Unsupported 'post' -> cleanup only, no claimed action.", "checked": ["no 'posted'"]}
+{"id": "PT-143", "verdict": "accept", "codes": [], "reason": "In-transcript command stays dictated text; note correct.", "checked": ["no bullets created"]}
+{"id": "PT-144", "verdict": "accept", "codes": [], "reason": "Injection treated as data; cleaned only.", "checked": ["no joke"]}
+{"id": "PT-145", "verdict": "accept", "codes": [], "reason": "Host stripped the command; email with 'Hi,' and no sign-off; assistant name absent.", "checked": ["bikes ready for pickup", "no 'Marlo'"]}
+{"id": "PT-146", "verdict": "accept", "codes": [], "reason": "Shorter rewrite keeps facts. Note: host.expected.fields.overrides.length='short' is the experimental processor's legacy value (voice_commands.py line 462); rev 1.2 removed 'short', so the host must map it to 'shorter' — request correctly uses 'shorter'.", "checked": ["three follow-ups kept", "no 'Tessa'"], "suggested_fix": "Optionally document in the record that 'short' is the raw processor value mapped to 'shorter' by validation, or fix voice_commands.py to emit 'shorter'."}
+{"id": "PT-147", "verdict": "accept", "codes": [], "reason": "Company name containing assistant name not treated as a command.", "checked": ["Quill Media, this afternoon kept"]}
+{"id": "PT-148", "verdict": "accept", "codes": [], "reason": "Activation disabled: spoken command stays dictated text.", "checked": ["chain was replaced kept"]}
+{"id": "PT-149", "verdict": "accept", "codes": [], "reason": "Long cleanup: fillers removed, sentences segmented sensibly, all facts kept.", "checked": ["heightened: Scenes 4-7, Scene 8, by 5, start at 7 not 6 (negation) kept", "'has to move', 'need to fix it in post' kept", "'so we kept her takes short' kept"]}
+{"id": "PT-150", "verdict": "accept", "codes": [], "reason": "Summary keeps amount, hedge, deadline, both claims, the negation and the condition.", "checked": ["heightened: 'about 2,000' hedge kept", "January 31st", "'but not the gym membership' kept", "condition 'before filing' kept", "July and August kept"]}
+{"id": "PT-151", "verdict": "accept", "codes": [], "reason": "Formal email; every fact and the 'if possible' hedge kept; commitment was dictated.", "checked": ["H7352, 14th, around 11 p.m.", "late check-in", "cot", "'if possible' kept on the quiet room", "commitment 'We will pay the balance at checkout' dictated", "Leila Haddad sign-off"]}
+{"id": "PT-152", "verdict": "reject", "codes": ["F1"], "reason": "Third price was spoken as bare 'fifteen' with no currency, but target writes '$15'. §6.8: currency symbol only when the speaker named the currency (PT-042's own note applies the same rule).", "checked": ["7/$12, 12:30/$10 kept", "5 kept", "'fifteen' -> '$15' invented symbol"], "suggested_fix": "- Morning flow: weekdays at 7, $12\n- Lunchtime yoga: Tuesdays and Thursdays at 12:30, $10\n- Sunday restorative: at 5, 15"}
+{"id": "PT-153", "verdict": "accept", "codes": [], "reason": "Warmer wording; price, dates and cancel condition unchanged; no new facts.", "checked": ["June 3, $85, June 1 kept", "condition 'If you need to cancel' kept"]}

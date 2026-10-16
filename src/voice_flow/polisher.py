@@ -53,6 +53,8 @@ FAST_LANE_MAX_WORDS = 60
 # on 300+ words; a slow polish still beats a compressed one.
 AI_POLISH_LONG_BUDGET_SECONDS = 12.0
 AI_POLISH_LONG_TIMEOUT_SECONDS = 10.0
+# A local CPU model needs the long cap once a transcript reaches this size.
+LOCAL_MODEL_LONG_TEXT_WORDS = 300
 # Timeout-class failures get a short flat cooldown: a slow network minute
 # must not silence a lane for 15 minutes (measured live: preferred-model and
 # Groq timeouts escalated into cascading cooldowns that left only the
@@ -804,6 +806,11 @@ _EMAIL_TEMPLATE_RE = re.compile(
     r"\b(?:best|kind) regards\b|\bsign-?off\b",
     re.IGNORECASE,
 )
+_PLACEHOLDER_RE = re.compile(
+    r"\[\s*(?:your|recipient|sender|insert|name|company|position|contact|date)\b[^\]]*\]",
+    re.IGNORECASE,
+)
+_SUBJECT_LINE_RE = re.compile(r"^\s*subject\s*:", re.IGNORECASE | re.MULTILINE)
 _BULLET_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+\S", re.MULTILINE)
 _PROMPT_LABEL_RE = re.compile(r"^\s*(?:task|objective|requirements?|context)\s*:", re.IGNORECASE | re.MULTILINE)
 
@@ -868,12 +875,60 @@ def _fulfills_command(
                 return False
             if not re.match(r"^(?:create|build|write|improve|make|design|develop|implement|generate)\b", stripped, re.IGNORECASE):
                 return False
+    if task != "cleanup":
+        # Unfilled template placeholders are never a finished message.
+        if _PLACEHOLDER_RE.search(candidate) and not _PLACEHOLDER_RE.search(source):
+            return False
+    if command_format in {"work_message", "personal_message", "linkedin_post", "note"}:
+        # These formats have no subject line, and chat/post formats no
+        # formal email furniture ("Dear ...", "Best regards").
+        if _SUBJECT_LINE_RE.search(candidate) and not _SUBJECT_LINE_RE.search(source):
+            return False
+        if command_format != "note" and _EMAIL_TEMPLATE_RE.search(candidate) and not _EMAIL_TEMPLATE_RE.search(source):
+            return False
+    if command_format == "linkedin_post":
+        # A post is a hook plus short paragraphs: a long single block that
+        # merely echoes the dictation is not a post.
+        if (len(_tokenize_for_fidelity(source)) >= 40 and "\n" not in candidate.strip()
+                and _command_body_tokens(source) == _command_body_tokens(candidate)):
+            return False
+    if task == "summarize":
+        source_words = len(_tokenize_for_fidelity(source))
+        candidate_words = len(_tokenize_for_fidelity(candidate))
+        if source_words >= 20 and candidate_words >= source_words:
+            return False
     if overrides.get("length") == "short":
         source_words = len(_tokenize_for_fidelity(source))
         candidate_words = len(_tokenize_for_fidelity(candidate))
         if source_words >= 9 and candidate_words >= source_words * 0.9:
             return False
     return True
+
+
+def _local_model_timeout_seconds(
+    text: str,
+    *,
+    task: str,
+    command_format: str | None = None,
+    overrides: dict[str, object] | None = None,
+) -> float:
+    """Per-attempt cap for a local (S1) generation.
+
+    Plain cleanup of an ordinary dictation keeps the historic 5s cap. Long
+    transcripts and outputs that legitimately grow (email layout, lists,
+    "detailed") get the long-polish budget, because CPU generation time is
+    proportional to output length. The caller's deadline still bounds it.
+    """
+    ovr = overrides if isinstance(overrides, dict) else {}
+    long_text = len(str(text or "").split()) >= LOCAL_MODEL_LONG_TEXT_WORDS
+    expanding = (
+        task in {"prompt", "summarize"}
+        or (command_format or "") in {"email", "bullet_list", "note", "linkedin_post"}
+        or ovr.get("length") == "detailed"
+    )
+    if long_text or (task != "cleanup" and expanding):
+        return AI_POLISH_LONG_TIMEOUT_SECONDS
+    return AI_POLISH_REQUEST_TIMEOUT_SECONDS
 
 
 def _preserves_fidelity(source: str, candidate: str) -> bool:
@@ -919,6 +974,15 @@ def _command_system_prompt(
             "Include an output requirement only if dictated. Do not execute or answer the resulting prompt."
         )
     return prompt
+
+
+def _preferred_spellings_line(text: str) -> str:
+    """Model-agnostic note naming the user's terms present in ``text``."""
+    try:
+        note = dictionary_engine.preferred_spellings_note(text)
+    except Exception:
+        return ""
+    return f"{note}\n" if note else ""
 
 
 def _apply_dictionary_safely(
@@ -1083,6 +1147,48 @@ class TextPolisher:
         self._rate_limited_keys.pop(cooldown_id, None)
 
     def polish(
+        self,
+        raw_text: str,
+        style_instruction: Any = "",
+        cleanup_level: str | None = None,
+        force_ai: bool = False,
+        deadline: float | None = None,
+        model_ref: str | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Polish on every route, then guard the user's dictionary words.
+
+        Words and Replacements are applied before the model sees the text
+        (shortcuts are not, so no model rewrites an expansion), and the
+        output of every route (cloud, S1, LFM, deterministic, commands) is
+        passed through ``dictionary_engine.guard_polished_output``.
+        """
+        if not raw_text or not raw_text.strip():
+            return ""
+        prepared = raw_text
+        try:
+            prepared = dictionary_engine.apply_dictionary_post_processing(
+                raw_text, kwargs.get("dictionary_trace") if isinstance(kwargs.get("dictionary_trace"), list) else None,
+                include_snippets=False,
+            )
+        except TypeError:
+            prepared = raw_text  # legacy test adapters
+        except Exception:
+            log.exception("Dictionary pre-pass failed; polishing the raw text")
+            prepared = raw_text
+        from voice_flow.dictionary import already_applied
+
+        with already_applied():
+            result = self._polish_routes(
+                prepared, style_instruction, cleanup_level, force_ai, deadline, model_ref, **kwargs,
+            )
+        guard = getattr(dictionary_engine, "guard_polished_output", None)
+        if guard is None or not isinstance(result, str) or not result:
+            return result
+        guarded = guard(prepared, result)
+        return guarded if isinstance(guarded, str) else result
+
+    def _polish_routes(
         self,
         raw_text: str,
         style_instruction: Any = "",
@@ -1265,7 +1371,10 @@ class TextPolisher:
                         )
                     if supported:
                         remaining = self._remaining_budget(deadline)
-                        timeout = min(AI_POLISH_REQUEST_TIMEOUT_SECONDS, remaining)
+                        timeout = min(_local_model_timeout_seconds(
+                            raw_text, task=s1_task, command_format=s1_format,
+                            overrides=s1_overrides,
+                        ), remaining)
                         if timeout <= 0:
                             self._last_attempt_status = "timeout"
                             result = None
@@ -1296,9 +1405,13 @@ class TextPolisher:
                                     sanitized = self._deterministic_cleanup(sanitized, "", level)
                                 else:
                                     sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
+                                # Cleanup stays on the strict cleanup gate. An
+                                # executed command is judged by the same
+                                # task-aware gate as the cloud path.
                                 safe = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
-                                    raw_text, sanitized, task="cleanup",
+                                    raw_text, sanitized, task=s1_task,
                                     command_format=s1_format,
+                                    allow_compression=(not cleanup_only) and allow_compression,
                                 )
                                 fulfilled = safe and _fulfills_command(
                                     raw_text, sanitized, task=s1_task,
@@ -1307,7 +1420,17 @@ class TextPolisher:
                                 if fulfilled:
                                     sanitized = self._apply_style_register(sanitized, style_id or instruction)
                                     self._record_polish_latency(s1_engine.S1_MODEL_ID, started, is_local=True)
-                                    self._notify_outcome(outcome_callback, "local_model")
+                                    # A format/prompt/constraint command that only got S1's
+                                    # cleanup pass was not performed: say so instead of
+                                    # reporting success (tone/formality are applied by the
+                                    # deterministic register pass above).
+                                    command_dropped = cleanup_only and bool(
+                                        command_format or task == "prompt"
+                                        or getattr(command, "constraints", ())
+                                    )
+                                    self._notify_outcome(
+                                        outcome_callback, "command_unfulfilled" if command_dropped else "local_model",
+                                    )
                                     return _apply_dictionary_with_trace(sanitized, dictionary_trace)
                                 self._last_attempt_status = "fidelity_reject"
                                 attempt_outcome = "command_unfulfilled" if task != "cleanup" else "fidelity_reject"
@@ -1514,7 +1637,9 @@ class TextPolisher:
                     )
 
                 s1_result = self._run_bridge_with_timeout(
-                    s1_fallback, min(local_model_budget, AI_POLISH_REQUEST_TIMEOUT_SECONDS),
+                    s1_fallback, min(local_model_budget, _local_model_timeout_seconds(
+                        raw_text, task=task, command_format=command_format, overrides=overrides,
+                    )),
                     deadline=(float(deadline) - AI_POLISH_DETERMINISTIC_RESERVE_SECONDS)
                     if deadline is not None else None,
                 )
@@ -1530,7 +1655,8 @@ class TextPolisher:
                     else:
                         sanitized = _cleanup_preserving_dictionary_inputs(sanitized, level)
                     safe_candidate = not _is_assistant_response(sanitized, raw_text) and s1_engine.normalization_preserves_content(
-                        raw_text, sanitized, task="cleanup", command_format=command_format,
+                        raw_text, sanitized, task=task, command_format=command_format,
+                        allow_compression=allow_compression,
                     )
                     fulfilled = safe_candidate and _fulfills_command(
                         raw_text, sanitized, task=task, overrides=overrides,
@@ -1834,6 +1960,7 @@ class TextPolisher:
         instruction = style_instruction
         user_content = (
             f"Style instruction: {instruction}\n"
+            f"{_preferred_spellings_line(raw_text)}"
             f"<input_transcript>\n{raw_text}\n</input_transcript>"
         )
         if not isinstance(api_keys, dict):

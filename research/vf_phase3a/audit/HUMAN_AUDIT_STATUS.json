@@ -1,0 +1,10 @@
+{
+ "status": "NOT_STARTED",
+ "human_reviewer": null,
+ "date": null,
+ "records": 120,
+ "pass": null,
+ "fail": null,
+ "unsure": null,
+ "note": "Fill only from a real human review. AI-agent reviews are recorded separately in vf_phase2b/data/reviews and do not count."
+}

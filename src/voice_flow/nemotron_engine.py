@@ -6,7 +6,7 @@ Supports local quantized (Q8_0) GGUF models:
 
 Provides:
   1. Thread-safe singleton in-memory caching to eliminate reload latencies.
-  2. Direct in-process C ABI execution via nemo_speech_asr_c.dll (< 40ms load, < 500ms inference).
+  2. Persistent isolated C ABI execution via nemo_speech_asr_c.dll (< 40ms load, < 500ms inference).
   3. Direct GGUF header and metadata parsing (vocabulary, mel filterbank, params).
   4. High-speed vectorized log-mel feature extraction (~15-30ms for 5s of audio).
   5. Native CLI execution when nemo-speech binary is installed.
@@ -15,6 +15,8 @@ Provides:
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
+from collections import deque
 import io
 import logging
 import os
@@ -82,120 +84,74 @@ _DLL_LOCK = threading.Lock()
 
 # --- C ABI Structures matching NeMo-Speech.cpp (include/nemo_speech/asr.h) ---
 
-class _BackendConfig(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("gpu", ctypes.c_int32),
-    ]
+from voice_flow.nemotron_abi import (
+    _BackendConfig, _ModelConfig, _RecognizerConfig, _SpeechContext,
+    _RecognitionOptions, _make_speech_context, _options_support_speech_context,
+    _attach_speech_context,
+    NEMOTRON_CONTEXT_BOOST,
+)
+from voice_flow.nemotron_worker_client import NativeASRClient, NativeASRWorkerError, NativeASRBusyError
+
+_FAILED_MODELS: dict[str, NativeASRWorkerError] = {}
+_FAILED_AT: dict[str, float] = {}
+_RETRY_ACTIONS = deque(maxlen=16)
+_FAILURE_LOCK = threading.Lock()
 
 
-class _ModelConfig(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("path", ctypes.c_char_p),
-        ("name", ctypes.c_char_p),
-    ]
-
-
-class _RecognizerConfig(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("backend", ctypes.POINTER(_BackendConfig)),
-        ("model", ctypes.POINTER(_ModelConfig)),
-        ("streaming", ctypes.c_void_p),
-        ("decoder", ctypes.c_void_p),
-        ("vad", ctypes.c_void_p),
-        ("endpointing", ctypes.c_void_p),
-        ("postproc", ctypes.c_void_p),
-        ("diar", ctypes.c_void_p),
-        ("batching", ctypes.c_void_p),
-    ]
-
-
-class _SpeechContext(ctypes.Structure):
-    """Per-request phrase boost, matching nemo_speech/asr.h v0.1.0."""
-
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("phrases", ctypes.POINTER(ctypes.c_char_p)),
-        ("phrase_count", ctypes.c_size_t),
-        ("boost", ctypes.c_float),
-    ]
-
-
-class _RecognitionOptions(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_size_t),
-        ("request_id", ctypes.c_char_p),
-        ("language_code", ctypes.c_char_p),
-        ("interim_results", ctypes.c_bool),
-        ("enable_word_time_offsets", ctypes.c_bool),
-        ("enable_automatic_punctuation", ctypes.c_bool),
-        ("verbatim_transcripts", ctypes.c_bool),
-        ("profanity_filter", ctypes.c_bool),
-        ("stop_history_eou_ms", ctypes.c_int32),
-        ("speech_contexts", ctypes.POINTER(_SpeechContext)),
-        ("speech_context_count", ctypes.c_size_t),
-        ("max_alternatives", ctypes.c_int32),
-        ("enable_speaker_diarization", ctypes.c_bool),
-        ("max_speaker_count", ctypes.c_int32),
-    ]
-
-
-def _make_speech_context(vocabulary: list[str] | tuple[str, ...] | None):
-    """Build a per-request native phrase boost and retain all backing memory.
-
-    The returned references must stay alive through the C ABI call. Streaming
-    callers retain them for the whole stream because native stream setup may
-    keep request context while decoding continues.
-    """
-    terms: list[str] = []
-    seen: set[str] = set()
-    used_chars = 0
-    for raw in vocabulary or ():
-        term = str(raw).strip()
-        key = term.casefold()
-        if not term or len(term) > 96 or key in seen:
-            continue
-        extra = len(term) + (2 if terms else 0)
-        if used_chars + extra > 499:
-            continue
-        terms.append(term)
-        seen.add(key)
-        used_chars += extra
-        if len(terms) >= 15:
+@contextmanager
+def _bounded_lock(lock, deadline=None, cancelled=None, timeout=120.0):
+    absolute = time.monotonic() + timeout
+    while True:
+        limit = deadline() if callable(deadline) else deadline
+        if cancelled is not None and cancelled.is_set():
+            raise NativeASRBusyError("Speech operation cancelled; recording retained")
+        if time.monotonic() >= min(absolute, limit if limit is not None else absolute):
+            raise NativeASRBusyError("Speech operation deadline elapsed; recording retained")
+        if lock.acquire(timeout=0.02):
             break
-    if not terms:
-        return None, ()
-
-    encoded_phrases = tuple(term.encode("utf-8") for term in terms)
-    phrase_array = (ctypes.c_char_p * len(encoded_phrases))(*encoded_phrases)
-    contexts = (_SpeechContext * 1)()
-    contexts[0].size = ctypes.sizeof(_SpeechContext)
-    contexts[0].phrases = phrase_array
-    contexts[0].phrase_count = len(encoded_phrases)
-    contexts[0].boost = 3.0
-    return contexts, (contexts, phrase_array, encoded_phrases)
+    try:
+        yield
+    finally:
+        lock.release()
 
 
-def _options_support_speech_context(opts: _RecognitionOptions) -> bool:
-    """Whether this native library's append-only options struct has both fields."""
-    struct_size = int(getattr(opts, "size", 0) or 0)
-    ptr_end = _RecognitionOptions.speech_contexts.offset + ctypes.sizeof(ctypes.c_void_p)
-    count_end = _RecognitionOptions.speech_context_count.offset + ctypes.sizeof(ctypes.c_size_t)
-    return struct_size >= max(ptr_end, count_end)
-
-
-def _attach_speech_context(opts: _RecognitionOptions, vocabulary):
-    """Attach supported phrase boosts and return the references to retain."""
-    if not vocabulary or not _options_support_speech_context(opts):
-        return ()
-    contexts, references = _make_speech_context(vocabulary)
-    if contexts is None:
-        return ()
-    opts.speech_contexts = ctypes.cast(contexts, ctypes.POINTER(_SpeechContext))
-    opts.speech_context_count = 1
-    return references
+def retry_failed_model(model_ref, action):
+    """Grant at most one retry for an explicit new capture/history action."""
+    from voice_flow import downloadable_models
+    spec = downloadable_models.get_model_spec(model_ref)
+    model_file = (downloadable_models.get_models_dir() / spec["filename"]
+                  if spec else Path(model_ref))
+    key = str(model_file.resolve())
+    with _FAILURE_LOCK:
+        if any(old_key == key and old_action is action for old_key, old_action in _RETRY_ACTIONS):
+            return False
+        _RETRY_ACTIONS.append((key, action))
+        if key not in _FAILED_MODELS:
+            return True
+        if time.monotonic() - _FAILED_AT.get(key, time.monotonic()) < 5.0:
+            raise _FAILED_MODELS[key]
+    if not _CONSTRUCTION_LOCK.acquire(blocking=False):
+        raise NativeASRBusyError("Local speech worker is still closing; recording retained")
+    try:
+        with _CACHE_LOCK:
+            engine = _NEMOTRON_CACHE.get(key)
+        if engine is not None:
+            if not engine.lock.acquire(blocking=False):
+                raise NativeASRBusyError("Local speech worker is still closing; recording retained")
+            try:
+                if engine._active_streams:
+                    raise NativeASRBusyError("Local speech stream is still closing; recording retained")
+                engine.close()
+            finally:
+                engine.lock.release()
+        with _CACHE_LOCK:
+            _NEMOTRON_CACHE.pop(key, None)
+        with _FAILURE_LOCK:
+            _FAILED_MODELS.pop(key, None)
+            _FAILED_AT.pop(key, None)
+        return True
+    finally:
+        _CONSTRUCTION_LOCK.release()
 
 
 def _find_nemo_speech_dll() -> Path | None:
@@ -269,96 +225,9 @@ def _ensure_nemo_speech_binaries() -> Path | None:
     return None
 
 
-def get_nemo_dll() -> ctypes.CDLL | None:
-    """Retrieve or initialize the NeMo-Speech C ABI DLL with typed signatures."""
-    global _NEMO_DLL, _DLL_LOAD_ATTEMPTED
-    with _DLL_LOCK:
-        if _DLL_LOAD_ATTEMPTED:
-            return _NEMO_DLL
-        _DLL_LOAD_ATTEMPTED = True
-
-        dll_path = _ensure_nemo_speech_binaries()
-        if not dll_path or not dll_path.is_file():
-            return None
-
-        try:
-            dll_dir = str(dll_path.parent.resolve())
-            if hasattr(os, "add_dll_directory"):
-                os.add_dll_directory(dll_dir)
-
-            dll = ctypes.CDLL(str(dll_path))
-
-            dll.nemo_speech_asr_version.restype = ctypes.c_char_p
-            dll.nemo_speech_asr_last_error.restype = ctypes.c_char_p
-            dll.nemo_speech_asr_recognition_options_default.restype = _RecognitionOptions
-
-            dll.nemo_speech_asr_create.argtypes = [
-                ctypes.POINTER(_RecognizerConfig),
-                ctypes.POINTER(ctypes.c_void_p),
-            ]
-            dll.nemo_speech_asr_create.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_destroy.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_destroy.restype = None
-
-            dll.nemo_speech_asr_recognize_f32.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(_RecognitionOptions),
-                ctypes.POINTER(ctypes.c_float),
-                ctypes.c_size_t,
-                ctypes.c_int32,
-                ctypes.POINTER(ctypes.c_void_p),
-            ]
-            dll.nemo_speech_asr_recognize_f32.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_result_transcript.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-            dll.nemo_speech_asr_result_transcript.restype = ctypes.c_char_p
-
-            dll.nemo_speech_asr_result_destroy.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_result_destroy.restype = None
-
-            # Streaming recognition C ABI exports
-            dll.nemo_speech_asr_streaming_recognize.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(_RecognitionOptions),
-                ctypes.POINTER(ctypes.c_void_p),
-            ]
-            dll.nemo_speech_asr_streaming_recognize.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_stream_push_f32.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_float),
-                ctypes.c_size_t,
-                ctypes.c_int32,
-            ]
-            dll.nemo_speech_asr_stream_push_f32.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_stream_next.argtypes = [
-                ctypes.c_void_p,
-                ctypes.POINTER(ctypes.c_void_p),
-            ]
-            dll.nemo_speech_asr_stream_next.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_stream_force_endpoint.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_stream_force_endpoint.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_stream_finish.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_stream_finish.restype = ctypes.c_int
-
-            dll.nemo_speech_asr_stream_close.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_stream_close.restype = None
-
-            dll.nemo_speech_asr_result_is_final.argtypes = [ctypes.c_void_p]
-            dll.nemo_speech_asr_result_is_final.restype = ctypes.c_bool
-
-            ver = dll.nemo_speech_asr_version()
-            ver_str = ver.decode("utf-8", errors="replace") if ver else "unknown"
-            log.info("[NEMOTRON] Loaded native NeMo-Speech C ABI: %s", ver_str)
-            _NEMO_DLL = dll
-            return _NEMO_DLL
-        except Exception as exc:
-            log.warning("[NEMOTRON] Failed to load nemo_speech_asr_c.dll: %s", exc, exc_info=True)
-            return None
+def get_nemo_dll():
+    """Native loading is forbidden in the application process."""
+    raise RuntimeError("Native ASR is owned by its isolated worker")
 
 
 def is_nemotron_model(model_ref: str | None) -> bool:
@@ -371,6 +240,15 @@ def is_nemotron_model(model_ref: str | None) -> bool:
 
 def clear_engine_cache(model_ref: str | None = None) -> None:
     """Evict cached engine instance(s) from memory and release native recognizer handles."""
+    with _FAILURE_LOCK:
+        if model_ref is None:
+            _FAILED_MODELS.clear()
+            _FAILED_AT.clear()
+        else:
+            for key in tuple(_FAILED_MODELS):
+                if str(model_ref).strip().lower() in key.lower():
+                    _FAILED_MODELS.pop(key, None)
+                    _FAILED_AT.pop(key, None)
     with _CACHE_LOCK:
         if model_ref is None:
             for eng in list(_NEMOTRON_CACHE.values()):
@@ -397,14 +275,20 @@ def clear_engine_cache(model_ref: str | None = None) -> None:
 class NemotronGGUFEngine:
     """Warm, thread-safe Nemotron ASR engine loaded from a local GGUF file."""
 
-    def __init__(self, model_path: Path | str, spec: dict[str, Any] | None = None) -> None:
+    def __init__(self, model_path: Path | str, spec: dict[str, Any] | None = None, *, deadline=None, cancelled=None) -> None:
         self.model_path = Path(model_path).resolve()
         self.spec = spec or {}
         self.model_id = self.spec.get("id") or self.model_path.stem
         self.model_name = self.spec.get("name") or self.model_path.name
         self.lock = threading.RLock()
 
-        # Native C ABI Recognizer Handle
+        self._native = None
+        self.fatal_error = None
+        self._startup_deadline = deadline
+        self._startup_cancelled = cancelled
+        self._streams_idle = threading.Event()
+        self._streams_idle.set()
+        # Opaque worker token; never a native pointer in this process.
         self.rec_handle: ctypes.c_void_p = ctypes.c_void_p()
 
         # Parsed GGUF metadata & state
@@ -434,7 +318,7 @@ class NemotronGGUFEngine:
 
     @property
     def is_warm(self) -> bool:
-        return self._is_warm
+        return self._is_warm and self.fatal_error is None
 
     def _load_and_warm(self) -> None:
         """Parse GGUF header, index tensors, extract vocab & filterbank into RAM, and create C ABI handle."""
@@ -549,50 +433,39 @@ class NemotronGGUFEngine:
                 "native dictionary boosting is unavailable for this model."
             )
 
-        # Initialize in-memory native C ABI recognizer
-        dll = get_nemo_dll()
-        if dll is not None:
+        dll_path = _ensure_nemo_speech_binaries()
+        if dll_path is not None:
+            from voice_flow import runtime_env
             try:
-                bcfg = _BackendConfig(size=ctypes.sizeof(_BackendConfig), gpu=-1)
-                mcfg = _ModelConfig(
-                    size=ctypes.sizeof(_ModelConfig),
-                    path=str(self.model_path).encode("utf-8"),
-                    name=None,
-                )
-                rcfg = _RecognizerConfig(
-                    size=ctypes.sizeof(_RecognizerConfig),
-                    backend=ctypes.pointer(bcfg),
-                    model=ctypes.pointer(mcfg),
-                    streaming=None,
-                    decoder=None,
-                    vad=None,
-                    endpointing=None,
-                    postproc=None,
-                    diar=None,
-                    batching=None,
-                )
-                rec = ctypes.c_void_p()
-                st = dll.nemo_speech_asr_create(ctypes.byref(rcfg), ctypes.byref(rec))
-                if st == 0 and rec.value:
-                    self.rec_handle = rec
-                    log.info("[NEMOTRON] Created warm in-process C ABI recognizer handle %s", rec.value)
-                else:
-                    err = dll.nemo_speech_asr_last_error()
-                    err_msg = err.decode("utf-8", errors="replace") if err else f"code {st}"
-                    log.warning("[NEMOTRON] nemo_speech_asr_create failed: %s", err_msg)
-            except Exception as exc:
-                log.warning("[NEMOTRON] Exception during C ABI recognizer initialization: %s", exc)
+                self._native = NativeASRClient(str(dll_path), runtime_env.python_executable())
+            except NativeASRWorkerError as exc:
+                self._mark_native_failure(exc)
+                raise
+            created = self._native_call("create", deadline=self._startup_deadline,
+                                        cancelled=self._startup_cancelled,
+                                        dll_path=str(dll_path), model_path=str(self.model_path))
+            if created["status"] == 0 and created["handle"]:
+                self.rec_handle = ctypes.c_void_p(created["handle"])
+                log.info("[NEMOTRON] Created warm isolated native recognizer")
+            else:
+                self._native.close()
+                self._native = None
+                error = NativeASRWorkerError(f"Local speech initialization failed (status {created['status']}); recording retained")
+                self._mark_native_failure(error)
+                raise error
 
         load_ms = (time.perf_counter() - t0) * 1000
-        self._is_warm = True
         # Run one short silent pass so the first real dictation does not pay
         # first-inference cost (weight paging, graph/allocator setup) inside its
         # release drain. This is what made the very first stream of a session
         # noticeably slower than every later one.
         try:
             self._warm_inference_pass()
+        except NativeASRWorkerError:
+            raise
         except Exception as exc:
             log.debug("[NEMOTRON] Warm inference pass skipped: %s", exc)
+        self._is_warm = True
         log.info(
             "[NEMOTRON] Loaded & warmed model '%s' (%d tensors, %d vocab, %.1fMB) in %.1fms (c_abi=%s)",
             self.model_name,
@@ -603,62 +476,57 @@ class NemotronGGUFEngine:
             bool(self.rec_handle.value),
         )
 
-    def _warm_inference_pass(self) -> None:
-        """Push a brief silent utterance through the recognizer to warm it up."""
-        dll = get_nemo_dll()
-        if dll is None or not getattr(self, "rec_handle", None) or not self.rec_handle.value:
-            return
-        stream = ctypes.c_void_p()
-        with self.lock:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
-            opts.interim_results = False
-            st = dll.nemo_speech_asr_streaming_recognize(
-                self.rec_handle, ctypes.byref(opts), ctypes.byref(stream)
-            )
-        if st != 0 or not stream.value:
-            return
+    def _mark_native_failure(self, exc):
+        self.fatal_error = exc
+        self._is_warm = False
+        self.rec_handle = ctypes.c_void_p()
+        with _FAILURE_LOCK:
+            _FAILED_MODELS[str(self.model_path)] = exc
+            _FAILED_AT[str(self.model_path)] = time.monotonic()
+
+    def _native_call(self, op, **values):
+        if self.fatal_error:
+            raise self.fatal_error
         try:
-            silence = np.zeros(16000, dtype=np.float32)
-            ptr = silence.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-            if dll.nemo_speech_asr_stream_push_f32(stream, ptr, len(silence), 16000) == 0:
-                res = ctypes.c_void_p()
-                while True:
-                    nxt = dll.nemo_speech_asr_stream_next(stream, ctypes.byref(res))
-                    if nxt != 0 or not res.value:
-                        break
-                    dll.nemo_speech_asr_result_destroy(res)
-        finally:
-            try:
-                dll.nemo_speech_asr_stream_close(stream)
-            except Exception:
-                pass
+            return self._native.call(op, **values)
+        except NativeASRWorkerError as exc:
+            self._mark_native_failure(exc)
+            raise
+
+    def _warm_inference_pass(self) -> None:
+        if self._native is not None and self.rec_handle.value:
+            response = self._native_call("warm", handle=self.rec_handle.value, streaming=True,
+                                         deadline=self._startup_deadline, cancelled=self._startup_cancelled)
+            if response["status"] != 0:
+                error = NativeASRWorkerError(f"Local speech warmup failed (status {response['status']}); recording retained")
+                self._mark_native_failure(error)
+                self._native.close()
+                self._native = None
+                raise error
 
     def close(self) -> None:
-        """Destroy native recognizer handle and release RAM."""
         with self.lock:
             if self._active_streams:
                 self._evict_when_idle = True
                 return
-            if getattr(self, "rec_handle", None) and self.rec_handle.value:
-                dll = get_nemo_dll()
-                if dll is not None:
-                    try:
-                        dll.nemo_speech_asr_destroy(self.rec_handle)
-                    except Exception:
-                        pass
-                self.rec_handle = ctypes.c_void_p()
+            if self._native is not None:
+                self._native.close()
+                self._native = None
+            self.rec_handle = ctypes.c_void_p()
             self._is_warm = False
 
     def acquire_stream(self) -> None:
         with self.lock:
             self._active_streams += 1
+            self._streams_idle.clear()
             self._last_used = time.monotonic()
 
     def release_stream(self) -> None:
         should_close = False
         with self.lock:
             self._active_streams = max(0, self._active_streams - 1)
+            if not self._active_streams:
+                self._streams_idle.set()
             self._last_used = time.monotonic()
             should_close = self._active_streams == 0 and self._evict_when_idle
         if should_close:
@@ -666,8 +534,9 @@ class NemotronGGUFEngine:
         notify_models_available("speech")
 
     def touch(self) -> None:
-        with self.lock:
-            self._last_used = time.monotonic()
+        # Advisory recency only: stream/model leases own lifetime. Cache getters
+        # must not wait behind an in-flight native call while holding _CACHE_LOCK.
+        self._last_used = time.monotonic()
 
     def release_if_idle(self, now: float, *, force: bool = False) -> bool:
         """Release unused native arenas without interrupting active speech."""
@@ -804,63 +673,33 @@ class NemotronGGUFEngine:
         clean = raw.replace("\u2581", " ").strip()
         return clean
 
-    def _transcribe_segment(
-        self,
-        wav_segment: np.ndarray,
-        language: str | None = None,
-        vocabulary: list[str] | None = None,
-    ) -> str:
-        """Transcribe a single <= 12s audio segment via in-process C ABI."""
-        dll = get_nemo_dll()
-        if dll is None or not getattr(self, "rec_handle", None) or not self.rec_handle.value:
+    def _transcribe_segment(self, wav_segment, language=None, vocabulary=None, deadline=None) -> str:
+        if self.fatal_error:
+            raise self.fatal_error
+        if self._native is None or not self.rec_handle.value:
             return ""
-        try:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
-            lang = language or self.spec.get("default_language")
-            if not lang or lang == "multilingual":
-                try:
-                    from voice_flow.config import config
-                    lang = getattr(config, "language", "en") or "en"
-                except Exception:
-                    lang = "en"
-            if lang and lang != "multilingual":
-                opts.language_code = lang.encode("utf-8")
-            # Phrases are copied by the native C ABI while recognize_f32 is
-            # running. Keep every ctypes buffer alive until that synchronous
-            # call returns; old libraries with a shorter options struct safely
-            # ignore the appended speech-context fields.
-            speech_context_refs = (
-                _attach_speech_context(opts, vocabulary)
-                if getattr(self, "metadata", {}).get("speech_context_supported", False)
-                else ()
-            )
-
-            audio_ptr = wav_segment.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-            res_handle = ctypes.c_void_p()
-
-            st = dll.nemo_speech_asr_recognize_f32(
-                self.rec_handle,
-                ctypes.byref(opts),
-                audio_ptr,
-                len(wav_segment),
-                self.sample_rate,
-                ctypes.byref(res_handle),
-            )
-            _ = speech_context_refs
-            if st == 0 and res_handle.value:
-                txt_p = dll.nemo_speech_asr_result_transcript(res_handle, 0)
-                seg_text = txt_p.decode("utf-8", errors="replace").strip() if txt_p else ""
-                dll.nemo_speech_asr_result_destroy(res_handle)
-                return seg_text
-            else:
-                err = dll.nemo_speech_asr_last_error()
-                err_msg = err.decode("utf-8", errors="replace") if err else f"code {st}"
-                log.warning("[NEMOTRON] C ABI recognize error: %s", err_msg)
-                return ""
-        except Exception as exc:
-            log.warning("[NEMOTRON] C ABI recognize exception: %s", exc)
-            return ""
+        lang = language or self.spec.get("default_language")
+        if not lang or lang == "multilingual":
+            from voice_flow.config import config
+            lang = getattr(config, "language", "en") or "en"
+        # Reuse the warmed cache-aware encoder instead of allocating a
+        # separate offline encoder for whole-recording recovery.
+        response = self._native_call(
+            "recognize", handle=self.rec_handle.value,
+            streaming=True,
+            language=lang if lang != "multilingual" else None,
+            vocabulary=tuple(vocabulary or ()) if self.metadata.get("speech_context_supported", False) else (),
+            audio=np.ascontiguousarray(wav_segment, dtype=np.float32).tobytes(),
+            count=len(wav_segment), rate=self.sample_rate, deadline=deadline,
+        )
+        if response.get("busy"):
+            raise NativeASRBusyError("Previous speech stream is still closing; recording retained")
+        result = response.get("result")
+        if response.get("status") != 0 or not isinstance(result, dict) or result.get("final") is not True:
+            # A failed later segment must abort the whole recording rather
+            # than allowing the long-recording loop to publish earlier text.
+            raise NativeASRWorkerError("Local speech recognition incomplete (recognize_incomplete); recording retained")
+        return result["text"].decode("utf-8", errors="replace").strip()
 
     def transcribe(
         self,
@@ -897,17 +736,23 @@ class NemotronGGUFEngine:
         if wav.dtype != np.float32:
             wav = wav.astype(np.float32, copy=False)
 
-        c_abi_available = False
-        dll = get_nemo_dll()
-        if dll is not None and getattr(self, "rec_handle", None) and self.rec_handle.value:
-            c_abi_available = True
+        if self.fatal_error:
+            raise self.fatal_error
+        c_abi_available = self._native is not None and bool(self.rec_handle.value)
+        if c_abi_available:
+            limit = deadline if deadline is not None else time.monotonic() + 120.0
+            while not self._streams_idle.wait(0.02):
+                if self.fatal_error:
+                    raise self.fatal_error
+                if time.monotonic() >= limit:
+                    raise NativeASRBusyError("Previous speech stream is still closing; recording retained")
 
         if c_abi_available:
-            with self.lock:
+            with _bounded_lock(self.lock, deadline):
                 self._last_used = time.monotonic()
                 # If audio is short or is a stream chunk, transcribe directly in-process
                 if is_chunk or duration <= 12.0:
-                    result = self._transcribe_segment(wav, language=resolved_lang, vocabulary=vocabulary)
+                    result = self._transcribe_segment(wav, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                 else:
                     # Long whole-buffer audio (> 12.0s): chunk into ~4s segments at silence points
                     # to avoid FastConformer O(T^2) quadratic self-attention blowup on CPU.
@@ -948,7 +793,7 @@ class NemotronGGUFEngine:
                             offset = split_point
 
                         if seg.size >= int(0.2 * self.sample_rate):
-                            part_txt = self._transcribe_segment(seg, language=resolved_lang, vocabulary=vocabulary)
+                            part_txt = self._transcribe_segment(seg, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                             if part_txt:
                                 transcripts.append(part_txt)
 
@@ -998,6 +843,9 @@ def get_cached_nemotron_engine(model_ref_or_path: str | Path | None = None) -> N
         return None
 
     path_key = str(model_file.resolve())
+    with _FAILURE_LOCK:
+        if path_key in _FAILED_MODELS:
+            raise _FAILED_MODELS[path_key]
     with _CACHE_LOCK:
         cached = _NEMOTRON_CACHE.get(path_key)
         if cached is not None and cached.is_warm:
@@ -1008,7 +856,7 @@ def get_cached_nemotron_engine(model_ref_or_path: str | Path | None = None) -> N
     return None
 
 
-def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> NemotronGGUFEngine | None:
+def get_nemotron_engine(model_ref_or_path: str | Path | None = None, *, deadline=None, cancelled=None) -> NemotronGGUFEngine | None:
     """Retrieve or instantiate a warm singleton NemotronGGUFEngine."""
     from voice_flow import downloadable_models
 
@@ -1031,6 +879,9 @@ def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> Nemotron
         return None
 
     path_key = str(model_file.resolve())
+    with _FAILURE_LOCK:
+        if path_key in _FAILED_MODELS:
+            raise _FAILED_MODELS[path_key]
     with _CACHE_LOCK:
         cached = _NEMOTRON_CACHE.get(path_key)
         if cached is not None and cached.is_warm:
@@ -1040,7 +891,10 @@ def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> Nemotron
             return cached
 
     replaced: list[NemotronGGUFEngine] = []
-    with _CONSTRUCTION_LOCK:
+    with _bounded_lock(_CONSTRUCTION_LOCK, deadline, cancelled):
+        with _FAILURE_LOCK:
+            if path_key in _FAILED_MODELS:
+                raise _FAILED_MODELS[path_key]
         # Another capture/stream worker may have completed the same cold load
         # while this caller waited. Recheck before reserving native memory.
         with _CACHE_LOCK:
@@ -1051,7 +905,12 @@ def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> Nemotron
                     touch()
                 return cached
         try:
-            engine = NemotronGGUFEngine(model_file, spec=spec)
+            engine = NemotronGGUFEngine(model_file, spec=spec, deadline=deadline, cancelled=cancelled)
+        except NativeASRWorkerError as exc:
+            with _FAILURE_LOCK:
+                _FAILED_MODELS[path_key] = exc
+                _FAILED_AT.setdefault(path_key, time.monotonic())
+            raise
         except Exception as exc:
             log.error("[NEMOTRON ERROR] Failed to load Nemotron engine from %s: %s", model_file, exc, exc_info=True)
             return None
@@ -1070,7 +929,7 @@ def get_nemotron_engine(model_ref_or_path: str | Path | None = None) -> Nemotron
 
 
 class NemotronStreamTranscriber:
-    """Live in-process streaming ASR session using native NeMo-Speech C ABI.
+    """Live isolated streaming ASR session using native NeMo-Speech C ABI.
 
     Audio frames from the microphone are queued and pushed incrementally into
     the C ABI stream (nemo_speech_asr_stream_push_f32). The FastConformer
@@ -1090,6 +949,7 @@ class NemotronStreamTranscriber:
         self._cancel = threading.Event()
         self._done = threading.Event()
         self._failed = False
+        self.fatal_error = None
         self._text = ""
         self._accepted = 0
         self._deadline: float | None = None
@@ -1113,48 +973,23 @@ class NemotronStreamTranscriber:
             self._failed = True
             self._done.set()
 
-    def _open_stream(self, dll: Any) -> bool:
-        """Create the native streaming recognizer for this session."""
+    def _native_call(self, op, **values):
+        return self._engine._native_call(op, deadline=lambda: self._deadline,
+                                         cancelled=self._cancel, **values)
+
+    def _open_stream(self, _client=None) -> bool:
         eng = self._engine
-        try:
-            opts = dll.nemo_speech_asr_recognition_options_default()
-            opts.enable_automatic_punctuation = True
-            opts.interim_results = False
-            # Streaming decode outlives this setup call; retain the ctypes
-            # arrays and UTF-8 phrase storage on this session until the native
-            # stream closes in _run's finally block.
-            self._speech_context_refs = (
-                _attach_speech_context(opts, self._vocabulary)
-                if eng is not None and getattr(eng, "metadata", {}).get("speech_context_supported", False)
-                else ()
-            )
-
-            lang = None
-            if eng is not None and eng.spec:
-                lang = eng.spec.get("default_language")
-            if not lang or lang == "multilingual":
-                try:
-                    from voice_flow.config import config
-
-                    lang = getattr(config, "language", "en") or "en"
-                except Exception:
-                    lang = "en"
-            if lang and lang != "multilingual":
-                opts.language_code = lang.encode("utf-8")
-
-            with eng.lock:
-                st = dll.nemo_speech_asr_streaming_recognize(
-                    eng.rec_handle, ctypes.byref(opts), ctypes.byref(self._stream)
-                )
-            if st != 0 or not self._stream.value:
-                err = dll.nemo_speech_asr_last_error()
-                err_msg = err.decode("utf-8", errors="replace") if err else f"code {st}"
-                log.warning("[NEMOTRON STREAM] streaming_recognize failed: %s", err_msg)
-                return False
-            return True
-        except Exception as exc:
-            log.warning("[NEMOTRON STREAM] Could not open stream: %s", exc)
-            return False
+        lang = eng.spec.get("default_language") if eng.spec else None
+        if not lang or lang == "multilingual":
+            from voice_flow.config import config
+            lang = getattr(config, "language", "en") or "en"
+        response = self._native_call(
+            "stream_open", handle=eng.rec_handle.value, streaming=True,
+            language=lang if lang != "multilingual" else None,
+            vocabulary=self._vocabulary if eng.metadata.get("speech_context_supported", False) else (),
+        )
+        self._stream = ctypes.c_void_p(response["handle"])
+        return response["status"] == 0 and bool(response["handle"])
 
     def submit_frame(self, frame: np.ndarray, native_sr: int) -> None:
         if self._finish.is_set() or self._cancel.is_set() or self._done.is_set():
@@ -1230,20 +1065,20 @@ class NemotronStreamTranscriber:
             if self._cancel.is_set() or self._expired():
                 raise RuntimeError("Stream was cancelled before model loading")
             if eng is None:
-                eng = get_nemotron_engine(self._model_ref)
+                eng = get_nemotron_engine(self._model_ref, deadline=lambda: self._deadline, cancelled=self._cancel)
                 self._engine = eng
-            dll = get_nemo_dll()
+            client = eng._native if eng is not None else None
             if self._cancel.is_set() or self._expired():
                 raise RuntimeError("Stream was cancelled during model loading")
-            if dll is None or eng is None or not getattr(eng, "rec_handle", None) or not eng.rec_handle.value:
+            if client is None or eng is None or not getattr(eng, "rec_handle", None) or not eng.rec_handle.value:
                 raise RuntimeError("Native C ABI engine handle not available")
-            with eng.lock:
+            with _bounded_lock(eng.lock, lambda: self._deadline, self._cancel):
                 if not eng.rec_handle.value:
                     raise RuntimeError("Native recognizer was evicted before stream setup")
                 eng.acquire_stream()
                 stream_acquired = True
                 self._stream = ctypes.c_void_p()
-                if not self._open_stream(dll):
+                if not self._open_stream(client):
                     stream = self._stream
                     raise RuntimeError("Native C ABI stream could not be opened")
             stream = self._stream
@@ -1270,26 +1105,22 @@ class NemotronStreamTranscriber:
                     # Condition only the per-stream copy.  AudioRecorder keeps
                     # the complete raw frames for whole-recording recovery.
                     mono = live_enhancer.process(mono, sr)
-                    ptr = mono.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-                    push_st = dll.nemo_speech_asr_stream_push_f32(stream, ptr, len(mono), int(sr))
-                    if push_st != 0:
-                        raise RuntimeError(f"Audio frame was not accepted (status {push_st})")
-
-                    res = ctypes.c_void_p()
-                    next_st = dll.nemo_speech_asr_stream_next(stream, ctypes.byref(res))
-                    if next_st == 0 and res.value:
-                        try:
-                            is_fin = dll.nemo_speech_asr_result_is_final(res)
-                            txt_p = dll.nemo_speech_asr_result_transcript(res, 0)
-                            t = txt_p.decode("utf-8", errors="replace").strip() if txt_p else ""
-                            if is_fin:
-                                if t:
-                                    committed_transcripts.append(t)
-                                    interim_latest = ""
-                            else:
-                                interim_latest = t
-                        finally:
-                            dll.nemo_speech_asr_result_destroy(res)
+                    response = self._native_call("stream_push_next", handle=stream.value,
+                                                 audio=np.ascontiguousarray(mono).tobytes(),
+                                                 count=len(mono), rate=int(sr))
+                    if response["status"] != 0 and response.get("result") is None:
+                        # next may report no result; only an explicit push error fails input.
+                        if response.get("push_failed"):
+                            raise RuntimeError("Audio frame was not accepted")
+                    result = response.get("result")
+                    if result:
+                        t = result["text"].decode("utf-8", errors="replace").strip()
+                        if result["final"]:
+                            if t:
+                                committed_transcripts.append(t)
+                                interim_latest = ""
+                        else:
+                            interim_latest = t
 
             if self._cancel.is_set():
                 raise RuntimeError("Stream was cancelled")
@@ -1305,7 +1136,7 @@ class NemotronStreamTranscriber:
 
             # Finalize audio stream and drain tail
             t_finish = time.perf_counter()
-            fin_st = dll.nemo_speech_asr_stream_finish(stream)
+            fin_st = self._native_call("stream_finish", handle=stream.value)["status"]
             if fin_st != 0:
                 raise RuntimeError(f"Audio finalization failed (status {fin_st})")
 
@@ -1318,26 +1149,17 @@ class NemotronStreamTranscriber:
                     self._failed = True
                     log.warning("[NEMOTRON STREAM] Stream deadline elapsed during drain")
                     break
-                res = ctypes.c_void_p()
-                next_st = dll.nemo_speech_asr_stream_next(stream, ctypes.byref(res))
-                if next_st != 0 or not res.value:
+                response = self._native_call("stream_next", handle=stream.value)
+                result = response.get("result")
+                if response["status"] != 0 or result is None:
                     break
-                try:
-                    is_final_fn = getattr(dll, "nemo_speech_asr_result_is_final", None)
-                    # The registered C ABI exposes this function. Keep
-                    # compatibility with older alternate bindings that only
-                    # return terminal drain results and lack the flag.
-                    is_fin = bool(is_final_fn(res)) if callable(is_final_fn) else True
-                    txt_p = dll.nemo_speech_asr_result_transcript(res, 0)
-                    t = txt_p.decode("utf-8", errors="replace").strip() if txt_p else ""
-                    if is_fin:
-                        if t:
-                            committed_transcripts.append(t)
-                            interim_latest = ""
-                    elif t:
-                        interim_latest = t
-                finally:
-                    dll.nemo_speech_asr_result_destroy(res)
+                t = result["text"].decode("utf-8", errors="replace").strip()
+                if result["final"]:
+                    if t:
+                        committed_transcripts.append(t)
+                        interim_latest = ""
+                elif t:
+                    interim_latest = t
 
             if interim_latest:
                 # A final interim may contain words that the last committed
@@ -1362,6 +1184,10 @@ class NemotronStreamTranscriber:
                 self._accepted,
                 self._text[:60] if self._text else "<empty>",
             )
+        except (NativeASRWorkerError, NativeASRBusyError) as exc:
+            self.fatal_error = exc
+            self._failed = True
+            self._text = ""
         except Exception as exc:
             if committed_transcripts or interim_latest:
                 if interim_latest and not committed_transcripts:
@@ -1380,9 +1206,13 @@ class NemotronStreamTranscriber:
                 self._failed = True
                 log.warning("[NEMOTRON STREAM] Streaming session exception: %s; falling back to whole-buffer", exc)
         finally:
-            if stream.value and 'dll' in locals() and dll is not None:
+            if stream.value and eng is not None and eng._native is not None and not eng.fatal_error:
                 try:
-                    dll.nemo_speech_asr_stream_close(stream)
+                    # Cleanup ignores user cancellation but remains bounded.
+                    eng._native_call("stream_close", handle=stream.value, timeout=0.3)
+                except NativeASRWorkerError as exc:
+                    self.fatal_error = exc
+                    self._failed = True
                 except Exception:
                     pass
             self._speech_context_refs = ()

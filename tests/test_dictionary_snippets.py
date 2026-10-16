@@ -136,9 +136,9 @@ def test_unicode_casefold_migration_surfaces_displaced_values(store):
 
 
 def test_dictionary_exact_casing_and_no_fuzzy_false_positive(store):
-    store.add_dictionary_word("VoiceFlow")
+    store.add_dictionary_word("GrokBot")
     engine = DictionaryEngine(store)
-    assert engine.apply_dictionary_post_processing("voiceflow is ready") == "VoiceFlow is ready"
+    assert engine.apply_dictionary_post_processing("grokbot is ready") == "GrokBot is ready"
     assert engine.apply_dictionary_post_processing("voice floe is ready") == "voice floe is ready"
 
 
@@ -170,20 +170,12 @@ def test_dictionary_reload_is_immediate_after_storage_change(store):
     assert engine.apply_dictionary_post_processing("openai") == "OpenAI"
 
 
-def test_auto_captured_rows_are_visible_but_never_active_dictionary_rules(store):
-    """Learned metadata must not silently become a spelling rewrite."""
-    assert store.add_dictionary_word("LearnedTerm", category="Auto-Captured")
-    engine = DictionaryEngine(store)
-
-    assert engine.apply_dictionary_post_processing("learnedterm") == "learnedterm"
-    assert "LearnedTerm" not in engine.get_initial_prompt()
-    assert store.get_dictionary_entries(include_auto=True)[0]["category"] == "Auto-Captured"
 
 
 def test_dictionary_update_rejects_legacy_expansion_syntax(store):
-    assert store.add_dictionary_word("VoiceFlow")
-    assert not store.update_dictionary_word("VoiceFlow", "shortcut -> expansion")
-    assert store.get_dictionary_words() == ["VoiceFlow"]
+    assert store.add_dictionary_word("GrokBot")
+    assert not store.update_dictionary_word("GrokBot", "shortcut -> expansion")
+    assert store.get_dictionary_words() == ["GrokBot"]
 
 
 def test_engine_snapshot_reads_remain_safe_while_lexicon_changes(store):
@@ -212,13 +204,6 @@ def test_static_ui_has_no_snippets_page_after_feature_removal():
     assert "loadSnippets" not in javascript and "renderSnippets" not in javascript
 
 
-def test_static_dictionary_page_explains_automatic_repeated_use_learning():
-    """The dictionary describes automatic learning without an approval step."""
-    root = Path(__file__).parents[1] / "src" / "voice_flow" / "gui"
-    html = (root / "index.html").read_text(encoding="utf8")
-    dictionary_page = html.split('<section id="page-dictionary"', 1)[1].split("</section>", 1)[0]
-    assert "added automatically after repeated use" in dictionary_page
-    assert "approval" not in dictionary_page.lower()
 
 
 @contextmanager
@@ -253,101 +238,14 @@ def get(url, path):
             return error.code, json.load(error)
 
 
-def test_api_does_not_suggest_terms_already_activated_by_repeated_use(store, monkeypatch):
-    for _ in range(3):
-        store.add_dictation(
-            "we use Kubernetes for routing",
-            "We use Kubernetes for routing",
-            status="success",
-            insertion_status="pasted",
-        )
-    with api_server(store, monkeypatch) as url:
-        status, suggestions = get(url, "/api/dictionary/suggestions")
-    assert status == 200
-    assert "Kubernetes" in store.get_dictionary_words()
-    assert suggestions == []
 
 
-def test_repeated_name_mishearing_automatically_activates_with_correction(store):
-    """Genuinely repeated user vocabulary (used 3+ times with a heard-as
-    variant) automatically activates its canonical spelling and heard-as rule."""
-    from voice_flow.correction_learning import extract_correction_pairs
-
-    pairs = extract_correction_pairs("please ask joe ee to review", "Please ask Joey to review")
-    assert ("Joey", "joe ee") in pairs
-    for _ in range(3):
-        record = store.add_dictation(
-            "please ask joe ee to review",
-            "Please ask Joey to review",
-            status="success",
-            insertion_status="pasted",
-        )
-        for term, variant in pairs:
-            store.record_lexicon_candidate(
-                term, variant, source="correction", history_id=record.id
-            )
-    assert "Joey" in store.get_dictionary_words()
-    assert any(row["wrong_text"] == "joe ee" and row["correct_text"] == "Joey" for row in store.get_dictionary_corrections())
-    assert store.get_lexicon_suggestions() == []
 
 
-def test_ignored_internal_candidate_never_activates(store):
-    """A user can ignore a candidate before it reaches the activation threshold."""
-    for _ in range(2):
-        store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    with store._get_conn_ctx() as conn:
-        candidate = conn.execute("SELECT id FROM lexicon_candidates WHERE term='Kubernetes'").fetchone()
-    assert store.set_lexicon_candidate_state(candidate["id"], "ignored")
-    assert store.get_lexicon_suggestions() == []
-    # Further observations must not activate the ignored word or its rule.
-    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    store.record_lexicon_candidate("Kubernetes", "cuber netties", source="correction")
-    assert store.get_lexicon_suggestions() == []
-    assert "Kubernetes" not in store.get_dictionary_words()
-    assert store.get_dictionary_corrections() == []
 
 
-def test_heard_as_correction_activates_only_after_repeated_evidence(store):
-    """Canonical term and heard-as correction activate together at threshold."""
-    records = [
-        store.add_dictation(
-            "we use cuber netties for routing",
-            "We use Kubernetes for routing",
-            status="success",
-            insertion_status="pasted",
-        )
-        for _ in range(3)
-    ]
-    store.record_lexicon_candidate(
-        "Kubernetes", "cuber netties", source="correction", history_id=records[0].id
-    )
-    store.record_lexicon_candidate(
-        "Kubernetes", "cuber netties", source="correction", history_id=records[1].id
-    )
-    assert store.get_lexicon_suggestions() == []
-    assert "Kubernetes" not in store.get_dictionary_words()
-    assert store.get_dictionary_corrections() == []
-    store.record_lexicon_candidate(
-        "Kubernetes", "cuber netties", source="correction", history_id=records[2].id
-    )
-    assert "Kubernetes" in store.get_dictionary_words()
-    assert any(row["wrong_text"] == "cuber netties" and row["correct_text"] == "Kubernetes" for row in store.get_dictionary_corrections())
-    assert store.get_lexicon_suggestions() == []
 
 
-def test_candidate_calls_without_history_stay_pending(store):
-    for _ in range(3):
-        assert not store.record_lexicon_candidate(
-            "Kubernetes", "cuber netties", source="correction"
-        )
-    assert "Kubernetes" not in store.get_dictionary_words()
-    assert store.get_dictionary_corrections() == []
-    with store._get_conn_ctx() as conn:
-        candidate = conn.execute(
-            "SELECT evidence, state FROM lexicon_candidates "
-            "WHERE term = 'Kubernetes' AND variant = 'cuber netties'"
-        ).fetchone()
-    assert (candidate["evidence"], candidate["state"]) == (3, "candidate")
 
 
 def test_api_correction_crud(store, monkeypatch):
@@ -378,13 +276,13 @@ def test_api_dictionary_details_shows_auto_rows_with_provenance(store, monkeypat
 
 def test_api_dictionary_recognition_details_exposes_only_safe_generated_aliases(store, monkeypatch):
     assert store.add_dictionary_word("HyperKube")
-    assert store.add_dictionary_word("Here")
+    assert store.add_dictionary_word("LinkedIn")
     with api_server(store, monkeypatch) as url:
         status, entries = get(url, "/api/dictionary?details=1&include_auto=1&recognition=1")
     assert status == 200
     assert [(entry["word"], entry["recognized_as"]) for entry in entries] == [
         ("HyperKube", ["Hyper Kube"]),
-        ("Here", []),
+        ("LinkedIn", []),
     ]
 
 

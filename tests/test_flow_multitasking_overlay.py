@@ -47,9 +47,10 @@ def test_video_and_multiple_audio_rows_draw_together_and_have_distinct_hits() ->
     bar.show_audio_summary_progress(76, "Synthesizing", job_id="audio-2")
 
     bar._draw()
-    assert any("Video Flow · 42% · Rendering" in text for text in canvas.texts)
-    assert any("Audio Flow · 31% · Writing narration" in text for text in canvas.texts)
-    assert any("Audio Flow · 76% · Synthesizing" in text for text in canvas.texts)
+    assert "Video Flow" in canvas.texts and "42%" in canvas.texts
+    assert "Audio Flow" in canvas.texts and "31%" in canvas.texts
+    assert "76%" in canvas.texts
+    assert not any(stage in text for text in canvas.texts for stage in ("Rendering", "Writing narration", "Synthesizing"))
     assert bar.selected_text == "highlight to keep"
     assert bar._selection_generation == generation
 
@@ -79,8 +80,8 @@ def test_background_rows_preserve_each_voice_foreground_state() -> None:
         bar._draw()
         assert bar.state == state
         assert bar.selected_text == "selection"
-        assert any("Video Flow · 20% · Making video" in text for text in canvas.texts)
-        assert any("Audio Flow · 55% · Making audio" in text for text in canvas.texts)
+        assert "Video Flow" in canvas.texts and "20%" in canvas.texts
+        assert "Audio Flow" in canvas.texts and "55%" in canvas.texts
         assert len(bar._summary_row_geometry()) == 2
 
 
@@ -143,14 +144,19 @@ def test_foreground_hitboxes_use_foreground_width_when_rows_are_wider() -> None:
     bar, _canvas = make_bar()
     bar.state = "RECORDING"
     bar.show_video_progress("video", 10, "Rendering")
-    assert bar._get_zone(170, 12) == "finish"
-    assert bar._get_zone(180, 12) == "grip"
+    dx, dy = bar._foreground_offset()
+    assert bar._get_zone(dx+170, dy+12) == "finish"
+    assert bar._get_zone(dx+180, dy+12) == "grip"
 
     bar.state = "READY"
     bar._is_mouse_over = True
+    # Selection explicitly opens Voice/Video/settings actions; hovering a
+    # progress row alone must keep the integrated READY layout unchanged.
+    bar._selection_expanded = True
     bar.show_audio_summary_progress(15, "Making audio", job_id="audio")
     # Settings sits at the right side of the 248px voice bar; row width is 280.
-    assert bar._get_zone(220, 10) == "settings"
+    dx, dy = bar._foreground_offset()
+    assert bar._get_zone(dx+220, dy+10) == "settings"
     row_top, _row_bottom, _row = bar._summary_row_geometry()[0]
     assert bar._get_zone(258, row_top + 1) == "summary_cancel:0"
 
@@ -161,7 +167,8 @@ def test_false_or_failed_callbacks_leave_job_rows_available() -> None:
     bar.show_audio_summary_progress(100, "Audio ready", job_id="ready-job", title="Research Notes")
     bar.show_audio_summary_ready("ready-job")
     bar._draw()
-    assert any("Research Notes Ready" in text for text in bar.canvas.texts)
+    assert "▶ Audio Ready — Play" in bar.canvas.texts
+    assert bar._audio_summary_jobs["ready-job"]["title"] == "Research Notes"
     bar.on_audio_summary_ready = lambda _job_id: False
     x, y = row_point(bar, 0)
     bar._on_press(SimpleNamespace(x=x, y=y))
@@ -184,12 +191,13 @@ def test_long_audio_titles_are_clipped_before_ready_and_failure_controls() -> No
     bar.show_audio_summary_failed("failed-long", "Playback conversion failed", title=long_title)
     bar._draw()
 
-    ready_label = next(text for text in canvas.texts if "Ready — Click to play" in text)
-    failed_label = next(text for text in canvas.texts if "failed — click to dismiss" in text)
-    assert "A Very Long Audio…" in ready_label
-    assert "A Very Long Audio…" in failed_label
-    assert len(ready_label) <= 42
-    assert len(failed_label) <= 48
+    # Compact feature-only labels leave space for the integrated mic/cancel;
+    # source titles remain attached to their independently handled jobs.
+    assert "▶ Audio Ready — Play" in canvas.texts
+    assert "Audio failed — Dismiss" in canvas.texts
+    assert long_title not in canvas.texts
+    assert bar._audio_summary_jobs["ready-long"]["title"] == long_title[:36]
+    assert bar._audio_summary_jobs["failed-long"]["title"] == long_title[:36]
 
 
 def test_row_count_is_bounded_and_both_themes_keep_existing_palette() -> None:
@@ -209,11 +217,11 @@ def test_row_count_is_bounded_and_both_themes_keep_existing_palette() -> None:
         assert all(f"audio-running-{index}" in row_ids for index in range(8))
         assert "audio-final-0" not in row_ids
         assert all(f"audio-final-{index}" in row_ids for index in range(2, 6))
-        assert bar.height <= bar.idle_height + 4 + bar.MAX_SUMMARY_ROWS * 26 + (bar.MAX_SUMMARY_ROWS - 1) * 2
+        assert bar.height <= bar.MAX_SUMMARY_ROWS * 32 + (bar.MAX_SUMMARY_ROWS - 1) * 4
         assert any(item[2].get("fill") == expected for item in canvas.items if item[0] == "create_polygon")
 
 
-def test_processing_rows_share_one_animation_timer() -> None:
+def test_processing_rows_do_not_schedule_static_animation_timer() -> None:
     class FakeRoot:
         def __init__(self) -> None:
             self.callbacks = []
@@ -227,8 +235,10 @@ def test_processing_rows_share_one_animation_timer() -> None:
     bar.show_video_progress("video", 5, "Rendering")
     bar.show_audio_summary_progress(10, "Synthesizing", job_id="audio-1")
     bar.show_audio_summary_progress(20, "Synthesizing", job_id="audio-2")
-    assert len(bar.root.callbacks) == 1
-    assert bar.root.callbacks[0][0] == 90
+    # The shared UI dispatcher may arm a one-shot pump to deliver the redraw;
+    # what must never appear is a repeating static-animation timer.
+    timers = [cb for cb in bar.root.callbacks if "UiDispatcher" not in getattr(cb[1], "__qualname__", "")]
+    assert timers == []
 
 
 def test_restart_refresh_preserves_background_job_rows_without_tk() -> None:

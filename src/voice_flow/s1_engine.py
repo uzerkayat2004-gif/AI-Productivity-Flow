@@ -99,13 +99,25 @@ def is_s1_downloaded() -> bool:
 
 
 def is_s1_runtime_available() -> bool:
-    """Whether the local inference runtime (llama_cpp) is present."""
+    """Whether the local inference runtime (llama-server or llama_cpp) is present."""
     try:
         import importlib.util
 
-        return importlib.util.find_spec("llama_cpp") is not None
+        if importlib.util.find_spec("llama_cpp") is not None:
+            return True
     except Exception:
-        return False
+        pass
+
+    try:
+        from voice_flow import vf1_engine
+
+        engine = vf1_engine.get_vf1_engine()
+        if engine.is_server_healthy() or engine._find_llama_server_binary() is not None:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _release_cached_s1(llm: Any) -> None:
@@ -310,6 +322,12 @@ def s1_can_handle(
         return False
 
     # 2. Command attribute checks
+    # Free-text constraints ("without hashtags") cannot be expressed in S1's
+    # native control line; routing them to S1 would silently drop them.
+    if getattr(command, "constraints", ()):
+        return False
+    if getattr(command, "operation", None) == "unsupported":
+        return False
     if getattr(command, "persistent_change", False):
         return False
     if getattr(command, "ambiguous", False):
@@ -683,10 +701,22 @@ def normalization_preserves_content(
     *,
     task: str = "cleanup",
     command_format: str | None = None,
+    allow_compression: bool = False,
 ) -> bool:
     """Run the shared fidelity guard after narrow S1 normalization equivalences."""
     try:
         from voice_flow.polisher import _candidate_preserves_content
+        from voice_flow.vf_checks import expand_contractions, normalize_source_for_guard
+
+        # Apply the edits a correct cleanup is expected to make (fillers,
+        # repeats, self-corrections, "dont" -> "do not", spoken price
+        # compounds) before comparing, so valid normalisations are not
+        # rejected (A16).  Number, negation, literal and retention checks
+        # below still run on the result.
+        source = normalize_source_for_guard(source, candidate)
+        candidate = expand_contractions(candidate)
+        if not re.search(r"\w", source):
+            return not re.search(r"\w", candidate or "")
 
         stutter_normalized_source = _collapse_repeated_half_quantity_prefix(source)
         has_stutter_equivalence = stutter_normalized_source != source
@@ -710,6 +740,7 @@ def normalization_preserves_content(
             normalized_candidate,
             task=task,
             command_format=command_format,
+            allow_compression=allow_compression,
         )
     except Exception as exc:
         log.debug("[S1] Could not run canonical fidelity guard: %s", exc)
@@ -773,23 +804,35 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
         if getattr(polish_with_s1, "_cached_llm_path", None) == str(model_path):
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
-        from llama_cpp import Llama  # type: ignore
+        try:
+            from llama_cpp import Llama  # type: ignore
 
-        gpu_layers = -1 if sys.platform == "darwin" else 0
-        llm = Llama(
-            model_path=str(model_path),
-            n_ctx=_S1_CONTEXT_TOKENS,
-            **_s1_runtime_batch_settings(),
-            n_gpu_layers=gpu_layers,
-            verbose=False,
-        )
-        old_llm = getattr(polish_with_s1, "_cached_llm", None)
-        if old_llm is not None:
-            _release_cached_s1(old_llm)
-        setattr(polish_with_s1, "_cached_llm", llm)
-        setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-        setattr(polish_with_s1, "_last_used", idle_time())
-        return True
+            gpu_layers = -1 if sys.platform == "darwin" else 0
+            llm = Llama(
+                model_path=str(model_path),
+                n_ctx=_S1_CONTEXT_TOKENS,
+                **_s1_runtime_batch_settings(),
+                n_gpu_layers=gpu_layers,
+                verbose=False,
+            )
+            old_llm = getattr(polish_with_s1, "_cached_llm", None)
+            if old_llm is not None:
+                _release_cached_s1(old_llm)
+            setattr(polish_with_s1, "_cached_llm", llm)
+            setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            setattr(polish_with_s1, "_last_used", idle_time())
+            return True
+        except Exception:
+            from voice_flow import vf1_engine
+
+            engine = vf1_engine.get_vf1_engine()
+            if engine.is_server_healthy() or (
+                engine._find_llama_server_binary() and engine.ensure_server_running()
+            ):
+                setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+                setattr(polish_with_s1, "_last_used", idle_time())
+                return True
+            return False
     except Exception as exc:
         log.warning("[S1] Could not warm S1-mini model: %s", exc)
         return False
@@ -830,11 +873,59 @@ def _chunk_transcript(text: str, max_chunk_words: int = 150) -> list[str]:
     return chunks or [text]
 
 
+# Tasks whose output must see the whole transcript at once. Splitting a
+# summary, prompt, email or list into independent pieces yields several
+# partial results glued together, so these are never chunked; when the whole
+# text cannot fit the model context the request is refused locally instead.
+_WHOLE_TEXT_TASKS = frozenset({"summarize", "prompt"})
+_WHOLE_TEXT_FORMATS = frozenset({"email", "bullet_list", "prompt", "linkedin_post", "note"})
+
+
+def _task_allows_chunking(task: str | None, command_format: str | None) -> bool:
+    if str(task or "cleanup").lower() in _WHOLE_TEXT_TASKS:
+        return False
+    return str(command_format or "").lower() not in _WHOLE_TEXT_FORMATS
+
+
+def _s1_output_token_budget(
+    transcript_tokens: int,
+    *,
+    task: str | None = None,
+    command_format: str | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> int:
+    """Return the generation cap for one S1 call.
+
+    Cleanup keeps the historic ``1.3x + 48`` cap exactly: a normalizer that
+    needs more than that is adding undictated text. Formats that add
+    structure (email greeting/sign-off, list markers, a "detailed" request)
+    may expand; summaries and "short" requests only need to shrink. The
+    caller still clamps this to the space left in the context window.
+    """
+    tokens = max(0, int(transcript_tokens))
+    task_name = str(task or "cleanup").lower()
+    fmt = str(command_format or "").lower()
+    ovr = overrides if isinstance(overrides, dict) else {}
+    if task_name == "summarize" or ovr.get("length") == "short":
+        return int(tokens * 1.0) + 48
+    if task_name == "cleanup" and not fmt:
+        return int(tokens * 1.3) + 48
+    if ovr.get("length") == "detailed":
+        return int(tokens * 2.5) + 128
+    if fmt in {"email", "bullet_list", "note", "linkedin_post", "work_message", "personal_message", "prompt"} or task_name == "prompt":
+        return int(tokens * 2.0) + 128
+    return int(tokens * 1.3) + 48
+
+
 def _polish_chunk_with_s1(
     llm: Any,
     chunk: str,
     control_line: str,
     deadline: float,
+    *,
+    task: str | None = None,
+    command_format: str | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> str | None:
     """Run S1 inference on a single chunk with ChatML and greedy decoding."""
     prompt = build_s1_prompt(control_line, chunk)
@@ -852,7 +943,12 @@ def _polish_chunk_with_s1(
     except Exception:
         transcript_tokens = len(chunk.split())
     available_tokens = _S1_CONTEXT_TOKENS - input_tokens
-    max_tokens = min(int(transcript_tokens * 1.3) + 48, available_tokens)
+    max_tokens = min(
+        _s1_output_token_budget(
+            transcript_tokens, task=task, command_format=command_format, overrides=overrides,
+        ),
+        available_tokens,
+    )
     if max_tokens <= 0:
         return None
 
@@ -895,6 +991,27 @@ def _polish_chunk_with_s1(
     cleaned = re.sub(r"<think>.*?</think>", "", raw_output, flags=re.DOTALL)
     cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
     cleaned = cleaned.replace("<|im_end|>", "")
+    cleaned = cleaned.strip()
+    return cleaned or None
+
+
+def _polish_chunk_with_server(
+    chunk: str,
+    control_line: str,
+    deadline: float,
+) -> str | None:
+    """Run S1 inference on a single chunk using local llama-server."""
+    from voice_flow import vf1_engine
+
+    engine = vf1_engine.get_vf1_engine()
+    prompt = build_s1_prompt(control_line, chunk)
+    res = engine._run_llama_server_inference(prompt, deadline)
+    if not res:
+        return None
+
+    cleaned = re.sub(r"<think>.*?</think>", "", res, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*", "", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.replace("<|im_end|>", "").replace("<|endoftext|>", "")
     cleaned = cleaned.strip()
     return cleaned or None
 
@@ -952,6 +1069,13 @@ def _polish_with_s1_impl(
         overrides=overrides,
     )
 
+    resolved_format = str(
+        getattr(command, "format", None)
+        or getattr(effective, "format", None)
+        or command_format
+        or ""
+    ).lower()
+
     if time.monotonic() >= deadline:
         return None
 
@@ -962,45 +1086,62 @@ def _polish_with_s1_impl(
         return None
 
     try:
-        try:
-            from llama_cpp import Llama  # type: ignore
-        except Exception:
-            log.info("[S1] llama-cpp runtime unavailable; S1 cannot run.")
-            return None
-
+        use_server = False
         llm = getattr(polish_with_s1, "_cached_llm", None)
-        cached_path = getattr(polish_with_s1, "_cached_llm_path", None)
-        if llm is None or cached_path != str(model_path):
-            gpu_layers = -1 if sys.platform == "darwin" else 0
-            replacement = Llama(
-                model_path=str(model_path),
-                n_ctx=_S1_CONTEXT_TOKENS,
-                **_s1_runtime_batch_settings(),
-                n_gpu_layers=gpu_layers,
-                verbose=False,
-            )
-            if llm is not None:
-                _release_cached_s1(llm)
-            llm = replacement
-            setattr(polish_with_s1, "_cached_llm", llm)
-            setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+        if llm is None:
+            try:
+                from llama_cpp import Llama  # type: ignore
+
+                cached_path = getattr(polish_with_s1, "_cached_llm_path", None)
+                if cached_path != str(model_path):
+                    gpu_layers = -1 if sys.platform == "darwin" else 0
+                    replacement = Llama(
+                        model_path=str(model_path),
+                        n_ctx=_S1_CONTEXT_TOKENS,
+                        **_s1_runtime_batch_settings(),
+                        n_gpu_layers=gpu_layers,
+                        verbose=False,
+                    )
+                    llm = replacement
+                    setattr(polish_with_s1, "_cached_llm", llm)
+                    setattr(polish_with_s1, "_cached_llm_path", str(model_path))
+            except Exception:
+                from voice_flow import vf1_engine
+
+                engine = vf1_engine.get_vf1_engine()
+                if engine.is_server_healthy() or (
+                    engine._find_llama_server_binary() and engine.ensure_server_running()
+                ):
+                    use_server = True
+                else:
+                    log.info("[S1] llama-cpp runtime and llama-server unavailable; S1 cannot run.")
+                    return None
 
         register_idle_cleanup("s1", _release_idle_s1, kind="polish")
         setattr(polish_with_s1, "_last_used", idle_time())
 
         # Chunk transcript if longer than ~900 tokens (approx 700 words)
         words = user_text.split()
-        if len(words) > 700:
+        chunk_kwargs = {"task": task, "command_format": resolved_format or None, "overrides": overrides}
+        if len(words) > 700 and _task_allows_chunking(task, resolved_format):
             chunks = _chunk_transcript(user_text, max_chunk_words=300)
             cleaned_pieces: list[str] = []
             for ch in chunks:
-                piece = _polish_chunk_with_s1(llm, ch, control_line, deadline)
+                if use_server:
+                    piece = _polish_chunk_with_server(ch, control_line, deadline)
+                else:
+                    piece = _polish_chunk_with_s1(llm, ch, control_line, deadline, **chunk_kwargs)
                 if not piece or not piece.strip() or time.monotonic() >= deadline:
                     return None
                 cleaned_pieces.append(piece)
             output = " ".join(cleaned_pieces).strip()
         else:
-            output = _polish_chunk_with_s1(llm, user_text, control_line, deadline)
+            # Whole-text tasks run in one pass; a prompt that does not fit
+            # the context is refused inside _polish_chunk_with_s1.
+            if use_server:
+                output = _polish_chunk_with_server(user_text, control_line, deadline)
+            else:
+                output = _polish_chunk_with_s1(llm, user_text, control_line, deadline, **chunk_kwargs)
             if output is None:
                 return None
 

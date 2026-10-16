@@ -59,17 +59,26 @@ def _ignore(directory: str, names: list[str]) -> set[str]:
         lowered = name.lower()
         if name == "__pycache__" or lowered.endswith((".pyc", ".pyo", ".pyd")):
             ignored.add(name)
-        elif lowered in {".env", "credentials.json", "token.json"} or lowered.endswith(
+        elif lowered in {".git", ".git-backup", ".env", "credentials.json", "token.json"} or lowered.startswith(".git") or lowered.endswith(
             (".pem", ".key", ".env")
         ):
             ignored.add(name)
     return ignored
 
 
+def _handle_remove_readonly(func, path, exc):
+    import stat
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
+
+
 def copy_code2video(source: Path, destination: Path) -> Path:
     """Copy Code2Video into ``destination``, replacing real API configs."""
     if destination.exists():
-        shutil.rmtree(destination)
+        shutil.rmtree(destination, onexc=_handle_remove_readonly)
     shutil.copytree(source, destination, ignore=_ignore)
     for config in destination.rglob("api_config.json"):
         if not api_config_is_placeholder(config):

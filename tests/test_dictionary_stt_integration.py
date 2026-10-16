@@ -74,7 +74,7 @@ def test_filler_inside_exact_heard_as_survives_cleanup_until_final_dictionary_pa
 
     assert result == "Open Kubernetes now."
     assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]
-    assert provider_inputs == ([raw] if enabled else [])
+    assert provider_inputs == (["open Kubernetes now"] if enabled else [])  # models see the corrected name
 
     unrelated_trace: list[dict[str, str]] = []
     unrelated = "open cube netties now"
@@ -87,7 +87,7 @@ def test_filler_inside_exact_heard_as_survives_cleanup_until_final_dictionary_pa
 
     assert unrelated_result == "Open cube netties now."
     assert unrelated_trace == []
-    assert provider_inputs == ([raw, unrelated] if enabled else [])
+    assert provider_inputs == (["open Kubernetes now", unrelated] if enabled else [])
 
 
 def test_cleanup_masking_keeps_dictionary_inputs_inside_protected_spans(tmp_path, monkeypatch):
@@ -121,7 +121,7 @@ def test_cleanup_masking_keeps_dictionary_inputs_inside_protected_spans(tmp_path
         "Kubernetes `cube er netties` "
         "https://example.test/cube-er-netties cube.er.netties@example.test."
     )
-    assert trace == [{"from": "Cube er netties", "to": "Kubernetes"}]
+    assert trace == [{"from": "cube er netties", "to": "Kubernetes"}]  # recorded on the raw text, before polish
 
 
 def test_hints_use_local_store_and_only_canonical_terms_and_correction_targets(tmp_path, monkeypatch):
@@ -188,7 +188,8 @@ def test_legacy_ordinary_words_do_not_crowd_out_recognition_hints(tmp_path):
     store.add_dictionary_word("Kubernetes")
     engine = DictionaryEngine(store)
     assert engine.get_stt_hint_terms() == ["Kubernetes"]
-    assert len(store.get_dictionary_words()) == 7  # existing terms are retained
+    # Ordinary words are refused by the rebuilt dictionary.
+    assert store.get_dictionary_words() == ["Kubernetes"]
 
 
 def test_correction_targets_precede_excess_global_terms(tmp_path):
@@ -269,7 +270,7 @@ def test_cloud_provider_dispatch_uses_no_dictionary_vocabulary(tmp_path, monkeyp
         ("local/nemotron-speech-streaming-en-0.6b", "voice_flow.nemotron_engine.NemotronStreamTranscriber"),
     ],
 )
-def test_native_stream_startup_receives_no_global_dictionary_vocabulary(
+def test_native_stream_startup_receives_dictionary_bias_terms(
     tmp_path, monkeypatch, model_ref, constructor_path,
 ):
     from voice_flow import main as main_module
@@ -279,13 +280,6 @@ def test_native_stream_startup_receives_no_global_dictionary_vocabulary(
     store.add_dictionary_word("HyperKube")
     engine = DictionaryEngine(store)
     monkeypatch.setattr(main_module, "dictionary_engine", engine)
-    monkeypatch.setattr(
-        engine,
-        "get_stt_hint_terms",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("ordinary stream startup must not read recognition hints")
-        ),
-    )
     monkeypatch.setattr(stt_engines, "prewarm_cloud_stt", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         "voice_flow.nemotron_engine.is_nemotron_model",
@@ -312,5 +306,5 @@ def test_native_stream_startup_receives_no_global_dictionary_vocabulary(
 
     app._start_stream_for_session(session)
 
-    assert constructed == [((), {})]
+    assert constructed == [((), {"vocabulary": ["HyperKube"]})]
     assert app._stream_stt.started == {"model_ref": model_ref}

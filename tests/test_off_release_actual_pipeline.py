@@ -1,4 +1,6 @@
 """Isolated full release-to-paste probe with real pipeline/finalizer and a fake native ABI."""
+
+from native_fixture_client import bind_native
 import ctypes
 import logging
 import threading
@@ -96,7 +98,6 @@ def replay(monkeypatch, *, incomplete=False, next_cost=0.0025, load_cost=0.0):
     monkeypatch.setattr(m, "time", clock)
     monkeypatch.setattr(native, "time", clock)
     monkeypatch.setattr(polisher_module, "time", clock)
-    monkeypatch.setattr(native, "get_nemo_dll", lambda: dll)
     monkeypatch.setattr(m.storage, "get_setting", lambda key, default=None: False if key in {"polishing_enabled", "voice_flow_mic_profile"} else default)
 
     dictionary_calls = []
@@ -171,15 +172,15 @@ def replay(monkeypatch, *, incomplete=False, next_cost=0.0025, load_cost=0.0):
     app._delivery_session = None
     app.last_successful_transcript = None
 
-    engine = None if load_cost else FakeEngine()
+    engine = None if load_cost else bind_native(FakeEngine(), dll, opened=True)
     if load_cost:
-        def load_engine(_model_ref):
+        def load_engine(_model_ref, **_kwargs):
             assert clock.release.wait(2.0)
             clock.now += clock.load_cost
-            return FakeEngine()
+            return bind_native(FakeEngine(), dll, opened=True)
         monkeypatch.setattr(native, "get_nemotron_engine", load_engine)
     stream = native.NemotronStreamTranscriber(engine=engine)
-    monkeypatch.setattr(stream, "_open_stream", lambda fake_dll: setattr(stream._stream, "value", 42) or True)
+    monkeypatch.setattr(stream, "_open_stream", lambda client: setattr(stream._stream, "value", 42) or True)
     app._stream_stt = stream
     stream.start_session(model_ref=session.stt_model_ref)
     for _ in range(32):
@@ -262,7 +263,7 @@ def test_actual_off_release_path_with_warm_native_stream_is_fast(monkeypatch):
     print("warm_stream_metrics=" + repr(result))
     assert result["native_frame_pushes"] == 32
     assert result["fallback_calls"] == 0
-    assert result["dictionary_calls"] == 1
+    assert result["dictionary_calls"] == 2  # names before polish + shortcuts after
     assert result["processing_metadata"]["polish"]["outcome"] == "disabled"
     assert result["processing_metadata"]["command"]["status"] == "disabled"
     assert result["lease_actions"] == [("release_after_idle", m.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)]
@@ -273,7 +274,7 @@ def test_actual_off_release_path_recovers_incomplete_stream_with_full_buffer(mon
     result = replay(monkeypatch, incomplete=True)
     print("incomplete_stream_metrics=" + repr(result))
     assert result["fallback_calls"] == 1
-    assert result["dictionary_calls"] == 1
+    assert result["dictionary_calls"] == 2  # names before polish + shortcuts after
     assert result["lease_actions"] == [("release_after_idle", m.NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)]
     assert result["release_to_paste_ms"] < 1000, result
 

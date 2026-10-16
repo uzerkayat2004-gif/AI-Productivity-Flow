@@ -11,10 +11,11 @@ scaling, format presets, styles, live document analysis, and Native Engine (Visu
 from __future__ import annotations
 
 import base64
+import ctypes
+from ctypes import wintypes
 import json
 import logging
 import os
-import queue
 import re
 import subprocess
 import sys
@@ -30,6 +31,7 @@ log = logging.getLogger("voice_flow.video_flow_widget")
 
 from voice_flow.video_flow_documents import DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, extract_document_text
 from voice_flow.storage import storage
+from voice_flow.ui_dispatch import UiDispatcher
 
 try:
     from voice_flow.video_flow_engine.notebooklm.document_profiler import (
@@ -367,8 +369,10 @@ class VideoFlowScreenWidget:
         self._controls: dict[str, Any] = {}
         self._cached_catalog: dict[str, Any] = {}
         self._catalog_request_id: int = 0
-        self._ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
-        self._ui_poll_id: str | None = None
+        self._ui_dispatcher = UiDispatcher()
+        self._lifecycle_generation = 0
+        self._auth_request_id = 0
+        self._submit_request_id = 0
         self._model_options: dict[str, dict[str, str]] = {}
         self._theme_options: dict[str, dict[str, str]] = {}
         self._format_options: dict[str, dict[str, str]] = {}
@@ -386,7 +390,6 @@ class VideoFlowScreenWidget:
         self._nlm_format: tk.StringVar | None = None
         self._nlm_style: tk.StringVar | None = None
         self._nlm_style_prompt: tk.StringVar | None = None
-        self._nlm_focus: tk.Text | None = None
         self._auth_banner_frame: tk.Frame | None = None
         self._auth_pill_frame: tk.Frame | None = None
         self._auth_status_label: tk.Label | None = None
@@ -397,37 +400,20 @@ class VideoFlowScreenWidget:
 
     def attach_root(self, root: tk.Tk) -> None:
         self.root = root
-        self._schedule_ui_poll()
-
-    def _schedule_ui_poll(self) -> None:
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None and self._ui_poll_id is None:
-            try:
-                if getattr(root, "_tclCommands", None) is not None and root.winfo_exists():
-                    self._ui_poll_id = root.after(20, self._poll_ui_queue)
-            except Exception:
-                self._ui_poll_id = None
-
-    def _poll_ui_queue(self) -> None:
-        self._ui_poll_id = None
-        self._process_ui_queue()
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None:
-            try:
-                if getattr(root, "_tclCommands", None) is not None and root.winfo_exists():
-                    self._ui_poll_id = root.after(20, self._poll_ui_queue)
-            except Exception:
-                self._ui_poll_id = None
+        self._ui_dispatcher = self._ui_dispatcher.attach(root)
 
     def _process_ui_queue(self) -> None:
-        if not hasattr(self, "_ui_queue"):
-            return
-        while not self._ui_queue.empty():
-            try:
-                callback = self._ui_queue.get_nowait()
-                callback()
-            except Exception as exc:
-                log.exception("Error running callback in video_flow_widget UI queue: %s", exc)
+        self._ui_dispatcher.drain()
+
+    def _invalidate_completions(self) -> None:
+        self._lifecycle_generation += 1
+        self._catalog_request_id += 1
+        self._auth_request_id += 1
+        self._submit_request_id += 1
+
+    def _run_if_current(self, generation: int, request_attr: str, request_id: int, callback: Callable[[], None]) -> None:
+        if self._lifecycle_generation == generation and getattr(self, request_attr) == request_id:
+            callback()
 
     def launch(self, selected_text: str = "", mode: str = "summary") -> "VideoFlowScreenWidget":
         """Public, stable entrypoint for callers outside the dashboard."""
@@ -509,26 +495,25 @@ class VideoFlowScreenWidget:
         return options
 
     def hide(self) -> None:
-        """Withdraw composer window without destroying widget state."""
-        self._stop_grid()
-        if self.win and self.win.winfo_exists():
-            try:
+        """Withdraw composer and invalidate pending callbacks on its owner."""
+        def _hide() -> None:
+            self._invalidate_completions()
+            self._stop_grid()
+            if self.win and self.win.winfo_exists():
                 self.win.withdraw()
-            except Exception:
-                pass
+        self._run_on_ui(_hide)
 
     def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None) -> None:
         clean = (selected_text or "").strip()
-        self._mode = mode if mode in {"summary", "full"} else "summary"
-        self._source_text = clean
-        self._source_name = "Selected text" if clean else ""
-        self._initial_text = clean
-        if anchor_bar is not None:
-            self._anchor_win = anchor_bar
-        if self.root is None:
-            self.root = getattr(tk, "_default_root", None)
 
         def _show() -> None:
+            self._mode = mode if mode in {"summary", "full"} else "summary"
+            self._source_text = clean
+            self._source_name = "Selected text" if clean else ""
+            self._initial_text = clean
+            if anchor_bar is not None:
+                self._anchor_win = anchor_bar
+            self._invalidate_completions()
             if not self.root:
                 self.root = getattr(tk, "_default_root", None)
             if not self.root:
@@ -556,6 +541,8 @@ class VideoFlowScreenWidget:
                 self._controls["mode"].set(self._mode)
             if "file_label" in self._controls:
                 self._controls["file_label"].set(self._source_name or "No document selected")
+            if "generate" in self._controls:
+                self._controls["generate"].configure(state="normal")
             if "status" in self._controls:
                 self._controls["status"].set("Selected text is ready." if source_txt else "Paste text or choose a document.")
             self._stop_grid()
@@ -576,6 +563,7 @@ class VideoFlowScreenWidget:
         self._run_on_ui(_show)
 
     def _build(self) -> None:
+        self._invalidate_completions()
         if not self.root:
             self.root = getattr(tk, "_default_root", None)
         if not self.root:
@@ -598,7 +586,7 @@ class VideoFlowScreenWidget:
         win.withdraw()
         win.title("Video Flow — Create video")
         win.geometry("560x650")
-        win.minsize(500, 560)
+        win.minsize(320, 240)
         win.resizable(True, True)
         win.attributes("-topmost", True)
         win.configure(bg=colors["background"])
@@ -616,6 +604,10 @@ class VideoFlowScreenWidget:
         except Exception:
             pass
         self._configure_styles(win)
+
+        # Reserve the action area before allocating the scrollable body.
+        footer_frame = tk.Frame(win, bg=colors["surface"], padx=20, pady=10)
+        footer_frame.pack(side="bottom", fill="x")
 
         viewport = tk.Frame(win, bg=colors["background"])
         viewport.pack(fill="both", expand=True)
@@ -642,7 +634,7 @@ class VideoFlowScreenWidget:
             highlightthickness=1,
             highlightbackground=colors["border"],
             padx=20,
-            pady=20,
+            pady=12,
         )
         shell_window = scroll_canvas.create_window((280, 12), window=shell, anchor="n")
 
@@ -671,7 +663,7 @@ class VideoFlowScreenWidget:
         def sync_shell_width(event: tk.Event) -> None:
             canvas_width = event.width
             card_margin = 16
-            card_width = max(440, canvas_width - (card_margin * 2))
+            card_width = max(1, canvas_width - (card_margin * 2))
             center_x = canvas_width // 2
             scroll_canvas.coords(shell_window, center_x, 12)
             scroll_canvas.itemconfigure(shell_window, width=card_width)
@@ -999,28 +991,6 @@ class VideoFlowScreenWidget:
         )
         custom_style_entry.pack(fill="x", ipady=4, pady=(2, 4))
 
-        # Focus / Visual Direction Entry
-        nlm_focus_frame = tk.Frame(notebooklm_frame, bg=colors["surface"])
-        nlm_focus_frame.pack(fill="x", pady=(2, 6))
-        self._label(nlm_focus_frame, "Focus / Visual Direction (optional)")
-        nlm_focus = tk.Text(
-            nlm_focus_frame,
-            height=2,
-            wrap="word",
-            bg=colors["surface"],
-            fg=colors["text"],
-            insertbackground=colors["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=colors["border"],
-            highlightcolor=colors["border_focus"],
-            padx=10,
-            pady=6,
-            font=("Segoe UI", 9),
-            undo=True,
-        )
-        nlm_focus.pack(fill="x", pady=(2, 0))
-
         # 4B. NATIVE ENGINE CONFIGURATION (Legacy Visual V2.1)
         native_frame = tk.Frame(shell, bg=colors["surface"])
         self._native_frame = native_frame
@@ -1095,27 +1065,6 @@ class VideoFlowScreenWidget:
         theme = ttk.Combobox(theme_cell, textvariable=theme_display_var, state="readonly", style="VideoFlow.TCombobox", width=14)
         theme.pack(fill="x", ipady=2, pady=(2, 0))
 
-        native_direction_frame = tk.Frame(native_frame, bg=colors["surface"])
-        native_direction_frame.pack(fill="x", pady=(4, 4))
-        self._label(native_direction_frame, "Your visual direction (optional)")
-        visual_direction = tk.Text(
-            native_direction_frame,
-            height=2,
-            wrap="word",
-            bg=colors["surface"],
-            fg=colors["text"],
-            insertbackground=colors["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=colors["border"],
-            highlightcolor=colors["border_focus"],
-            padx=10,
-            pady=6,
-            font=("Segoe UI", 9),
-            undo=True,
-        )
-        visual_direction.pack(fill="x", pady=(2, 0))
-
         # Pack default NotebookLM frame
         notebooklm_frame.pack(fill="x", pady=(0, 6))
 
@@ -1144,9 +1093,6 @@ class VideoFlowScreenWidget:
         # ---------------------------------------------------------------------
         # 6. BOTTOM ACTION & STATUS FOOTER
         # ---------------------------------------------------------------------
-        footer_frame = tk.Frame(shell, bg=colors["surface"])
-        footer_frame.pack(fill="x", pady=(4, 0))
-
         status_left = tk.Frame(footer_frame, bg=colors["surface"])
         status_left.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
@@ -1186,14 +1132,13 @@ class VideoFlowScreenWidget:
             font=("Segoe UI", 10, "bold"),
             cursor="hand2",
         )
-        generate.pack(side="right")
+        generate.pack(side="right", before=status_left)
         generate.bind("<Enter>", lambda _e: generate.configure(bg=colors["orange_dark"]) if str(generate.cget("state")) != "disabled" else None)
         generate.bind("<Leave>", lambda _e: generate.configure(bg=colors["orange"]))
 
         self._nlm_format = format_ref_var
         self._nlm_style = style_ref_var
         self._nlm_style_prompt = custom_style_var
-        self._nlm_focus = nlm_focus
 
         self._controls = {
             "provider": provider_var,
@@ -1212,8 +1157,6 @@ class VideoFlowScreenWidget:
             "style_box": style_box,
             "style_prompt": custom_style_var,
             "style_prompt_entry": custom_style_entry,
-            "nlm_focus": nlm_focus,
-            "visual_direction": visual_direction,
             "model": model_ref_var,
             "model_display": model_display_var,
             "model_detail": model_detail_var,
@@ -1259,6 +1202,9 @@ class VideoFlowScreenWidget:
                 pass
 
         refresh_provider_cards()
+        win.update_idletasks()
+        initial_height = max(650, shell.winfo_reqheight() + 24 + footer_frame.winfo_reqheight())
+        win.geometry(f"560x{initial_height}")
 
     def _configure_styles(self, master: tk.Misc) -> None:
         colors = getattr(self, "colors", None) or get_composer_colors()
@@ -1393,10 +1339,6 @@ class VideoFlowScreenWidget:
         format_ref = str(self._controls.get("format", tk.StringVar(value="auto")).get() or "auto").strip().lower()
 
         focus_text = ""
-        if self._nlm_focus is not None:
-            focus_text = self._nlm_focus.get("1.0", "end-1c").strip()[:1000]
-        elif "nlm_focus" in self._controls:
-            focus_text = self._controls["nlm_focus"].get("1.0", "end-1c").strip()[:1000]
         title_text = self._controls["title"].get().strip() if "title" in self._controls else ""
 
         try:
@@ -1524,6 +1466,9 @@ class VideoFlowScreenWidget:
 
     def _check_notebooklm_auth(self) -> None:
         """Check NotebookLM authentication status and update the UI auth banner pill."""
+        self._auth_request_id += 1
+        request_id = self._auth_request_id
+        generation = self._lifecycle_generation
         is_auth, email = self._check_notebooklm_auth_local()
         self._update_auth_banner(is_auth, email)
 
@@ -1538,7 +1483,9 @@ class VideoFlowScreenWidget:
                     api_email = data.get("email")
                     if api_auth and not api_email:
                         api_email = email or self._auth_email
-                    self._run_on_ui(lambda: self._update_auth_banner(api_auth, api_email))
+                    self._run_on_ui(lambda: self._run_if_current(
+                        generation, "_auth_request_id", request_id,
+                        lambda: self._update_auth_banner(api_auth, api_email)))
             except Exception:
                 pass
 
@@ -1670,7 +1617,10 @@ class VideoFlowScreenWidget:
         threading.Thread(target=_trigger_auth_start, daemon=True, name="video-flow-auth-start").start()
 
         if self.win and self.win.winfo_exists():
-            self.win.after(4000, self._check_notebooklm_auth)
+            generation = self._lifecycle_generation
+            request_id = self._auth_request_id
+            self.win.after(4000, lambda: self._run_if_current(
+                generation, "_auth_request_id", request_id, self._check_notebooklm_auth))
 
     def _refresh_models(self) -> None:
         """Fetch model/theme catalog asynchronously without blocking the Tkinter UI thread."""
@@ -1682,6 +1632,7 @@ class VideoFlowScreenWidget:
 
         self._catalog_request_id = getattr(self, "_catalog_request_id", 0) + 1
         req_id = self._catalog_request_id
+        generation = self._lifecycle_generation
 
         def _fetch_catalog() -> None:
             catalog: dict[str, Any] = {}
@@ -1694,9 +1645,12 @@ class VideoFlowScreenWidget:
             except Exception:
                 catalog = {}
 
-            if catalog and getattr(self, "_catalog_request_id", 0) == req_id:
-                self._cached_catalog = catalog
-                self._run_on_ui(lambda: self._apply_catalog(catalog))
+            if catalog:
+                def _apply() -> None:
+                    self._cached_catalog = catalog
+                    self._apply_catalog(catalog)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_catalog_request_id", req_id, _apply))
 
         threading.Thread(target=_fetch_catalog, daemon=True, name="video-flow-catalog-refresh").start()
 
@@ -1802,12 +1756,7 @@ class VideoFlowScreenWidget:
         format_ref = str((self._nlm_format.get() if self._nlm_format is not None else self._controls.get("format", tk.StringVar(value="auto")).get()) or "auto").strip().lower()
         style_ref = str((self._nlm_style.get() if self._nlm_style is not None else self._controls.get("style", tk.StringVar(value="auto")).get()) or "auto").strip().lower()
         style_prompt = ((self._nlm_style_prompt.get() if self._nlm_style_prompt is not None else self._controls.get("style_prompt", tk.StringVar(value="")).get()) or "").strip() if style_ref == "custom" else ""
-        if self._nlm_focus is not None:
-            focus_text = self._nlm_focus.get("1.0", "end-1c").strip()[:1000]
-        elif "nlm_focus" in self._controls:
-            focus_text = self._controls["nlm_focus"].get("1.0", "end-1c").strip()[:1000]
-        else:
-            focus_text = ""
+        focus_text = ""
 
         title_text = self._controls["title"].get().strip() if "title" in self._controls else ""
         try:
@@ -1879,7 +1828,7 @@ class VideoFlowScreenWidget:
                 "target_duration_seconds": duration_sec,
                 "document_profile": profile_dict,
                 "theme": self._controls["theme"].get() or "auto",
-                "visual_direction": self._controls["visual_direction"].get("1.0", "end-1c").strip()[:1000],
+                "visual_direction": "",
                 "allow_local_fallback": True,
             }
 
@@ -1902,14 +1851,22 @@ class VideoFlowScreenWidget:
         self._controls["status"].set("Starting Video Flow…")
         self._start_grid()
 
+        self._submit_request_id += 1
+        request_id = self._submit_request_id
+        generation = self._lifecycle_generation
+
         def _queue() -> None:
             try:
                 result = self.on_generate(payload) or {}
                 if not result.get("id"):
                     raise RuntimeError("Video Flow did not return a job.")
-                self._run_on_ui(self._queued)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_submit_request_id", request_id, self._queued))
             except Exception as exc:
-                self._run_on_ui(lambda: self._generation_error(str(exc)))
+                message = str(exc)
+                self._run_on_ui(lambda: self._run_if_current(
+                    generation, "_submit_request_id", request_id,
+                    lambda: self._generation_error(message)))
 
         threading.Thread(target=_queue, daemon=True, name="video-flow-screen-queue").start()
 
@@ -1943,6 +1900,19 @@ class VideoFlowScreenWidget:
         src_dir = str(Path(__file__).resolve().parents[1])
         env = dict(os.environ)
         env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
+        api_base = env.get("VOICE_FLOW_API_BASE", "").strip().rstrip("/")
+        if not api_base:
+            # Inspect an already-running module; importing it here could start
+            # unrelated provider/storage initialization in standalone callers.
+            api_module = sys.modules.get("voice_flow.gui.api_server")
+            try:
+                port = int(getattr(api_module, "PORT", 8991))
+                if not 1 <= port <= 65535:
+                    port = 8991
+            except (TypeError, ValueError):
+                port = 8991
+            api_base = f"http://127.0.0.1:{port}"
+        env["VOICE_FLOW_API_BASE"] = api_base
 
         try:
             subprocess.Popen(
@@ -1952,9 +1922,30 @@ class VideoFlowScreenWidget:
                 env=env,
             )
         except Exception as exc:
-            log.warning("Could not launch video flow player subprocess: %s", exc)
+            log.warning("Could not launch video flow player subprocess (%s)", type(exc).__name__)
             import webbrowser
-            webbrowser.open(f"http://127.0.0.1:8991/video-player.html?id={urllib.parse.quote(str(video_id))}")
+            webbrowser.open(f"{api_base}/video-player.html?id={urllib.parse.quote(str(video_id))}")
+
+    def _composer_work_area(self, width: int, height: int, x: int, y: int) -> tuple[int, int, int, int]:
+        """Return the candidate rectangle's monitor work area in Tk coordinates."""
+        if sys.platform == "win32":
+            try:
+                class MonitorInfo(ctypes.Structure):
+                    _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT),
+                                ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
+                user32 = ctypes.windll.user32
+                user32.MonitorFromRect.argtypes = [ctypes.POINTER(wintypes.RECT), wintypes.DWORD]
+                user32.MonitorFromRect.restype = wintypes.HANDLE
+                user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
+                info = MonitorInfo()
+                info.size = ctypes.sizeof(info)
+                candidate = wintypes.RECT(x, y, x + width, y + height)
+                monitor = user32.MonitorFromRect(ctypes.byref(candidate), 2)
+                if user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                    return info.work.left, info.work.top, info.work.right, info.work.bottom
+            except (AttributeError, OSError, tk.TclError):
+                pass
+        return 0, 0, self.win.winfo_screenwidth(), self.win.winfo_screenheight()
 
     def _center(self) -> None:
         if not self.root:
@@ -1963,44 +1954,46 @@ class VideoFlowScreenWidget:
             return
         try:
             from voice_flow.audio_flow_dialog import calculate_anchored_dialog_geometry
-            w, h, x, y = calculate_anchored_dialog_geometry(
+            width, height, x, y = calculate_anchored_dialog_geometry(
                 self.win,
                 parent=getattr(self, "_anchor_win", None),
                 default_w=560,
                 default_h=650,
                 gap=12,
             )
-            self.win.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
             self.win.update_idletasks()
-            current_w = self.win.winfo_width()
-            current_h = self.win.winfo_height()
-            width = current_w if current_w > 200 else 560
-            height = current_h if current_h > 200 else 650
-            screen_w = self.win.winfo_screenwidth()
-            screen_h = self.win.winfo_screenheight()
-            x = max(0, (screen_w - width) // 2)
-            y = max(0, (screen_h - height) // 2 - 20)
-            self.win.geometry(f"{width}x{height}+{x}+{y}")
+            width = self.win.winfo_width()
+            height = self.win.winfo_height()
+            width = width if width > 200 else 560
+            height = height if height > 200 else 650
+            x = (self.win.winfo_screenwidth() - width) // 2
+            y = (self.win.winfo_screenheight() - height) // 2 - 20
+        # A withdrawn window can still report its previous applied height.
+        # Preserve the initial content request before clamping to available space.
+        if self._title_frame is not None and "generate" in self._controls:
+            body = self._title_frame.master
+            footer = self._controls["generate"].master
+            height = max(height, body.winfo_reqheight() + 24 + footer.winfo_reqheight())
+        left, top, right, bottom = self._composer_work_area(width, height, x, y)
+        # Leave room for the native title bar and borders on compact displays.
+        available_w = max(1, right - left - 16)
+        available_h = max(1, bottom - top - 48)
+        width, height = min(width, available_w), min(height, available_h)
+        self.win.minsize(min(320, available_w), min(240, available_h))
+        x = max(left + 8, min(x, right - width - 8))
+        y = max(top + 32, min(y, bottom - height - 16))
+        self.win.geometry(f"{width}x{height}+{x}+{y}")
 
     def _run_on_ui(self, callback: Callable[[], None]) -> None:
-        if hasattr(self, "_ui_queue"):
-            self._ui_queue.put(callback)
-            self._schedule_ui_poll()
-            if threading.current_thread() is threading.main_thread():
-                self._process_ui_queue()
-            return
-        root = self.root or getattr(tk, "_default_root", None)
-        if root is not None:
-            try:
-                root.after(0, callback)
-                return
-            except Exception:
-                pass
-        try:
-            callback()
-        except Exception:
-            pass
+        if self._ui_dispatcher.root is None and threading.current_thread() is threading.main_thread():
+            root = self.root or getattr(tk, "_default_root", None)
+            if root is not None:
+                self.attach_root(root)
+        if self._ui_dispatcher.is_owner():
+            self._ui_dispatcher._invoke(callback)
+        else:
+            self._ui_dispatcher.submit(callback)
 
 
 video_flow_widget = VideoFlowScreenWidget()

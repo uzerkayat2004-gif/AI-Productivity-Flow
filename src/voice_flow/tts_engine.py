@@ -157,28 +157,16 @@ class TTSEngine:
                 pass
 
     def stop(self) -> None:
-        """Immediately stop speech audio playback."""
+        """Cancel immediately; each playback worker releases its own native handle."""
+        self._session += 1
         self._stop_event.set()
         self._pause_event.clear()
         self._is_speaking = False
         self._is_paused = False
-        if self._active_mci_alias:
-            try:
-                import ctypes
-                ctypes.windll.winmm.mciSendStringW(f"close {self._active_mci_alias}", None, 0, 0)
-            except Exception:
-                pass
-            self._active_mci_alias = None
-        if self._player_proc is not None:
-            try:
-                self._player_proc.terminate()
-            except Exception:
-                pass
-        try:
-            import winsound
-            winsound.PlaySound(None, winsound.SND_PURGE)
-        except Exception:
-            pass
+        # Native close/terminate may block a driver. Existing playback loops
+        # observe stop/session and close their local alias/process in finally.
+        self._active_mci_alias = None
+        self._player_proc = None
 
     def set_speed(self, speed: float) -> None:
         """Set the speech speed for the next TTS synthesis (baked into neural voice generation)."""
@@ -383,11 +371,6 @@ class TTSEngine:
                         break
                     continue
 
-                if not started_fired:
-                    started_fired = True
-                    if on_start:
-                        on_start()
-
                 alias = f"vf_pipe_{time.time_ns()}_{idx}"
                 pipeline_alias = alias
                 self._active_mci_alias = alias
@@ -395,20 +378,33 @@ class TTSEngine:
 
                 open_res = winmm.mciSendStringW(f'open "{safe_path}" type MPEGVideo alias {alias}', None, 0, 0)
                 if open_res == 0:
-                    winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    if _cancelled():
+                        break
+                    play_res = winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    if play_res != 0:
+                        log.warning("Pipelined MCI play failed with code %d", play_res)
+                        return False
                     if self._is_paused:
                         winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
 
                     played_any = True
+                    if not started_fired:
+                        started_fired = True
+                        if on_start:
+                            on_start()
                     buf = ctypes.create_unicode_buffer(128)
                     while not _cancelled():
-                        winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                        status_res = winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                        if status_res != 0:
+                            log.warning("Pipelined MCI status failed with code %d", status_res)
+                            return False
                         status = buf.value.lower()
                         if status not in ("playing", "paused"):
                             break
                         time.sleep(0.04)
 
                     winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+                    pipeline_alias = None
                     if self._active_mci_alias == alias:
                         self._active_mci_alias = None
                     if not _cancelled() and not is_last:
@@ -422,6 +418,7 @@ class TTSEngine:
                             time.sleep(0.02)
                 else:
                     log.warning("Pipelined MCI open failed for sentence %d with code %d", idx, open_res)
+                    return False
 
                 if is_last or _cancelled():
                     break
@@ -482,11 +479,10 @@ class TTSEngine:
 
             safe_path = tmp_path.replace("\\", "/")
 
-            playback_started = False
             playback_completed_cleanly = False
 
             async def _stream_and_play_async():
-                nonlocal playback_started, playback_completed_cleanly
+                nonlocal playback_completed_cleanly
                 valid_v = resolve_edge_voice(voice_name)
                 communicate = edge_tts.Communicate(
                     clean_text, valid_v, rate=rate_str, pitch=pitch_str
@@ -513,18 +509,24 @@ class TTSEngine:
                 if _cancelled():
                     return
 
-                playback_started = True
-                if on_start:
-                    on_start()
-
                 open_res = winmm.mciSendStringW(f'open "{safe_path}" type MPEGVideo alias {alias}', None, 0, 0)
                 if open_res == 0:
-                    winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    if _cancelled():
+                        return
+                    play_res = winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                    if play_res != 0:
+                        log.warning("MCI play failed with code %d", play_res)
+                        return
+                    if on_start:
+                        on_start()
                     if self._is_paused:
                         winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
                     buf = ctypes.create_unicode_buffer(128)
                     while not _cancelled():
-                        winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                        status_res = winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                        if status_res != 0:
+                            log.warning("MCI status failed with code %d", status_res)
+                            return
                         status = buf.value.lower()
                         if status not in ("playing", "paused"):
                             break
@@ -541,17 +543,18 @@ class TTSEngine:
             finally:
                 loop.close()
 
-            return playback_started or playback_completed_cleanly
+            return playback_completed_cleanly
         except Exception as e:
             log.warning("Fast progressive audio error: %s", e)
             return False
         finally:
-            if hasattr(self, "_active_mci_alias") and self._active_mci_alias == alias:
-                try:
-                    import ctypes
-                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, 0)
-                except Exception:
-                    pass
+            # This worker owns alias even after a replacement takes the shared slot.
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+            except Exception:
+                pass
+            if self._active_mci_alias == alias:
                 self._active_mci_alias = None
             try:
                 if tmp_path and os.path.exists(tmp_path):
@@ -1358,136 +1361,119 @@ class TTSEngine:
         return None
 
     def _play_audio(self, audio_bytes: bytes, session: int = 0) -> None:
-        """Play audio_bytes via MCI (pausable), falling back to PowerShell MediaPlayer."""
-        if not audio_bytes or self._stop_event.is_set() or session != self._session:
+        """Play through an owned MCI alias, falling back when start is rejected."""
+        def cancelled() -> bool:
+            return self._stop_event.is_set() or session != self._session
+
+        if not audio_bytes or cancelled():
             return
-
-        # Detect format by magic bytes: WAV starts with RIFF, MP3 with ID3 or 0xFF 0xFB
-        is_wav = audio_bytes[:4] == b"RIFF"
-        suffix = ".wav" if is_wav else ".mp3"
-
+        suffix = ".wav" if audio_bytes[:4] == b"RIFF" else ".mp3"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
-
         safe_path = tmp_path.replace("\\", "/")
         alias = f"vf_audio_{time.time_ns()}"
-        mci_played = False
 
-        if sys.platform == "darwin":
-            try:
-                import subprocess
-                self._player_proc = subprocess.Popen(["afplay", safe_path])
-                while self._player_proc.poll() is None:
-                    if self._stop_event.is_set() or session != self._session:
-                        self._player_proc.terminate()
-                        break
-                    time.sleep(0.05)
-            except Exception as e:
-                log.error("macOS afplay playback error: %s", e)
-            finally:
-                self._player_proc = None
-                try:
-                    if os.path.exists(tmp_path):
-                        time.sleep(0.1)
-                        os.remove(tmp_path)
-                except Exception:
-                    pass
-            return
-
-        try:
-            import ctypes
-
-            winmm = getattr(getattr(ctypes, "windll", None), "winmm", None)
-            if not winmm:
-                raise RuntimeError("winmm is not available")
-            self._active_mci_alias = alias
-            mci_type = "type waveaudio" if is_wav else "type MPEGVideo"
-            open_res = winmm.mciSendStringW(f'open "{safe_path}" {mci_type} alias {alias}', None, 0, 0)
-            if open_res == 0:
-                mci_played = True
-                winmm.mciSendStringW(f'play {alias}', None, 0, 0)
-                if self._is_paused:
-                    winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
-                buf = ctypes.create_unicode_buffer(128)
-                while not (self._stop_event.is_set() or session != self._session):
-                    winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
-                    if buf.value.lower() not in ("playing", "paused"):
-                        break
-                    time.sleep(0.05)
-            else:
-                log.warning("MCI open failed with code %d; using PowerShell playback", open_res)
-        except Exception as e:
-            log.error("MCI playback error: %s", e)
-        finally:
-            if self._active_mci_alias == alias:
-                try:
-                    import ctypes
-                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, 0)
-                except Exception:
-                    pass
-                self._active_mci_alias = None
-
-        if mci_played or self._stop_event.is_set() or session != self._session:
-            try:
-                if os.path.exists(tmp_path):
-                    time.sleep(0.1)
-                    os.remove(tmp_path)
-            except Exception:
-                pass
-            return
-
-        # Codec fallback: MCI cannot open this format; MediaPlayer is not pausable.
-        try:
+        def run_process(command) -> None:
             import subprocess
+            if cancelled():
+                return
+            proc = subprocess.Popen(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+            )
+            if not cancelled():
+                self._player_proc = proc
+            try:
+                while proc.poll() is None:
+                    if cancelled():
+                        proc.terminate()
+                        return
+                    time.sleep(0.05)
+                if not cancelled() and proc.returncode != 0:
+                    raise RuntimeError("Audio playback could not start. Please try Read again.")
+            finally:
+                if self._player_proc is proc:
+                    self._player_proc = None
 
+        try:
+            if sys.platform == "darwin":
+                run_process(["afplay", safe_path])
+                return
+            mci_played = False
+            winmm = None
+            opened = False
+            try:
+                import ctypes
+                winmm = getattr(getattr(ctypes, "windll", None), "winmm", None)
+                if winmm and not cancelled():
+                    self._active_mci_alias = alias
+                    mci_type = "type waveaudio" if suffix == ".wav" else "type MPEGVideo"
+                    open_res = winmm.mciSendStringW(f'open "{safe_path}" {mci_type} alias {alias}', None, 0, 0)
+                    opened = open_res == 0
+                    if opened and not cancelled():
+                        play_res = winmm.mciSendStringW(f'play {alias}', None, 0, 0)
+                        mci_played = play_res == 0
+                        if mci_played:
+                            if self._is_paused:
+                                winmm.mciSendStringW(f'pause {alias}', None, 0, 0)
+                            buf = ctypes.create_unicode_buffer(128)
+                            while not cancelled():
+                                status_res = winmm.mciSendStringW(f'status {alias} mode', buf, 128, 0)
+                                if status_res != 0:
+                                    mci_played = False
+                                    break
+                                if buf.value.lower() not in ("playing", "paused"):
+                                    break
+                                time.sleep(0.05)
+                        else:
+                            log.warning("MCI play failed with code %d; using fallback playback", play_res)
+                    elif not opened:
+                        log.warning("MCI open failed with code %d; using fallback playback", open_res)
+            except Exception:
+                mci_played = False
+                log.warning("MCI playback unavailable; using fallback playback")
+            finally:
+                if opened:
+                    try:
+                        winmm.mciSendStringW(f'close {alias}', None, 0, 0)
+                    except Exception:
+                        pass
+                if self._active_mci_alias == alias:
+                    self._active_mci_alias = None
+            if mci_played or cancelled():
+                return
+
+            # Fail explicitly if loading never produces a duration. A nonzero
+            # process exit is reported through speak()'s on_error callback.
             ps_template = (
+                '$ErrorActionPreference = "Stop"\n'
                 'Add-Type -AssemblyName presentationCore\n'
                 '$path = [System.IO.Path]::GetFullPath("__SAFE_PATH__")\n'
                 '$p = New-Object System.Windows.Media.MediaPlayer\n'
                 '$p.Open([System.Uri]$path)\n'
                 '$timeout = 0\n'
                 'while (-not $p.NaturalDuration.HasTimeSpan -and $timeout -lt 200) {\n'
-                '    Start-Sleep -Milliseconds 50\n'
-                '    $timeout++\n'
+                '    Start-Sleep -Milliseconds 50; $timeout++\n'
                 '}\n'
-                'if ($p.NaturalDuration.HasTimeSpan) {\n'
-                '    Start-Sleep -Milliseconds 100\n'
-                '    $p.Play()\n'
+                'if (-not $p.NaturalDuration.HasTimeSpan) { $p.Close(); exit 1 }\n'
+                '$p.Play()\n'
+                'while ($p.Position -lt $p.NaturalDuration.TimeSpan) {\n'
                 '    Start-Sleep -Milliseconds 50\n'
-                '    while ($p.NaturalDuration.HasTimeSpan -and ($p.Position -lt $p.NaturalDuration.TimeSpan)) {\n'
-                '        Start-Sleep -Milliseconds 50\n'
-                '    }\n'
-                '    Start-Sleep -Milliseconds 100\n'
                 '}\n'
                 '$p.Close()\n'
             )
-
             ps_code = ps_template.replace("__SAFE_PATH__", safe_path)
             encoded_cmd = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
-
-            self._player_proc = subprocess.Popen(
-                ["powershell", "-NoProfile", "-EncodedCommand", encoded_cmd],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=0x08000000  # CREATE_NO_WINDOW
-            )
-
-            while self._player_proc.poll() is None:
-                if self._stop_event.is_set() or session != self._session:
-                    self._player_proc.terminate()
-                    break
-                time.sleep(0.05)
-
-        except Exception as e:
-            log.error("Audio playback error: %s", e)
+            run_process(["powershell", "-NoProfile", "-EncodedCommand", encoded_cmd])
+        except Exception as exc:
+            if not cancelled():
+                raise RuntimeError("Audio playback could not start. Please try Read again.") from exc
         finally:
-            self._player_proc = None
             try:
                 if os.path.exists(tmp_path):
-                    time.sleep(0.1)
                     os.remove(tmp_path)
-            except Exception:
+            except OSError:
                 pass
 
 

@@ -18,12 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from voice_flow.vocabulary_learning import (
-    extract_vocabulary_candidates,
-    is_ambiguous_spaced_alias,
-    is_noise_variant,
-    is_useful_term,
-)
+from voice_flow.dictionary_rules import replacement_problem, term_problem
 
 from voice_flow.paths import data_dir
 
@@ -55,15 +50,11 @@ def _dictionary_term_occurrences(text: str, term: str) -> int:
 
 
 def _visible_dictionary_corrections(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
-    """Hide unsafe legacy automatic mappings without deleting user data."""
+    """Return user Replacements without internal bookkeeping columns."""
     visible: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
-        automatic_candidate_id = item.pop("automatic_candidate_id", None)
-        if automatic_candidate_id is not None and is_ambiguous_spaced_alias(
-            str(item.get("correct_text") or ""), str(item.get("wrong_text") or "")
-        ):
-            continue
+        item.pop("automatic_candidate_id", None)
         visible.append(item)
     return visible
 
@@ -698,8 +689,7 @@ class StorageEngine:
         self._migrate_audio_summary_history()
         self._seed_default_models()
         self._seed_tts_models()
-        self.auto_seed_history_vocabulary()
-        self.migrate_vocabulary_quality()
+        self._migrate_dictionary_rebuild()
         try:
             self.sync_media_to_history()
         except Exception:
@@ -936,11 +926,6 @@ class StorageEngine:
             conn.commit()
             record_id = cursor.lastrowid
 
-        # Learn only from one successful raw source record. Raw/final text and
-        # repeated occurrences inside that record are never double-counted.
-        if self.get_setting("dictionary_auto_learning_enabled", True) and self._is_successful_dictation(status, insertion_status):
-            self._learn_raw_vocabulary(record_id, raw_text)
-
         return DictationRecord(
             id=record_id,
             timestamp=now_str,
@@ -962,150 +947,8 @@ class StorageEngine:
             insertion_status or ""
         ).strip().casefold() in {"success", "pasted"}
 
-    def _count_valid_candidate_observations_conn(
-        self,
-        conn: sqlite3.Connection,
-        candidate_id: int,
-        term: str,
-        variant: str = "",
-        *,
-        history_floor: int = 0,
-        threshold: int = 3,
-    ) -> int:
-        """Count retained observations that still satisfy today's trust rules.
 
-        Old rows remain recoverable, but an ID is evidence only while its
-        joined history row is a successful paste and still contains the exact
-        current raw term or validated correction pair.
-        """
-        rows = conn.execute(
-            "SELECT substr(h.raw_text, 1, 12000) AS raw_text, "
-            "substr(h.polished_text, 1, 12000) AS polished_text "
-            "FROM lexicon_candidate_observations o "
-            "JOIN history h ON h.id = o.history_id "
-            "WHERE o.candidate_id = ? AND o.history_id > ? "
-            "AND LOWER(COALESCE(h.status, '')) IN ('success', 'pasted') "
-            "AND LOWER(COALESCE(h.insertion_status, '')) IN ('success', 'pasted') "
-            "ORDER BY o.history_id DESC LIMIT 512",
-            (int(candidate_id), int(history_floor or 0)),
-        ).fetchall()
-        valid = 0
-        expected = (term.casefold(), variant.casefold())
-        if variant:
-            from voice_flow.correction_learning import extract_correction_pairs
 
-            for row in rows:
-                pairs = {
-                    (candidate_term.casefold(), heard.casefold())
-                    for candidate_term, heard in extract_correction_pairs(
-                        str(row["raw_text"] or ""), str(row["polished_text"] or "")
-                    )
-                }
-                if expected in pairs:
-                    valid += 1
-                    if valid >= threshold:
-                        break
-        else:
-            for row in rows:
-                if any(
-                    candidate_term.casefold() == expected[0]
-                    for candidate_term in extract_vocabulary_candidates(str(row["raw_text"] or ""))
-                ):
-                    valid += 1
-                    if valid >= threshold:
-                        break
-        return valid
-
-    def _learn_raw_vocabulary(self, history_id: int, raw_text: str) -> None:
-        """Activate a useful raw term after three distinct successful records."""
-        candidates = extract_vocabulary_candidates(raw_text)
-        if not candidates:
-            return
-        try:
-            with self._get_conn_ctx() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                deleted = self._read_setting(conn, "dictionary_deleted_terms")
-                ignored = self._read_setting(conn, "dictionary_ignored_terms")
-                blocked = {
-                    str(item).casefold()
-                    for item in self._setting_values(deleted) + self._setting_values(ignored)
-                }
-                active = {
-                    str(row["word"]).casefold()
-                    for row in conn.execute("SELECT word FROM dictionary WHERE LOWER(category) != 'auto-captured'")
-                }
-                now = datetime.datetime.now().isoformat(timespec="seconds")
-                for term in candidates:
-                    folded = term.casefold()
-                    if folded in blocked or folded in active:
-                        continue
-                    row = conn.execute(
-                        "SELECT id, state, evidence, evidence_history_floor FROM lexicon_candidates "
-                        "WHERE term = ? COLLATE NOCASE AND variant = ''",
-                        (term,),
-                    ).fetchone()
-                    if row is None:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO lexicon_candidates "
-                            "(term, variant, evidence, state, source, created_at, updated_at) "
-                            "VALUES (?, '', 0, 'candidate', 'usage-history', ?, ?)",
-                            (term, now, now),
-                        )
-                        row = conn.execute(
-                            "SELECT id, state, evidence, evidence_history_floor FROM lexicon_candidates "
-                            "WHERE term = ? COLLATE NOCASE AND variant = ''",
-                            (term,),
-                        ).fetchone()
-                    candidate_id, state = int(row["id"]), str(row["state"])
-                    if state == "ignored":
-                        continue
-                    inserted = conn.execute(
-                        "INSERT OR IGNORE INTO lexicon_candidate_observations (candidate_id, history_id) VALUES (?, ?)",
-                        (candidate_id, history_id),
-                    ).rowcount
-                    if not inserted:
-                        continue
-                    observation_count = self._count_valid_candidate_observations_conn(
-                        conn,
-                        candidate_id,
-                        term,
-                        history_floor=int(row["evidence_history_floor"] or 0),
-                    )
-                    # Imported candidate counts without record IDs are not
-                    # trusted for production activation.
-                    evidence = observation_count
-                    state = "candidate"
-                    if evidence >= 3 and self._try_autoactivate_candidate_conn(conn, term, "", now):
-                        state = "active"
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET evidence = ?, state = ?, updated_at = ? WHERE id = ?",
-                        (evidence, state, now, candidate_id),
-                    )
-                self._touch_lexicon(conn)
-        except Exception:
-            log.exception("Could not record raw vocabulary observations")
-
-    def _try_autoactivate_candidate_conn(
-        self, conn: sqlite3.Connection, term: str, variant: str, now: str | None = None
-    ) -> bool:
-        """Save a learned term/correction atomically while retaining evidence on failure."""
-        revision_before = self._lexicon_revision
-        conn.execute("SAVEPOINT learned_vocabulary_activation")
-        try:
-            activated = self._add_dictionary_entry_conn(conn, term, variant, now, automatic=True)
-            if not activated:
-                conn.execute("ROLLBACK TO learned_vocabulary_activation")
-                conn.execute("RELEASE learned_vocabulary_activation")
-                self._lexicon_revision = revision_before
-                return False
-            conn.execute("RELEASE learned_vocabulary_activation")
-            return True
-        except Exception:
-            conn.execute("ROLLBACK TO learned_vocabulary_activation")
-            conn.execute("RELEASE learned_vocabulary_activation")
-            self._lexicon_revision = revision_before
-            log.exception("Could not auto-activate learned vocabulary %r", term)
-            return False
 
     @staticmethod
     def _read_setting(conn: sqlite3.Connection, key: str) -> Any:
@@ -1681,6 +1524,78 @@ class StorageEngine:
 
     # --- Dictionary API ---
 
+    # v2: v1 ran, but database consolidation then merged the old words back
+    # from sibling databases. Clear (with a fresh backup) once more.
+    DICTIONARY_REBUILD_KEY = "dictionary_rebuild_v2"
+    _DICTIONARY_REBUILD_TABLES = (
+        "dictionary",
+        "dictionary_keys",
+        "dictionary_corrections",
+        "correction_keys",
+        "lexicon_candidate_observations",
+        "lexicon_candidates",
+    )
+    _DICTIONARY_REBUILD_SETTINGS = (
+        "dictionary_deleted_terms",
+        "dictionary_ignored_terms",
+    )
+
+    def _migrate_dictionary_rebuild(self) -> str | None:
+        """Clear the old dictionary once, after saving a JSON backup.
+
+        The previous dictionary auto-learned rewrites from polished text and
+        those rows kept changing ordinary words. The user asked for a clean
+        start. Shortcuts, history, settings, and keys are not touched.
+        Returns the backup path when rows were cleared.
+        """
+        try:
+            if self.get_setting(self.DICTIONARY_REBUILD_KEY, False):
+                return None
+        except Exception:
+            return None
+        backup_path: str | None = None
+        try:
+            with self._get_conn_ctx() as conn:
+                existing = {
+                    str(row[0])
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+                }
+                dump: dict[str, Any] = {"created_at": datetime.datetime.now().isoformat(), "tables": {}, "settings": {}}
+                total = 0
+                for table in self._DICTIONARY_REBUILD_TABLES:
+                    if table not in existing:
+                        continue
+                    rows = [dict(row) for row in conn.execute(f"SELECT * FROM {table}").fetchall()]
+                    dump["tables"][table] = rows
+                    total += len(rows)
+                for key in self._DICTIONARY_REBUILD_SETTINGS:
+                    dump["settings"][key] = self._read_setting(conn, key)
+                if total:
+                    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                    target = Path(os.path.abspath(self.db_path)).parent / f"dictionary-backup-before-rebuild-{stamp}.json"
+                    target.write_text(json.dumps(dump, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+                    backup_path = str(target)
+                conn.execute("BEGIN IMMEDIATE")
+                for table in self._DICTIONARY_REBUILD_TABLES:
+                    if table in existing:
+                        conn.execute(f"DELETE FROM {table}")
+                for key in self._DICTIONARY_REBUILD_SETTINGS:
+                    conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                    (self.DICTIONARY_REBUILD_KEY, json.dumps(True), datetime.datetime.now().isoformat()),
+                )
+                self._bump_dictionary_revision(conn)
+                conn.commit()
+            if total:
+                log.info("[DICTIONARY] Cleared %d old dictionary rows; backup at %s", total, backup_path)
+        except Exception:
+            # Never clear without a backup: a failed write aborts the migration
+            # and it is retried on the next start.
+            log.exception("[DICTIONARY] Rebuild migration failed; old rows kept")
+            return None
+        return backup_path
+
     def get_dictionary_entries(self, include_auto: bool = True, include_snippets: bool = True) -> list[dict[str, Any]]:
         """Return dictionary rows with provenance for the vocabulary engine."""
         query = "SELECT id, word, category, created_at FROM dictionary"
@@ -1769,10 +1684,10 @@ class StorageEngine:
     def add_dictionary_word(self, word: str, category: str = "Personal") -> bool:
         if not isinstance(word, str):
             return False
-        word_clean = word.strip()
-        if "->" in word_clean or "=>" in word_clean:
+        word_clean = " ".join(word.split())
+        if term_problem(word_clean):
             return False
-        parsed = self._parse_dictionary_value(word)
+        parsed = self._parse_dictionary_value(word_clean)
         if parsed is None:
             return False
         category_clean = str(category).strip() or "Personal"
@@ -1805,6 +1720,16 @@ class StorageEngine:
         except (sqlite3.IntegrityError, sqlite3.OperationalError):
             return False
 
+    @staticmethod
+    def dictionary_entry_problem(word: str, heard_as: str = "") -> str | None:
+        """User-facing reason a Word (+ optional Heard as) cannot be saved."""
+        heard = heard_as.strip() if isinstance(heard_as, str) else ""
+        if heard:
+            # A Replacement may target an ordinary-looking spelling, but the
+            # Word row itself must still be a real name or term.
+            return replacement_problem(heard, word) or term_problem(word)
+        return term_problem(word)
+
     def add_dictionary_entry(self, word: str, heard_as: str = "") -> bool:
         """Atomically save an active term and its optional heard-as correction."""
         if not isinstance(word, str) or not isinstance(heard_as, str):
@@ -1814,9 +1739,7 @@ class StorageEngine:
             variant = self._validated_text(heard_as, "heard phrase", 0, 240) if heard_as.strip() else ""
         except (TypeError, ValueError):
             return False
-        if "->" in term or "=>" in term or (variant and ("->" in variant or "=>" in variant)):
-            return False
-        if variant and variant.casefold() == term.casefold():
+        if self.dictionary_entry_problem(term, variant):
             return False
         now = datetime.datetime.now().isoformat()
         try:
@@ -3874,338 +3797,7 @@ class StorageEngine:
             if changed:
                 self._touch_lexicon()
 
-    def auto_seed_history_vocabulary(self) -> int:
-        """Auto-activate qualified raw terms from a bounded successful-history scan."""
-        try:
-            if self.get_setting("history_vocab_seeded_v5", False):
-                return 0
-        except Exception:
-            pass
-        if not self.get_setting("dictionary_auto_learning_enabled", True):
-            return 0
 
-        try:
-            with self._get_conn_ctx() as conn:
-                rows = conn.execute(
-                    "SELECT id, substr(raw_text, 1, 12000) AS raw_text FROM history "
-                    "WHERE status IN ('success', 'pasted') "
-                    "AND LOWER(COALESCE(insertion_status, '')) IN ('success', 'pasted') "
-                    "ORDER BY id DESC LIMIT 10000"
-                )
-                blocked = set()
-                for key in ("dictionary_deleted_terms", "dictionary_ignored_terms"):
-                    blocked.update(
-                        str(item).casefold()
-                        for item in self._setting_values(self._read_setting(conn, key))
-                    )
-                active = {
-                    str(row["word"]).casefold()
-                    for row in conn.execute("SELECT word FROM dictionary WHERE LOWER(category) != 'auto-captured'")
-                }
-                by_term: dict[str, tuple[str, int, list[int]]] = {}
-                for r in rows:
-                    history_id = int(r["id"])
-                    for term in extract_vocabulary_candidates(str(r["raw_text"] or "")):
-                        folded = term.casefold()
-                        if folded in blocked or folded in active:
-                            continue
-                        item = by_term.get(folded)
-                        if item is None:
-                            # Keep migration memory bounded even for histories
-                            # with thousands of one-off technical-looking tokens.
-                            if len(by_term) >= 20_000:
-                                continue
-                            item = (term, 0, [])
-                        observed_ids = item[2]
-                        if len(observed_ids) < 3:
-                            observed_ids.append(history_id)
-                        by_term[folded] = (item[0], item[1] + 1, observed_ids)
-
-                now = datetime.datetime.now().isoformat(timespec="seconds")
-                activated_count = 0
-                for term, history_count, history_ids in by_term.values():
-                    candidate = conn.execute(
-                        "SELECT id, state, evidence, evidence_history_floor FROM lexicon_candidates "
-                        "WHERE term = ? COLLATE NOCASE AND variant = ''",
-                        (term,),
-                    ).fetchone()
-                    if candidate is not None and str(candidate["state"]) == "ignored":
-                        continue
-                    if candidate is None:
-                        cursor = conn.execute(
-                            "INSERT INTO lexicon_candidates "
-                            "(term, variant, evidence, state, source, created_at, updated_at) "
-                            "VALUES (?, '', 0, 'candidate', 'usage-history', ?, ?)",
-                            (term, now, now),
-                        )
-                        candidate_id = int(cursor.lastrowid)
-                    else:
-                        candidate_id = int(candidate["id"])
-                        # Pre-v5 counters/observations may have been produced by
-                        # raw+polished double counting. Rebuild usage evidence
-                        # exclusively from this bounded successful raw-history scan.
-                        if str(candidate["state"]) != "retired":
-                            conn.execute(
-                                "DELETE FROM lexicon_candidate_observations WHERE candidate_id = ?",
-                                (candidate_id,),
-                            )
-                    conn.executemany(
-                        "INSERT OR IGNORE INTO lexicon_candidate_observations (candidate_id, history_id) VALUES (?, ?)",
-                        [(candidate_id, history_id) for history_id in history_ids],
-                    )
-                    floor = int(candidate["evidence_history_floor"] or 0) if candidate is not None else 0
-                    stored_observations = self._count_valid_candidate_observations_conn(
-                        conn, candidate_id, term, history_floor=floor
-                    )
-                    evidence = min(3, stored_observations)
-                    state = "candidate"
-                    if evidence >= 3 and self._try_autoactivate_candidate_conn(conn, term, "", now):
-                        state = "active"
-                        activated_count += 1
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET evidence = ?, state = ?, updated_at = ? WHERE id = ?",
-                        (evidence, state, now, candidate_id),
-                    )
-
-                # Only correction candidates with distinct, validated history
-                # IDs can auto-activate during migration. Old evidence counters
-                # without IDs are discarded and stay internal.
-                correction_candidates = conn.execute(
-                    "SELECT id, term, variant, evidence_history_floor FROM lexicon_candidates "
-                    "WHERE variant != '' AND state IN ('candidate', 'suggested') "
-                    "ORDER BY id LIMIT 5000"
-                ).fetchall()
-                for candidate in correction_candidates:
-                    candidate_id = int(candidate["id"])
-                    term = str(candidate["term"])
-                    variant = str(candidate["variant"])
-                    evidence = self._count_valid_candidate_observations_conn(
-                        conn,
-                        candidate_id,
-                        term,
-                        variant,
-                        history_floor=int(candidate["evidence_history_floor"] or 0),
-                    )
-                    state = "candidate"
-                    if (
-                        evidence >= 3
-                        and term.casefold() not in blocked
-                        and variant.casefold() not in blocked
-                        and is_useful_term(term, allow_sentence_initial=True)
-                        and not is_noise_variant(variant)
-                        and self._try_autoactivate_candidate_conn(conn, term, variant, now)
-                    ):
-                        state = "active"
-                        activated_count += 1
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET evidence = ?, state = ?, updated_at = ? WHERE id = ?",
-                        (evidence, state, now, candidate_id),
-                    )
-                # v5 no longer exposes approval-era suggestions. The correction
-                # loop above promotes only IDs validated against successful
-                # history; every old suggestion still pending is internalized.
-                conn.execute(
-                    "UPDATE lexicon_candidates SET state = 'candidate', evidence = 0, updated_at = ? "
-                    "WHERE state = 'suggested'",
-                    (now,),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                    ("history_vocab_seeded_v5", "true", now),
-                )
-                if activated_count:
-                    self._touch_lexicon(conn)
-                return activated_count
-        except Exception as exc:
-            log.warning("Could not auto-seed history vocabulary: %s", exc)
-        return 0
-
-    def migrate_vocabulary_quality(self) -> int:
-        """Retire unqualified Learned rows without deleting dictionary data.
-
-        Personal rows and snippets are explicit user data and are never
-        reclassified. Only automatically-owned Learned rows are revalidated.
-        """
-        migration_key = "vocabulary_quality_migration_v2"
-        correction_migration_key = "vocabulary_correction_quality_migration_v3"
-        quality_complete = bool(self.get_setting(migration_key, False))
-        correction_audit_complete = bool(self.get_setting(correction_migration_key, False))
-        if quality_complete and correction_audit_complete:
-            return 0
-
-        demoted = 0
-        changed = False
-        now = datetime.datetime.now().isoformat(timespec="seconds")
-        with self._get_conn_ctx() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            learned_rows = [] if quality_complete else conn.execute(
-                "SELECT id, word, created_at FROM dictionary WHERE LOWER(category) = 'learned'"
-            ).fetchall()
-            for row in learned_rows:
-                term = str(row["word"] or "")
-                # Every automatic row, including a known term, must still be
-                # grounded in three distinct successful pasted records. Term
-                # shape says what may be learned; observations prove it was
-                # actually used by this user.
-                qualified = False
-                candidates = conn.execute(
-                    "SELECT id, variant, source, evidence_history_floor FROM lexicon_candidates "
-                    "WHERE term = ? COLLATE NOCASE AND state = 'active' ORDER BY id LIMIT 8",
-                    (term,),
-                ).fetchall()
-                for candidate in candidates:
-                    variant = str(candidate["variant"] or "")
-                    valid = self._count_valid_candidate_observations_conn(
-                        conn,
-                        int(candidate["id"]),
-                        term,
-                        variant,
-                        history_floor=int(candidate["evidence_history_floor"] or 0),
-                    )
-                    if valid >= 3:
-                        qualified = True
-                        break
-                if qualified:
-                    continue
-                conn.execute(
-                    "UPDATE dictionary SET category = 'Auto-Captured' WHERE id = ?",
-                    (int(row["id"]),),
-                )
-                demoted += 1
-                changed = True
-
-                usage_candidates = conn.execute(
-                    "SELECT id FROM lexicon_candidates WHERE term = ? COLLATE NOCASE "
-                    "AND variant = '' AND source = 'usage-history' AND state != 'ignored'",
-                    (term,),
-                ).fetchall()
-                for candidate in usage_candidates:
-                    candidate_id = int(candidate["id"])
-                    floor = int(conn.execute(
-                        "SELECT COALESCE(MAX(history_id), 0) FROM lexicon_candidate_observations WHERE candidate_id = ?",
-                        (candidate_id,),
-                    ).fetchone()[0])
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET state = 'retired', evidence = 0, "
-                        "evidence_history_floor = ?, updated_at = ? WHERE id = ?",
-                        (floor, now, candidate_id),
-                    )
-
-                # Quarantine only mappings owned by an active correction
-                # candidate for this exact term and heard-as phrase. Manual or
-                # unrelated corrections remain ownerless and active.
-                correction_candidates = conn.execute(
-                    "SELECT id, variant FROM lexicon_candidates WHERE term = ? COLLATE NOCASE "
-                    "AND variant != '' AND source = 'correction' AND state = 'active'",
-                    (term,),
-                ).fetchall()
-                for candidate in correction_candidates:
-                    candidate_id = int(candidate["id"])
-                    variant = str(candidate["variant"] or "")
-                    floor = int(conn.execute(
-                        "SELECT COALESCE(MAX(history_id), 0) FROM lexicon_candidate_observations WHERE candidate_id = ?",
-                        (candidate_id,),
-                    ).fetchone()[0])
-                    owned = conn.execute(
-                        "SELECT id, automatic_candidate_id, created_at FROM dictionary_corrections "
-                        "WHERE wrong_text = ? COLLATE NOCASE AND correct_text = ? COLLATE NOCASE "
-                        "AND (automatic_candidate_id = ? OR "
-                        "(automatic_candidate_id IS NULL AND created_at = ? "
-                        "AND updated_at = created_at AND LENGTH(created_at) = 19))",
-                        (variant, term, candidate_id, str(row["created_at"] or "")),
-                    ).fetchall()
-                    for correction in owned:
-                        correction_id = int(correction["id"])
-                        if correction["automatic_candidate_id"] is None:
-                            conn.execute(
-                                "UPDATE dictionary_corrections SET automatic_candidate_id = ? WHERE id = ?",
-                                (candidate_id, correction_id),
-                            )
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET state = 'retired', evidence = 0, "
-                        "evidence_history_floor = ?, updated_at = ? WHERE id = ?",
-                        (floor, now, candidate_id),
-                    )
-                    if owned:
-                        changed = True
-
-            # A canonical word can have valid raw-use evidence while one of
-            # its automatic heard-as mappings has no trustworthy correction
-            # evidence. Audit those candidates independently so keeping the
-            # word cannot keep a poisoned rewrite active. This has its own
-            # marker because existing accounts may already have completed v2.
-            if not correction_audit_complete or not quality_complete:
-                correction_candidates = conn.execute(
-                    "SELECT id, term, variant, evidence, evidence_history_floor "
-                    "FROM lexicon_candidates WHERE variant != '' "
-                    "AND source = 'correction' AND state = 'active'"
-                ).fetchall()
-                for candidate in correction_candidates:
-                    candidate_id = int(candidate["id"])
-                    term = str(candidate["term"] or "")
-                    variant = str(candidate["variant"] or "")
-                    valid = self._count_valid_candidate_observations_conn(
-                        conn,
-                        candidate_id,
-                        term,
-                        variant,
-                        history_floor=int(candidate["evidence_history_floor"] or 0),
-                    )
-                    if valid >= 3:
-                        continue
-
-                    floor = int(conn.execute(
-                        "SELECT COALESCE(MAX(history_id), 0) "
-                        "FROM lexicon_candidate_observations WHERE candidate_id = ?",
-                        (candidate_id,),
-                    ).fetchone()[0])
-                    learned = conn.execute(
-                        "SELECT created_at FROM dictionary WHERE word = ? COLLATE NOCASE "
-                        "AND LOWER(category) = 'learned' ORDER BY id LIMIT 1",
-                        (term,),
-                    ).fetchone()
-                    learned_created_at = str(learned["created_at"] or "") if learned else None
-                    owned = conn.execute(
-                        "SELECT id, automatic_candidate_id FROM dictionary_corrections "
-                        "WHERE wrong_text = ? COLLATE NOCASE AND correct_text = ? COLLATE NOCASE "
-                        "AND (automatic_candidate_id = ? OR "
-                        "(automatic_candidate_id IS NULL AND ? IS NOT NULL "
-                        "AND created_at = ? AND updated_at = created_at "
-                        "AND LENGTH(created_at) = 19))",
-                        (
-                            variant,
-                            term,
-                            candidate_id,
-                            learned_created_at,
-                            learned_created_at,
-                        ),
-                    ).fetchall()
-                    for correction in owned:
-                        if correction["automatic_candidate_id"] is None:
-                            conn.execute(
-                                "UPDATE dictionary_corrections "
-                                "SET automatic_candidate_id = ? WHERE id = ?",
-                                (candidate_id, int(correction["id"])),
-                            )
-                    conn.execute(
-                        "UPDATE lexicon_candidates SET state = 'retired', evidence = 0, "
-                        "evidence_history_floor = ?, updated_at = ? WHERE id = ?",
-                        (floor, now, candidate_id),
-                    )
-                    changed = True
-
-                conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                    (correction_migration_key, "true", now),
-                )
-            if not quality_complete:
-                conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                    (migration_key, "true", now),
-                )
-            if changed:
-                self._touch_lexicon(conn)
-        return demoted
 
     def _migrate_audio_summary_history(self) -> None:
         """Ensure title, status, error, and progress columns exist on audio_summary_history."""
@@ -4283,180 +3875,8 @@ class StorageEngine:
 
     # -- learned vocabulary candidates (spec SS34-37) --------------------
 
-    def record_lexicon_candidate(
-        self,
-        term: str,
-        variant: str = "",
-        source: str = "correction",
-        *,
-        history_id: int | None = None,
-    ) -> bool:
-        """Record evidence and activate a term after three distinct observations.
 
-        Production callers must pass the successful history ID for activation.
-        Calls without an ID remain compatible as pending evidence only.
-        """
-        if not isinstance(term, str) or not isinstance(variant, str):
-            return False
-        term = term.strip()
-        variant = variant.strip()
-        if (
-            not term
-            or (variant and is_noise_variant(variant))
-            or term.casefold() == variant.casefold()
-        ):
-            return False
-        try:
-            if not self.get_setting("dictionary_auto_learning_enabled", True):
-                return False
-            deleted = self.get_setting("dictionary_deleted_terms", []) or []
-            ignored = self.get_setting("dictionary_ignored_terms", []) or []
-            blocked = {
-                str(item).casefold()
-                for item in self._setting_values(deleted) + self._setting_values(ignored)
-            }
-            if term.casefold() in blocked or (variant and variant.casefold() in blocked):
-                return False
-        except Exception:
-            pass
-        import datetime as _dt
 
-        now = _dt.datetime.now().isoformat(timespec="seconds")
-        try:
-            with self._get_conn_ctx() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                record = None
-                if history_id is not None:
-                    record = conn.execute(
-                        "SELECT raw_text, polished_text, status, insertion_status FROM history WHERE id = ?",
-                        (int(history_id),),
-                    ).fetchone()
-                    if record is None or not self._is_successful_dictation(
-                        record["status"], record["insertion_status"]
-                    ):
-                        return False
-                    raw = str(record["raw_text"] or "")
-                    polished = str(record["polished_text"] or "")
-                    if variant:
-                        from voice_flow.correction_learning import extract_correction_pairs
-
-                        if (
-                            not self._contains_whole_phrase(raw, variant)
-                            or not self._contains_whole_phrase(polished, term)
-                            or (term.casefold(), variant.casefold()) not in {
-                                (candidate_term.casefold(), heard.casefold())
-                                for candidate_term, heard in extract_correction_pairs(raw, polished)
-                            }
-                        ):
-                            return False
-                    elif (
-                        not self._contains_whole_phrase(raw, term)
-                        or not any(
-                            candidate_term.casefold() == term.casefold()
-                            for candidate_term in extract_vocabulary_candidates(raw)
-                        )
-                    ):
-                        return False
-                elif not is_useful_term(
-                    term,
-                    allow_sentence_initial=True,
-                    correction_variant=variant,
-                ):
-                    return False
-
-                row = conn.execute(
-                    "SELECT id, evidence, state, evidence_history_floor FROM lexicon_candidates "
-                    "WHERE term = ? COLLATE NOCASE AND variant = ? COLLATE NOCASE",
-                    (term, variant),
-                ).fetchone()
-                if row is None:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO lexicon_candidates "
-                        "(term, variant, evidence, state, source, created_at, updated_at) "
-                        "VALUES (?, ?, 0, 'candidate', ?, ?, ?)",
-                        (term, variant, source, now, now),
-                    )
-                    row = conn.execute(
-                        "SELECT id, evidence, state, evidence_history_floor FROM lexicon_candidates "
-                        "WHERE term = ? COLLATE NOCASE AND variant = ? COLLATE NOCASE",
-                        (term, variant),
-                    ).fetchone()
-                candidate_id = int(row["id"])
-                if str(row["state"]) == "ignored":
-                    return False
-
-                if history_id is not None:
-                    inserted = conn.execute(
-                        "INSERT OR IGNORE INTO lexicon_candidate_observations (candidate_id, history_id) VALUES (?, ?)",
-                        (candidate_id, int(history_id)),
-                    ).rowcount
-                    if not inserted:
-                        return False
-                    evidence = self._count_valid_candidate_observations_conn(
-                        conn,
-                        candidate_id,
-                        term,
-                        variant,
-                        history_floor=int(row["evidence_history_floor"] or 0),
-                    )
-                else:
-                    evidence = int(row["evidence"]) + 1
-
-                state = "candidate"
-                activated = False
-                if history_id is not None and evidence >= 3:
-                    activated = self._try_autoactivate_candidate_conn(conn, term, variant, now)
-                    if activated:
-                        state = "active"
-                conn.execute(
-                    "UPDATE lexicon_candidates SET evidence = ?, state = ?, updated_at = ? WHERE id = ?",
-                    (evidence, state, now, candidate_id),
-                )
-                self._touch_lexicon(conn)
-                return activated
-        except (sqlite3.IntegrityError, sqlite3.OperationalError, TypeError, ValueError):
-            log.exception("Could not record lexicon candidate %r", term)
-            return False
-
-    def get_lexicon_suggestions(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Candidates with enough evidence to suggest (spec SS37: only
-        'suggested' rows surface; raw candidates stay internal)."""
-        with self._get_conn_ctx() as conn:
-            rows = conn.execute(
-                "SELECT id, term, variant, evidence, state, source, created_at, updated_at "
-                "FROM lexicon_candidates WHERE state = 'suggested' "
-                "ORDER BY evidence DESC, updated_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
-
-    def set_lexicon_candidate_state(self, candidate_id: int, state: str) -> bool:
-        """User decision on a suggestion: active (adds to dictionary), ignored."""
-        if state not in ("active", "ignored", "candidate"):
-            return False
-        import datetime as _dt
-
-        now = _dt.datetime.now().isoformat(timespec="seconds")
-        try:
-            with self._get_conn_ctx() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute("SELECT term, variant, state FROM lexicon_candidates WHERE id = ?", (candidate_id,)).fetchone()
-                if row is None:
-                    return False
-                if state == "active" and not self._add_dictionary_entry_conn(
-                    conn, str(row["term"]), str(row["variant"] or ""), now
-                ):
-                    conn.rollback()
-                    return False
-                conn.execute(
-                    "UPDATE lexicon_candidates SET state = ?, updated_at = ? WHERE id = ?",
-                    (state, now, candidate_id),
-                )
-                self._touch_lexicon(conn)
-            return True
-        except (sqlite3.IntegrityError, sqlite3.OperationalError, ValueError):
-            log.exception("Could not approve lexicon candidate %r", candidate_id)
-            return False
 
     def update_dictionary_word(self, old_word: str, new_word: str) -> bool:
         """Rename/replace a dictionary term in place (inline chip editing).
@@ -4472,8 +3892,7 @@ class StorageEngine:
             not old_clean
             or not new_clean
             or len(new_clean) > 240
-            or "->" in new_clean
-            or "=>" in new_clean
+            or term_problem(new_clean)
         ):
             return False
         with self._lexicon_lock:
@@ -4530,31 +3949,13 @@ class StorageEngine:
             ).fetchall()
             return [str(r["word"]) for r in rows]
 
-    def migrate_learned_vocabulary(self) -> int:
-        """Re-evaluate bounded raw history using current automatic activation policy.
-
-        Legacy rows without trustworthy record evidence stay unchanged. Only
-        terms supported by three separate successful raw records activate;
-        qualifying Auto-Captured rows are upgraded in place, and explicit
-        Personal rows are left alone.
-        """
-        try:
-            if self.get_setting("lexicon_migration_v2", False):
-                return 0
-        except Exception:
-            pass
-        if not self.get_setting("dictionary_auto_learning_enabled", True):
-            return 0
-        promoted = self.auto_seed_history_vocabulary()
-        try:
-            self.save_setting("lexicon_migration_v2", True)
-        except Exception:
-            pass
-        return promoted
 
     def add_dictionary_correction(self, wrong_text: str, correct_text: str) -> dict[str, Any]:
         wrong = self._validated_text(wrong_text, "heard phrase", 1, 240)
         correct = self._validated_text(correct_text, "desired spelling", 1, 240)
+        problem = replacement_problem(wrong, correct)
+        if problem:
+            raise ValueError(problem)
         now = datetime.datetime.now().isoformat()
         with self._lexicon_lock:
             with self._get_conn_ctx() as conn:
@@ -4595,6 +3996,9 @@ class StorageEngine:
     def update_dictionary_correction(self, correction_id: int, wrong_text: str, correct_text: str) -> dict[str, Any] | None:
         wrong = self._validated_text(wrong_text, "heard phrase", 1, 240)
         correct = self._validated_text(correct_text, "desired spelling", 1, 240)
+        problem = replacement_problem(wrong, correct)
+        if problem:
+            raise ValueError(problem)
         with self._lexicon_lock:
             with self._get_conn_ctx() as conn:
                 existing = conn.execute("SELECT correction_id FROM correction_keys WHERE normalized = ?", (wrong.casefold(),)).fetchone()

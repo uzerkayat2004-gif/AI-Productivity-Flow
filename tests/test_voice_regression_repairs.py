@@ -1,4 +1,6 @@
 """User-visible regressions: missing words and AI commands silently skipped."""
+
+from native_fixture_client import bind_native
 import time
 import threading
 from types import SimpleNamespace
@@ -223,8 +225,8 @@ def test_native_stream_failure_cannot_publish_partial_success(monkeypatch, failu
             pass
 
     dll = DLL()
-    monkeypatch.setattr(native, "get_nemo_dll", lambda: dll)
     engine = SimpleNamespace(rec_handle=ctypes.c_void_p(1), spec={}, lock=threading.Lock())
+    bind_native(engine, dll)
     stream = native.NemotronStreamTranscriber(engine=engine)
     stream.submit_frame(np.ones(1600, dtype=np.float32), 16000)
     stream.end_session(deadline=time.monotonic()-1 if failure == "deadline" else None)

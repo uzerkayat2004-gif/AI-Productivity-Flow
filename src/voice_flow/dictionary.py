@@ -1,8 +1,21 @@
-"""Vocabulary biasing and explicit correction rules for dictation.
+"""The user dictionary: Words, Replacements, and recognizer biasing.
 
-The dictionary is deliberately conservative: users' saved terms get their exact
-casing when actually spoken, and corrections run only for phrases the user
-explicitly configured.  Snippets live in :mod:`voice_flow.snippets`.
+Design (see ``docs/dictionary.md``):
+
+* **Words** are names and special terms the user saved (``Kubernetes``,
+  ``Siobhan``, ``GraphQL``). They are sent to the speech recognizer as bias
+  terms, given to the AI polisher as preferred spellings, and afterwards fix
+  only their *own* spelling: ``kubernetes`` -> ``Kubernetes``, keeping a
+  plural or possessive ending (``kubernetes's`` -> ``Kubernetes's``).
+* **Replacements** are explicit ``heard -> correct`` pairs the user wrote.
+  Only that whole heard phrase is replaced.
+* Nothing is learned automatically. Polished text is never treated as a
+  correction, so polishing cannot teach the dictionary to change words.
+* The same deterministic pass runs with polishing on and off.
+
+Shortcuts (snippets) are a separate feature with their own table. They are
+expanded in the same single pass so that an expansion is never rewritten
+again by a Word or Replacement, exactly as before.
 """
 
 from __future__ import annotations
@@ -12,110 +25,63 @@ import logging
 import os
 import re
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
+from difflib import SequenceMatcher
 
+from voice_flow.dictionary_rules import is_ordinary, normalize, term_problem
 from voice_flow.storage import storage
-from voice_flow.vocabulary_learning import is_ambiguous_spaced_alias, is_noise_variant
 
 log = logging.getLogger(__name__)
 
-# Do not allow a vocabulary rule to rewrite text inside these constructs.  They
-# are user content, not spoken vocabulary tokens.
+# Never rewrite inside code, links, URLs, or email addresses.
 _PROTECTED_RE = re.compile(
     r"``[\s\S]*?``|`[^`\n]*`|\[[^\]]+\]\([^\)]+\)|"
     r"(?:https?|ftp)://[^\s<>]+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|"
     r"\bwww\.[^\s<>]+",
     re.IGNORECASE,
 )
-# Sound-alike repair for the CRITICAL wake/product term (spec §34/§39): speech
-# engines routinely mis-hear "Voice Flow" (Wiseflow, voice with flow…), which
-# breaks command detection. Applied ONLY to the raw transcript before command
-# parsing, via repair_wake_term(); the canonical dictionary keeps its scope.
+
+# Misheard forms of the built-in "Voice Flow" wake term. Applied ONLY to the
+# command-detection copy of the transcript, never to pasted text.
 _WAKE_REPAIR_RE = re.compile(
     r"(?<![\w])wiseflow(?![\w])"
     r"|(?<![\w])voice\s+with\s+flow(?![\w])"
     r"|(?<![\w])voice\s+of\s+flow(?![\w])"
     r"|(?<![\w])whisflow(?![\w])"
-    # Common STT renderings of the wake term observed in real dictation.
-    # These are repaired only in the command-detection string, never in the
-    # text that gets pasted, so ordinary dictation is unaffected.
     r"|(?<![\w])voice\s+(?:low|bake|load|lowe)(?![\w])"
     r"|(?<![\w])voicefloor(?![\w])"
     r"|(?<![\w])voiceflow(?![\w])(?!\.\w)",
     re.IGNORECASE,
 )
 _WAKE_REPAIR_REPLACEMENT = "Voice Flow"
-_STOPWORDS = {
-    "the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "and",
-    "or", "but", "if", "so", "my", "this", "that", "it", "we", "you", "i",
-    "he", "she", "they", "how", "hey", "can", "when", "what", "where", "who",
-    "why",
-    # Filler / greeting / deictic noise must never reach STT bias prompts or
-    # hint lists. Engines that "hear" these tokens in the prompt overproduce
-    # them ("uh hey" loops), and they carry no vocabulary value.
-    "hello", "hi", "here", "there",
-    "uh", "um", "umm", "uhh", "er", "ah", "oh", "hmm",
-    "ok", "okay", "yes", "yeah", "no",
-    "is", "are", "was", "were", "be", "been",
-}
 
-# Keep vocabulary prompts short enough to be useful to both Whisper and cloud
-# providers. A single malformed/very long correction target must not crowd out
-# otherwise useful saved terms.
+# Recognizer hint budget. Deepgram and AssemblyAI cap keyterms at 100;
+# Whisper-style prompts degrade with long lists (Superwhisper docs).
 _STT_HINT_MAX_CHARS = 500
-_STT_HINT_MAX_TERM_CHARS = 96
+_STT_HINT_MAX_TERM_CHARS = 60
 
-# A saved product or proper name such as ``HyperKube`` has an unambiguous
-# spoken form ("Hyper Kube").  Speech engines commonly insert that space,
-# while a literal casing rule can only see the joined form.  These aliases are
-# deliberately narrow: they come only from an explicit, alphabetic camel- or
-# Pascal-cased vocabulary entry.  They are in-memory matching aids, never
-# stored as corrections and never inferred from ordinary words such as
-# ``Here`` or ``Hey``.
-_CAMEL_WORD_BOUNDARY_RE = re.compile(
-    r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
-)
+# A Word keeps the ending the speaker used: plural, possessive, or both.
+_SUFFIX = r"(?:['\u2019]s|s['\u2019]|es|s|['\u2019])?"
+
+WORD = "word"
+REPLACEMENT = "replacement"
+SNIPPET = "snippet"
 
 
 @dataclass(frozen=True)
 class _Rule:
     trigger: str
     replacement: str
-    snippet: bool = False
+    kind: str = WORD
 
-
-def generated_spaced_aliases(value: str) -> tuple[str, ...]:
-    """Return safe spoken-space aliases for one explicit vocabulary term.
-
-    ``HyperKube`` becomes ``Hyper Kube`` and ``OpenAI`` becomes ``Open AI``.
-    The strict alphabetic/single-token gate keeps this from becoming fuzzy
-    matching: terms containing spaces, punctuation, digits, snippets, and
-    ordinary words have no generated alias.  Users retain full control over
-    other mishearings through explicit Heard-as corrections.
-    """
-    if not isinstance(value, str):
-        return ()
-    term = value.strip()
-    if not term or not term.isalpha() or not any(char.islower() for char in term) or not any(char.isupper() for char in term):
-        return ()
-    alias = _CAMEL_WORD_BOUNDARY_RE.sub(" ", term)
-    if alias == term or " " not in alias:
-        return ()
-    # A one-letter leading fragment (for example iPhone) is a meaningful
-    # brand spelling but its spoken form is too broad to rewrite automatically.
-    # The user can still add an explicit Heard-as correction for it.
-    if any(len(part) < 2 for part in alias.split()):
-        return ()
-    # Camel-cased brands can still split into an ordinary sentence fragment.
-    # For example, LinkedIn -> "Linked In" would rewrite "details are linked
-    # in this document" despite the brand never being spoken. Explicit
-    # Heard-as corrections remain available when a user wants such an alias.
-    if is_ambiguous_spaced_alias(term, alias):
-        return ()
-    return (alias,)
+    @property
+    def snippet(self) -> bool:  # backwards-compatible attribute
+        return self.kind == SNIPPET
 
 
 def _split_entry(value: str) -> tuple[str, str | None]:
-    """Parse one GUI dictionary value without losing delimiters in expansions."""
+    """Legacy ``trigger -> expansion`` strings are shortcuts, not Words."""
     for delimiter in ("->", "=>"):
         if delimiter in value:
             trigger, expansion = value.split(delimiter, 1)
@@ -123,74 +89,173 @@ def _split_entry(value: str) -> tuple[str, str | None]:
     return value.strip(), None
 
 
-def _rule_pattern(trigger: str) -> re.Pattern[str]:
-    escaped = re.escape(trigger)
-    # A dictionary trigger is a complete lexical phrase even when it ends in
-    # punctuation (for example C++ or C#); otherwise it can rewrite a prefix
-    # of a larger symbolic token such as C++x.
-    return re.compile(r"(?<!\w)" + escaped + r"(?!\w)", re.IGNORECASE)
+# A spoken alias containing one of these is likely an ordinary sentence
+# fragment ("linked in", "you tube", "face book" stays allowed).
+_FUNCTION_WORDS = frozenset({
+    "a", "an", "and", "as", "at", "be", "by", "do", "for", "go", "he", "i",
+    "if", "in", "is", "it", "me", "my", "no", "of", "on", "or", "so", "the",
+    "to", "up", "us", "we", "you", "out", "off", "all", "any", "can", "get",
+})
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
-def _is_symbolic_trigger(trigger: str) -> bool:
-    return any(not char.isalnum() and char != "_" and not char.isspace() for char in trigger)
+def generated_spaced_aliases(value: str) -> tuple[str, ...]:
+    """Spoken form of a camel-cased Word: ``HyperKube`` -> ``Hyper Kube``.
+
+    Narrow by design: one alphabetic token with mixed case, every part at
+    least two letters, and not a phrase made only of ordinary words
+    (``LinkedIn`` -> "linked in" is skipped so real sentences stay intact).
+    """
+    if not isinstance(value, str):
+        return ()
+    term = value.strip()
+    if not term.isalpha() or term.islower() or term.isupper():
+        return ()
+    alias = _CAMEL_BOUNDARY_RE.sub(" ", term)
+    if alias == term or any(len(part) < 2 for part in alias.split()):
+        return ()
+    parts = [part.casefold() for part in alias.split()]
+    if is_ordinary(alias) or any(part in _FUNCTION_WORDS for part in parts):
+        return ()
+    return (alias,)
 
 
-def _rule_matches(match: re.Match[str], rule: _Rule) -> bool:
-    """Keep symbolic triggers from matching a larger identifier."""
-    if not _is_symbolic_trigger(rule.trigger):
-        return True
-    end = match.end()
-    return end >= len(match.string) or not (match.string[end].isalnum() or match.string[end] == "_")
+def _allows_suffix(rule: _Rule) -> bool:
+    return rule.kind == WORD and len(rule.trigger) >= 3 and rule.trigger[-1].isalnum()
 
 
-def _combined_pattern(rules: tuple[_Rule, ...]) -> tuple[re.Pattern[str], tuple[_Rule, ...]]:
-    """Build one callback pattern while retaining each rule's boundaries."""
-    usable = tuple(rule for rule in rules if rule.trigger)
-    pattern = re.compile(
-        "|".join(f"({_rule_pattern(rule.trigger).pattern})" for rule in usable),
-        re.IGNORECASE,
-    )
-    return pattern, usable
+def _rule_regex(rule: _Rule) -> str:
+    escaped = re.escape(rule.trigger)
+    # Spoken phrases may arrive with different spacing.
+    escaped = escaped.replace(r"\ ", r"\s+")
+    if _allows_suffix(rule):
+        # Match the stem; the suffix is checked by the lookahead and left as
+        # spoken so only the term's own spelling changes.
+        return r"(?<!\w)" + escaped + r"(?=" + _SUFFIX + r"(?!\w))"
+    if rule.trigger[-1:].isalnum() or rule.trigger[-1:] == "_":
+        return r"(?<!\w)" + escaped + r"(?!\w)"
+    # Symbolic endings (C++, C#) must not match a prefix of a larger token.
+    return r"(?<!\w)" + escaped + r"(?![\w+#])"
+
+
+def _compile(rules: tuple[_Rule, ...]) -> re.Pattern[str] | None:
+    usable = [rule for rule in rules if rule.trigger]
+    if not usable:
+        return None
+    return re.compile("|".join(f"({_rule_regex(rule)})" for rule in usable), re.IGNORECASE)
+
+
+# Set while text that already had one dictionary pass is processed again
+# (after a polisher, template, or command rewrite). A Replacement whose heard
+# phrase is itself another rule's output is then skipped, so a chain such as
+# first -> second, second -> third never runs twice.
+_ALREADY_APPLIED: ContextVar[bool] = ContextVar("vf_dictionary_already_applied", default=False)
+
+
+@contextmanager
+def already_applied():
+    token = _ALREADY_APPLIED.set(True)
+    try:
+        yield
+    finally:
+        _ALREADY_APPLIED.reset(token)
+
+
+def _apply(text: str, rules: tuple[_Rule, ...], pattern: re.Pattern[str] | None,
+           trace: list[dict[str, str]] | None = None) -> str:
+    """One left-to-right pass outside protected spans; no cascading."""
+    if not text or pattern is None:
+        return text
+    outputs = {
+        rule.replacement.casefold() for rule in rules if rule.kind != SNIPPET
+    } if _ALREADY_APPLIED.get() else set()
+
+    def replace(match: re.Match[str]) -> str:
+        index = match.lastindex or 0
+        rule = rules[index - 1] if 0 < index <= len(rules) else None
+        original = match.group(0)
+        if rule is None:
+            return original
+        if rule.kind == REPLACEMENT and _ALREADY_APPLIED.get() and original.casefold() in outputs:
+            return original
+        if rule.kind != WORD and _inside_existing_target(match, rule.replacement):
+            # "grok" -> "Grok Bot" must not turn "Grok Bot" into "Grok Bot Bot".
+            return original
+        if trace is not None and original != rule.replacement:
+            trace.append({"from": original, "to": rule.replacement})
+        return rule.replacement
+
+    out: list[str] = []
+    cursor = 0
+    for protected in _PROTECTED_RE.finditer(text):
+        out.append(pattern.sub(replace, text[cursor:protected.start()]))
+        out.append(protected.group(0))
+        cursor = protected.end()
+    out.append(pattern.sub(replace, text[cursor:]))
+    return "".join(out)
+
+
+def _inside_existing_target(match: re.Match[str], target: str) -> bool:
+    if not target:
+        return False
+    haystack = match.string
+    folded_target = target.casefold()
+    start = max(0, match.start() - len(target))
+    window = haystack[start:match.end() + len(target)].casefold()
+    offset = 0
+    while True:
+        found = window.find(folded_target, offset)
+        if found < 0:
+            return False
+        abs_start = start + found
+        abs_end = abs_start + len(target)
+        whole = abs_start == match.start() and abs_end == match.end()
+        if abs_start <= match.start() and match.end() <= abs_end and not whole:
+            return True
+        offset = found + 1
+
+
+_TOKEN_RE = re.compile(r"[^\W_]+(?:['\u2019.\-+#][^\W_]+)*[+#]*", re.UNICODE)
+
+
+def _similar(a: str, b: str) -> float:
+    a2 = re.sub(r"[\W_]+", "", a.casefold())
+    b2 = re.sub(r"[\W_]+", "", b.casefold())
+    if not a2 or not b2:
+        return 0.0
+    return SequenceMatcher(None, a2, b2).ratio()
+
+
+def _ordered(rules: list[_Rule]) -> tuple[_Rule, ...]:
+    """Longest trigger wins; at equal length Replacement > Shortcut > Word."""
+    priority = {REPLACEMENT: 0, SNIPPET: 1, WORD: 2}
+    return tuple(sorted(rules, key=lambda r: (-len(r.trigger), priority[r.kind], r.trigger.casefold())))
 
 
 class DictionaryEngine:
-    """Apply active saved and automatically learned vocabulary exactly once."""
+    """Apply the user's Words, Replacements, and Shortcuts exactly once."""
 
     def __init__(self, store=storage) -> None:
         self.store = store
         self.words: list[str] = []
         self.corrections: list[dict] = []
+        self.snippets: list[tuple[str, str]] = []
         self._rules: tuple[_Rule, ...] = ()
-        self._correction_rules: tuple[_Rule, ...] = ()
+        self._pattern: re.Pattern[str] | None = None
+        self._spelling_rules: tuple[_Rule, ...] = ()
+        self._spelling_pattern: re.Pattern[str] | None = None
         self._dirty = True
         self._revision: object = None
         self._lock = threading.RLock()
         self._ensure_loaded()
 
+    # -- loading -----------------------------------------------------------
+
     def mark_dirty(self) -> None:
-        """Signal that the database changed and the next call must reload."""
         with self._lock:
             self._dirty = True
 
-    @staticmethod
-    def _revision_identity(revision: object) -> str | None:
-        """Extract the database namespace from a scoped cache token."""
-        if isinstance(revision, tuple) and revision and isinstance(revision[0], str):
-            return revision[0]
-        return None
-
-    def _clear_cached_rules(self, revision: object) -> None:
-        """Drop rules that belong to a confirmed different database."""
-        self.words = []
-        self.corrections = []
-        self._rules = ()
-        self._correction_rules = ()
-        self._revision = revision
-
     def _get_revision(self) -> object:
-        # The dictation process can outlive a login/account switch. Repoint the
-        # app-wide store before consulting its cache token so the first
-        # dictation after a switch cannot use the previous account's rules.
         if getattr(self.store, "is_global_singleton", False):
             repoint = getattr(self.store, "repoint_if_needed", None)
             if repoint is not None:
@@ -198,197 +263,143 @@ class DictionaryEngine:
                     repoint()
                 except Exception:
                     log.exception("Could not synchronize dictionary storage account")
-
-        token_getter = getattr(self.store, "get_dictionary_cache_token", None)
-        if token_getter is not None:
-            try:
-                return token_getter()
-            except Exception:
-                pass
-
-        getter = getattr(self.store, "get_lexicon_revision", None)
-        if getter is not None:
+        for name in ("get_dictionary_cache_token", "get_lexicon_revision", "get_dictionary_revision"):
+            getter = getattr(self.store, name, None)
+            if getter is None:
+                continue
             try:
                 revision = getter()
+            except Exception:
+                continue
+            if name != "get_dictionary_cache_token":
                 database = getattr(self.store, "db_path", None)
                 if database:
                     return os.path.normcase(os.path.realpath(os.path.abspath(str(database)))), revision
-                return revision
-            except Exception:
-                pass
-        legacy = getattr(self.store, "get_dictionary_revision", None)
-        if legacy is not None:
-            try:
-                revision = legacy()
-                database = getattr(self.store, "db_path", None)
-                if database:
-                    return os.path.normcase(os.path.realpath(os.path.abspath(str(database)))), revision
-                return revision
-            except Exception:
-                return None
+            return revision
         return None
 
-    def _load_source_words(self) -> list[str]:
-        # Auto-captured entries are intentionally excluded from the active
-        # vocabulary. They lack the repeated raw evidence required for
-        # automatic activation; qualifying rows are promoted by storage.
-        words: list[str] = []
-        loaded = False
-        last_error: Exception | None = None
-        getter = getattr(self.store, "get_dictionary_entries", None)
-        if getter is not None:
-            try:
-                words = [str(row["word"]) for row in getter(include_auto=False)]
-                loaded = True
-            except Exception as exc:
-                last_error = exc
-                log.exception("Could not load dictionary entries")
-        # An empty explicit dictionary is a valid, authoritative result.  Do
-        # not fall through to the legacy snapshot in that case: snapshots can
-        # contain unqualified Auto-Captured metadata, which must never become
-        # an active rewrite rule merely because it was stored.
-        if not loaded:
-            snapshot = getattr(self.store, "get_dictionary_snapshot", None)
-            if snapshot is not None:
-                try:
-                    _, snapshot_words, _ = snapshot()
-                    words = [str(w) for w in snapshot_words]
-                    loaded = True
-                except Exception as exc:
-                    last_error = exc
-                    log.exception("Could not load dictionary snapshot")
-        if not loaded:
-            fallback = getattr(self.store, "get_dictionary_words", None)
-            if fallback is not None:
-                try:
-                    words = [str(w) for w in fallback(include_snippets=True)]
-                    loaded = True
-                except Exception as exc:
-                    last_error = exc
-        if not loaded and last_error is not None:
-            # Let _ensure_loaded retain the previous in-memory rules. A
-            # transient disk/SQLite failure must not erase a working
-            # dictionary or abort dictation startup.
-            raise last_error
+    def _call(self, name: str, *args, **kwargs):
+        getter = getattr(self.store, name, None)
+        if getter is None:
+            return None
+        try:
+            return getter(*args, **kwargs)
+        except TypeError:
+            return getter()
 
-        # Include custom snippets formatted as "trigger -> expansion" in active vocabulary
-        snippet_getter = getattr(self.store, "get_snippets", None)
-        if snippet_getter is not None:
-            try:
-                for s in snippet_getter():
-                    t = (s.get("trigger") or "").strip()
-                    e = (s.get("expansion") or "").strip()
-                    if t and e:
-                        formatted = f"{t} -> {e}"
-                        if formatted not in words:
-                            words.append(formatted)
-            except Exception as exc:
-                log.debug("Could not load dictionary snippets: %s", exc)
-        return words
+    def _load(self) -> tuple[list[str], list[dict], list[tuple[str, str]]]:
+        words: list[str] | None = None
+        if hasattr(self.store, "get_dictionary_entries"):
+            rows = self._call("get_dictionary_entries", include_auto=False, include_snippets=False)
+            words = [str(row["word"]) for row in rows or []]
+        elif hasattr(self.store, "get_dictionary_snapshot"):
+            _, snapshot_words, _ = self.store.get_dictionary_snapshot()
+            words = [str(w) for w in snapshot_words]
+        elif hasattr(self.store, "get_dictionary_words"):
+            words = [str(w) for w in self._call("get_dictionary_words", include_snippets=True) or []]
+        words = words or []
 
-    def _load_corrections(self) -> list[dict]:
-        loaded = False
-        last_error: Exception | None = None
-        snapshot = getattr(self.store, "get_dictionary_snapshot", None)
-        if snapshot is not None:
+        corrections: list[dict] = []
+        if hasattr(self.store, "get_dictionary_corrections"):
+            corrections = list(self.store.get_dictionary_corrections() or [])
+        elif hasattr(self.store, "get_dictionary_snapshot"):
+            corrections = list(self.store.get_dictionary_snapshot()[2] or [])
+
+        snippets: list[tuple[str, str]] = []
+        plain_words: list[str] = []
+        for raw in words:
+            trigger, expansion = _split_entry(str(raw))
+            if expansion is not None:
+                if trigger and expansion:
+                    snippets.append((trigger, expansion))
+            elif trigger:
+                plain_words.append(trigger)
+        if hasattr(self.store, "get_snippets"):
             try:
-                _, _, corrections = snapshot()
-                loaded = True
-                return list(corrections)
+                for item in self.store.get_snippets() or []:
+                    trigger = str(item.get("trigger") or "").strip()
+                    expansion = str(item.get("expansion") or "").strip()
+                    if trigger and expansion:
+                        snippets.append((trigger, expansion))
             except Exception as exc:
-                last_error = exc
-                log.exception("Could not load corrections snapshot")
-        getter = getattr(self.store, "get_dictionary_corrections", None)
-        if getter is not None:
-            try:
-                loaded = True
-                return list(getter())
-            except Exception as exc:
-                last_error = exc
-                log.exception("Could not load corrections")
-        if not loaded and last_error is not None:
-            raise last_error
-        return []
+                log.debug("Could not load shortcuts: %s", exc)
+        return plain_words, corrections, snippets
 
     def _ensure_loaded(self) -> None:
         with self._lock:
             revision = self._get_revision()
             if not self._dirty and revision == self._revision:
                 return
-
             try:
-                words = self._load_source_words()
-                corrections = self._load_corrections()
+                words, corrections, snippets = self._load()
             except Exception as exc:
-                current_identity = self._revision_identity(revision)
-                cached_identity = self._revision_identity(self._revision)
-                switched_database = bool(
-                    current_identity and cached_identity and current_identity != cached_identity
-                )
-                if switched_database:
-                    self._clear_cached_rules(revision)
-                    log.warning(
-                        "New account dictionary unavailable; cleared previous account rules: %s",
-                        exc,
-                    )
+                current = revision[0] if isinstance(revision, tuple) and revision else None
+                cached = self._revision[0] if isinstance(self._revision, tuple) and self._revision else None
+                if current and cached and current != cached:
+                    # A different account's database: never reuse old rules.
+                    self.words, self.corrections, self.snippets = [], [], []
+                    self._rules, self._pattern = (), None
+                    self._spelling_rules, self._spelling_pattern = (), None
+                    self._revision = revision
+                    log.warning("New account dictionary unavailable; cleared previous rules: %s", exc)
                 else:
-                    log.warning("Dictionary storage unavailable; retaining cached rules: %s", exc)
-                # Keep the last good snapshot. On first startup the empty
-                # snapshot is still a safe no-op. A confirmed account switch
-                # clears the prior account's snapshot instead. Leave the reload
-                # pending so the next dictation retries even if storage's
-                # revision did not change while it was unavailable.
+                    log.warning("Dictionary storage unavailable; keeping cached rules: %s", exc)
                 self._dirty = True
                 return
 
             rules: list[_Rule] = []
             seen: set[str] = set()
-            for raw in words:
-                trigger, expansion = _split_entry(raw.strip())
-                if not trigger or (expansion is not None and not expansion):
-                    # Empty snippet expansions are malformed and must never erase
-                    # the trigger from dictated text.
+            for heard, correct in (
+                (str(c.get("wrong_text") or "").strip(), str(c.get("correct_text") or "").strip())
+                for c in corrections
+            ):
+                key = normalize(heard)
+                if heard and correct and key not in seen:
+                    seen.add(key)
+                    rules.append(_Rule(heard, correct, REPLACEMENT))
+            for trigger, expansion in snippets:
+                key = normalize(trigger)
+                if key not in seen:
+                    seen.add(key)
+                    rules.append(_Rule(trigger, expansion, SNIPPET))
+            canonical: dict[str, str] = {}
+            for word in words:
+                # Legacy rows saved before validation (Hey, Here, Voice Flow)
+                # are ignored even if they are still stored somewhere.
+                if term_problem(word):
                     continue
-                key = trigger.casefold()
-                if key in seen:
+                key = normalize(word)
+                if key and key not in canonical:
+                    canonical[key] = word
+            spelling: list[_Rule] = []
+            for key, word in canonical.items():
+                # A lowercase ordinary word has no spelling to restore.
+                if word == word.lower() and is_ordinary(word):
                     continue
-                seen.add(key)
-                rules.append(_Rule(trigger, expansion if expansion is not None else trigger, expansion is not None))
+                spelling.append(_Rule(word, word, WORD))
+                if key not in seen:
+                    seen.add(key)
+                    rules.append(_Rule(word, word, WORD))
+                for alias in generated_spaced_aliases(word):
+                    alias_key = normalize(alias)
+                    if alias_key not in seen:
+                        seen.add(alias_key)
+                        rules.append(_Rule(alias, word, REPLACEMENT))
 
-            # Explicit casing terms may safely recognize their normal spoken
-            # spaced form (HyperKube -> Hyper Kube).  Do not generate aliases
-            # for snippets or overwrite an explicit entry/correction.  The
-            # combined substitution below still makes this one pass, so an
-            # alias replacement cannot trigger another vocabulary rule.
-            canonical_rules = tuple(rules)
-            for rule in canonical_rules:
-                if rule.snippet:
-                    continue
-                for alias in generated_spaced_aliases(rule.trigger):
-                    alias_key = alias.casefold()
-                    if alias_key in seen:
-                        continue
-                    seen.add(alias_key)
-                    rules.append(_Rule(alias, rule.replacement))
-
-            # Longer triggers win. Casefold tie-breaking keeps behavior stable even
-            # if SQLite returns rows in a different order.
-            rules.sort(key=lambda rule: (-len(rule.trigger), rule.trigger.casefold(), rule.trigger))
-
-            correction_rules: list[_Rule] = []
-            for item in corrections:
-                wrong = str(item.get("wrong_text") or "").strip()
-                correct = str(item.get("correct_text") or "").strip()
-                if not wrong or not correct:
-                    continue
-                correction_rules.append(_Rule(wrong, correct))
-
-            self.words = words
+            self.words = list(canonical.values())
             self.corrections = corrections
-            self._rules = tuple(rules)
-            self._correction_rules = tuple(sorted(
-                correction_rules, key=lambda rule: (-len(rule.trigger), rule.trigger.casefold())
-            ))
+            self.snippets = snippets
+            self._rules = _ordered(rules)
+            self._pattern = _compile(self._rules)
+            # Spelling restoration after formatting: Words plus the targets of
+            # Replacements, never the heard side and never shortcuts.
+            targets = {r.trigger.casefold(): r for r in spelling}
+            for rule in rules:
+                if rule.kind == REPLACEMENT and rule.replacement.casefold() not in targets:
+                    if not is_ordinary(rule.replacement):
+                        targets[rule.replacement.casefold()] = _Rule(rule.replacement, rule.replacement, WORD)
+            self._spelling_rules = _ordered(list(targets.values()))
+            self._spelling_pattern = _compile(self._spelling_rules)
             self._revision = revision
             self._dirty = False
 
@@ -397,223 +408,265 @@ class DictionaryEngine:
         self._ensure_loaded()
         return list(self.words)
 
-    def get_initial_prompt(self, category: str | None = None) -> str:
-        """Build a deterministic, bounded Whisper bias prompt from explicit terms.
-
-        When an app category is supplied, terms tagged for that category lead
-        the prompt (contextual vocabulary pack, spec §33); global terms fill
-        the remaining bounded slots.
-        """
-        terms = self._build_stt_hint_terms(category, limit=40)
-        if not terms:
-            return "Clear dictation, accurate spelling, proper names."
-        prompt = "Dictionary terms: " + ", ".join(terms) + "."
-        log.info("Whisper initial_prompt biased with %d explicit terms", len(terms))
-        return prompt
-
-    @staticmethod
-    def _apply_segment(
-        segment: str,
-        rules: tuple[_Rule, ...],
-        trace: list[dict[str, str]] | None = None,
-    ) -> str:
-        if not segment or not rules:
-            return segment
-        combined, usable_rules = _combined_pattern(rules)
-        # One alternation/callback pass means an expansion is never considered
-        # as new input for another rule during this dictation.
-        def replace(match: re.Match[str]) -> str:
-            for index, rule in enumerate(usable_rules, start=1):
-                if match.group(index) is not None and _rule_matches(match, rule):
-                    original = match.group(0)
-                    if trace is not None and original != rule.replacement:
-                        trace.append({"from": original, "to": rule.replacement})
-                    return rule.replacement
-            return match.group(0)
-
-        return combined.sub(replace, segment)
+    # -- the one deterministic pass ---------------------------------------
 
     def apply_dictionary_post_processing(
         self,
         text: str,
         trace: list[dict[str, str]] | None = None,
+        include_snippets: bool = True,
     ) -> str:
-        """Apply explicit literal terms/corrections once; fuzzy matching is opt-in.
+        """Fix Word spellings, apply Replacements, expand Shortcuts. One pass.
 
-        Passing an empty ``trace`` list records only substitutions actually
-        made during this single pass.  It provides truthful UI/history
-        evidence without deriving guesses from a raw/final text diff.
+        ``include_snippets=False`` is used before an AI polish: names are
+        corrected so the model sees them, while shortcut expansions are left
+        for the final pass so no model can rewrite them.
         """
         if not text:
             return text
         self._ensure_loaded()
-        if not self._rules and not self._correction_rules:
-            return text
-
-        # Split protected spans out so a term such as ``app`` cannot mutate a
-        # URL or email address. Corrections run before vocabulary so a declared
-        # wrong-phrase fix wins over plain casing restoration; each pass keeps
-        # expansions literal, including backslashes and group-looking sequences.
-        combined_rules = self._correction_rules + self._rules
-        output: list[str] = []
-        cursor = 0
-        for protected in _PROTECTED_RE.finditer(text):
-            output.append(self._apply_segment(text[cursor:protected.start()], combined_rules, trace))
-            output.append(protected.group(0))
-            cursor = protected.end()
-        output.append(self._apply_segment(text[cursor:], combined_rules, trace))
-        result = "".join(output)
+        if include_snippets:
+            result = _apply(text, self._rules, self._pattern, trace)
+        else:
+            rules = tuple(rule for rule in self._rules if rule.kind != SNIPPET)
+            result = _apply(text, rules, _compile(rules), trace)
         if result != text:
-            log.info("Applied explicit dictionary rules to dictated text")
+            log.info("Applied dictionary rules to dictated text")
         return result
 
-    def mask_rule_inputs_for_cleanup(self, text: str) -> tuple[str, dict[str, str]]:
-        """Protect exact rule inputs from deterministic filler cleanup.
+    def restore_dictionary_spelling(self, text: str) -> str:
+        """Re-apply only Word spellings after styling; never re-runs rewrites."""
+        if not text:
+            return text
+        self._ensure_loaded()
+        return _apply(text, self._spelling_rules, self._spelling_pattern)
 
-        This does not apply a dictionary replacement. It temporarily masks
-        only spans that the final literal dictionary pass would match, so a
-        Heard-as phrase such as ``cube er netties`` keeps the middle word until
-        that final pass. URLs, code, links, and email addresses remain outside
-        dictionary matching exactly as they are during final application.
+    # -- protection around any polisher ------------------------------------
+
+    def _protected_targets(self) -> list[str]:
+        self._ensure_loaded()
+        return [rule.trigger for rule in self._spelling_rules]
+
+    def terms_in(self, text: str) -> list[str]:
+        """Protected Words / Replacement targets that occur in ``text``."""
+        if not text:
+            return []
+        found: list[str] = []
+        for term in self._protected_targets():
+            pattern = r"(?<!\w)" + re.escape(term).replace(r"\ ", r"\s+") + r"(?!\w)"
+            if re.search(pattern, text, re.IGNORECASE):
+                found.append(term)
+        return found
+
+    def preferred_spellings_note(self, text: str) -> str:
+        """Model-agnostic prompt note listing only the terms in this text.
+
+        Any prompt-based polisher (cloud, LFM, a future fine-tuned model) can
+        append it. It lists only names already present, so a model is never
+        invited to insert an unspoken name. S1's trained control line is not
+        changed; see docs/dictionary.md for the training-data note.
         """
+        try:
+            terms = self.terms_in(text)
+        except Exception:
+            return ""
+        if not terms:
+            return ""
+        return (
+            "Keep these names exactly as spelled: " + ", ".join(terms[:40]) + "."
+        )
+
+    def guard_polished_output(self, source: str, output: str) -> str:
+        """Make any polisher's output keep the user's dictionary words.
+
+        1. Re-apply Words and Replacements (never shortcuts) to the output.
+        2. Restore exact Word spelling.
+        3. For a Word that was in ``source`` but the model re-spelled
+           (Kubernetis, Kuber Netes), replace the closest near-miss span.
+        Deterministic, idempotent, and a no-op for an empty dictionary.
+        """
+        if not output or not source:
+            return output
+        original = output
+        try:
+            self._ensure_loaded()
+            if not self._spelling_rules and not self._rules:
+                return output
+            prepared = self.apply_dictionary_post_processing(source, include_snippets=False)
+            expected = self.terms_in(prepared)
+            # Shortcut expansions are pasted literally: hide them from the guard.
+            shielded: dict[str, str] = {}
+            for index, (_, expansion) in enumerate(sorted(self.snippets, key=lambda item: -len(item[1]))):
+                if expansion and expansion in output:
+                    token = f"\u27e6VF_SNIPPET_{index}\u27e7"
+                    shielded[token] = expansion
+                    output = output.replace(expansion, token)
+            with already_applied():
+                result = self._guard_text(output, expected)
+            for token, expansion in shielded.items():
+                result = result.replace(token, expansion)
+            return result
+        except Exception:
+            log.exception("Dictionary guard failed; keeping polished text")
+            return original
+
+    def _guard_text(self, output: str, expected: list[str]) -> str:
+        result = self.apply_dictionary_post_processing(output, include_snippets=False)
+        result = self.restore_dictionary_spelling(result)
+        for term in expected:
+            if term not in self.terms_in(result):
+                result = self._repair_near_miss(result, term)
+        return result
+
+    @staticmethod
+    def _repair_near_miss(text: str, term: str) -> str:
+        tokens = list(_TOKEN_RE.finditer(text))
+        if not tokens:
+            return text
+        width = max(1, len(term.split()))
+        best: tuple[float, int, int] | None = None
+        for size in {width, width + 1, max(1, width - 1)}:
+            for i in range(0, len(tokens) - size + 1):
+                start = tokens[i].start()
+                end = tokens[i + size - 1].end()
+                span = text[start:end]
+                if _PROTECTED_RE.search(span):
+                    continue
+                score = _similar(span, term)
+                if best is None or score > best[0]:
+                    best = (score, start, end)
+        if best is None or best[0] < 0.85 or len(term) < 5:
+            return text
+        _, start, end = best
+        span = text[start:end]
+        # Never turn ordinary words into a name ("give" -> GitHub,
+        # "tweet" -> Twitter), and require the same first letter.
+        if is_ordinary(span) or any(is_ordinary(part) for part in span.split()):
+            return text
+        if span[:1].casefold() != term[:1].casefold():
+            return text
+        suffix = ""
+        match = re.search(r"(['\u2019]s|s['\u2019])$", span)
+        if match and not term.casefold().endswith(match.group(0).casefold()):
+            suffix = match.group(0)
+        log.info("Dictionary guard restored a re-spelled term")
+        return text[:start] + term + suffix + text[end:]
+
+    def mask_rule_inputs_for_cleanup(self, text: str) -> tuple[str, dict[str, str]]:
+        """Shield exact rule inputs from filler cleanup until the final pass."""
         if not text:
             return text, {}
         self._ensure_loaded()
-        rules = self._correction_rules + self._rules
-        if not rules:
+        if self._pattern is None:
             return text, {}
-        combined, usable_rules = _combined_pattern(rules)
         token_map: dict[str, str] = {}
-        token_index = 0
+        counter = 0
 
-        def mask_segment(segment: str) -> str:
-            nonlocal token_index
-            if not segment:
-                return segment
+        def replace(match: re.Match[str]) -> str:
+            nonlocal counter
+            counter += 1
+            token = f"\u27e6VF_DICT_INPUT_{counter}\u27e7"
+            while token in text:
+                counter += 1
+                token = f"\u27e6VF_DICT_INPUT_{counter}\u27e7"
+            token_map[token] = match.group(0)
+            return token
 
-            def replace(match: re.Match[str]) -> str:
-                nonlocal token_index
-                for index, rule in enumerate(usable_rules, start=1):
-                    if match.group(index) is not None and _rule_matches(match, rule):
-                        token_index += 1
-                        token = f"⟦VF_DICT_INPUT_{token_index}⟧"
-                        while token in text or token in token_map:
-                            token_index += 1
-                            token = f"⟦VF_DICT_INPUT_{token_index}⟧"
-                        token_map[token] = match.group(0)
-                        return token
-                return match.group(0)
-
-            return combined.sub(replace, segment)
-
-        output: list[str] = []
+        out: list[str] = []
         cursor = 0
         for protected in _PROTECTED_RE.finditer(text):
-            output.append(mask_segment(text[cursor:protected.start()]))
-            output.append(protected.group(0))
+            out.append(self._pattern.sub(replace, text[cursor:protected.start()]))
+            out.append(protected.group(0))
             cursor = protected.end()
-        output.append(mask_segment(text[cursor:]))
-        return "".join(output), token_map
+        out.append(self._pattern.sub(replace, text[cursor:]))
+        return "".join(out), token_map
 
     @staticmethod
     def unmask_rule_inputs_after_cleanup(text: str, token_map: dict[str, str]) -> str:
-        """Restore original rule inputs without performing substitutions."""
         result = text
         for token in sorted(token_map, key=len, reverse=True):
             result = result.replace(token, token_map[token])
         return result
 
-    # -- protected terminology (spec §38) + contextual vocab (spec §33) ----
-
-    def restore_dictionary_spelling(self, text: str) -> str:
-        """Restore canonical casing after styling, without replaying rewrites."""
-        if not text:
-            return text
-        self._ensure_loaded()
-        terms = {_rule.trigger.casefold(): _rule.trigger for _rule in self._rules if not _rule.snippet}
-        for rule in self._correction_rules:
-            terms.setdefault(rule.replacement.casefold(), rule.replacement)
-        rules = tuple(_Rule(term, term) for term in sorted(terms.values(), key=lambda value: (-len(value), value.casefold())))
-        output: list[str] = []
-        cursor = 0
-        for protected in _PROTECTED_RE.finditer(text):
-            output.append(self._apply_segment(text[cursor:protected.start()], rules))
-            output.append(protected.group(0))
-            cursor = protected.end()
-        output.append(self._apply_segment(text[cursor:], rules))
-        return "".join(output)
-
     def repair_wake_term(self, text: str) -> str:
-        """Repair mis-hearings of the critical "Voice Flow" wake term.
-
-        Runs on the RAW transcript before command detection so a garbled wake
-        phrase ("Wiseflow, make this an email") still becomes a command.
-        Deliberately static and NOT a dictionary correction — that would
-        override the user's own casing entries and pollute STT hints.
-        Pure string work — no I/O, no model.
-        """
+        """Repair misheard "Voice Flow" for command detection only."""
         if not text:
             return text
         return _WAKE_REPAIR_RE.sub(_WAKE_REPAIR_REPLACEMENT, text)
 
-    def get_protected_terms(self, limit: int = 60) -> list[str]:
-        """Canonical user terms that an AI polish must never re-spell."""
+    # -- recognizer biasing and polisher hints ----------------------------
+
+    def get_stt_hint_terms(self, category: str | None = None, limit: int = 50) -> list[str]:
+        """Exact spellings to bias the recognizer: Words, then Replacement targets."""
         self._ensure_loaded()
+        if limit <= 0:
+            return []
+        # Replacement targets first: those are words the recognizer is known
+        # to get wrong. Then the user's other Words.
+        candidates = [str(c.get("correct_text") or "") for c in self.corrections] + list(self.words)
         terms: list[str] = []
         seen: set[str] = set()
-        for rule in self._rules:
-            trigger = rule.trigger
-            key = trigger.casefold()
-            # Skip generic words and snippets (a snippet trigger is still fair
-            # game for its expansion, and masking it would hide legitimate
-            # speech from the model).
-            if rule.snippet or key in _STOPWORDS or len(trigger) < 3:
+        used = 0
+        for term in candidates:
+            cleaned = " ".join(str(term).split())
+            key = cleaned.casefold()
+            if (
+                len(cleaned) < 2
+                or len(cleaned) > _STT_HINT_MAX_TERM_CHARS
+                or key in seen
+                or is_ordinary(cleaned)
+            ):
                 continue
-            # Skip ordinary lowercase words: masking "meeting" would hurt the
-            # polish prompt more than it protects anything.
-            if trigger == trigger.lower() and " " not in trigger and "-" not in trigger:
+            cost = len(cleaned) + (2 if terms else 0)
+            if used + cost > _STT_HINT_MAX_CHARS:
                 continue
-            if key not in seen:
-                seen.add(key)
-                terms.append(trigger)
+            terms.append(cleaned)
+            seen.add(key)
+            used += cost
             if len(terms) >= limit:
                 break
         return terms
 
-    def mask_protected_terms(self, text: str) -> tuple[str, dict[str, str]]:
-        """Replace protected terms with opaque tokens the model must keep.
+    def get_contextual_vocabulary(self, category: str | None = None, limit: int = 30) -> list[str]:
+        return self.get_stt_hint_terms(category, limit=limit)
 
-        Returns ``(masked_text, token_map)``; ``token_map`` is empty when
-        nothing needed masking. Never raises by contract.
-        """
+    def get_initial_prompt(self, category: str | None = None) -> str:
+        """A short Whisper prompt naming the user's terms."""
+        terms = self.get_stt_hint_terms(category, limit=30)
+        if not terms:
+            return "Clear dictation, accurate spelling, proper names."
+        return "Names and terms: " + ", ".join(terms) + "."
+
+    def get_preferred_spellings(self, limit: int = 40) -> list[str]:
+        """Spellings the AI polisher must keep exactly as written."""
+        return self.get_stt_hint_terms(limit=limit)
+
+    def get_protected_terms(self, limit: int = 60) -> list[str]:
+        return [t for t in self.get_preferred_spellings(limit) if len(t) >= 3]
+
+    def mask_protected_terms(self, text: str) -> tuple[str, dict[str, str]]:
+        """Swap protected terms for opaque tokens before an AI call."""
         if not text:
             return text, {}
         try:
             terms = self.get_protected_terms()
         except Exception:
             return text, {}
-        if not terms:
-            return text, {}
-
-        # Longer terms first so "AI Productivity Flow" wins over "AI".
         spans: list[tuple[int, int, str]] = []
-        taken: list[tuple[int, int]] = []
         for term in sorted(terms, key=len, reverse=True):
             for match in re.finditer(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text, re.IGNORECASE):
                 start, end = match.span()
-                if any(not (end <= s or start >= e) for s, e in taken):
+                if any(not (end <= s or start >= e) for s, e, _ in spans):
                     continue
-                taken.append((start, end))
                 spans.append((start, end, term))
         if not spans:
             return text, {}
-
         token_map: dict[str, str] = {}
         pieces: list[str] = []
         cursor = 0
         for index, (start, end, term) in enumerate(sorted(spans), start=1):
             pieces.append(text[cursor:start])
-            token = f"⟦TERM{index}⟧"
+            token = f"\u27e6TERM{index}\u27e7"
             token_map[token] = term
             pieces.append(token)
             cursor = end
@@ -622,114 +675,17 @@ class DictionaryEngine:
 
     @staticmethod
     def unmask_protected_terms(text: str, token_map: dict[str, str]) -> str:
-        """Restore canonical terms swapped out before the AI call."""
         if not text or not token_map:
             return text
         result = text
-        # Longest tokens first so a token that embeds another (TERM1 / TERM10)
-        # restores without corrupting the embedded one.
         for token in sorted(token_map, key=len, reverse=True):
             term = token_map[token]
-            # The model may or may not preserve the opaque token exactly;
-            # restore both the exact token and a whitespace-tolerant form.
             result = result.replace(token, term)
-            # Fuzzy pass: the model may drop or mangle the token's brackets
-            # (or echo it as bare "TERM2" text). Brackets are optional and
-            # inner whitespace is tolerated; whitespace outside the match is
-            # preserved so neighbouring words never glue together. A literal
-            # backslash-doubled replacement keeps user terms such as Windows
-            # paths from being read as escape codes (re.error in old code).
-            core = token.strip("⟦⟧[](){}")
-            fuzzy = r"[⟦\[\(\{]?\s*" + re.escape(core) + r"\s*[⟧\]\)\}]?"
-            try:
-                result = re.sub(fuzzy, term.replace("\\", "\\\\"), result, flags=re.IGNORECASE)
-            except re.error:
-                log.warning("Unmask fuzzy restore failed for token %r; exact replacement kept", token)
+            core = token.strip("\u27e6\u27e7[](){}")
+            fuzzy = r"[\u27e6\[\(\{]?\s*" + re.escape(core) + r"\s*[\u27e7\]\)\}]?"
+            result = re.sub(fuzzy, lambda _m, t=term: t, result, flags=re.IGNORECASE)
         return result
 
-    def get_stt_hint_terms(self, category: str | None = None, limit: int = 15) -> list[str]:
-        """Bounded terms for cloud STT biasing: contextual pack, explicit
-        terms, and correction targets — the exact spellings the provider
-        should hear (spec §33)."""
-        return self._build_stt_hint_terms(category, limit=limit)
 
-    def _build_stt_hint_terms(self, category: str | None, limit: int) -> list[str]:
-        """Return bounded canonical vocabulary and correction targets.
-
-        Build explicit terms from the stored rows instead of ``_rules``:
-        that rule set also contains snippet triggers and generated spoken-space
-        aliases, neither of which should bias recognition. Category lookup is
-        scoped to this engine's store and constrained to the same explicit
-        canonical terms.
-        """
-        self._ensure_loaded()
-        if limit <= 0:
-            return []
-
-        canonical_by_key: dict[str, str] = {}
-        for raw in self.words:
-            trigger, expansion = _split_entry(str(raw).strip())
-            if expansion is not None or not trigger:
-                continue
-            key = trigger.casefold()
-            if len(trigger) < 2 or key in _STOPWORDS or len(trigger) > _STT_HINT_MAX_TERM_CHARS:
-                continue
-            canonical_by_key.setdefault(key, trigger)
-
-        contextual: list[str] = []
-        if category:
-            getter = getattr(self.store, "get_contextual_vocabulary", None)
-            if getter is not None:
-                try:
-                    try:
-                        category_words = getter(category, limit=max(limit, 12))
-                    except TypeError:
-                        category_words = getter(category)
-                    for raw in category_words:
-                        key = str(raw).strip().casefold()
-                        term = canonical_by_key.get(key)
-                        if term and term not in contextual:
-                            contextual.append(term)
-                except Exception:
-                    log.exception("Could not load contextual vocabulary for %s", category)
-
-        global_terms = sorted(canonical_by_key.values(), key=lambda term: (-len(term), term.casefold()))
-        corrections = sorted(
-            (rule.replacement for rule in self._correction_rules),
-            key=lambda term: (-len(term), term.casefold()),
-        )
-
-        terms: list[str] = []
-        seen: set[str] = set()
-        used_chars = 0
-        # Contextual terms lead, then correction targets, then the remaining
-        # explicit vocabulary. This keeps corrections in the bounded prefix.
-        for term in contextual + corrections + global_terms:
-            cleaned = str(term).strip()
-            key = cleaned.casefold()
-            if (
-                not cleaned
-                or len(cleaned) > _STT_HINT_MAX_TERM_CHARS
-                or len(cleaned) < 2
-                or key in _STOPWORDS
-                or key in seen
-                or is_noise_variant(cleaned)
-            ):
-                continue
-            separator_chars = 2 if terms else 0  # comma and space, plus prompt period budget
-            if used_chars + separator_chars + len(cleaned) > _STT_HINT_MAX_CHARS - 1:
-                continue
-            terms.append(cleaned)
-            seen.add(key)
-            used_chars += separator_chars + len(cleaned)
-            if len(terms) >= limit:
-                break
-        return terms
-
-    def get_contextual_vocabulary(self, category: str | None = None, limit: int = 30) -> list[str]:
-        """Compatibility alias for bounded canonical contextual STT hints."""
-        return self._build_stt_hint_terms(category, limit=limit)
-
-
-# Singleton instance
 dictionary_engine = DictionaryEngine()
+dictionary = dictionary_engine

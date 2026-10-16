@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-10-14T17:55:00Z",
+  "trainer": "Antigravity Multi-Task Supervised LoRA Trainer",
+  "base_model": "superwhisper/s1-mini@88f6b15896c73bbb13a3b596e0afe8ea0d5150b4",
+  "adapter_safetensors_sha256": "055d8cd8fa37f2543f2f0f5ef622a3587ce929a8ad0dc16ebbb1598e68d63472",
+  "adapter_config_sha256": "a0bdd983ed2ab57aab88a63b21d68ab955cf645450fefe5680dbfecc57044a04",
+  "metrics_sha256": "50618981d2b84be01caad5b2305b0aa59ec7765ca9be43cc30a91cb5afe0eca5",
+  "run_config_sha256": "cfedbc6a47cb9fdcf33f8c2000770bcae509a374b9145d18f8a77613bdae1753",
+  "data_provenance_audit": "data/clean_vf1/DATA_PROVENANCE_AUDIT.json",
+  "gates_manifest": "D:\\.zcode\\workspace\\default\\AI-Productivity-Flow\\research\\vf_phase3a\\gates_clean_multitask.json"
+}

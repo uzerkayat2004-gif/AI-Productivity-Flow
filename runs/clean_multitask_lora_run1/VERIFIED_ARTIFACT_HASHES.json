@@ -1,0 +1,38 @@
+{
+  "runs/clean_multitask_lora_run1/adapter/adapter_model.safetensors": {
+    "sha256": "0ff44c3e32557f848c2b8ab75f1823c7289da96bfca816ae6c92e6ae8f6e71bc",
+    "size": 40422168
+  },
+  "runs/clean_multitask_lora_run1/adapter/adapter_config.json": {
+    "sha256": "fe32d24ff82589264b7287e4cb291a4d3b2c8ee26452111390245034127f2c4e",
+    "size": 1226
+  },
+  "runs/clean_multitask_lora_run1/metrics.jsonl": {
+    "sha256": "50b3c086c80f22648f09f5c8144804ca4cce920a558f88a9e6bae13b9813326a",
+    "size": 3531
+  },
+  "runs/clean_multitask_lora_run1/run_config.json": {
+    "sha256": "abb2ca23a807f42f74f49fce207ab202762349f19730200c4589c36b0f162d7b",
+    "size": 1381
+  },
+  "runs/clean_multitask_lora_run1/provenance.json": {
+    "sha256": "d574381f318febcb51d1bc4b714e92818167706b2a9fd316827d6088c4c0b163",
+    "size": 767
+  },
+  "data/clean_vf1/clean_corpus_train.jsonl": {
+    "sha256": "2592e730e4b9aab1a6099600fca3ec5ea905e3fd4d3da91a5ec3f536996518b4",
+    "size": 110998
+  },
+  "data/clean_vf1/clean_corpus_val.jsonl": {
+    "sha256": "544af9da5800dcc8025f99f938c8eb203d6617fb4fa57aaee216bb80d264654b",
+    "size": 23418
+  },
+  "data/clean_vf1/clean_rehearsal.jsonl": {
+    "sha256": "1e38ae7f8d5e86595e4644f734a1382f6973614441540943d9602c681c3e0058",
+    "size": 31976
+  },
+  "data/frozen_eval_multitask_35.jsonl": {
+    "sha256": "5d10682394397717a68537c5b9aef311b29cd4a6e3c36737a129229ce90eae3d",
+    "size": 29965
+  }
+}

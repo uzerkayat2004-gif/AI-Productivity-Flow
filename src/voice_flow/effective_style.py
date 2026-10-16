@@ -20,6 +20,7 @@ strictly separate from per-dictation overrides (spec §13, §47).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from voice_flow.storage import storage
@@ -36,6 +37,7 @@ FORMAT_TO_CATEGORY: dict[str, str | None] = {
     "note": "other",
     "linkedin_post": "other",
     "bullet_list": "other",
+    "numbered_list": "other",
     "prompt": None,
 }
 
@@ -49,9 +51,11 @@ OVERRIDE_INSTRUCTIONS: dict[str, str] = {
     "tone:playful": "Use a playful tone.",
     "formality:professional": "Keep the register professional.",
     "formality:formal": "Keep the register formal.",
+    "formality:relaxed": "Make the register less formal and more relaxed, without slang the speaker did not use.",
     "length:short": "Be concise; keep the result short.",
     "length:detailed": "Expand with more detail where it helps.",
     "clarity:simplified": "Simplify the wording for easy reading.",
+    "clarity:improved": "Improve clarity and flow without changing the meaning.",
     "grammar:fix": "Correct grammar and punctuation.",
     "dedupe:remove": "Remove repetitive phrases.",
 }
@@ -59,6 +63,7 @@ OVERRIDE_INSTRUCTIONS: dict[str, str] = {
 FORMAT_INSTRUCTIONS: dict[str, str] = {
     "note": "Format the result as a short note with a clear first line.",
     "bullet_list": "Format the result as a concise bullet list.",
+    "numbered_list": "Format the result as a numbered list, one item per line.",
     "linkedin_post": "Format the result as a LinkedIn post: hook, short paragraphs, no subject line.",
     "email": "Format the result as an email: greeting, body, sign-off.",
     "work_message": "Format the result as a workplace chat message: no subject line, no sign-off.",
@@ -106,6 +111,37 @@ def _extra_instruction(category: str) -> str:
     return extra.strip()
 
 
+def _standing_instruction() -> str:
+    """Global saved instruction that applies to every category."""
+    try:
+        value = str(storage.get_setting("style_standing_instruction", "") or "")
+    except Exception:
+        return ""
+    return value.strip()
+
+
+# Words that make a saved sentence a register/casing rule. Only these
+# sentences can conflict with an explicit one-off register command.
+_REGISTER_RULE_RE = re.compile(
+    r"\b(?:casual|formal|informal|professional|relaxed|register|tone|lower-?case|"
+    r"upper-?case|capitali[sz]\w*|slang|contractions?|excited|exclamation)\b",
+    re.IGNORECASE,
+)
+
+
+def _non_register_rules(extra: str) -> str:
+    """Keep saved rules that do not fight an explicit register command.
+
+    "Always write in lowercase" conflicts with a one-off "make it
+    professional"; "Never use emoji" does not, and must survive.
+    """
+    if not extra:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", extra)
+    kept = [s for s in sentences if s.strip() and not _REGISTER_RULE_RE.search(s)]
+    return _compose(kept)
+
+
 def _compose(parts: list[str]) -> str:
     return " ".join(p.strip() for p in parts if p and p.strip())
 
@@ -144,6 +180,8 @@ def _explicit_register_profile(category: str, overrides: dict) -> str | None:
     suffix = None
     if overrides.get("formality") in ("professional", "formal"):
         suffix = "formal"
+    elif overrides.get("formality") == "relaxed":
+        suffix = "casual"
     elif overrides.get("tone") in ("casual", "friendly", "conversational"):
         suffix = "casual"
     if not suffix:
@@ -155,6 +193,21 @@ def _explicit_register_profile(category: str, overrides: dict) -> str | None:
         return candidate if candidate in STYLE_PRESETS else None
     except Exception:
         return None
+
+
+def _drop_register_rules(extra: str) -> str:
+    """Remove only sentences of a saved rule that set the register/casing."""
+    import re
+
+    if not extra:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", extra.strip())
+    register_words = re.compile(
+        r"\b(?:formal|informal|professional|casual|relaxed|lower[\s-]?case|upper[\s-]?case|capitali[sz]|slang|"
+        r"tone|register|polite|friendly|excited|enthusiastic)\w*\b",
+        re.IGNORECASE,
+    )
+    return " ".join(s for s in sentences if s and not register_words.search(s))
 
 
 def resolve_effective_style(base, command) -> EffectiveStyle:
@@ -174,9 +227,10 @@ def resolve_effective_style(base, command) -> EffectiveStyle:
         base_instruction = str(base_instruction)
 
     extra = _extra_instruction(base_category)
+    standing = _standing_instruction()
 
     if command is None:
-        instruction = _compose([base_instruction, extra])
+        instruction = _compose([base_instruction, extra, standing])
         return EffectiveStyle(
             instruction=instruction,
             style_id=base_style_id,
@@ -239,7 +293,7 @@ def resolve_effective_style(base, command) -> EffectiveStyle:
         # is added explicitly so the profile + format stay composable (§16).
         override_parts.append(FORMAT_INSTRUCTIONS[fmt])
 
-    task = "rewrite" if (fmt or overrides) else "cleanup"
+    task = "rewrite" if (fmt or overrides or getattr(command, "constraints", ())) else "cleanup"
     if operation == "summarize":
         task = "summarize"
         override_parts.append(TASK_INSTRUCTIONS["summarize"])
@@ -253,18 +307,26 @@ def resolve_effective_style(base, command) -> EffectiveStyle:
             override_parts.append(OVERRIDE_INSTRUCTIONS.get(f"{key}:{value}", ""))
     if preserve_wording:
         override_parts.append(PRESERVE_WORDING_INSTRUCTION)
+    constraints = getattr(command, "constraints", ()) or ()
+    if isinstance(constraints, (list, tuple)) and constraints:
+        override_parts.append(
+            "Also follow these explicit instructions from the user: "
+            + "; ".join(str(c).strip() for c in constraints if str(c).strip()) + "."
+        )
 
     # A saved standing instruction may itself demand lowercase/casual output.
     # Do not let it undo an explicit per-dictation professional/casual card.
     # Persistent commands still update storage separately in
     # ``apply_persistent_change``.
-    effective_extra = "" if explicit_profile_id else (
+    category_extra = (
         _extra_instruction(effective_category) if effective_category != base_category else extra
     )
+    effective_extra = _non_register_rules(category_extra) if explicit_profile_id else category_extra
+    effective_standing = _non_register_rules(standing) if explicit_profile_id else standing
 
-    instruction = _compose(parts + [effective_extra] + override_parts)
+    instruction = _compose(parts + [effective_extra, effective_standing] + override_parts)
     requires_ai = bool(
-        fmt or overrides or ctx
+        fmt or overrides or ctx or constraints
         or operation in ("summarize", "prompt_generation")
         or preserve_wording
     )

@@ -461,11 +461,26 @@ def _apply_window_icon(ico_path: str, window=None, hwnd=None) -> None:
     try:
         import ctypes
         user32 = ctypes.windll.user32
+        # HWND/HICON and message parameters are pointer-sized on 64-bit Windows.
+        user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        user32.FindWindowW.restype = ctypes.c_void_p
+        user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+        user32.GetSystemMetrics.restype = ctypes.c_int
+        user32.LoadImageW.argtypes = [
+            ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+            ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+        ]
+        user32.LoadImageW.restype = ctypes.c_void_p
+        user32.SendMessageW.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t,
+        ]
+        user32.SendMessageW.restype = ctypes.c_ssize_t
         if not hwnd and window is not None:
             native = getattr(window, "native", None)
             if native is not None and hasattr(native, "Handle"):
                 try:
-                    hwnd = int(native.Handle)
+                    handle = native.Handle
+                    hwnd = int(handle.ToInt64()) if hasattr(handle, "ToInt64") else int(handle)
                 except Exception:
                     hwnd = None
         if not hwnd:
@@ -488,8 +503,12 @@ def _apply_window_icon(ico_path: str, window=None, hwnd=None) -> None:
 
         if hicon_sm:
             user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_sm)
+        else:
+            _launcher_log("Could not load the small Windows window icon.")
         if hicon_lg:
             user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_lg)
+        else:
+            _launcher_log("Could not load the large Windows window icon.")
     except Exception as exc:
         _launcher_log(f"Failed to apply window icon: {exc}")
 

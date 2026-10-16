@@ -100,7 +100,7 @@ def test_any_failed_chunk_rejects_whole_result(monkeypatch, tmp_path):
     monkeypatch.setattr(s1_engine, "s1_can_handle", lambda **kwargs: True)
     monkeypatch.setattr(s1_engine, "_LLM_LOCK", threading.Lock())
     monkeypatch.setattr(s1_engine, "_chunk_transcript", lambda text, max_chunk_words: ["first", "second"])
-    monkeypatch.setattr(s1_engine, "_polish_chunk_with_s1", lambda _llm, chunk, *_: calls.append(chunk) or ("first clean" if chunk == "first" else None))
+    monkeypatch.setattr(s1_engine, "_polish_chunk_with_s1", lambda _llm, chunk, *_, **__: calls.append(chunk) or ("first clean" if chunk == "first" else None))
     monkeypatch.setattr(s1_engine.time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(s1_engine.polish_with_s1, "_cached_llm", llm, raising=False)
     monkeypatch.setattr(s1_engine.polish_with_s1, "_cached_llm_path", str(tmp_path / "model.gguf"), raising=False)
@@ -153,6 +153,7 @@ def test_command_metadata_is_checked_without_command_object():
     ("source", "candidate"),
     [
         ("Meet me Friday, no wait, Thursday.", "Meet me Thursday."),
+        ("Meet me Friday, sorry, Thursday.", "Meet me Thursday."),
         ("There are twenty five seats.", "There are 25 seats."),
         ("It costs ten or twenty dollars.", "It costs $10 or $20."),
     ],
@@ -165,7 +166,10 @@ def test_canonical_fidelity_accepts_known_s1_normalizations(source, candidate):
     ("source", "candidate"),
     [
         ("Meet me Friday, no wait, Thursday.", "Meet me Monday."),
-        ("Meet me Friday, sorry, Thursday.", "Meet me Thursday."),
+        # Phase 1.1 (VF-1): "Friday, sorry, Thursday" is a spoken self-correction
+        # and "Meet me Thursday." is now accepted (see the accept list above and
+        # tests/test_vf1_regressions.py). The rejected variant keeps the wrong day.
+        ("Meet me Friday, sorry, Thursday.", "Meet me Friday."),
         ("There are twenty five seats.", "There are 25 tables."),
         ("It costs ten or twenty dollars.", "It costs $20."),
         ("Open https://example.com/file/123", "Open https://example.com/file/124"),

@@ -1,0 +1,59 @@
+[
+  {
+    "id": "UNSEEN-001",
+    "category": "prompt",
+    "description": "Complex AI prompt without meta-wrapper",
+    "input_transcript": "can you make me a prompt for gpt four that asks it to extract all named entities from an sec 10k filing and return them in json format",
+    "latency_ms": 14656.0,
+    "raw_output": "Can you make a GPT-4 prompt that asks it to extract all named entities from an SEC 10K filing and return them in JSON format?",
+    "evaluation": "FAIL",
+    "failure_reason": "Meta-wrapper echo: model normalized conversational preamble ('Can you make a GPT-4 prompt...') instead of synthesizing direct imperative prompt instructions for the AI.",
+    "pass": false
+  },
+  {
+    "id": "UNSEEN-002",
+    "category": "followup_edit",
+    "description": "Surgical draft edit of date and time",
+    "input_draft": "The product launch is scheduled for Tuesday at 9:00 AM in the main auditorium.",
+    "input_instruction": "Change Tuesday to Friday and change 9:00 AM to 11:30 AM.",
+    "input_transcript": "let's push the launch to friday at eleven thirty am instead",
+    "latency_ms": 8732.0,
+    "raw_output": "Let us push the launch to Friday at 11:30am instead.",
+    "evaluation": "FAIL",
+    "failure_reason": "Failed to apply edit to draft: model converted the spoken transcript into prose and ignored the prior [Draft] content instead of applying the date/time edit to the draft.",
+    "pass": false
+  },
+  {
+    "id": "UNSEEN-003",
+    "category": "cleanup_corrections",
+    "description": "Multiple speech corrections and currency",
+    "input_transcript": "please wire five thousand dollars no wait seven thousand five hundred dollars to account 9821 by five pm",
+    "latency_ms": 8979.0,
+    "raw_output": "Please wire $7,500 to account 9821 by 5pm.",
+    "evaluation": "PASS",
+    "failure_reason": null,
+    "pass": true
+  },
+  {
+    "id": "UNSEEN-004",
+    "category": "email",
+    "description": "Professional email with distinct subject and sender",
+    "input_transcript": "wanted to let the steering committee know that we successfully closed the acquisition this morning thanks for everyone's support marcus",
+    "latency_ms": 13449.5,
+    "raw_output": "Subject: Successful Closure of Acquisition\n\nDear Steering Committee,\n\nWe are pleased to confirm that we successfully closed the acquisition this morning.\n\nThanks for your support,\nMarcus",
+    "evaluation": "PASS",
+    "failure_reason": null,
+    "pass": true
+  },
+  {
+    "id": "UNSEEN-005",
+    "category": "notes_checklist",
+    "description": "Markdown checklist with intact action items",
+    "input_transcript": "three items for today first review pull request 88 second deploy the hotfix to staging and third notify the customer success team",
+    "latency_ms": 10127.0,
+    "raw_output": "- Review pull request 88\n- Deploy the hotfix to staging\n- Notify the customer success team",
+    "evaluation": "PASS",
+    "failure_reason": null,
+    "pass": true
+  }
+]
