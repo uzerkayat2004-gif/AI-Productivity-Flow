@@ -36,12 +36,13 @@ def baseline_from_workflow_launch():
     record(A, "workflow-launched app is running (baseline)", "ok" if rows else "fail", fmt_rows(rows))
     ls = leftovers()
     record(A, "files created by a first launch from /Applications", "info", ls[:2500], save("first-launch-files.txt", ls))
-    rc, out = sh(f"find {shlex.quote(app)} -newer {shlex.quote(str(OUT / 'system.txt'))} -type f | head -50", quiet=True)
-    # The workflow installs with `cp -R` after system.txt, so every file is
-    # "newer"; only Python bytecode written at runtime is meaningful here.
-    out = "\n".join(l for l in out.splitlines() if l.endswith(".pyc") or "__pycache__" in l)
-    record(A, "nothing written inside the bundle by first launch (/Applications)", "ok" if not out.strip() else "fail",
-           out.strip()[:1500] or "no files in the bundle newer than install time")
+    # The workflow installs with `cp -R` after system.txt, so every shipped file
+    # is "newer" (including shipped .pyc), which made a find-based check
+    # meaningless. The bundle's code signature seals every file: anything the
+    # first launch added or changed inside it breaks `codesign --verify`.
+    rc, out = sh(f"codesign --verify --deep --strict --verbose=2 {shlex.quote(app)} 2>&1", quiet=True, timeout=300)
+    record(A, "nothing written inside the bundle by first launch (/Applications): code signature still seals it", "ok" if rc == 0 else "fail",
+           out.strip()[-1500:])
     k = kill_all()
     record(A, "stop baseline app", "info", f"left after SIGTERM: {k}")
     wipe = wipe_user_data()
@@ -197,11 +198,25 @@ def gatekeeper_quarantined():
         running = app_tree()
         transl = any("AppTranslocation" in r["cmd"] for r in running)
         logs_ok = (HOME / ".voice_flow/logs").exists()
-        record(A, "run quarantined app from ~/Downloads after Gatekeeper allows it (App Translocation, read-only path)",
-               "ok" if up and logs_ok else "fail",
+        # On GitHub runners `spctl --global-disable` does not stop Gatekeeper
+        # (macOS 15 needs a System Settings confirmation; macOS 14 still shows
+        # "Not Opened"), so the process stays suspended behind the dialog.
+        # That is the expected block for an ad-hoc signed app, not an app
+        # failure: the "Open Anyway" path can only be tested on a real Mac.
+        gk_blocked = (not up) and transl and all((r.get("rss_kb") or 0) < 5000 for r in running if "AppTranslocation" in r["cmd"])
+        gk_win = sh("osascript -e 'tell application \"System Events\" to get name of every window of (every process whose name is \"CoreServicesUIAgent\")' 2>/dev/null", quiet=True)[1].strip()
+        status = "ok" if up and logs_ok else ("info" if gk_blocked else "fail")
+        record(A, "run quarantined app from ~/Downloads after Gatekeeper allows it (App Translocation, read-only path)"
+               + (" -- NOT TESTABLE ON CI: Gatekeeper still blocks (needs Open Anyway on a real Mac)" if status == "info" else ""),
+               status,
                f"spctl: {gd.strip()}; api up after {up}s; translocated={transl}; ~/.voice_flow/logs exists={logs_ok}\n{fmt_rows(running)}\nlogs: {sh('ls -la ~/.voice_flow/logs', quiet=True)[1][:800]}", s4)
         tr = quit_app()
-        record(A, "quit translocated app", "ok" if tr["all_gone"] else "fail", json.dumps(tr))
+        if gk_blocked and not tr["all_gone"]:
+            kill_all()
+            sh("killall CoreServicesUIAgent 2>/dev/null; true", quiet=True)
+            record(A, "quit translocated app -- NOT TESTABLE ON CI (app never got past Gatekeeper; killed)", "info", json.dumps(tr) + f"\nGatekeeper UI windows: {gk_win}")
+        else:
+            record(A, "quit translocated app", "ok" if tr["all_gone"] else "fail", json.dumps(tr))
         kill_all()
         sh("sudo spctl --global-enable 2>&1; spctl --status", quiet=True)
         sh(f"xattr -dr com.apple.quarantine {shlex.quote(zapp)}", quiet=True)
@@ -266,7 +281,8 @@ def applications_lifecycle():
     tree = app_tree()
     record(A, "process tree after first launch", "info", fmt_rows(tree), s)
     code, ver = api("/api/version")
-    record(A, "in-app version", "ok" if isinstance(ver, dict) and ver.get("version") == "1.0.2" else "fail", f"{code} {ver}")
+    want = plist(app, "CFBundleShortVersionString")
+    record(A, "in-app version matches the bundle (Info.plist)", "ok" if isinstance(ver, dict) and ver.get("version") == want and want else "fail", f"{code} {ver} plist={want}")
     code, upd = api("/api/updates/check?force=1", timeout=30)
     ok = isinstance(upd, dict) and upd.get("update_available") is False and upd.get("latest_version") in ("1.0.2", "v1.0.2")
     record(A, "update checker on 1.0.2", "ok" if ok else ("info" if isinstance(upd, dict) and "rate limit" in str(upd.get("error")) else "fail"), f"{code} {upd}")
