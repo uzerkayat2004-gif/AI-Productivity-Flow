@@ -97,9 +97,38 @@ def ffprobe_executable() -> Path | None:
     return _runtime_binary("ffmpeg", "ffprobe.exe")
 
 
+def _mac_app_runtime_root() -> Path | None:
+    """``Contents/Resources/runtime`` of the macOS ``.app``, when running from it.
+
+    The Mac bundle marks its runtime with ``build-manifest.json`` (not
+    ``runtime-manifest.json``), so ``runtime_root()`` stays None there and a
+    Mac bundle is never treated as a Windows install. Only bundle-shipped
+    data (the Whisper model) is resolved through this.
+    """
+    candidates: list[Path] = []
+    override = os.environ.get("AI_PRODUCTIVITY_FLOW_ROOT", "").strip()
+    if override:
+        candidates.append(Path(override).expanduser().resolve())
+    package_root = Path(__file__).resolve().parents[2]
+    candidates.append(package_root)
+    candidates.extend(package_root.parents)
+    for root in candidates:
+        runtime = root / "runtime"
+        if (runtime / "build-manifest.json").is_file():
+            return runtime
+    return None
+
+
 def whisper_model_path() -> Path | None:
-    """Bundled faster-whisper base.en model, when installed."""
+    """Bundled faster-whisper base.en model, when installed.
+
+    Windows: ``<install>/runtime/models/whisper/base.en``. macOS ``.app``:
+    ``Contents/Resources/runtime/models/whisper/base.en`` (shipped in the DMG
+    so the first dictation never downloads anything).
+    """
     runtime = runtime_root()
+    if runtime is None and sys.platform == "darwin":
+        runtime = _mac_app_runtime_root()
     if runtime is None:
         return None
     model = runtime / "models" / "whisper" / "base.en"

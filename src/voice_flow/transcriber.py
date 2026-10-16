@@ -588,6 +588,8 @@ class Transcriber:
 
             if not is_local:
                 log.info("[MODEL] Whisper '%s' is not on this device yet; downloading it once.", requested_model)
+            else:
+                log.info("[MODEL] Loading Whisper '%s' from on-device files (offline): %s", requested_model, resolved_model_ref)
             model_inst = WhisperModel(
                 resolved_model_ref,
                 device=config.device,

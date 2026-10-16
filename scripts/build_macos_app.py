@@ -184,6 +184,64 @@ def sanitize_runtime_libraries(runtime_dir: Path) -> None:
         print("Runtime dependency sanitation verified: zero Homebrew linkages found.")
 
 
+# faster-whisper base.en, pinned to the same revision and SHA-256 values as the
+# Windows installer (release/assemble_windows_staging.py and
+# release-packaging/WHISPER_BUNDLE.md). Shipping it in the .app means local
+# dictation works offline from the very first use: nothing is fetched from
+# huggingface.co at runtime.
+WHISPER_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
+WHISPER_BASE = f"https://huggingface.co/Systran/faster-whisper-base.en/resolve/{WHISPER_REVISION}/"
+WHISPER_FILES = {
+    "model.bin": "2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef",
+    "config.json": "f3bc3821e9fc76a27bae538e11ae5b677dcdd352b4600429ce7951d398569aeb",
+    "tokenizer.json": "929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df",
+    "vocabulary.txt": "ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf",
+}
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stage_whisper_model(runtime_dir: Path, cache_dir: Path | None = None, fetch=None) -> dict:
+    """Copy the pinned Whisper base.en files into ``runtime/models/whisper/base.en``.
+
+    Each file is downloaded once into ``.cache/whisper-base.en`` and verified
+    against its SHA-256; a mismatch stops the build.
+    """
+    cache_dir = cache_dir or (REPO_ROOT / ".cache" / "whisper-base.en")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = runtime_dir / "models" / "whisper" / "base.en"
+    target.mkdir(parents=True, exist_ok=True)
+
+    def _download(url: str, dest: Path) -> None:
+        req = urllib.request.Request(url, headers={"User-Agent": "AI-Productivity-Flow-Builder"})
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        with urllib.request.urlopen(req) as resp, open(tmp, "wb") as out:
+            shutil.copyfileobj(resp, out)
+        tmp.replace(dest)
+
+    fetch = fetch or _download
+    hashes: dict[str, str] = {}
+    for name, expected in WHISPER_FILES.items():
+        cached = cache_dir / name
+        if not cached.is_file() or _sha256_file(cached) != expected:
+            print(f"Downloading Whisper base.en {name}...")
+            fetch(WHISPER_BASE + name, cached)
+        actual = _sha256_file(cached)
+        if actual != expected:
+            raise RuntimeError(f"WHISPER CHECKSUM MISMATCH for {name}: {actual} != {expected}")
+        shutil.copy2(cached, target / name)
+        hashes[name] = actual
+    total = sum((target / name).stat().st_size for name in WHISPER_FILES)
+    print(f"Bundled Whisper base.en ({total / 1_048_576:.1f} MB) into {target}")
+    return {"model": "Systran/faster-whisper-base.en", "revision": WHISPER_REVISION, "sha256": hashes}
+
+
 def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
     """Download and bundle standalone Python 3.11 runtime and dependencies into Contents/Resources/runtime."""
     runtime_dir = RESOURCES_DIR / "runtime"
@@ -204,6 +262,7 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         "bundled_runtime": True,
         "supported_architectures": [target_arch],
     }
+    manifest["whisper"] = stage_whisper_model(runtime_dir)
     (runtime_dir / "build-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     python_dir = runtime_dir / "python"
