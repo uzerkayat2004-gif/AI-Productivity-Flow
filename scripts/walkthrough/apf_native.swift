@@ -53,6 +53,59 @@ case "move", "click":
         CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
     print("ok")
+case "cmdopt":
+    // Hold or release Command+Option as real modifier events (the Voice Flow hotkey on Mac).
+    guard args.count >= 3 else { exit(2) }
+    let src = CGEventSource(stateID: .hidSystemState)
+    func flag(_ key: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: down) {
+            e.type = .flagsChanged; e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+    }
+    if args[2] == "down" {
+        flag(0x37, true, [.maskCommand]); usleep(40_000)
+        flag(0x3A, true, [.maskCommand, .maskAlternate])
+    } else {
+        flag(0x3A, false, [.maskCommand]); usleep(40_000)
+        flag(0x37, false, [])
+    }
+    print("ok")
+case "key":
+    // key <keycode> [cmd] : press a key, optionally with Command held.
+    guard args.count >= 3, let kc = UInt16(args[2]) else { exit(2) }
+    let src = CGEventSource(stateID: .hidSystemState)
+    let withCmd = args.count >= 4 && args[3] == "cmd"
+    for down in [true, false] {
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kc), keyDown: down) {
+            if withCmd { e.flags = [.maskCommand] }
+            e.post(tap: .cghidEventTap)
+        }
+        usleep(50_000)
+    }
+    print("ok")
+case "drag":
+    guard args.count >= 6, let x1 = Double(args[2]), let y1 = Double(args[3]), let x2 = Double(args[4]), let y2 = Double(args[5]) else { exit(2) }
+    let a = CGPoint(x: x1, y: y1), b = CGPoint(x: x2, y: y2)
+    CGWarpMouseCursorPosition(a)
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: a, mouseButton: .left)?.post(tap: .cghidEventTap)
+    for i in 1...20 {
+        let t = Double(i) / 20.0
+        let p = CGPoint(x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        usleep(25_000)
+    }
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: b, mouseButton: .left)?.post(tap: .cghidEventTap)
+    print("ok")
+case "axtext":
+    // axtext <pid>: text of the focused element (or first text area) of an app, via Accessibility.
+    guard args.count >= 3, let pid = Int32(args[2]) else { exit(2) }
+    let app = AXUIElementCreateApplication(pid)
+    var focused: CFTypeRef?
+    var value: CFTypeRef?
+    if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let f = focused {
+        AXUIElementCopyAttributeValue(f as! AXUIElement, kAXValueAttribute as CFString, &value)
+    }
+    print((value as? String) ?? "<no AX value>")
 default:
     exit(2)
 }
