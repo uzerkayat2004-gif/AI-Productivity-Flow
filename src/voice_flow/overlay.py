@@ -655,7 +655,7 @@ class FloatingOverlayBar:
                 if self._mac_secondary_click(float(loc.x), primary_h - float(loc.y), on_bar):
                     return None
             except Exception as exc:
-                logging.getLogger(__name__).debug("bar menu monitor error: %s", exc)
+                logging.getLogger(__name__).warning("Floating bar right-click monitor error: %s", exc)
             return event
 
         try:
@@ -665,6 +665,8 @@ class FloatingOverlayBar:
         except Exception as exc:
             logging.getLogger(__name__).warning("Floating bar right-click monitor not installed: %s", exc)
             self._mac_menu_monitor = None
+            return
+        logging.getLogger(__name__).info("[MAC] Floating bar right-click monitor installed")
 
     def _show_app_menu(self, event=None) -> str | None:
         """macOS floating-bar context menu: Open the app window / Quit the app."""
