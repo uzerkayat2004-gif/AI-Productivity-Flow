@@ -150,9 +150,10 @@ def test_engine_downloads_are_pinned_with_sha256():
         assert "arm64" in url or "aarch64" in url
         assert len(sha) == 64 and int(sha, 16) >= 0
     assert builder.LLAMA_CPP_BUILD in builder.LLAMA_CPP_MACOS_ARM64_URL
-    # Same NeMo-Speech release as the Windows runtime download (same C ABI).
-    windows_src = (ROOT / "src/voice_flow/nemotron_engine.py").read_text(encoding="utf-8")
-    assert f"/v{builder.NEMO_SPEECH_VERSION}/" in windows_src
+    # macOS ships NeMo-Speech v0.2.0 (C ABI v1, like the v0.1.0 Windows download):
+    # v0.1.0 was ~20x slower than real time on Apple Silicon.
+    assert builder.NEMO_SPEECH_VERSION == "0.2.0"
+    assert f"/v{builder.NEMO_SPEECH_VERSION}/" in builder.NEMO_SPEECH_MACOS_ARM64_URL
 
 
 def test_download_rejects_checksum_mismatch(tmp_path, monkeypatch):
@@ -292,3 +293,41 @@ def test_nemotron_finds_bundled_dylib_on_mac(mac_bundle, monkeypatch):
 def test_nemotron_worker_spawned_with_native_worker_python():
     source = (ROOT / "src/voice_flow/nemotron_engine.py").read_text(encoding="utf-8")
     assert "NativeASRClient(str(dll_path), runtime_env.native_worker_python())" in source
+
+
+def _spawned_cmd(monkeypatch, tmp_path, platform_name):
+    from voice_flow import vf1_engine
+
+    monkeypatch.setattr(vf1_engine.sys, "platform", platform_name)
+    manager = vf1_engine.LlamaServerManager(run_dir=tmp_path / "run")
+    seen = []
+
+    def fake_spawn(cmd):
+        seen.append(cmd)
+        raise RuntimeError("stop after capturing the command")
+
+    monkeypatch.setattr(manager, "_spawn", fake_spawn)
+    assert manager.ensure_running(binary=tmp_path / "llama-server", model_path=tmp_path / "s1.gguf",
+                                  ready_timeout=0.5) is False
+    return seen[0]
+
+
+def test_llama_server_skips_metal_device_on_mac(monkeypatch, tmp_path):
+    cmd = _spawned_cmd(monkeypatch, tmp_path, "darwin")
+    assert cmd[cmd.index("-dev") + 1] == "none"
+    assert cmd[cmd.index("-ngl") + 1] == "0"
+
+
+def test_llama_server_command_unchanged_off_mac(monkeypatch, tmp_path):
+    cmd = _spawned_cmd(monkeypatch, tmp_path, "win32")
+    assert "-dev" not in cmd
+
+
+def test_llama_server_ready_timeout_longer_on_mac(monkeypatch):
+    from voice_flow import vf1_engine
+
+    engine = vf1_engine.VF1Engine()
+    monkeypatch.setattr(vf1_engine.sys, "platform", "darwin")
+    assert engine._server_ready_timeout() == 60.0
+    monkeypatch.setattr(vf1_engine.sys, "platform", "win32")
+    assert engine._server_ready_timeout() == float(engine.config.server_ready_timeout_seconds)

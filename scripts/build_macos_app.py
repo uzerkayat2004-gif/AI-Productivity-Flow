@@ -59,14 +59,16 @@ LLAMA_CPP_MACOS_ARM64_URL = (
 )
 LLAMA_CPP_MACOS_ARM64_SHA256 = "6aac007fbe153efefe06250d2cf05d0487583aa0706379082ebef2b05579f649"
 
-# Official NVIDIA NeMo-Speech.cpp C ABI runtime for Nemotron speech. Same
-# release (v0.1.0, CPU) the Windows app downloads, so the ABI is identical.
-NEMO_SPEECH_VERSION = "0.1.0"
+# Official NVIDIA NeMo-Speech.cpp C ABI runtime for Nemotron speech (same C ABI
+# v1 the Windows app uses with v0.1.0). macOS ships v0.2.0: on a macOS arm64
+# runner v0.1.0 needed 25-40 s to recognize 4.8 s of audio (and 35 s for the
+# warm-up pass), v0.2.0 takes 0.9-1.3 s with identical text.
+NEMO_SPEECH_VERSION = "0.2.0"
 NEMO_SPEECH_MACOS_ARM64_URL = (
     f"https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v{NEMO_SPEECH_VERSION}/"
     f"nemo-speech-{NEMO_SPEECH_VERSION}-macos-aarch64-cpu.tar.gz"
 )
-NEMO_SPEECH_MACOS_ARM64_SHA256 = "971661d38d4bf97a63c528d13041a964316d25068d8df045e5b4839848092f25"
+NEMO_SPEECH_MACOS_ARM64_SHA256 = "6a91355e15d22db6a319144d389d2e1b02f233c1c6808c0da85b6d3283e52296"
 
 
 def create_info_plist() -> None:

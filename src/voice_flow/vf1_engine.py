@@ -917,8 +917,17 @@ class VF1Engine:
             model_path=Path(model_path),
             host=self.config.server_host,
             port=int(self.config.server_port or 0),
-            ready_timeout=float(self.config.server_ready_timeout_seconds),
+            ready_timeout=self._server_ready_timeout(),
         )
+
+    def _server_ready_timeout(self) -> float:
+        timeout = float(self.config.server_ready_timeout_seconds)
+        if sys.platform == "darwin":
+            # First start after install reads the model and engine from a cold
+            # disk cache (measured 40 s on a CI Mac, ~6 s afterwards); do not
+            # kill a server that is still loading and pay that again.
+            timeout = max(timeout, 60.0)
+        return timeout
 
     def stop_server(self) -> None:
         """Stop the llama-server this app spawned (if any)."""
@@ -1216,6 +1225,12 @@ class LlamaServerManager:
                 "-ngl", "0",
                 "-t", str(threads),
             ]
+            if sys.platform == "darwin":
+                # The bundled macOS build includes Metal. -ngl 0 keeps the
+                # weights on the CPU, but Metal still initialises its device
+                # (and is far slower on virtualised GPUs). "-dev none" skips
+                # it: measured 2.9 s to ready instead of 5.8 s, same output.
+                cmd += ["-dev", "none"]
             log.info("[VF-1] Spawning llama-server on %s:%d", host, chosen_port)
             proc = self._spawn(cmd)
             with self._lock:
