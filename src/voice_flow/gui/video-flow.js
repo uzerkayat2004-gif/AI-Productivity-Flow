@@ -3972,6 +3972,10 @@ function isVideoModelExternal(modelRef) {
 }
 
 async function generateVideoFlow() {
+  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
+    vfToast("Video Flow is coming to Mac soon, available on Windows now", true);
+    return;
+  }
   const sourceInput = document.getElementById("vf-source-input");
   const titleInput = document.getElementById("vf-title-input");
   const button = document.getElementById("vf-generate-button");

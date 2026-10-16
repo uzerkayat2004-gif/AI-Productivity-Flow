@@ -25,7 +25,7 @@ AI Productivity Flow is a desktop AI system engineered to operate seamlessly alo
 
 Select any text, notes, or documentation on screen, or tap a global shortcut to speak naturally:
 
-1. **🎬 Video Flow** — Generate visual explainer videos with narration and synchronized motion graphics. Windows only for now; Mac support is coming later.
+1. **🎬 Video Flow** — Generate visual explainer videos with narration and synchronized motion graphics. Video Flow is coming to Mac soon, available on Windows now.
 2. **🎧 Audio Flow** — Read text aloud or listen to structured multi-depth audio summaries.
 3. **🎙️ Voice Flow** — Dictate directly into any focused application with instant text injection.
 
@@ -55,7 +55,7 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
 
 #### Installing on Mac
 
-The Mac build is Apple Silicon only (M1 or newer). Download links above stay on the latest stable release. On Mac you get Voice Flow and Audio Flow; Video Flow is Windows only for now, and Mac support is coming later.
+The Mac build is Apple Silicon only (M1 or newer); it does not run on Intel Macs. Download links above stay on the latest stable release. On Mac you get Voice Flow and Audio Flow. Video Flow is coming to Mac soon, available on Windows now.
 
 1. Open the DMG and drag the app to Applications.
 2. The app is not signed yet, so the first time you open it macOS blocks it. On macOS 15 and later, right-click → Open no longer gets past this. Instead:
@@ -76,7 +76,7 @@ The Mac build is Apple Silicon only (M1 or newer). Download links above stay on 
 
 Video Flow transforms dense articles, technical notes, or documentation into structured, animated MP4 explainer videos with synchronized voiceover narration.
 
-> **Platform note:** Video Flow is Windows only for now. Mac support is coming later.
+> **Platform note:** Video Flow is coming to Mac soon, available on Windows now.
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/61afd3f3-d75b-4cff-8010-6a7f0d8657a9" controls width="100%"></video>

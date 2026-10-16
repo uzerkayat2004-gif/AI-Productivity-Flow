@@ -68,6 +68,18 @@ from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION, RUNTIME_FEATUR
 from voice_flow.runtime_guard import runtime_is_compatible
 from voice_flow.local_server import LoopbackHTTPServer, require_loopback_host
 from voice_flow.video_flow_service import get_video_flow_service
+from voice_flow.video_flow_platform import video_flow_supported, video_flow_unsupported_payload
+
+# Video Flow POST routes that start or re-run a render. Refused on macOS,
+# where the render toolchain is not bundled yet. NotebookLM sign-in and the
+# provider/key routes stay open: Audio Flow summaries and text polish share them.
+VIDEO_FLOW_RENDER_POST_PATHS = frozenset({
+    "/api/video-flow/generate",
+    "/api/video-flow/v3/generate",
+    "/api/video-flow/videos/retry",
+    "/api/video-flow/analyze-source",
+    "/api/video-flow/documents/extract",
+})
 
 GUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8991
@@ -2655,6 +2667,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
 
         path = urllib.parse.urlparse(self.path).path
+
+        if path in VIDEO_FLOW_RENDER_POST_PATHS and not video_flow_supported():
+            # macOS build ships no Video Flow render toolchain yet; refuse
+            # before any job, analyzer, or Windows-only code is reached.
+            self.send_json_response(video_flow_unsupported_payload(), 501)
+            return
 
         if path in {"/auth/logout", "/auth/desktop/session", "/api/auth/google", "/api/auth/google/start", "/api/auth/register", "/api/auth/login", "/api/auth/switch", "/api/auth/logout", "/api/app/restart", "/api/storage/clear-audio-cache", "/api/overlay/reset-and-refresh"}:
             reason = settings_busy_reason()
@@ -9000,6 +9018,8 @@ def _complete_video_flow_oauth(service, provider_id, code, state=None, redirect_
 
 def _focus_app_window() -> None:
     """Bring the Voice Flow desktop window forward after OAuth completes."""
+    if sys.platform != "win32":
+        return
     try:
         import ctypes
         user32 = ctypes.windll.user32

@@ -343,12 +343,10 @@ jobs:
               EXIT_CODE=0
               wait "$APP_PID" || EXIT_CODE=$?
               echo "App process crashed or exited prematurely after ${i}s (exit code ${EXIT_CODE})!"
-              RESOURCES="dist/AI Productivity Flow.app/Contents/Resources"
               python scripts/report_macos_launch_failure.py \
                 --output "$RUNNER_TEMP/macos_launch_failure_safe.log" \
                 "$LOG_FILE" \
-                "$RESOURCES/crash_log.txt" \
-                "$RESOURCES/voice_flow_debug.log" \
+                "$HOME/.voice_flow/logs/crash_log.txt" \
                 "$HOME/.voice_flow/logs/voice_flow_debug.log" \
                 "$HOME/.voice_flow/gui_crash.log" \
                 "$HOME/.voice_flow/gui_launcher.log"

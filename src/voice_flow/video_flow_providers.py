@@ -135,6 +135,8 @@ def antigravity_executable_candidates() -> list[Path]:
 
 def _file_description(path: Path) -> str:
     """Return the FileDescription of a Windows PE file, or '' when unknown."""
+    if sys.platform != "win32":
+        return ""
     try:
         import ctypes
         from ctypes import wintypes
