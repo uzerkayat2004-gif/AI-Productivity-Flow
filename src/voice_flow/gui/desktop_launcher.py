@@ -226,6 +226,21 @@ def _poke_keepalive_refresh() -> None:
 
 
 
+def _mac_engine_lock_held() -> bool:
+    """macOS: True while an engine process holds the per-user engine lock."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        from voice_flow.platform.macos_lifecycle import ENGINE_LOCK_NAME, InstanceLock
+        probe = InstanceLock(_data_dir() / ENGINE_LOCK_NAME)
+        if probe.acquire():
+            probe.release()
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def _is_backend_running() -> bool:
     """Check if Voice Flow watchdog or main engine is already running."""
     try:
@@ -233,6 +248,11 @@ def _is_backend_running() -> bool:
             return True
     except Exception:
         pass
+
+    # The packaged Mac engine runs as the bundle executable, not "python", so
+    # the process scan below cannot see it; its lock is the reliable signal.
+    if _mac_engine_lock_held():
+        return True
 
     try:
         from voice_flow.paths import data_dir
@@ -719,6 +739,9 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         except Exception:
             pass
 
+        if sys.platform == "darwin":
+            _install_mac_window_lifecycle(window)
+
         # Start pywebview loop with custom icon. private_mode=False keeps the
         # WebView profile (localStorage: onboarding flags, theme) across
         # launches; pywebview defaults to a throwaway private profile.
@@ -729,6 +752,52 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
         _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+
+
+def _install_mac_window_lifecycle(window) -> None:
+    """macOS: Quit ends the whole app; a second launch raises this window.
+
+    Closing the window (red button / Cmd+W) still only closes the window: the
+    engine keeps dictation running and its menu bar item / floating bar menu
+    offer "Open" and "Quit AI Productivity Flow".
+    """
+    try:
+        from voice_flow.platform import macos_lifecycle
+    except Exception as exc:
+        _launcher_log(f"mac lifecycle unavailable: {exc}")
+        return
+
+    def _quit_everything() -> None:
+        _launcher_log("app quit (Cmd+Q / Dock / Apple Event) - asking the engine to quit")
+        macos_lifecycle.notify_engine_quit(port=PORT, reason="window-quit")
+
+    def _show() -> None:
+        try:
+            window.restore()
+        except Exception:
+            pass
+        window.show()
+
+    if macos_lifecycle.install_terminate_observer(_quit_everything):
+        _launcher_log("mac quit observer installed")
+    macos_lifecycle.serve_desktop_control(_show)
+
+
+def _mac_window_already_running() -> bool:
+    """macOS single window process: raise the running one and report True."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        from voice_flow.platform import macos_lifecycle
+    except Exception:
+        return False
+    if macos_lifecycle.acquire_desktop_lock():
+        return False
+    for _ in range(20):  # the other window may still be starting
+        if macos_lifecycle.send_desktop_show():
+            break
+        time.sleep(0.25)
+    return True
 
 
 def _focus_existing_window() -> bool:
@@ -922,6 +991,10 @@ def _wait_for_existing_window(
 
 def _run_desktop_launcher() -> None:
     """Single-instance entry flow shared by direct and boot launches."""
+    if _mac_window_already_running():
+        _launcher_log("window process already running - raised it, exiting duplicate launcher")
+        sys.exit(0)
+
     if _focus_existing_window():
         _launcher_log("existing window focused - exiting duplicate launcher")
         print("[GUI] Desktop App window already open — focusing it instead of launching a duplicate.")

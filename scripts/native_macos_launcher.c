@@ -64,7 +64,10 @@ int main(int argc, char **argv) {
         contents, contents, home);
     if (length < 0 || (size_t)length >= sizeof(pythonpath) ||
         setenv("PYTHONHOME", home, 1) || prepend_env("PYTHONPATH", pythonpath) ||
-        prepend_env("PATH", bin)) {
+        prepend_env("PATH", bin) ||
+        /* Never write .pyc files into the signed bundle: the build ships
+         * unchecked-hash bytecode, so nothing needs to be cached at runtime. */
+        setenv("PYTHONDONTWRITEBYTECODE", "1", 1)) {
         fprintf(stderr, "AI Productivity Flow: cannot configure bundled runtime.\n");
         return 1;
     }

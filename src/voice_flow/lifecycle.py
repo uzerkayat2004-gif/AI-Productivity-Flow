@@ -579,6 +579,16 @@ def restart_suite(runtime_controller: object | None = None) -> bool:
     if not try_acquire_restart_lock():
         return False
 
+    if sys.platform == "darwin":
+        # macOS: the engine quits itself (by its real pid, not a process-name
+        # sweep) and a detached waiter reopens the app once it has exited.
+        from voice_flow.platform import macos_lifecycle
+
+        if macos_lifecycle.restart_app(runtime_controller):
+            return True
+        release_restart_lock()
+        return False
+
     # 3. Spawn a detached background restart worker
     from voice_flow.watchdog import get_pythonw_executable, get_pythonw_env, get_silent_windows_spawn_kwargs
 

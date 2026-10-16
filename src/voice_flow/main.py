@@ -3706,7 +3706,10 @@ class VoiceFlowApp:
             args = getattr(self, "args", None)
             headless = getattr(args, "headless", False) if args else False
             no_gui = getattr(args, "no_gui", False) if args else False
-            if not headless and not no_gui:
+            if sys.platform == "darwin":
+                if not headless and not no_gui:
+                    self.open_desktop_window()
+            elif not headless and not no_gui:
                 window_open = False
                 try:
                     from voice_flow.gui.desktop_launcher import _focus_existing_window
@@ -3739,6 +3742,9 @@ class VoiceFlowApp:
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 
+        if sys.platform == "darwin":
+            self._install_mac_lifecycle_ui()
+
         # Run Tkinter Floating Overlay Bar on the MAIN THREAD
         while not getattr(self, "_shutdown_requested", False):
             try:
@@ -3747,6 +3753,154 @@ class VoiceFlowApp:
             except Exception as e:
                 log.error("Overlay main loop error: %s", e)
                 time.sleep(1.0)
+
+    # ------------------------------------------------------------------
+    # macOS lifecycle: window process, real Quit, menu bar item.
+    # ------------------------------------------------------------------
+    def _desktop_process_alive(self) -> bool:
+        proc = getattr(self, "_desktop_proc", None)
+        try:
+            return proc is not None and proc.poll() is None
+        except Exception:
+            return False
+
+    def _spawn_desktop_window(self) -> bool:
+        """Start the window process as a reaped child of the engine (macOS)."""
+        from voice_flow.platform import macos_lifecycle
+        from voice_flow.watchdog import get_pythonw_env, get_pythonw_executable
+
+        with self._desktop_lock():
+            if self._desktop_process_alive():
+                return True
+            try:
+                proc = subprocess.Popen(
+                    [get_pythonw_executable(), "-m", "voice_flow.gui.desktop_launcher"],
+                    cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+                    env=get_pythonw_env(),
+                    close_fds=True,
+                )
+            except Exception as exc:
+                log.warning("Could not launch Desktop GUI: %s", exc)
+                return False
+            self._desktop_proc = proc
+
+        def _on_exit(code: int, proc=proc) -> None:
+            log.info("[MAC] Window process %s exited (code %s); dictation keeps running.", proc.pid, code)
+            if getattr(self, "_desktop_proc", None) is proc:
+                self._desktop_proc = None
+
+        macos_lifecycle.reap_when_done(proc, _on_exit)
+        return True
+
+    def _desktop_lock(self):
+        lock = getattr(self, "_desktop_proc_lock", None)
+        if lock is None:
+            lock = self._desktop_proc_lock = threading.Lock()
+        return lock
+
+    def open_desktop_window(self) -> bool:
+        """Show the main window: raise the running one or start it (macOS)."""
+        if getattr(self, "_shutdown_requested", False):
+            return False
+        from voice_flow.platform import macos_lifecycle
+
+        if self._desktop_process_alive():
+            if macos_lifecycle.send_desktop_show():
+                return True
+            proc = getattr(self, "_desktop_proc", None)
+            return macos_lifecycle.activate_process(proc.pid) if proc is not None else False
+        # A window process not started by this engine (e.g. opened directly).
+        if macos_lifecycle.send_desktop_show():
+            return True
+        return self._spawn_desktop_window()
+
+    def request_quit(self, reason: str = "user") -> bool:
+        """End the whole app: window, engine, helpers. Idempotent, never blocks."""
+        if getattr(self, "_quit_started", False):
+            return True
+        self._quit_started = True
+        self._shutdown_requested = True
+        log.info("[QUIT] Quit requested (%s): stopping AI Productivity Flow.", reason)
+        from voice_flow.platform import macos_lifecycle
+
+        def _hard_exit() -> None:
+            log.warning("[QUIT] Cleanup exceeded %.0fs; exiting now.", macos_lifecycle.QUIT_HARD_DEADLINE_SECONDS)
+            self._final_exit()
+
+        watchdog_timer = threading.Timer(macos_lifecycle.QUIT_HARD_DEADLINE_SECONDS, _hard_exit)
+        watchdog_timer.daemon = True
+        watchdog_timer.start()
+
+        def _bounded(fn, seconds: float) -> None:
+            worker = threading.Thread(target=fn, daemon=True)
+            worker.start()
+            worker.join(seconds)
+
+        def _cleanup() -> None:
+            macos_lifecycle.stop_process(getattr(self, "_desktop_proc", None), timeout=1.0)
+            _bounded(self._stop_for_quit, 2.0)
+            try:
+                from voice_flow import child_processes
+                _bounded(child_processes.shutdown, 2.0)
+            except Exception:
+                pass
+            macos_lifecycle.terminate_descendants(timeout=1.0)
+            macos_lifecycle.stop_supervisor_parent()
+            log.info("[QUIT] AI Productivity Flow stopped.")
+            watchdog_timer.cancel()
+            self._final_exit()
+
+        threading.Thread(target=_cleanup, daemon=True, name="VoiceFlowQuit").start()
+        return True
+
+    def _stop_for_quit(self) -> None:
+        try:
+            self.overlay.hide()
+        except Exception:
+            pass
+        try:
+            self.stop()
+        except Exception as exc:
+            log.debug("[QUIT] stop() error: %s", exc)
+
+    def _final_exit(self, code: int = 0) -> None:
+        try:
+            from voice_flow.platform import macos_lifecycle
+            macos_lifecycle.release_engine_lock()
+        except Exception:
+            pass
+        try:
+            logging.shutdown()
+        except Exception:
+            pass
+        os._exit(code)
+
+    def _install_mac_lifecycle_ui(self) -> None:
+        """Quit/Reopen Apple Events, menu bar item, floating-bar menu (macOS)."""
+        from voice_flow.platform import macos_lifecycle
+
+        overlay = getattr(self, "overlay", None)
+        root = getattr(overlay, "root", None)
+        if root is None and overlay is not None:
+            try:  # early creation failed in __init__; run_loop reuses this window
+                overlay._create_window()
+                root = getattr(overlay, "root", None)
+            except Exception as exc:
+                log.debug("[MAC] Could not create Tk root for lifecycle hooks: %s", exc)
+        quit_from_ui = lambda: self.request_quit("menu")  # noqa: E731
+        reopen = lambda: threading.Thread(target=self.open_desktop_window, daemon=True).start()  # noqa: E731
+        show_bar = lambda: overlay.show() if overlay is not None else None  # noqa: E731
+        macos_lifecycle.install_tk_app_handlers(
+            root, lambda: (self.request_quit("apple-event"), "")[1], reopen)
+        if overlay is not None:
+            overlay.app_menu_actions = {"open": reopen, "quit": quit_from_ui}
+        if root is not None and hasattr(root, "after"):
+            def _add_status_item() -> None:
+                self._status_item = macos_lifecycle.install_status_item(reopen, quit_from_ui, show_bar)
+            try:
+                root.after(200, _add_status_item)
+            except Exception:
+                pass
 
     def reset_state_and_refresh(self) -> None:
         """Reset dictation/audio state, cancel any in-flight/stuck recordings, and restart/refresh overlay."""
@@ -3788,6 +3942,33 @@ VoiceFlowController = VoiceFlowApp
 
 
 _ENGINE_MUTEX_HANDLE = None
+
+
+def _mac_show_running_instance() -> bool:
+    try:
+        from voice_flow.platform import macos_lifecycle
+        return macos_lifecycle.ask_running_engine_to_show_window()
+    except Exception as exc:
+        log.debug("Signaling running instance error: %s", exc)
+        return False
+
+
+def _mac_take_engine_lock() -> bool:
+    """True when this process may run the engine (macOS single instance)."""
+    from voice_flow.platform import macos_lifecycle
+
+    if macos_lifecycle.acquire_engine_lock():
+        try:
+            from voice_flow.platform import get_backend
+            migrate = getattr(get_backend(), "migrate_legacy_login_item", None)
+            if callable(migrate) and migrate():
+                log.info("[MAC] Login item renamed to com.uzerkayat.aiproductivityflow.")
+        except Exception as exc:
+            log.debug("Login item migration skipped: %s", exc)
+        return True
+    log.info("[MAC] AI Productivity Flow is already running; bringing it forward and exiting this copy.")
+    _mac_show_running_instance()
+    return False
 
 
 def main() -> None:
@@ -3839,6 +4020,13 @@ def main() -> None:
         except Exception:
             pass
 
+    # macOS: one engine per user. A second launch (e.g. the copy inside the
+    # DMG while the /Applications copy runs) must not register a second set
+    # of hotkeys (double paste); it brings the running app forward instead.
+    if sys.platform == "darwin" and "pytest" not in sys.modules:
+        if not _mac_take_engine_lock():
+            return
+
     app: VoiceFlowApp | None = None
     try:
         from voice_flow.gui.api_server import PORT
@@ -3847,6 +4035,12 @@ def main() -> None:
         runtime_port = prepare_runtime_port(port=PORT, require_engine=True)
         if runtime_port.status == "occupied":
             log.warning("Port 8991 is currently occupied by another listener.")
+            return
+        if sys.platform == "darwin" and runtime_port.status == "compatible":
+            # A live engine (an older copy without the lock) already serves
+            # dictation; starting another would double every paste.
+            log.info("[MAC] AI Productivity Flow is already running; showing it instead.")
+            _mac_show_running_instance()
             return
         app = VoiceFlowApp()
         app.run()

@@ -1083,7 +1083,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/me":
             from voice_flow.google_auth import handle_me
-            handle_me(self)
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            handle_me(self, optional=query.get("optional", ["0"])[0] in ("1", "true"))
             return
         if path == "/api/platform/permissions":
             from voice_flow.platform import get_backend
@@ -4103,6 +4104,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": True, "job_id": job.job_id, "video": _shim_video(job)}, 202)
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 400)
+
+        elif path in ("/api/app/quit", "/api/app/open-window"):
+            # macOS lifecycle: Cmd+Q / Dock Quit in the window process ends the
+            # whole app; a second launch raises the existing window.
+            controller = runtime_controller
+            action = "request_quit" if path == "/api/app/quit" else "open_desktop_window"
+            fn = getattr(controller, action, None) if controller is not None else None
+            if sys.platform != "darwin" or not callable(fn):
+                self.send_json_response({"success": False, "error": "Not available on this platform."}, 404)
+                return
+            try:
+                if path == "/api/app/quit":
+                    ok = bool(fn(str(data.get("reason") or "api")))
+                else:
+                    ok = bool(fn())
+                self.send_json_response({"success": ok}, 200 if ok else 503)
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
 
         elif path == "/api/app/restart":
             try:
