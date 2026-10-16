@@ -339,9 +339,12 @@ class Win32MouseHook:
             if drag_dist < 16.0:
                 self._dispatch_action(self._safe_on_mouse_release, x, y, drag_dist, start_x, start_y, selection_epoch)
             else:
+                log.info("[MOUSE HOOK] macOS drag release (%.0f px) queued for selection capture.", drag_dist)
                 self._enqueue_selection(self._safe_on_mouse_release, x, y, drag_dist, start_x, start_y, selection_epoch)
         except Exception:
             self._callback_error_count += 1
+            if self._callback_error_count <= 3:
+                log.warning("[MOUSE HOOK] macOS click callback failed", exc_info=True)
 
     # -- Internal Hook Lifecycle --
 

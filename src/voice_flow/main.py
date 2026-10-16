@@ -2869,6 +2869,11 @@ class VoiceFlowApp:
         audio_enabled = self._get_cached_setting("audio_flow_enabled", True)
         video_enabled = self._get_cached_setting("video_flow_enabled", True)
         if (not audio_enabled and not video_enabled) or getattr(self, "state", DictationState.IDLE) != DictationState.IDLE or self.is_recording:
+            if sys.platform == "darwin" and drag_distance >= 16.0:
+                log.info(
+                    "[AUDIO FLOW] Selection ignored on macOS: audio=%s video=%s state=%s recording=%s",
+                    audio_enabled, video_enabled, getattr(self, "state", None), self.is_recording,
+                )
             self.overlay.clear_selected_text()
             audio_flow_widget.hide()
             return
@@ -3012,9 +3017,11 @@ class VoiceFlowApp:
         def _check() -> None:
             try:
                 if not _still_current():
+                    log.info("[AUDIO FLOW] macOS selection superseded before capture (state=%s).", getattr(self, "state", None))
                     return
                 owner = macos_native.frontmost_window_owner()
                 if callable(is_own_app) and is_own_app(owner):
+                    log.info("[AUDIO FLOW] macOS selection skipped: frontmost window is ours (%s).", owner.get("app"))
                     return  # never read our own windows
                 app_name = str(owner.get("app", "")).lower()
                 if any(kw in app_name for kw in ("screenshot", "screencapture")):
@@ -3023,16 +3030,18 @@ class VoiceFlowApp:
                 time.sleep(0.08)
                 selected = self.injector.get_selected_text_strict()
                 if not _still_current():
+                    log.info("[AUDIO FLOW] macOS selection superseded during capture.")
                     return
                 if selected and len(selected.strip()) > 1:
                     log.info("[AUDIO FLOW] Selection captured on macOS (%d chars) from %s.", len(selected.strip()), owner.get("app") or "frontmost app")
                     self.overlay.set_selected_text(selected, timeout_ms=self.MAC_SELECTION_TIMEOUT_MS)
                     audio_flow_widget.show_at(x, y, selected)
                 else:
+                    log.info("[AUDIO FLOW] macOS drag ended with no readable selection in %s.", owner.get("app") or "frontmost app")
                     self.overlay.clear_selected_text()
                     audio_flow_widget.hide()
             except Exception as exc:
-                log.debug("[AUDIO FLOW] macOS selection capture failed: %s", exc)
+                log.warning("[AUDIO FLOW] macOS selection capture failed: %s", exc, exc_info=True)
                 if _still_current():
                     self.overlay.clear_selected_text()
                     audio_flow_widget.hide()
@@ -3102,6 +3111,7 @@ class VoiceFlowApp:
             with self._get_read_generation_lock():
                 player_active = bool(getattr(self, "_active_summary_player_token", None))
                 if player_active or tts_engine.is_speaking():
+                    log.info("[AUDIO FLOW] Audio is playing (player=%s); this press stops it.", player_active)
                     self._stop_audio_flow_pipeline()
                     return
 
@@ -3126,6 +3136,8 @@ class VoiceFlowApp:
                     log.info("[AUDIO FLOW] Using the selection captured from the mouse (%d chars).", len(cached))
                     text_to_read = cached
         if not text_to_read or not text_to_read.strip():
+            if sys.platform == "darwin":
+                log.info("[AUDIO FLOW] No selected text found to read (state=%s).", getattr(self, "state", None))
             if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
                 audio_flow_widget.set_playing(False)
                 self.overlay.show_error("Select text to listen")
@@ -3149,6 +3161,7 @@ class VoiceFlowApp:
             if player_active or tts_engine.is_speaking():
                 self._stop_audio_flow_pipeline()
             if self.state != DictationState.IDLE:
+                log.info("[AUDIO FLOW] Read not started: dictation state is %s.", self.state)
                 return
             generation = getattr(self, "_read_generation", 0) + 1
             self._read_generation = generation
