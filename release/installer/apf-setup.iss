@@ -5,7 +5,7 @@
 #define MyAppName "AI Productivity Flow"
 #define MyAppVersion "1.0.2"
 #define MyAppPublisher "Uzer Kayat"
-#define MyAppURL "https://ai-productivity-flow.vercel.app/"
+#define MyAppURL "https://aiproductivityflow.site/"
 #define MyAppExeName "pythonw.exe"
 
 #ifndef REPO_ROOT

@@ -235,7 +235,10 @@ def test_processing_rows_do_not_schedule_static_animation_timer() -> None:
     bar.show_video_progress("video", 5, "Rendering")
     bar.show_audio_summary_progress(10, "Synthesizing", job_id="audio-1")
     bar.show_audio_summary_progress(20, "Synthesizing", job_id="audio-2")
-    assert bar.root.callbacks == []
+    # The shared UI dispatcher may arm a one-shot pump to deliver the redraw;
+    # what must never appear is a repeating static-animation timer.
+    timers = [cb for cb in bar.root.callbacks if "UiDispatcher" not in getattr(cb[1], "__qualname__", "")]
+    assert timers == []
 
 
 def test_restart_refresh_preserves_background_job_rows_without_tk() -> None:

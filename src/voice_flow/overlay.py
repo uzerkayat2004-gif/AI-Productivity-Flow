@@ -1905,6 +1905,11 @@ class FloatingOverlayBar:
 
     def _draw(self) -> None:
         previous_theme = getattr(self, "_frame_theme_dark", None)
+        if previous_theme is None:
+            # Each frame reads the theme exactly once (so a change shows on the
+            # next frame); color lookups inside the frame reuse that snapshot,
+            # and calls between frames reuse the short theme cache.
+            self._theme_cache_until = 0.0
         self._frame_theme_dark = self._is_theme_dark()
         try:
             self._draw_frame()

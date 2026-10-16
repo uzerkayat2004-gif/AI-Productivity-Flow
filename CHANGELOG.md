@@ -3,7 +3,13 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.0.2 - 2026-10-16
+
+### Voice Flow
+- **Local S1-mini polish (VF-1)**: Voice Flow can clean up dictation on the device with the S1-mini model, through llama-cpp or a local llama-server, with a factual safety gate that rejects output that drops or invents content.
+- **Review before risky edits**: A review step keeps the original draft when the polished text changes names, numbers, or other facts.
+- **Faster, steadier speech recognition**: The Nemotron recognizer runs in its own worker process, stays warm between dictations, and re-decodes short recordings with full context for better accuracy.
+- **Smarter voice commands**: Task-aware time limits, safer command checks, email layouts that handle "Hey/He <Name>," greetings, and tolerance for common mishearings of "Hey Voice Flow".
 
 ### Dictionary rebuilt
 - **Words and Replacements, nothing else**: A saved Word (a name or special term such as Kubernetes) is sent to the speech recognizer as a bias term, given to the cloud polisher as a preferred spelling, and afterwards fixes only its own spelling, keeping plural and possessive endings. A Replacement ("Heard as") swaps only the exact misheard phrase the user wrote.
@@ -13,7 +19,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Recognizer biasing**: Nemotron speech context, faster-whisper hotwords, Deepgram keyterms, and cloud prompts now receive the user's terms.
 - **One-time reset**: On first start the old dictionary rows, replacements, and learning data are saved to `dictionary-backup-before-rebuild-<time>.json` in the data folder and cleared. Shortcuts, history, settings, and keys are unchanged.
 
-## 1.0.2 - 2026-10-09
+### Onboarding and app
+- **Guides show once**: Each feature guide starts automatically only the first time; Replay onboarding shows them again.
+- **Lighter onboarding**: Demo videos load only when their guide opens, and hidden onboarding screens do no layout work.
+- **Audio Flow and Video Flow upgrades**: Reworked players, progress rows, and a shared UI dispatcher for the floating bar.
 
 ### Standalone Runtime & macOS App Enhancements
 - **Hermetic macOS Runtime**: Bundled standalone Python 3.11 (`python-build-standalone`) directly within `Contents/Resources/runtime/python` to ensure execution on clean macOS environments without system or Homebrew Python dependencies.
