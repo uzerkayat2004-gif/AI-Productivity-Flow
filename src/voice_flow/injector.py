@@ -830,6 +830,164 @@ def _format_text_for_title(text: str, window_title: str) -> str:
     return text
 
 
+# Outcome of the most recent inject_text() call, for honest status reporting.
+#   "pasted"                  keystroke delivered to the frontmost app
+#   "copied_needs_permission" macOS would drop Cmd+V (no Accessibility); the
+#                             text was left on the clipboard for a manual paste
+#   "copied_internal"         target was our own window; text left on clipboard
+#   "failed"                  nothing could be done
+_last_injection_outcome = "failed"
+PASTE_PERMISSION_MESSAGE = (
+    "Text copied. Press Cmd+V to paste it. To paste automatically, allow AI Productivity Flow in "
+    "System Settings > Privacy & Security > Accessibility."
+)
+
+
+def last_injection_outcome() -> str:
+    return _last_injection_outcome
+
+
+def _set_injection_outcome(outcome: str) -> None:
+    global _last_injection_outcome
+    _last_injection_outcome = outcome
+
+
+def _notify_paste_needs_permission() -> None:
+    """Tell the user plainly that the text is on the clipboard (macOS).
+
+    Shown as a system notification because the floating bar's short status
+    line cannot carry the instruction. Throttled so a burst of dictations does
+    not spam Notification Center."""
+    global _last_permission_notice
+    now = time.time()
+    if now - _last_permission_notice < 60.0:
+        return
+    _last_permission_notice = now
+    try:
+        import subprocess
+
+        script = (
+            'display notification "Press Cmd+V to paste. Allow Accessibility in System Settings to paste '
+            'automatically." with title "AI Productivity Flow" subtitle "Text copied, not pasted"'
+        )
+        subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        log.debug("[INJECTOR] Could not show paste-permission notification.", exc_info=True)
+
+
+_last_permission_notice = 0.0
+
+
+def _mac_paste_landed(before: dict, timeout: float = 1.0) -> bool:
+    """After Cmd+V on macOS, check the focused field's AXValue changed.
+
+    Only decides "not landed" when the field's text value was readable both
+    before and after and stayed identical; anything we cannot read (web views,
+    terminals, custom controls) is given the benefit of the doubt."""
+    before_value = before.get("value")
+    if before.get("value_status") != 0 or not isinstance(before_value, str):
+        return True
+    try:
+        from voice_flow.platform import macos_native
+    except Exception:
+        return True
+    deadline = time.monotonic() + timeout
+    readable_after = False
+    while True:
+        time.sleep(0.05)
+        after = macos_native.focused_value_snapshot()
+        if after.get("value_status") == 0 and isinstance(after.get("value"), str):
+            readable_after = True
+            if after.get("value") != before_value:
+                return True
+        if time.monotonic() >= deadline:
+            return not readable_after
+
+
+def _inject_text_non_windows(text: str, press_enter: bool = False) -> bool:
+    """macOS paste: never report success for a keystroke the OS will drop."""
+    _set_injection_outcome("failed")
+    try:
+        from voice_flow.platform import get_backend
+
+        backend = get_backend()
+        if backend.is_own_window_focused():
+            log.warning("[INJECTOR] Target is an internal app window; refusing to paste into internal app. Dictation remains safely on clipboard.")
+            if text:
+                backend.copy_to_clipboard(text)
+            _set_injection_outcome("copied_internal")
+            return False
+        can_post = getattr(backend, "can_post_events", None)
+        before_snapshot: dict | None = None
+        ax_disabled = False
+        if sys.platform == "darwin":
+            try:
+                from voice_flow.platform import macos_native
+
+                if text:
+                    before_snapshot = macos_native.focused_value_snapshot()
+                    # The live AX error is the truth; AXIsProcessTrusted() can
+                    # stay True in-process after Accessibility is revoked.
+                    ax_disabled = before_snapshot.get("focus_status") == macos_native.kAXErrorAPIDisabled
+                log.info(
+                    "[INJECTOR] macOS paste permission check: accessibility=%s post_events=%s ax_read=%s",
+                    macos_native.accessibility_trusted(prompt=False),
+                    macos_native.preflight_post_event_access(),
+                    (before_snapshot or {}).get("focus_status"),
+                )
+            except Exception:
+                before_snapshot = None
+        if ax_disabled or (callable(can_post) and not can_post()):
+            # Cmd+V would be silently discarded. Leave the dictation on the
+            # clipboard (no restore: restoring is what lost the text) and say so.
+            if text and backend.copy_to_clipboard(text):
+                log.warning(
+                    "[INJECTOR] Accessibility is not granted; Cmd+V cannot be sent. Text left on the clipboard (%d chars) for a manual paste.",
+                    len(text),
+                )
+                _set_injection_outcome("copied_needs_permission")
+                _notify_paste_needs_permission()
+            else:
+                log.error("[INJECTOR] Accessibility is not granted and the clipboard could not be written.")
+            return False
+        saved = backend.read_clipboard()
+        if text and not backend.copy_to_clipboard(text):
+            log.error("[INJECTOR] Could not write text to clipboard; skipping paste.")
+            return False
+        time.sleep(0.015)
+        ok = bool(backend.send_paste()) if text else True
+        if press_enter:
+            time.sleep(0.05)
+            backend.send_enter()
+        if ok and text and before_snapshot is not None and not _mac_paste_landed(before_snapshot):
+            ok = False
+            log.warning(
+                "[INJECTOR] Cmd+V was sent but the focused field did not change; the paste did not land "
+                "(Accessibility likely revoked). Text left on the clipboard (%d chars).",
+                len(text),
+            )
+        if not ok:
+            log.warning("[INJECTOR] Cmd+V could not be sent; text left on the clipboard.")
+            if text:
+                _set_injection_outcome("copied_needs_permission")
+                _notify_paste_needs_permission()
+            return False
+        if saved and text:
+            def _restore_clip(expected: str = text) -> None:
+                time.sleep(0.25)
+                # Only restore when the clipboard still holds our dictation;
+                # never overwrite something the user copied in the meantime.
+                if backend.read_clipboard() == expected:
+                    backend.copy_to_clipboard(saved)
+
+            threading.Thread(target=_restore_clip, daemon=True).start()
+        _set_injection_outcome("pasted")
+        return True
+    except Exception as exc:
+        log.error("[INJECTOR] Non-Windows inject_text failed: %s", exc)
+        return False
+
+
 def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = False) -> bool:
     """Inject polished text into the target application window via clipboard paste."""
     if not text and not press_enter:
@@ -837,31 +995,7 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
         return False
 
     if not IS_WINDOWS:
-        try:
-            from voice_flow.platform import get_backend
-            backend = get_backend()
-            if backend.is_own_window_focused():
-                log.warning("[INJECTOR] Target is an internal app window; refusing to paste into internal app. Dictation remains safely on clipboard.")
-                backend.copy_to_clipboard(text)
-                return False
-            saved = backend.read_clipboard()
-            if not backend.copy_to_clipboard(text):
-                log.error("[INJECTOR] Could not write text to clipboard; skipping paste.")
-                return False
-            time.sleep(0.015)
-            ok = backend.send_paste()
-            if press_enter:
-                time.sleep(0.05)
-                backend.send_enter()
-            if saved:
-                def _restore_clip():
-                    time.sleep(0.2)
-                    backend.copy_to_clipboard(saved)
-                threading.Thread(target=_restore_clip, daemon=True).start()
-            return bool(ok)
-        except Exception as exc:
-            log.error("[INJECTOR] Non-Windows inject_text failed: %s", exc)
-            return False
+        return _inject_text_non_windows(text, press_enter)
 
     if target_hwnd and is_internal_window(target_hwnd):
         log.warning(

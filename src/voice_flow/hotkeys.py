@@ -47,13 +47,51 @@ def platform_input_defaults() -> dict[str, Any]:
             "push_to_talk_shortcut": "Cmd+Option",
             "middle_click_enabled": False,
             "ready_line": "Hold Command+Option to speak",
+            # Reads the current selection aloud (or your default Audio Flow mode).
+            "audio_flow_hotkey": MAC_AUDIO_FLOW_HOTKEY,
         }
     return {
         "hotkey_trigger": "ctrl_win",
         "push_to_talk_shortcut": "Ctrl+Win",
         "middle_click_enabled": True,
         "ready_line": "Hold MOUSE SCROLL BUTTON (Middle Click) or CTRL + WIN to speak",
+        # Windows keeps its existing triggers (selection widget / floating bar).
+        "audio_flow_hotkey": "",
     }
+
+
+MAC_AUDIO_FLOW_HOTKEY = "Ctrl+Option+L"
+
+# macOS virtual key codes (HIToolbox kVK_ANSI_*), used because pynput reports
+# Ctrl-modified letters as control characters on macOS.
+_MAC_KEYCODES = {
+    "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+    "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19,
+    "3": 20, "4": 21, "6": 22, "5": 23, "9": 25, "7": 26, "8": 28, "0": 29, "o": 31,
+    "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46, "space": 49,
+}
+
+
+def parse_audio_flow_hotkey(raw: Any) -> tuple[frozenset[str], str] | None:
+    """Parse e.g. "Ctrl+Option+L" into ({"ctrl", "alt"}, "l"); None disables it."""
+    text = str(raw or "").strip()
+    if not text or text.lower() in ("none", "off", "disabled"):
+        return None
+    pieces = [piece.strip().lower() for piece in text.replace("-", "+").split("+") if piece.strip()]
+    mods: set[str] = set()
+    base = None
+    for piece in pieces:
+        mapped = {"option": "alt", "opt": "alt", "alt": "alt", "ctrl": "ctrl", "control": "ctrl",
+                  "shift": "shift", "cmd": "cmd", "command": "cmd"}.get(piece)
+        if mapped:
+            mods.add(mapped)
+        elif base is None:
+            base = piece
+        else:
+            return None
+    if not base or not mods or (base not in _MAC_KEYCODES and len(base) != 1):
+        return None
+    return frozenset(mods), base
 
 
 # Win32 Virtual Key Codes
@@ -424,6 +462,9 @@ class InputTriggerListener:
         self._trigger_mode: str = "hybrid"
         self._middle_click_enabled: bool = defaults["middle_click_enabled"]
         self._ctrl_key_dictation_enabled: bool = False
+        self._audio_flow_hotkey: tuple[frozenset[str], str] | None = parse_audio_flow_hotkey(
+            defaults.get("audio_flow_hotkey")
+        )
 
         try:
             self.reload_config()
@@ -435,6 +476,12 @@ class InputTriggerListener:
         if not IS_WINDOWS:
             self._stop_event.clear()
             self._request_macos_hotkey_permissions_once()
+            if sys.platform == "darwin":
+                # Text selection → Audio Flow widget (Quartz listen-only tap).
+                try:
+                    self._mouse_hook.start()
+                except Exception as e:
+                    log.error("[INPUT] Failed to start macOS mouse listener: %s", e)
             if not self._start_key_listener():
                 return
             active_label = (
@@ -706,6 +753,13 @@ class InputTriggerListener:
                 self._ctrl_key_dictation_enabled = True
             else:
                 self._ctrl_key_dictation_enabled = False
+            raw_audio_hotkey = settings.get("audio_flow_hotkey") if "audio_flow_hotkey" in settings else None
+            if raw_audio_hotkey is None:
+                try:
+                    raw_audio_hotkey = _storage.get_setting("audio_flow_hotkey", defaults.get("audio_flow_hotkey", ""))
+                except Exception:
+                    raw_audio_hotkey = defaults.get("audio_flow_hotkey", "")
+            self._audio_flow_hotkey = parse_audio_flow_hotkey(raw_audio_hotkey)
             current = (self._hotkey_trigger, self._custom_hotkey_str, self._custom_trigger_type, self._trigger_mode, self._ctrl_key_dictation_enabled)
             if current != previous and not self._is_recording:
                 self._reset_shortcut_transients()
@@ -1217,6 +1271,16 @@ class InputTriggerListener:
                     return
                 now = time.time()
 
+                # Audio Flow hotkey (macOS default Ctrl+Option+L): read the
+                # current selection. Never while dictating.
+                if (
+                    not self._is_recording
+                    and self._on_audio_flow is not None
+                    and self._matches_audio_flow_hotkey(key, ctrl_down, alt_down, shift_down, win_down)
+                ):
+                    threading.Thread(target=self._safe_on_audio_flow, name="AudioFlowHotkey", daemon=True).start()
+                    return
+
                 # 1. BOTH Ctrl and Win must be held simultaneously to trigger dictation
                 # Active when trigger is ctrl_win, or as safe fallback
                 is_ctrl_win_active = active_trigger in ("ctrl_win", "") or (active_trigger not in ("single_ctrl", "double_ctrl", "alt_space", "alt_tab", "cmd_option", "middle_click", "custom"))
@@ -1634,6 +1698,31 @@ class InputTriggerListener:
                                 threading.Thread(target=self._safe_on_start, daemon=True).start()
         except Exception as e:
             log.exception("[INPUT] Key release handler error: %s", e)
+
+    def _matches_audio_flow_hotkey(self, key: Any, ctrl: bool, alt: bool, shift: bool, cmd: bool) -> bool:
+        combo = getattr(self, "_audio_flow_hotkey", None)
+        if not combo or key is None:
+            return False
+        mods, base = combo
+        held = {name for name, down in (("ctrl", ctrl), ("alt", alt), ("shift", shift), ("cmd", cmd)) if down}
+        if held != set(mods):
+            return False
+        vk = getattr(key, "vk", None)
+        if sys.platform == "darwin" and vk is not None and base in _MAC_KEYCODES:
+            return vk == _MAC_KEYCODES[base]
+        if base == "space":
+            return keyboard is not None and key == keyboard.Key.space
+        return _key_matches_name(key, base)
+
+    def _safe_on_audio_flow(self) -> None:
+        callback = self._on_audio_flow
+        if callback is None:
+            return
+        try:
+            log.info("[INPUT] Audio Flow hotkey pressed.")
+            callback()
+        except Exception as e:
+            log.error("[INPUT] Error in Audio Flow hotkey action: %s", e)
 
     def _safe_on_start(self) -> None:
         action_lock = getattr(self, "_action_lock", None)

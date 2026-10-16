@@ -19,6 +19,7 @@ Concise, checkable facts about AI Productivity Flow (v1.0.0 Public Release). Pub
   - Windows AI Text Rewriter where supported by hardware.
   - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Ollama.
 - **Audio Flow**:
+  - **Trigger**: select text, then click the Listen button next to it or the floating bar. Mac also has a hotkey, Control+Option+L (read the selection; press again to stop). Mac needs Accessibility to read the selection.
   - **Read Mode**: Spoken reader that articulates selected text with human cadence.
   - **Summary Mode**: Multi-depth summaries (Short, Balanced, Deep Dive).
   - Voices: Microsoft Edge Neural (default, free, online: text is sent to Microsoft), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
