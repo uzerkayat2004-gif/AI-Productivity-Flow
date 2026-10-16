@@ -53,6 +53,33 @@ case "move", "click":
         CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
     print("ok")
+case "rclick":
+    guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(2) }
+    let p = CGPoint(x: x, y: y)
+    CGWarpMouseCursorPosition(p)
+    usleep(80_000)
+    // Hardware clicks carry clickState 1; set it so the synthetic click looks real.
+    for t in [CGEventType.rightMouseDown, CGEventType.rightMouseUp] {
+        if let e = CGEvent(mouseEventSource: CGEventSource(stateID: .hidSystemState), mouseType: t, mouseCursorPosition: p, mouseButton: .right) {
+            e.setIntegerValueField(.mouseEventClickState, value: 1)
+            e.post(tap: .cghidEventTap)
+        }
+        usleep(60_000)
+    }
+    print("ok")
+case "ctrlclick":
+    guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(2) }
+    let p = CGPoint(x: x, y: y)
+    CGWarpMouseCursorPosition(p)
+    usleep(80_000)
+    for t in [CGEventType.leftMouseDown, CGEventType.leftMouseUp] {
+        if let e = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left) {
+            e.flags = [.maskControl]
+            e.post(tap: .cghidEventTap)
+        }
+        usleep(60_000)
+    }
+    print("ok")
 case "cmdopt":
     // Hold or release Command+Option as real modifier events (the Voice Flow hotkey on Mac).
     guard args.count >= 3 else { exit(2) }
@@ -81,6 +108,39 @@ case "key":
             e.post(tap: .cghidEventTap)
         }
         usleep(50_000)
+    }
+    print("ok")
+case "chord":
+    // chord <keycode> <mods>: hold modifiers (ctrl,alt,shift,cmd) as real flagsChanged events,
+    // tap the key, release modifiers. pynput tracks modifiers only from flagsChanged.
+    guard args.count >= 4, let kc = UInt16(args[2]) else { exit(2) }
+    let src = CGEventSource(stateID: .hidSystemState)
+    let names = args[3].split(separator: ",").map { String($0) }
+    let table: [String: (CGKeyCode, CGEventFlags)] = [
+        "ctrl": (0x3B, .maskControl), "alt": (0x3A, .maskAlternate),
+        "shift": (0x38, .maskShift), "cmd": (0x37, .maskCommand)]
+    var flags: CGEventFlags = []
+    for n in names {
+        guard let (code, f) = table[n] else { continue }
+        flags.insert(f)
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true) {
+            e.type = .flagsChanged; e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(40_000)
+    }
+    for down in [true, false] {
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kc), keyDown: down) {
+            e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(60_000)
+    }
+    for n in names.reversed() {
+        guard let (code, f) = table[n] else { continue }
+        flags.remove(f)
+        if let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) {
+            e.type = .flagsChanged; e.flags = flags; e.post(tap: .cghidEventTap)
+        }
+        usleep(40_000)
     }
     print("ok")
 case "drag":
