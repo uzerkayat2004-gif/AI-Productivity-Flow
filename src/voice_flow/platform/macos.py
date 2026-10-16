@@ -264,7 +264,11 @@ class MacOSBackend:
             front = NSWorkspace.sharedWorkspace().frontmostApplication()
             front_pid = int(front.processIdentifier()) if front is not None else 0
             report["active_pid"] = front_pid
-            if front_pid != os.getpid():
+            # Act only when we hold activation, or when nothing does (closing
+            # our widget menu with Escape can leave no active app; seen on
+            # macOS 14 CI: Cmd+V then went nowhere). Never take focus from
+            # another app the user activated (Spotlight-style panels too).
+            if front_pid not in (0, os.getpid()):
                 return report
             target = native.frontmost_window_owner() or {}
             pid = target.get("pid")

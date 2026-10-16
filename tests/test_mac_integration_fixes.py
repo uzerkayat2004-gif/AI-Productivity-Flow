@@ -96,8 +96,10 @@ class _App:
 
 def _fake_appkit(monkeypatch, front_pid, target_pid):
     registry: dict = {}
-    apps = {front_pid: _App(front_pid, registry), target_pid: _App(target_pid, registry)}
-    registry["front"] = apps[front_pid]
+    apps = {target_pid: _App(target_pid, registry)}
+    if front_pid:
+        apps[front_pid] = _App(front_pid, registry)
+    registry["front"] = apps.get(front_pid)
     yielded: list = []
 
     class NSWorkspace:
@@ -244,3 +246,24 @@ def test_mac_keeps_whisper_warm_after_a_dictation(monkeypatch):
 
 def test_windows_still_releases_whisper_immediately(monkeypatch):
     assert _release(monkeypatch, "win32") == [("release",)]
+
+
+def test_restore_focus_reactivates_users_app_when_no_app_is_active(monkeypatch):
+    """Escape on our widget menu can leave no active app: Cmd+V must not go nowhere."""
+    target = os.getpid() + 1000
+    apps, _ = _fake_appkit(monkeypatch, 0, target)
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    report = backend.restore_paste_target_focus(timeout=0.3)
+    assert report["active_pid"] == 0
+    assert report["restored"] is True
+    assert apps[target].activated == 1
+
+
+def test_restore_focus_leaves_another_active_app_alone(monkeypatch):
+    """A different app holding activation (e.g. a Spotlight-style panel) keeps it."""
+    target = os.getpid() + 1000
+    other = os.getpid() + 2000
+    apps, _ = _fake_appkit(monkeypatch, other, target)
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    assert backend.restore_paste_target_focus(timeout=0.2)["restored"] is False
+    assert apps[target].activated == 0
