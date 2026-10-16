@@ -442,3 +442,120 @@ def test_quit_stops_watchdog_parent_only(monkeypatch):
     monkeypatch.setattr(psutil, "Process", lambda pid: P(["/sbin/launchd"]))
     assert ml.stop_supervisor_parent() is False
     assert terminated == [["launcher", "-m", "voice_flow.watchdog"]]
+
+
+# ---------------------------------------------------------------- bar right-click
+
+class _FakeBarWin:
+    def winfo_viewable(self): return True
+    def winfo_rootx(self): return 488
+    def winfo_rooty(self): return 687
+    def winfo_width(self): return 48
+    def winfo_height(self): return 10
+
+
+def test_right_click_on_bar_opens_menu_via_cocoa_monitor(monkeypatch):
+    """Aqua does not hand a right-click on the bar to Tk; the NSEvent monitor does."""
+    import voice_flow.overlay as ov
+
+    bar = ov.FloatingOverlayBar.__new__(ov.FloatingOverlayBar)
+    bar.win = _FakeBarWin()
+    scheduled, shown = [], []
+
+    class Root:
+        def after(self, ms, fn): scheduled.append(fn)
+
+    bar.root = Root()
+    monkeypatch.setattr(bar, "_show_app_menu", lambda ev: shown.append((ev.x_root, ev.y_root)), raising=False)
+    assert bar._mac_secondary_click(512, 692) is True       # on the pill: swallow, open menu
+    assert bar._mac_secondary_click(100, 100) is False      # elsewhere: pass through
+    assert len(scheduled) == 1
+    scheduled[0]()
+    assert shown == [(512, 692)]
+    src = (SRC / "voice_flow" / "overlay.py").read_text()
+    assert "addLocalMonitorForEventsMatchingMask_handler_" in src
+    assert "self._mac_install_menu_monitor()" in src
+
+
+def test_bar_menu_not_opened_twice_for_one_click(monkeypatch):
+    import voice_flow.overlay as ov
+
+    popups = []
+
+    class FakeMenu:
+        def __init__(self, *a, **k): pass
+        def add_command(self, label, command): pass
+        def add_separator(self): pass
+        def tk_popup(self, x, y): popups.append((x, y))
+        def grab_release(self): pass
+
+    monkeypatch.setattr(ov.tk, "Menu", FakeMenu)
+    bar = ov.FloatingOverlayBar.__new__(ov.FloatingOverlayBar)
+    bar.root = object()
+    bar.app_menu_actions = {"open": lambda: None, "quit": lambda: None}
+    ev = SimpleNamespace(x_root=1, y_root=2)
+    bar._show_app_menu(ev)
+    bar._show_app_menu(ev)  # Tk binding + Cocoa monitor for the same click
+    assert popups == [(1, 2)]
+
+
+# ---------------------------------------------------------------- Settings > Restart
+
+def test_relaunch_command_uses_app_bundle(tmp_path):
+    exe = tmp_path / "AI Productivity Flow.app" / "Contents" / "MacOS" / "ai-productivity-flow-launcher"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert ml.relaunch_command(str(exe)) == ["/usr/bin/open", str(tmp_path / "AI Productivity Flow.app")]
+    plain = tmp_path / "python3"
+    plain.write_text("")
+    assert ml.relaunch_command(str(plain)) == [str(plain), "-m", "voice_flow.main"]
+
+
+def test_engine_pid_comes_from_engine_lock(tmp_path):
+    lock = ml.InstanceLock(tmp_path / "engine.lock")
+    assert lock.acquire()
+    try:
+        assert ml.engine_pid(tmp_path / "engine.lock") == os.getpid()
+    finally:
+        lock.release()
+    (tmp_path / "other.lock").write_text("424242\n")
+    assert ml.engine_pid(tmp_path / "other.lock") == 424242
+
+
+def test_relaunch_waits_for_engine_pid_and_survives_quit(tmp_path):
+    import psutil
+
+    engine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    marker = tmp_path / "relaunched"
+    assert ml.spawn_relaunch_after_exit(
+        engine.pid, [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ok')"], max_wait=10)
+    # The waiter is not our descendant, so Quit's terminate_descendants() spares it.
+    kids = [p.pid for p in psutil.Process().children(recursive=True)]
+    assert kids == [engine.pid]
+    time.sleep(0.8)
+    assert not marker.exists()          # engine still running: not relaunched yet
+    engine.wait()
+    for _ in range(50):
+        if marker.exists():
+            break
+        time.sleep(0.1)
+    assert marker.read_text() == "ok"
+
+
+def test_restart_on_mac_quits_real_engine_then_relaunches(monkeypatch, tmp_path):
+    from voice_flow import lifecycle
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(lifecycle, "data_dir", lambda: tmp_path)
+    spawned, quits = [], []
+    monkeypatch.setattr(ml, "engine_pid", lambda path=None: 4321)
+    monkeypatch.setattr(ml, "relaunch_command", lambda executable=None: ["/usr/bin/open", "/Applications/X.app"])
+    monkeypatch.setattr(ml, "spawn_relaunch_after_exit", lambda pid, cmd, **k: spawned.append((pid, cmd)) or True)
+    swept = []
+    monkeypatch.setattr(lifecycle, "terminate_suite_processes", lambda *a, **k: swept.append(1) or [])
+    controller = SimpleNamespace(request_quit=lambda reason: quits.append(reason) or True)
+    assert lifecycle.restart_suite(controller) is True
+    time.sleep(0.8)
+    assert spawned == [(4321, ["/usr/bin/open", "/Applications/X.app"])]
+    assert quits == ["restart"]
+    assert swept == []  # no process-name sweep on the Mac

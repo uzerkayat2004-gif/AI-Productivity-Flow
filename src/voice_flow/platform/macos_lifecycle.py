@@ -321,6 +321,97 @@ def stop_supervisor_parent() -> bool:
 
 
 # --------------------------------------------------------------------------
+# Settings > Restart: quit this engine, start the app again once it is gone.
+# --------------------------------------------------------------------------
+
+RELAUNCH_MAX_WAIT_SECONDS = 30.0
+
+# Waits (bounded) for the engine pid to disappear, then starts the app again.
+_RELAUNCH_SCRIPT = (
+    'pid="$1"; shift; n=0; '
+    'while kill -0 "$pid" 2>/dev/null; do '
+    'n=$((n+1)); [ "$n" -ge "$APF_RELAUNCH_TRIES" ] && exit 1; sleep 0.2; done; '
+    'sleep 0.5; exec "$@"'
+)
+
+
+def engine_pid(path: Optional[Path] = None) -> int:
+    """PID of the running engine: the owner recorded in engine.lock, else this process."""
+    lock = _engine_lock
+    if path is not None or lock is None:
+        lock = InstanceLock(path or (_data_dir() / ENGINE_LOCK_NAME))
+    pid = lock.owner_pid()
+    return int(pid) if pid and pid > 0 else os.getpid()
+
+
+def app_bundle_path(executable: Optional[str] = None) -> Optional[Path]:
+    """The enclosing ``*.app`` of the running executable, if any."""
+    exe = Path(executable or sys.executable or "")
+    try:
+        exe = exe.resolve()
+    except OSError:
+        pass
+    for parent in exe.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def relaunch_command(executable: Optional[str] = None) -> list[str]:
+    """How to start the app again: LaunchServices for a bundle, else the engine module."""
+    bundle = app_bundle_path(executable)
+    if bundle is not None:
+        return ["/usr/bin/open", str(bundle)]
+    return [executable or sys.executable, "-m", "voice_flow.main"]
+
+
+def spawn_relaunch_after_exit(pid: int, command: list[str], *, cwd: Optional[str] = None,
+                              max_wait: float = RELAUNCH_MAX_WAIT_SECONDS) -> bool:
+    """Start ``command`` once ``pid`` has exited, from a process that is NOT our descendant.
+
+    A double fork (outer ``sh`` backgrounds the waiter and exits at once) hands
+    the waiter to launchd, so Quit's terminate_descendants() cannot kill it."""
+    env = os.environ.copy()
+    env["APF_RELAUNCH_TRIES"] = str(max(1, int(max_wait / 0.2)))
+    outer = (
+        '/bin/sh -c "$0" apf-relaunch "$@" </dev/null >/dev/null 2>&1 &'
+    )
+    try:
+        proc = subprocess.Popen(
+            ["/bin/sh", "-c", outer, _RELAUNCH_SCRIPT, str(int(pid)), *command],
+            cwd=cwd, env=env, close_fds=True, start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        proc.wait(timeout=5)
+        return proc.returncode == 0
+    except Exception as exc:
+        log.warning("[RESTART] Could not schedule relaunch: %s", exc)
+        return False
+
+
+def restart_app(controller: Any, *, delay: float = 0.4) -> bool:
+    """Settings > Restart on macOS: relaunch after the real engine pid exits, then Quit.
+
+    The Windows sweep looks for ``python`` processes by name; on the Mac every
+    app process is ``ai-productivity-flow-launcher``, so that found nothing and
+    Restart left the old engine running. Here the engine itself quits (same
+    path as Cmd+Q: window, helpers, descendants) and a detached waiter starts
+    the app again once that pid is gone (engine.lock is then free)."""
+    quit_fn = getattr(controller, "request_quit", None)
+    if not callable(quit_fn):
+        return False
+    pid = engine_pid()
+    command = relaunch_command()
+    if not spawn_relaunch_after_exit(pid, command):
+        return False
+    log.info("[RESTART] Restarting: relaunch (%s) scheduled after engine pid %s exits.", command[0], pid)
+    timer = threading.Timer(delay, lambda: quit_fn("restart"))
+    timer.daemon = True
+    timer.start()
+    return True
+
+
+# --------------------------------------------------------------------------
 # Window process: control socket so a second launch can raise the window.
 # --------------------------------------------------------------------------
 
