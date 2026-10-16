@@ -2548,50 +2548,10 @@ class VoiceFlowApp:
                 elif effective_target is None and target_h and self._is_internal_window(target_h):
                     target_h = None
 
-                # Check user review barrier for high-risk content (P0-1)
-                try:
-                    from voice_flow.entity_review import check_user_review_barrier, get_review_manager
-                    needs_review, flagged_entities, review_summary = check_user_review_barrier(
-                        polished_text,
-                        task=task,
-                        draft=command_context,
-                    )
-                    if needs_review:
-                        log.info("[REVIEW BARRIER] High-risk content detected: %s. Holding text.", review_summary)
-                        self._overlay_call("show_done", "Review Required")
-                        review_manager = get_review_manager()
-                        resolution = review_manager.resolve_review(
-                            polished_text,
-                            flagged_entities,
-                            task=task,
-                            draft=command_context,
-                        )
-                        if not resolution.insertion_permitted:
-                            log.warning("[REVIEW BARRIER] Review was %s. Target application UNCHANGED.", resolution.action)
-                            self._history_update(
-                                record_id,
-                                status="review_rejected",
-                                error_message=f"Review {resolution.action}; insertion cancelled.",
-                                insertion_status="cancelled",
-                            )
-                            self._defer_history_insert(
-                                recovery, session, duration,
-                                raw_text=raw_transcript,
-                                polished_text=polished_text,
-                                status="review_rejected",
-                                error_message=f"Review {resolution.action}; insertion cancelled.",
-                                insertion_status="cancelled",
-                                processing_metadata=processing_metadata,
-                            )
-                            self._reset_to_idle(session)
-                            self._overlay_call("show_done", f"Review {resolution.action.title()} — Not Pasted")
-                            return
-                        # Use approved/corrected text
-                        polished_text = resolution.final_text
-                        log.info("[REVIEW BARRIER] User approved insertion. Final text: '%s'", polished_text)
-                except Exception as rev_err:
-                    log.warning("[REVIEW BARRIER] Review check error: %s", rev_err)
-
+                # The risky-edit review step is not part of 1.0.2 dictation:
+                # its wiring referenced undefined names and silently failed on
+                # every dictation. The polish safety gate already keeps the
+                # original text when a candidate changes content.
                 injection_started = time.perf_counter()
                 success = self.injector.paste_text(polished_text, target_h, press_enter=should_press_enter)
                 injection_elapsed = time.perf_counter() - injection_started
