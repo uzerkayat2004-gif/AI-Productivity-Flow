@@ -42,6 +42,34 @@ try:
 except Exception:
     VERSION = "1.0.0"
 
+# The oldest macOS every bundled Mach-O binary supports. This value is written
+# to Info.plist (LSMinimumSystemVersion) and the build fails if any bundled
+# binary needs a newer macOS (see verify_bundle_minimum_macos), so README and
+# Info.plist cannot drift from the binaries again. The binding constraints are
+# the macOS arm64 scipy/numpy wheels (Accelerate builds, minos 14.0) and the
+# official llama.cpp release (minos 13.3).
+MACOS_MINIMUM = "14.0"
+
+# Official llama.cpp release whose llama-server runs local S1-mini polish on
+# macOS (the Windows build uses the in-process llama-cpp-python wheel instead).
+LLAMA_CPP_BUILD = "b11696"
+LLAMA_CPP_MACOS_ARM64_URL = (
+    f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_CPP_BUILD}/"
+    f"llama-{LLAMA_CPP_BUILD}-bin-macos-arm64.tar.gz"
+)
+LLAMA_CPP_MACOS_ARM64_SHA256 = "6aac007fbe153efefe06250d2cf05d0487583aa0706379082ebef2b05579f649"
+
+# Official NVIDIA NeMo-Speech.cpp C ABI runtime for Nemotron speech (same C ABI
+# v1 the Windows app uses with v0.1.0). macOS ships v0.2.0: on a macOS arm64
+# runner v0.1.0 needed 25-40 s to recognize 4.8 s of audio (and 35 s for the
+# warm-up pass), v0.2.0 takes 0.9-1.3 s with identical text.
+NEMO_SPEECH_VERSION = "0.2.0"
+NEMO_SPEECH_MACOS_ARM64_URL = (
+    f"https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v{NEMO_SPEECH_VERSION}/"
+    f"nemo-speech-{NEMO_SPEECH_VERSION}-macos-aarch64-cpu.tar.gz"
+)
+NEMO_SPEECH_MACOS_ARM64_SHA256 = "6a91355e15d22db6a319144d389d2e1b02f233c1c6808c0da85b6d3283e52296"
+
 
 def create_info_plist() -> None:
     plist_data = {
@@ -54,7 +82,7 @@ def create_info_plist() -> None:
         "CFBundleSignature": "????",
         "CFBundleExecutable": "ai-productivity-flow-launcher",
         "CFBundleIconFile": "AppIcon",
-        "LSMinimumSystemVersion": "12.0",
+        "LSMinimumSystemVersion": MACOS_MINIMUM,
         "NSMicrophoneUsageDescription": "AI Productivity Flow requires microphone access for voice dictation and speech-to-text.",
         "NSAppleEventsUsageDescription": "AI Productivity Flow needs access to paste transcribed text into target applications.",
         "NSSupportsAutomaticGraphicsSwitching": True,
@@ -110,7 +138,7 @@ def create_native_launcher(target_arch: str | None = None) -> None:
     # scaffold looking like a successfully compiled distributable executable.
     candidate = launcher.with_name(launcher.name + ".native")
     subprocess.run([
-        clang, "-arch", arch, "-mmacosx-version-min=12.0",
+        clang, "-arch", arch, f"-mmacosx-version-min={MACOS_MINIMUM}",
         "-Wall", "-Wextra", "-Werror", str(source), "-o", str(candidate),
     ], check=True)
     if not candidate.is_file() or candidate.read_bytes()[:4] != b"\xcf\xfa\xed\xfe":
@@ -286,6 +314,359 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         print(f"Host platform is '{sys.platform}'. Skipping pip package installation in Darwin binary on non-Darwin host.")
 
     sanitize_runtime_libraries(runtime_dir)
+
+
+# ---------------------------------------------------------------------------
+# Native speech/polish engines (macOS arm64)
+# ---------------------------------------------------------------------------
+
+def _download_verified(url: str, sha256: str, cache_name: str) -> Path:
+    """Download ``url`` once into .cache/engines and verify its pinned SHA-256."""
+    cache_dir = REPO_ROOT / ".cache" / "engines"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / cache_name
+
+    def digest(path: Path) -> str:
+        h = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    if target.is_file() and digest(target) == sha256:
+        return target
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        try:
+            print(f"Downloading {url} ...")
+            req = urllib.request.Request(url, headers={"User-Agent": "AI-Productivity-Flow-Builder"})
+            tmp = target.with_suffix(target.suffix + ".part")
+            with urllib.request.urlopen(req, timeout=300) as resp, open(tmp, "wb") as out:
+                shutil.copyfileobj(resp, out, 1024 * 1024)
+            tmp.replace(target)
+            break
+        except Exception as exc:  # network hiccup: retry, then fail loudly
+            last_error = exc
+    else:
+        raise RuntimeError(f"Failed to download {url}: {last_error}")
+    actual = digest(target)
+    if actual != sha256:
+        target.unlink(missing_ok=True)
+        raise RuntimeError(f"SHA-256 mismatch for {url}: expected {sha256}, got {actual}")
+    return target
+
+
+def _safe_extract(archive: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    root = dest.resolve()
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            out = (dest / member.name).resolve()
+            if not out.is_relative_to(root):
+                raise RuntimeError(f"Unsafe path in {archive.name}: {member.name}")
+            if member.issym() or member.islnk():
+                link = (out.parent / member.linkname).resolve()
+                if not link.is_relative_to(root):
+                    raise RuntimeError(f"Unsafe link in {archive.name}: {member.name}")
+        tar.extractall(dest)
+
+
+def _rpath_dependencies(binary: Path) -> list[str]:
+    """``@rpath/`` library names a Mach-O loads (read from its load commands)."""
+    names = []
+    for dep in macho_info(binary).get("dylibs", []):
+        if dep.startswith("@rpath/") or dep.startswith("@loader_path/"):
+            names.append(dep.split("/", 1)[1])
+    return names
+
+
+def _copy_with_rpath_closure(src_dir: Path, roots: list[str], dest_dir: Path) -> list[Path]:
+    """Copy ``roots`` from src_dir plus every @rpath dylib they (transitively) load.
+
+    The upstream binaries use ``@loader_path`` rpaths, so keeping them together
+    in one directory makes them self-contained. Version symlinks are recreated.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    pending = list(roots)
+    seen: set[str] = set()
+    copied: list[Path] = []
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        src = src_dir / name
+        if not src.exists():
+            raise RuntimeError(f"{name} is missing from {src_dir}")
+        if src.is_symlink():
+            real = src.resolve()
+            link_target = os.path.relpath(real, src.parent)
+            dst = dest_dir / name
+            if dst.exists() or dst.is_symlink():
+                dst.unlink()
+            os.symlink(link_target, dst)
+            pending.append(real.name)
+            continue
+        dst = dest_dir / name
+        shutil.copy2(src, dst)
+        dst.chmod(0o755)
+        copied.append(dst)
+        pending.extend(_rpath_dependencies(src))
+    return copied
+
+
+def _adhoc_sign(paths: list[Path]) -> None:
+    """Strip quarantine/provenance attributes and (re)sign each Mach-O ad hoc.
+
+    arm64 macOS refuses to run unsigned code; the outer bundle signature only
+    seals these loose Resources files, it does not sign them.
+    """
+    if sys.platform != "darwin":
+        return
+    for path in paths:
+        subprocess.run(["xattr", "-c", str(path)], check=False, capture_output=True)
+        subprocess.run(["codesign", "--force", "--sign", "-", str(path)], check=True, capture_output=True)
+
+
+def bundle_llama_server(runtime_dir: Path) -> Path:
+    """Bundle the official llama.cpp macOS arm64 llama-server for local S1-mini polish.
+
+    Layout: Contents/Resources/runtime/llama/{llama-server, lib*.dylib, LICENSE}.
+    The app finds it via runtime_env.mac_bundled_llama_server().
+    """
+    archive = _download_verified(
+        LLAMA_CPP_MACOS_ARM64_URL, LLAMA_CPP_MACOS_ARM64_SHA256,
+        f"llama-{LLAMA_CPP_BUILD}-bin-macos-arm64.tar.gz",
+    )
+    work = DIST_DIR / ".engine-extract" / "llama"
+    shutil.rmtree(work, ignore_errors=True)
+    _safe_extract(archive, work)
+    src_dirs = [p.parent for p in work.rglob("llama-server") if p.is_file()]
+    if not src_dirs:
+        raise RuntimeError("llama-server not found in the llama.cpp release archive")
+    src_dir = src_dirs[0]
+    dest = runtime_dir / "llama"
+    shutil.rmtree(dest, ignore_errors=True)
+    copied = _copy_with_rpath_closure(src_dir, ["llama-server"], dest)
+    if (src_dir / "LICENSE").is_file():
+        shutil.copy2(src_dir / "LICENSE", dest / "LICENSE-llama.cpp.txt")
+    (dest / "VERSION.txt").write_text(
+        f"llama.cpp {LLAMA_CPP_BUILD}\n{LLAMA_CPP_MACOS_ARM64_URL}\nsha256 {LLAMA_CPP_MACOS_ARM64_SHA256}\n",
+        encoding="utf-8",
+    )
+    _adhoc_sign(copied)
+    shutil.rmtree(work, ignore_errors=True)
+    server = dest / "llama-server"
+    if sys.platform == "darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+        proc = subprocess.run([str(server), "--version"], capture_output=True, text=True, timeout=60)
+        output = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Bundled llama-server does not run: {output[-800:]}")
+        print(f"Bundled llama-server verified: {output.splitlines()[-1] if output else 'ok'}")
+    print(f"Bundled llama-server ({len(copied)} binaries) into {dest}")
+    return server
+
+
+def bundle_nemo_speech(runtime_dir: Path, python_bin: Path | None = None) -> Path:
+    """Bundle the official NeMo-Speech.cpp C ABI dylib for Nemotron speech.
+
+    Layout: Contents/Resources/runtime/nemo/lib/libnemo_speech_asr_c.dylib (+ deps).
+    Kept apart from runtime/llama: both ship a different libggml.0.dylib.
+    """
+    archive = _download_verified(
+        NEMO_SPEECH_MACOS_ARM64_URL, NEMO_SPEECH_MACOS_ARM64_SHA256,
+        f"nemo-speech-{NEMO_SPEECH_VERSION}-macos-aarch64-cpu.tar.gz",
+    )
+    work = DIST_DIR / ".engine-extract" / "nemo"
+    shutil.rmtree(work, ignore_errors=True)
+    _safe_extract(archive, work)
+    libs = [p.parent for p in work.rglob("libnemo_speech_asr_c.dylib")]
+    if not libs:
+        raise RuntimeError("libnemo_speech_asr_c.dylib not found in the NeMo-Speech release archive")
+    src_dir = libs[0]
+    dest_root = runtime_dir / "nemo"
+    shutil.rmtree(dest_root, ignore_errors=True)
+    dest = dest_root / "lib"
+    copied = _copy_with_rpath_closure(src_dir, ["libnemo_speech_asr_c.dylib"], dest)
+    licenses = src_dir.parent / "share" / "licenses" / "nemo-speech"
+    if licenses.is_dir():
+        shutil.copytree(licenses, dest_root / "licenses", dirs_exist_ok=True)
+    (dest_root / "VERSION.txt").write_text(
+        f"NeMo-Speech.cpp {NEMO_SPEECH_VERSION} (macos-aarch64-cpu)\n{NEMO_SPEECH_MACOS_ARM64_URL}\n"
+        f"sha256 {NEMO_SPEECH_MACOS_ARM64_SHA256}\n",
+        encoding="utf-8",
+    )
+    _adhoc_sign(copied)
+    shutil.rmtree(work, ignore_errors=True)
+    dylib = dest / "libnemo_speech_asr_c.dylib"
+    if (sys.platform == "darwin" and platform.machine().lower() in ("arm64", "aarch64")
+            and python_bin is not None and python_bin.is_file()):
+        probe = (
+            "import ctypes,sys; d=ctypes.CDLL(sys.argv[1]); "
+            "d.nemo_speech_asr_version.restype=ctypes.c_char_p; print(d.nemo_speech_asr_version().decode())"
+        )
+        proc = subprocess.run([str(python_bin), "-I", "-c", probe, str(dylib)],
+                              capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Bundled NeMo-Speech dylib does not load: {(proc.stdout + proc.stderr)[-800:]}")
+        print(f"Bundled NeMo-Speech C ABI verified: version {proc.stdout.strip()}")
+    print(f"Bundled NeMo-Speech ({len(copied)} binaries) into {dest}")
+    return dylib
+
+
+def bundle_native_engines(target_arch: str | None = None) -> None:
+    """Bundle llama-server (S1-mini polish) and NeMo-Speech (Nemotron) for macOS arm64."""
+    arch = (target_arch or platform.machine()).lower()
+    if arch not in ("arm64", "aarch64"):
+        print(f"Skipping native engines: only macOS arm64 is supported (target {arch}).")
+        return
+    runtime_dir = RESOURCES_DIR / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    bundle_llama_server(runtime_dir)
+    bundle_nemo_speech(runtime_dir, runtime_dir / "python" / "bin" / "python3")
+    shutil.rmtree(DIST_DIR / ".engine-extract", ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Mach-O minimum macOS version audit
+# ---------------------------------------------------------------------------
+
+_LC_REQ_DYLD = 0x80000000
+_LC_LOAD_DYLIB = 0xC
+_LC_LOAD_WEAK_DYLIB = 0x18 | _LC_REQ_DYLD
+_LC_REEXPORT_DYLIB = 0x1F | _LC_REQ_DYLD
+_LC_RPATH = 0x1C | _LC_REQ_DYLD
+_LC_VERSION_MIN_MACOSX = 0x24
+_LC_BUILD_VERSION = 0x32
+_PLATFORM_MACOS = 1
+
+
+def _parse_thin_macho(data: bytes, offset: int) -> dict | None:
+    import struct
+
+    magic = data[offset:offset + 4]
+    if magic == b"\xcf\xfa\xed\xfe":
+        header_size = 32
+    elif magic == b"\xce\xfa\xed\xfe":
+        header_size = 28
+    else:
+        return None
+    if len(data) < offset + header_size:
+        return None
+    ncmds, sizeofcmds = struct.unpack_from("<II", data, offset + 16)
+    pos = offset + header_size
+    end = min(len(data), pos + sizeofcmds)
+    result: dict = {"minos": None, "dylibs": [], "rpaths": []}
+    for _ in range(ncmds):
+        if pos + 8 > end:
+            break
+        cmd, cmdsize = struct.unpack_from("<II", data, pos)
+        if cmdsize < 8:
+            break
+        if cmd == _LC_BUILD_VERSION and pos + 12 <= end:
+            plat, minos = struct.unpack_from("<II", data, pos + 8)
+            if plat == _PLATFORM_MACOS:
+                result["minos"] = (minos >> 16, (minos >> 8) & 0xFF, minos & 0xFF)
+        elif cmd == _LC_VERSION_MIN_MACOSX and pos + 12 <= end:
+            (version,) = struct.unpack_from("<I", data, pos + 8)
+            result["minos"] = (version >> 16, (version >> 8) & 0xFF, version & 0xFF)
+        elif cmd in (_LC_LOAD_DYLIB, _LC_LOAD_WEAK_DYLIB, _LC_REEXPORT_DYLIB, _LC_RPATH):
+            (name_off,) = struct.unpack_from("<I", data, pos + 8)
+            raw = data[pos + name_off:pos + cmdsize]
+            name = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+            result["rpaths" if cmd == _LC_RPATH else "dylibs"].append(name)
+        pos += cmdsize
+    return result
+
+
+def macho_info(path: Path) -> dict:
+    """Minimum macOS (highest across fat slices), loaded dylibs and rpaths of a Mach-O.
+
+    Returns {} for files that are not Mach-O. Pure Python, so it also runs on
+    the Linux/Windows test hosts.
+    """
+    import struct
+
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(4)
+            if head not in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
+                return {}
+            data = head + handle.read()
+    except OSError:
+        return {}
+    slices: list[dict] = []
+    if data[:4] == b"\xca\xfe\xba\xbe":
+        (nfat,) = struct.unpack_from(">I", data, 4)
+        if nfat == 0 or nfat > 16:  # also rules out Java class files
+            return {}
+        for i in range(nfat):
+            _cpu, _sub, off, _size, _align = struct.unpack_from(">IIIII", data, 8 + i * 20)
+            parsed = _parse_thin_macho(data, off)
+            if parsed:
+                slices.append(parsed)
+    else:
+        parsed = _parse_thin_macho(data, 0)
+        if parsed:
+            slices.append(parsed)
+    if not slices:
+        return {}
+    minos = max((s["minos"] for s in slices if s["minos"]), default=None)
+    dylibs = sorted({d for s in slices for d in s["dylibs"]})
+    rpaths = sorted({r for s in slices for r in s["rpaths"]})
+    return {"minos": minos, "dylibs": dylibs, "rpaths": rpaths}
+
+
+def _version_tuple(text: str) -> tuple[int, int, int]:
+    parts = [int(p) for p in text.split(".")]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])  # type: ignore[return-value]
+
+
+def audit_bundle_minimum_macos(bundle_dir: Path) -> tuple[tuple[int, int, int] | None, list[tuple[str, str]]]:
+    """(highest minos found, [(relative path, minos)] sorted newest first)."""
+    found: list[tuple[tuple[int, int, int], str]] = []
+    for path in bundle_dir.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        info = macho_info(path)
+        if info and info.get("minos"):
+            found.append((info["minos"], str(path.relative_to(bundle_dir))))
+    found.sort(reverse=True)
+    highest = found[0][0] if found else None
+    return highest, [(rel, ".".join(map(str, v))) for v, rel in found]
+
+
+def verify_bundle_minimum_macos(bundle_dir: Path, declared: str = MACOS_MINIMUM) -> str | None:
+    """Fail the build when a bundled binary needs a newer macOS than Info.plist declares."""
+    highest, entries = audit_bundle_minimum_macos(bundle_dir)
+    if highest is None:
+        print("Minimum macOS audit: no Mach-O binaries found.")
+        return None
+    limit = _version_tuple(declared)
+    too_new = [(rel, v) for rel, v in entries if _version_tuple(v) > limit]
+    highest_text = ".".join(map(str, highest))
+    print(f"Minimum macOS audit: {len(entries)} Mach-O files, highest minos {highest_text}, "
+          f"declared LSMinimumSystemVersion {declared}.")
+    for rel, v in entries[:8]:
+        print(f"  minos {v}: {rel}")
+    if too_new:
+        listing = "\n".join(f"  minos {v}: {rel}" for rel, v in too_new[:20])
+        raise RuntimeError(
+            f"{len(too_new)} bundled binaries need macOS newer than the declared {declared}:\n{listing}\n"
+            "Raise MACOS_MINIMUM (and the README) or bundle older-compatible builds."
+        )
+    manifest = RESOURCES_DIR / "runtime" / "build-manifest.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["minimum_macos"] = declared
+            data["highest_binary_minos"] = highest_text
+            manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    return highest_text
 
 
 def sign_app_bundle(bundle_dir: Path) -> bool:
@@ -567,7 +948,9 @@ def main() -> None:
     copy_resources()
     if args.bundle_runtime:
         bundle_runtime_dependencies(target_arch=args.target_arch)
+        bundle_native_engines(target_arch=args.target_arch)
         create_native_launcher(target_arch=args.target_arch)
+        verify_bundle_minimum_macos(BUNDLE_DIR)
 
     sign_app_bundle(BUNDLE_DIR)
 

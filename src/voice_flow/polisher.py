@@ -700,6 +700,15 @@ def _candidate_preserves_content_strict(
                 return False
 
     if command_format == "email":
+        # The prompt allows only dictated greetings. Swapping the greeting the
+        # speaker said ("Hello Alex" -> "Hi Alex") rewrites their words; an
+        # added greeting when none was dictated is left to the prompt.
+        greetings = {"hi", "hello", "hey", "dear", "greetings", "hiya", "howdy"}
+        source_greetings = greetings.intersection(src_tokens)
+        opening = cand_tokens[0] if cand_tokens else ""
+        if source_greetings and opening in greetings and opening not in source_greetings:
+            log.info("[POLISH SAFETY] Email replaced the dictated greeting; rejected.")
+            return False
         source_prose = _expand_unambiguous_contractions(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", source))
         candidate_prose = _expand_unambiguous_contractions(_PROTECTED_CLEANUP_SPAN_RE.sub(" ", candidate))
         request_pattern = r"\b(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)([a-z]+)\b"

@@ -838,6 +838,14 @@ class VF1Engine:
             if p.is_file():
                 return p
 
+        if sys.platform == "darwin":
+            # The macOS .app ships the official llama.cpp llama-server.
+            from voice_flow import runtime_env
+
+            bundled = runtime_env.mac_bundled_llama_server()
+            if bundled is not None:
+                return bundled
+
         from voice_flow import downloadable_models
         candidate_dirs = [
             downloadable_models.get_models_dir().parent / "bin" / "llama",
@@ -909,8 +917,17 @@ class VF1Engine:
             model_path=Path(model_path),
             host=self.config.server_host,
             port=int(self.config.server_port or 0),
-            ready_timeout=float(self.config.server_ready_timeout_seconds),
+            ready_timeout=self._server_ready_timeout(),
         )
+
+    def _server_ready_timeout(self) -> float:
+        timeout = float(self.config.server_ready_timeout_seconds)
+        if sys.platform == "darwin":
+            # First start after install reads the model and engine from a cold
+            # disk cache (measured 40 s on a CI Mac, ~6 s afterwards); do not
+            # kill a server that is still loading and pay that again.
+            timeout = max(timeout, 60.0)
+        return timeout
 
     def stop_server(self) -> None:
         """Stop the llama-server this app spawned (if any)."""
@@ -1040,6 +1057,10 @@ while parent_alive; do
 done
 stop_child
 """
+# macOS: llama-server's SIGTERM handler calls exit() and can abort in a static
+# destructor (stream_session_manager), leaving a crash report. The server has
+# no state to flush, so the guard stops it with SIGKILL there.
+_DARWIN_GUARD_SCRIPT = _POSIX_GUARD_SCRIPT.replace('kill -TERM "$child"', 'kill -KILL "$child"')
 
 
 def _free_loopback_port(host: str = "127.0.0.1") -> int:
@@ -1208,6 +1229,12 @@ class LlamaServerManager:
                 "-ngl", "0",
                 "-t", str(threads),
             ]
+            if sys.platform == "darwin":
+                # The bundled macOS build includes Metal. -ngl 0 keeps the
+                # weights on the CPU, but Metal still initialises its device
+                # (and is far slower on virtualised GPUs). "-dev none" skips
+                # it: measured 2.9 s to ready instead of 5.8 s, same output.
+                cmd += ["-dev", "none"]
             log.info("[VF-1] Spawning llama-server on %s:%d", host, chosen_port)
             proc = self._spawn(cmd)
             with self._lock:
@@ -1245,6 +1272,11 @@ class LlamaServerManager:
 
     def _spawn(self, cmd: List[str]) -> subprocess.Popen:
         env = no_proxy_environment()
+        if sys.platform == "darwin":
+            # CPU-only server: create no Metal device. Each Metal device
+            # compiles ggml's embedded shader library at startup (~35-40 s on
+            # a first run, saturating the CPU that Nemotron needs).
+            env["GGML_METAL_DEVICES"] = "0"
         if os.name == "nt":
             proc = subprocess.Popen(
                 cmd,
@@ -1256,7 +1288,8 @@ class LlamaServerManager:
             )
         else:
             proc = subprocess.Popen(
-                ["/bin/sh", "-c", _POSIX_GUARD_SCRIPT, _GUARD_MARKER, str(os.getpid()), *cmd],
+                ["/bin/sh", "-c", _DARWIN_GUARD_SCRIPT if sys.platform == "darwin" else _POSIX_GUARD_SCRIPT,
+                 _GUARD_MARKER, str(os.getpid()), *cmd],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -1265,6 +1298,8 @@ class LlamaServerManager:
             )
         # Windows: kill-on-close job object; all: killed at app exit.
         child_processes.track(proc, "llama-server")
+        if sys.platform == "darwin":
+            child_processes.mark_hard_kill(proc)
         return proc
 
     def stop(self) -> None:

@@ -43,7 +43,7 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
   ```
 * **SmartScreen**: Windows may say it protected your PC. Choose **More info**, then **Run anyway**.
 
-### macOS 12+ (Apple Silicon only, M1 or newer)
+### macOS 14 Sonoma or later (Apple Silicon only, M1 or newer)
 
 * **DMG Installer**: Download the drag-to-Applications installer **[`AI-Productivity-Flow-macOS.dmg`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg)**.
 * **Checksum**: [`AI-Productivity-Flow-macOS.dmg.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg.sha256)

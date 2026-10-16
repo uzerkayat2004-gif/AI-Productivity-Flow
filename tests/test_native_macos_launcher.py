@@ -54,7 +54,7 @@ def test_compile_arch_and_native_replaces_shell_only_on_success(build_tree, monk
     builder.create_native_launcher("aarch64")
     command, kwargs = calls[0]
     assert command[command.index("-arch") + 1] == "arm64"
-    assert "-mmacosx-version-min=12.0" in command
+    assert f"-mmacosx-version-min={builder.MACOS_MINIMUM}" in command
     assert "-framework" not in command
     assert kwargs == {"check": True}
     assert launcher.read_bytes().startswith(b"\xcf\xfa\xed\xfe")
@@ -161,8 +161,12 @@ def test_main_bundles_then_compiles_signs_and_packages_only_in_tmp(tmp_path, mon
         monkeypatch.setattr(builder, name, lambda *args, **kwargs: None)
     monkeypatch.setattr(builder, "bundle_runtime_dependencies",
                         lambda **kwargs: events.append(("runtime", kwargs)))
+    monkeypatch.setattr(builder, "bundle_native_engines",
+                        lambda **kwargs: events.append(("engines", kwargs)))
     monkeypatch.setattr(builder, "create_native_launcher",
                         lambda **kwargs: events.append(("native", kwargs)))
+    monkeypatch.setattr(builder, "verify_bundle_minimum_macos",
+                        lambda path: events.append(("minos", path)))
     monkeypatch.setattr(builder, "sign_app_bundle",
                         lambda path: events.append(("sign", path)) or True)
     monkeypatch.setattr(builder, "package_zip", lambda: events.append(("zip", None)))
@@ -173,8 +177,9 @@ def test_main_bundles_then_compiles_signs_and_packages_only_in_tmp(tmp_path, mon
         raise AssertionError("A fresh temporary bundle should not need deletion")
     monkeypatch.setattr(builder.shutil, "rmtree", guarded_remove)
     builder.main()
-    assert [name for name, _ in events] == ["runtime", "native", "sign", "zip", "dmg"]
-    assert events[0][1] == events[1][1] == {"target_arch": "aarch64"}
-    assert events[2][1] == bundle
-    assert events[4][1][0] == bundle
-    assert events[4][1][1] == dist / "AI-Productivity-Flow-macOS.dmg"
+    assert [name for name, _ in events] == ["runtime", "engines", "native", "minos", "sign", "zip", "dmg"]
+    assert events[0][1] == events[1][1] == events[2][1] == {"target_arch": "aarch64"}
+    assert events[3][1] == bundle
+    assert events[4][1] == bundle
+    assert events[6][1][0] == bundle
+    assert events[6][1][1] == dist / "AI-Productivity-Flow-macOS.dmg"

@@ -30,6 +30,7 @@ _lock = threading.RLock()
 _tracked: dict[int, tuple[subprocess.Popen[Any], str]] = {}
 _handlers_lock = threading.Lock()
 _atexit_registered = False
+_hard_kill: set[int] = set()
 _signals_installed = False
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
@@ -164,6 +165,21 @@ def track(process: subprocess.Popen[Any], name: str = "") -> subprocess.Popen[An
     return process
 
 
+def mark_hard_kill(process: subprocess.Popen[Any]) -> None:
+    """Stop *process*'s tree with SIGKILL instead of SIGTERM (POSIX only).
+
+    For stateless servers whose own SIGTERM handler is unsafe: llama.cpp's
+    llama-server calls exit() from its signal handler and sometimes aborts in
+    a static destructor, which leaves a macOS crash report on every such stop.
+    """
+    try:
+        pid = int(process.pid)
+    except Exception:
+        return
+    with _lock:
+        _hard_kill.add(pid)
+
+
 def untrack(process: subprocess.Popen[Any] | None) -> None:
     if process is None:
         return
@@ -175,6 +191,7 @@ def untrack(process: subprocess.Popen[Any] | None) -> None:
         current = _tracked.get(pid)
         if current is not None and current[0] is process:
             _tracked.pop(pid, None)
+            _hard_kill.discard(pid)
 
 
 def tracked() -> list[subprocess.Popen[Any]]:
@@ -221,8 +238,12 @@ def kill_tree(process: subprocess.Popen[Any], timeout: float = 3.0) -> None:
         return
 
     group = _owns_group(process)
+    with _lock:
+        hard = int(process.pid) in _hard_kill
     try:
-        if group:
+        if group and hard:
+            os.killpg(process.pid, signal.SIGKILL)
+        elif group:
             os.killpg(process.pid, signal.SIGTERM)
         else:
             process.terminate()

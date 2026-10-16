@@ -7,7 +7,7 @@ Concise, checkable facts about AI Productivity Flow (v1.0.0 Public Release). Pub
 - **Core Promise**: From text to video. From text to audio. From voice to text. Without switching apps.
 - **Platforms**:
   - Windows 10/11 x64: Single-file installer (`AI-Productivity-Flow-Setup-x64.exe`) with isolated private runtime.
-  - macOS 12+ (Apple Silicon only, M1 or newer; not Intel Macs. The release bundle's Python runtime and launcher are arm64): Application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
+  - macOS 14 Sonoma or later (Apple Silicon only, M1 or newer; not Intel Macs. The release bundle's Python runtime and launcher are arm64): Application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
 - **Status**: v1.0.0 Stable Public Release.
 - **Public Version**: 1.0.0 (canonical source: `src/voice_flow/_version.py`).
 - **Speech recognition**:
