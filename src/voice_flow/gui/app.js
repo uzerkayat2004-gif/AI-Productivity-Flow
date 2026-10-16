@@ -5836,7 +5836,7 @@ async function testAllProviders() {
 // =========================================================
 
 const AUDIO_PROVIDERS_CONFIG = {
-  edge: { name: "Microsoft Edge Neural", logo: "✨", keyLink: null, free: true },
+  edge: { name: "Microsoft Edge Neural (Online)", logo: "✨", keyLink: null, free: true, online: true },
   offline: { name: "Windows Offline SAPI5", logo: "💻", keyLink: null, free: true },
   google: { name: "Google Cloud TTS", logo: "☁️", keyLink: "https://console.cloud.google.com/apis/credentials" },
   gemini: { name: "Gemini AI TTS", logo: "💎", keyLink: "https://aistudio.google.com/apikey" },
@@ -6778,6 +6778,22 @@ function openAudioSummaryModelPicker() {
   openSharedModelPicker("audio_summary");
 }
 
+// Edge voices are synthesized by Microsoft's online TTS service: the text being
+// read is sent to Microsoft. Show that next to any selected Edge voice.
+const EDGE_ONLINE_VOICE_HINT = "Online voice: the text is sent to Microsoft's text-to-speech service. Pick an offline voice to keep it on this device.";
+
+function isOnlineEdgeVoiceRef(ref) {
+  return String(ref || "").split("/", 1)[0].toLowerCase() === "edge";
+}
+
+function updateOnlineVoiceHint(hintId, modelRef) {
+  const hintEl = document.getElementById(hintId);
+  if (!hintEl) return;
+  const online = isOnlineEdgeVoiceRef(modelRef);
+  hintEl.textContent = online ? EDGE_ONLINE_VOICE_HINT : "";
+  hintEl.hidden = !online;
+}
+
 // Audio Flow TTS voice picker state (shared with video-flow.js).
 let audioVoicePolicyModels = [];
 let audioVoicePolicySet = null;
@@ -6833,6 +6849,7 @@ async function loadExecAudioFlowPolicy() {
         ? (activeObj.provider_name || activeObj.provider || "Reading voice")
         : "Saved voice";
     }
+    updateOnlineVoiceHint("exec-audio-online-hint", activeModel);
 
     // Note: the duplicated engine chip (#exec-audio-active-engine), the
     // Brain/specialty badges (#exec-audio-model-specialty) and the provider
@@ -10359,7 +10376,7 @@ async function loadAudioProvidersOverview() {
     }
 
     const freeProviders = [
-      { id: "edge", name: "Microsoft Edge Neural", logo: "✨", key_link: null },
+      { id: "edge", name: "Microsoft Edge Neural (Online)", logo: "✨", key_link: null },
       { id: "offline", name: "Windows Offline SAPI5", logo: "💻", key_link: null },
     ].map(p => ({ ...p, connection_count: 1, is_connected: true }));
 
@@ -10572,7 +10589,7 @@ async function loadAudioProviderDetails(providerId) {
           .replace(/^(.+?)\s*\((.+)\)$/, "$1|$2");
         const [edgeVoiceName, edgeVoiceDescription] = edgeVoiceMeta.includes("|")
           ? edgeVoiceMeta.split("|", 2)
-          : [edgeVoiceMeta, "Microsoft Edge Neural voice"];
+          : [edgeVoiceMeta, "Microsoft Edge Neural voice (Online)"];
 
         return `
           <div class="model-card-9r ${isEdgeVoice ? 'edge-voice-card' : ''} ${cardClass}" id="audio-model-card-${m.id}">

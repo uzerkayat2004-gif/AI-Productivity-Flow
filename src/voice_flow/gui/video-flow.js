@@ -4329,7 +4329,8 @@ function updateVideoFlowVoiceLabels() {
   const provider = String(videoFlowVoiceModelRef).split("/", 1)[0];
   if (labelEl) labelEl.textContent = active ? `${active.provider_name} — ${active.display_name}` : videoFlowVoiceModelRef;
   if (detailEl) detailEl.textContent = videoFlowVoiceModelRef;
-  if (engineEl) engineEl.textContent = provider === "edge" ? "Edge TTS (free)" : (active ? active.provider_name : provider);
+  if (engineEl) engineEl.textContent = provider === "edge" ? "Edge TTS (online, free)" : (active ? active.provider_name : provider);
+  if (typeof updateOnlineVoiceHint === "function") updateOnlineVoiceHint("vf-online-voice-hint", videoFlowVoiceModelRef);
 }
 
 async function saveVideoFlowVoice(voiceRef) {
