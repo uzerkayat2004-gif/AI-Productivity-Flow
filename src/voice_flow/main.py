@@ -2261,6 +2261,12 @@ class VoiceFlowApp:
                         break
                     if raw_transcript.strip():
                         break
+                    if use_streaming and not stream_closed:
+                        # The live result was rejected. Stop the stream so its
+                        # remaining decode does not hold the speech worker
+                        # while the complete recording is decoded.
+                        self._end_stream_session(discard=True, owner=session)
+                        stream_closed = True
                     try:
                         self.transcriber.category_hint = getattr(resolved_style, "category", None)
                         raw_transcript = _call_with_optional_deadline(
