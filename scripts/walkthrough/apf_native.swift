@@ -53,6 +53,15 @@ case "move", "click":
         CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
     print("ok")
+case "rclick":
+    guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(2) }
+    let p = CGPoint(x: x, y: y)
+    CGWarpMouseCursorPosition(p)
+    usleep(80_000)
+    CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+    usleep(60_000)
+    CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+    print("ok")
 case "cmdopt":
     // Hold or release Command+Option as real modifier events (the Voice Flow hotkey on Mac).
     guard args.count >= 3 else { exit(2) }
