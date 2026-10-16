@@ -701,11 +701,11 @@ class StorageEngine:
         """Seed standard TTS models for Audio Flow."""
         tts_seeds = {
             "edge": [
-                ("en-US-AvaNeural", "Edge Ava (Expressive Female - Free)"),
-                ("en-US-AndrewNeural", "Edge Andrew (Natural Male - Free)"),
-                ("en-US-EmmaNeural", "Edge Emma (Clear Female - Free)"),
-                ("en-GB-SoniaNeural", "Edge Sonia (British Female - Free)"),
-                ("en-IN-NeerjaNeural", "Edge Neerja (Indian Female - Free)"),
+                ("en-US-AvaNeural", "Edge Ava (Expressive Female · Online, free)"),
+                ("en-US-AndrewNeural", "Edge Andrew (Natural Male · Online, free)"),
+                ("en-US-EmmaNeural", "Edge Emma (Clear Female · Online, free)"),
+                ("en-GB-SoniaNeural", "Edge Sonia (British Female · Online, free)"),
+                ("en-IN-NeerjaNeural", "Edge Neerja (Indian Female · Online, free)"),
             ],
             "google": [
                 ("en-US-Neural2-F", "Google Cloud Neural2 F (Female)"),
@@ -2687,7 +2687,7 @@ class StorageEngine:
                 connected_providers.update(catalog_providers)
 
             provider_names = {
-                "edge": "Microsoft Edge Neural",
+                "edge": "Microsoft Edge Neural (Online)",
                 "elevenlabs": "ElevenLabs",
                 "deepgram": "Deepgram Aura",
                 "openai": "OpenAI TTS",

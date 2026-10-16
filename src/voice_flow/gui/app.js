@@ -836,6 +836,10 @@ const VOICEFLOW_CHILD_PAGES = ["home", "insights", "dictionary", "style", "provi
 
 let _onboardingAccountEpoch = 0;
 let _onboardingStatusPromise = null;
+// Persisted onboarding flag mirror (see PERSISTED_ONBOARDING_FLAGS).
+let _onboardingFlagMirror = {};
+let _onboardingFlagsHydration = null;
+let _onboardingFlagsSaveTimer = null;
 let _onboardingEligible = null;
 let _onboardingWelcomeShown = false;
 let _pendingAutomaticGuide = null;
@@ -852,6 +856,7 @@ function loadOnboardingEligibility() {
   const accountEpoch = _onboardingAccountEpoch;
   _onboardingStatusPromise = (async () => {
     let eligible = null;
+    await hydrateOnboardingFlags();
     try {
       const res = await fetch("/api/onboarding/status", { cache: "no-store" });
       const data = await res.json();
@@ -877,6 +882,8 @@ function resetOnboardingSession() {
   ++_onboardingAccountEpoch;
   cancelAutomaticGuide();
   _onboardingStatusPromise = null;
+  _onboardingFlagsHydration = null;
+  _onboardingFlagMirror = {};
   _onboardingEligible = null;
   _onboardingWelcomeShown = false;
   _automaticGuideAttempts.clear();
@@ -907,6 +914,11 @@ function scheduleAutomaticGuide(feature, pageId) {
     currentPageId === pending.pageId;
   loadOnboardingEligibility().then(eligible => {
     if (!isCurrent()) return;
+    // Re-check after the persisted flags were hydrated from the backend.
+    if (seenFlag && onboardingFlag(seenFlag) === "1") {
+      _pendingAutomaticGuide = null;
+      return;
+    }
     if (eligible !== true || isOnboardingAccountChanging() || isFeatureGuideVisible("onboarding-overlay")) {
       _pendingAutomaticGuide = null;
       return;
@@ -5836,7 +5848,7 @@ async function testAllProviders() {
 // =========================================================
 
 const AUDIO_PROVIDERS_CONFIG = {
-  edge: { name: "Microsoft Edge Neural", logo: "✨", keyLink: null, free: true },
+  edge: { name: "Microsoft Edge Neural (Online)", logo: "✨", keyLink: null, free: true, online: true },
   offline: { name: "Windows Offline SAPI5", logo: "💻", keyLink: null, free: true },
   google: { name: "Google Cloud TTS", logo: "☁️", keyLink: "https://console.cloud.google.com/apis/credentials" },
   gemini: { name: "Gemini AI TTS", logo: "💎", keyLink: "https://aistudio.google.com/apikey" },
@@ -5867,6 +5879,13 @@ function afEscape(str) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+// Inline-handler argument: JS-encode first (JSON string literal), then
+// HTML-escape for the attribute. afEscape alone is not enough: the browser
+// decodes &#039; back to ' before the handler runs (titles like "Today's").
+function afJsArg(value) {
+  return afEscape(JSON.stringify(String(value ?? "")));
 }
 
 function afFormatDate(value) {
@@ -6132,16 +6151,16 @@ function renderAudioSummaryHistory() {
       const dlText = isDownloaded ? "✓ Downloaded" : "↓ MP3";
       const dlTitle = isDownloaded ? "Downloaded to your Downloads folder (Click to download again)" : "Download MP3 audio";
       actionButtons += `
-        <button type="button" class="af-icon-btn" onclick="playAudioSummary('${afEscape(s.id)}', '${afEscape(title)}', '${afEscape(s.depth || 'balanced')}')">▶ Play</button>
-        <button type="button" class="af-icon-btn af-download-btn ${isDownloaded ? 'is-downloaded' : ''}" onclick="downloadAudioSummary('${afEscape(s.id)}', this, '${afEscape(title)}')" title="${dlTitle}">${dlText}</button>`;
+        <button type="button" class="af-icon-btn" onclick="playAudioSummary(${afJsArg(s.id)}, ${afJsArg(title)}, ${afJsArg(s.depth || 'balanced')})">▶ Play</button>
+        <button type="button" class="af-icon-btn af-download-btn ${isDownloaded ? 'is-downloaded' : ''}" onclick="downloadAudioSummary(${afJsArg(s.id)}, this, ${afJsArg(title)})" title="${dlTitle}">${dlText}</button>`;
     }
 
     actionButtons += `
       <div class="af-menu-wrap">
-        <button type="button" class="af-menu-trigger" onclick="afToggleMenu('${afEscape(s.id)}', event)" aria-label="More actions">⋯</button>
+        <button type="button" class="af-menu-trigger" onclick="afToggleMenu(${afJsArg(s.id)}, event)" aria-label="More actions">⋯</button>
         <div class="af-menu-dropdown" id="af-menu-${afEscape(s.id)}" style="display: none;">
-          <button type="button" onclick="shareAudioSummary('${afEscape(s.id)}'); afCloseAllMenus();">📋 Share text</button>
-          <button type="button" class="danger" onclick="deleteAudioSummary('${afEscape(s.id)}'); afCloseAllMenus();">🗑 Delete</button>
+          <button type="button" onclick="shareAudioSummary(${afJsArg(s.id)}); afCloseAllMenus();">📋 Share text</button>
+          <button type="button" class="danger" onclick="deleteAudioSummary(${afJsArg(s.id)}); afCloseAllMenus();">🗑 Delete</button>
         </div>
       </div>`;
 
@@ -6778,6 +6797,22 @@ function openAudioSummaryModelPicker() {
   openSharedModelPicker("audio_summary");
 }
 
+// Edge voices are synthesized by Microsoft's online TTS service: the text being
+// read is sent to Microsoft. Show that next to any selected Edge voice.
+const EDGE_ONLINE_VOICE_HINT = "Online voice: the text is sent to Microsoft's text-to-speech service. Pick an offline voice to keep it on this device.";
+
+function isOnlineEdgeVoiceRef(ref) {
+  return String(ref || "").split("/", 1)[0].toLowerCase() === "edge";
+}
+
+function updateOnlineVoiceHint(hintId, modelRef) {
+  const hintEl = document.getElementById(hintId);
+  if (!hintEl) return;
+  const online = isOnlineEdgeVoiceRef(modelRef);
+  hintEl.textContent = online ? EDGE_ONLINE_VOICE_HINT : "";
+  hintEl.hidden = !online;
+}
+
 // Audio Flow TTS voice picker state (shared with video-flow.js).
 let audioVoicePolicyModels = [];
 let audioVoicePolicySet = null;
@@ -6833,6 +6868,7 @@ async function loadExecAudioFlowPolicy() {
         ? (activeObj.provider_name || activeObj.provider || "Reading voice")
         : "Saved voice";
     }
+    updateOnlineVoiceHint("exec-audio-online-hint", activeModel);
 
     // Note: the duplicated engine chip (#exec-audio-active-engine), the
     // Brain/specialty badges (#exec-audio-model-specialty) and the provider
@@ -7466,11 +7502,66 @@ function initOnboardingConfetti() {
 let onboardingSlide = 0;
 let onboardingNarrationPaused = false;
 
+// Onboarding "seen" flags live in WebView localStorage and are mirrored to the
+// backend settings (key ONBOARDING_FLAGS_SETTING_KEY) so they survive a
+// WebView profile reset. "Replay onboarding" writes "" for each, clearing both.
+const ONBOARDING_FLAGS_SETTING_KEY = "onboarding_seen_flags";
+const PERSISTED_ONBOARDING_FLAGS = [
+  "hasViewedOnboarding",
+  "vf_onboarding.done",
+  "vf_onboarding.v2_seen",
+  "vf_onboarding.source",
+  "vf_onboarding.af_guided",
+  "vf_onboarding.vf_guided",
+  "vf_onboarding.vf_voice_guided",
+  "vf_onboarding.firstDictation",
+];
+
+function hydrateOnboardingFlags() {
+  if (_onboardingFlagsHydration) return _onboardingFlagsHydration;
+  _onboardingFlagsHydration = (async () => {
+    try {
+      const res = await fetch("/api/settings/get?key=" + encodeURIComponent(ONBOARDING_FLAGS_SETTING_KEY), { cache: "no-store" });
+      const data = await res.json();
+      const saved = data && data.success && data.value && typeof data.value === "object" ? data.value : null;
+      if (!saved) return;
+      PERSISTED_ONBOARDING_FLAGS.forEach(key => {
+        if (!Object.prototype.hasOwnProperty.call(saved, key)) return;
+        const value = saved[key] == null ? "" : String(saved[key]);
+        _onboardingFlagMirror[key] = value;
+        try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+      });
+    } catch (_) { /* Backend unavailable: localStorage alone. */ }
+  })();
+  return _onboardingFlagsHydration;
+}
+
+function persistOnboardingFlagsSoon() {
+  if (_onboardingFlagsSaveTimer) clearTimeout(_onboardingFlagsSaveTimer);
+  _onboardingFlagsSaveTimer = setTimeout(() => {
+    _onboardingFlagsSaveTimer = null;
+    fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: ONBOARDING_FLAGS_SETTING_KEY, value: { ..._onboardingFlagMirror } }),
+    }).catch(() => {});
+  }, 120);
+}
+
 function onboardingFlag(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  let value = null;
+  try { value = localStorage.getItem(key); } catch { value = null; }
+  if (value === null && Object.prototype.hasOwnProperty.call(_onboardingFlagMirror, key)) {
+    value = _onboardingFlagMirror[key];
+  }
+  return value;
 }
 function setOnboardingFlag(key, value) {
   try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+  if (PERSISTED_ONBOARDING_FLAGS.includes(key)) {
+    _onboardingFlagMirror[key] = value == null ? "" : String(value);
+    persistOnboardingFlagsSoon();
+  }
   const completedFeature = {
     "vf_onboarding.vf_voice_guided": "voice",
     "vf_onboarding.af_guided": "audio",
@@ -10359,7 +10450,7 @@ async function loadAudioProvidersOverview() {
     }
 
     const freeProviders = [
-      { id: "edge", name: "Microsoft Edge Neural", logo: "✨", key_link: null },
+      { id: "edge", name: "Microsoft Edge Neural (Online)", logo: "✨", key_link: null },
       { id: "offline", name: "Windows Offline SAPI5", logo: "💻", key_link: null },
     ].map(p => ({ ...p, connection_count: 1, is_connected: true }));
 
@@ -10572,7 +10663,7 @@ async function loadAudioProviderDetails(providerId) {
           .replace(/^(.+?)\s*\((.+)\)$/, "$1|$2");
         const [edgeVoiceName, edgeVoiceDescription] = edgeVoiceMeta.includes("|")
           ? edgeVoiceMeta.split("|", 2)
-          : [edgeVoiceMeta, "Microsoft Edge Neural voice"];
+          : [edgeVoiceMeta, "Microsoft Edge Neural voice (Online)"];
 
         return `
           <div class="model-card-9r ${isEdgeVoice ? 'edge-voice-card' : ''} ${cardClass}" id="audio-model-card-${m.id}">

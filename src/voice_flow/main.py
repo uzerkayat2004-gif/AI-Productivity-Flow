@@ -75,26 +75,41 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-log_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "voice_flow_debug.log"))
-try:
-    from voice_flow import runtime_env as _runtime_env
+def _voice_flow_log_dir():
+    """Writable per-user log folder (~/.voice_flow/logs), never the app bundle.
 
-    if _runtime_env.is_installed():
+    The install dir / macOS Contents/Resources can be read-only (DMG,
+    quarantined Downloads), so logs always live under the data dir. Returns
+    None when the folder cannot be created; callers then skip file logging.
+    """
+    try:
         from voice_flow.paths import data_dir as _data_dir
 
-        _log_dir = _data_dir() / "logs"
-        _log_dir.mkdir(parents=True, exist_ok=True)
+        _dir = _data_dir() / "logs"
+        _dir.mkdir(parents=True, exist_ok=True)
+        return _dir
+    except Exception:
+        return None
+
+
+_log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+log_file_path = None
+try:
+    from logging.handlers import RotatingFileHandler as _RotatingFileHandler
+
+    _log_dir = _voice_flow_log_dir()
+    if _log_dir is not None:
         log_file_path = str(_log_dir / "voice_flow_debug.log")
+        _log_handlers.append(
+            _RotatingFileHandler(log_file_path, mode="a", maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+        )
 except Exception:
-    pass
+    log_file_path = None
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_file_path, mode="a", encoding="utf-8")
-    ],
+    handlers=_log_handlers,
 )
 
 log = logging.getLogger("voice_flow.main")
@@ -3833,11 +3848,15 @@ def main() -> None:
         return
     except Exception as exc:
         import traceback
-        log_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "crash_log.txt"))
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"\n[UNCAUGHT ERROR] {exc}\n")
-            f.write(traceback.format_exc())
-            f.write("\n" + "="*50 + "\n")
+        try:
+            _crash_dir = _voice_flow_log_dir()
+            if _crash_dir is not None:
+                with open(_crash_dir / "crash_log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"\n[UNCAUGHT ERROR] {exc}\n")
+                    f.write(traceback.format_exc())
+                    f.write("\n" + "="*50 + "\n")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

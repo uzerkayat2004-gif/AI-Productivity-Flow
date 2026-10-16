@@ -4702,17 +4702,21 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                         return
                     self.send_json_response({"success": True, "key": key, "value": updated.get(key)})
                     return
-                if key == "anonymous_crash_reports" and val is True:
-                    try:
-                        from voice_flow.crash_reporting import init_crash_reporting
-                        init_crash_reporting()
-                    except Exception:
-                        pass
                 if not storage.save_setting(key, val):
                     if key == "autostart_enabled":
                         set_launch_at_login(previous_autostart)
                     self.send_json_response({"success": False, "error": "Could not save setting"}, 500)
                     return
+                if key == "anonymous_crash_reports":
+                    # Applied after saving: init reads the stored opt-in; opting out closes the client now.
+                    try:
+                        from voice_flow.crash_reporting import init_crash_reporting, shutdown_crash_reporting
+                        if val is True:
+                            init_crash_reporting()
+                        else:
+                            shutdown_crash_reporting()
+                    except Exception:
+                        pass
                 try:
                     invalidate = getattr(runtime_controller, "invalidate_cached_setting", None)
                     if callable(invalidate):

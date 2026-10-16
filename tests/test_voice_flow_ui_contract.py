@@ -120,6 +120,7 @@ const context = {
   vfCatalog: { models: [] }, vfProviderIcons: {},
   vfEscape: value => String(value ?? ""),
   vfJsArg: value => JSON.stringify(value),
+  vfHandlerArg: value => JSON.stringify(String(value ?? "")),
   vfCapabilityBadges: () => "",
   document: { getElementById: id => id === "vf-model-picker-list" ? root : id === "vf-model-picker-search" ? { value: "" } : null },
   voiceFlowPolicyModelRef: "stt/only-model",
