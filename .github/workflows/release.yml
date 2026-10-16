@@ -86,6 +86,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Assemble Windows runtime staging (official downloads)
+        shell: pwsh
+        run: python release/assemble_windows_staging.py
+
+      - name: Build Windows installer (Inno Setup)
+        shell: pwsh
+        run: python release/build_windows_release.py
+
       - name: Verify Windows Release Artifacts & Smoke Test
         shell: pwsh
         env:
@@ -443,10 +451,11 @@ jobs:
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $tag already exists; updating assets and notes..."
             gh release upload "$tag" release-assets/* --clobber --repo "${{ github.repository }}"
-            gh release edit "$tag" $prerelease_flag --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
+            gh release edit "$tag" --draft $prerelease_flag --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
           else
             gh release create "$tag" \
               release-assets/* \
+              --draft \
               $prerelease_flag \
               --title "AI Productivity Flow $tag" \
               --notes-file CHANGELOG.md \
