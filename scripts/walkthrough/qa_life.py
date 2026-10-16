@@ -129,12 +129,19 @@ def main():
             bar = [w for w in all_windows() if (w.get("h") or 0) < 120 and (w.get("layer") or 0) not in (25,) and (w.get("w") or 0) > 40]
             if bar:
                 b = bar[0]
-                helper("rclick", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
-                time.sleep(1.5)
-                menus = [w for w in all_windows() if (w.get("layer") or 0) >= 100]
+                menus = []
+                for attempt in range(2):  # first click may only activate the app
+                    helper("rclick", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
+                    time.sleep(1.5)
+                    menus = [w for w in all_windows() if (w.get("layer") or 0) >= 100]
+                    if menus:
+                        break
+                    helper("key", "53")
+                    time.sleep(0.5)
                 sm = shot("bar-right-click-menu")
+                opened = sh("grep -h 'Floating bar menu' ~/.voice_flow/logs/*.log | tail -3", quiet=True)[1]
                 record(A, "floating bar right-click opens Open/Quit menu", "ok" if menus else "fail",
-                       json.dumps({"bar": b, "menu_windows": menus}, indent=1)[:1500], sm)
+                       json.dumps({"bar": b, "menu_windows": menus, "log": opened}, indent=1)[:1500], sm)
                 helper("key", "53")  # Escape
                 time.sleep(1)
             else:
