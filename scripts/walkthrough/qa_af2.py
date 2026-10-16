@@ -133,6 +133,11 @@ def phase_selection_widget_and_read() -> None:
            f"widget={widget}\nfloating before={before}\nfloating after={floating()}\nlog: {log_lines('Selection captured|MOUSE HOOK|Accessibility')}", s1)
     native_probe("selection active", (w["x"] + 60, w["y"] + 80))
     if not widget:
+        # Diagnostics: engine threads (is the Quartz tap thread alive?) + app log.
+        pids = sh("pgrep -f 'ai-productivity-flow-launcher$'", quiet=True)[1].split()
+        for p in pids[:2]:
+            sh(f"sample {p} 1 -file {shlex.quote(str(EV / ('sample-noselection-' + p + '.txt')))} >/dev/null 2>&1", quiet=True, timeout=30)
+        save("af2-noselection-log.txt", log_lines("MOUSE HOOK|AUDIO FLOW|INPUT|Accessibility|trusted", 60))
         return
     helper("click", str(widget["x"] + widget["w"] / 2), str(widget["y"] + widget["h"] / 2))
     time.sleep(1.5)
