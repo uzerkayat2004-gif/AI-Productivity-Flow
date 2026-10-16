@@ -5881,6 +5881,13 @@ function afEscape(str) {
     .replaceAll("'", "&#039;");
 }
 
+// Inline-handler argument: JS-encode first (JSON string literal), then
+// HTML-escape for the attribute. afEscape alone is not enough: the browser
+// decodes &#039; back to ' before the handler runs (titles like "Today's").
+function afJsArg(value) {
+  return afEscape(JSON.stringify(String(value ?? "")));
+}
+
 function afFormatDate(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -6144,16 +6151,16 @@ function renderAudioSummaryHistory() {
       const dlText = isDownloaded ? "✓ Downloaded" : "↓ MP3";
       const dlTitle = isDownloaded ? "Downloaded to your Downloads folder (Click to download again)" : "Download MP3 audio";
       actionButtons += `
-        <button type="button" class="af-icon-btn" onclick="playAudioSummary('${afEscape(s.id)}', '${afEscape(title)}', '${afEscape(s.depth || 'balanced')}')">▶ Play</button>
-        <button type="button" class="af-icon-btn af-download-btn ${isDownloaded ? 'is-downloaded' : ''}" onclick="downloadAudioSummary('${afEscape(s.id)}', this, '${afEscape(title)}')" title="${dlTitle}">${dlText}</button>`;
+        <button type="button" class="af-icon-btn" onclick="playAudioSummary(${afJsArg(s.id)}, ${afJsArg(title)}, ${afJsArg(s.depth || 'balanced')})">▶ Play</button>
+        <button type="button" class="af-icon-btn af-download-btn ${isDownloaded ? 'is-downloaded' : ''}" onclick="downloadAudioSummary(${afJsArg(s.id)}, this, ${afJsArg(title)})" title="${dlTitle}">${dlText}</button>`;
     }
 
     actionButtons += `
       <div class="af-menu-wrap">
-        <button type="button" class="af-menu-trigger" onclick="afToggleMenu('${afEscape(s.id)}', event)" aria-label="More actions">⋯</button>
+        <button type="button" class="af-menu-trigger" onclick="afToggleMenu(${afJsArg(s.id)}, event)" aria-label="More actions">⋯</button>
         <div class="af-menu-dropdown" id="af-menu-${afEscape(s.id)}" style="display: none;">
-          <button type="button" onclick="shareAudioSummary('${afEscape(s.id)}'); afCloseAllMenus();">📋 Share text</button>
-          <button type="button" class="danger" onclick="deleteAudioSummary('${afEscape(s.id)}'); afCloseAllMenus();">🗑 Delete</button>
+          <button type="button" onclick="shareAudioSummary(${afJsArg(s.id)}); afCloseAllMenus();">📋 Share text</button>
+          <button type="button" class="danger" onclick="deleteAudioSummary(${afJsArg(s.id)}); afCloseAllMenus();">🗑 Delete</button>
         </div>
       </div>`;
 

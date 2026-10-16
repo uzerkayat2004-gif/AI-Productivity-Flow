@@ -856,6 +856,11 @@ function vfJsArg(value) {
   return "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
 }
 
+// Inline-handler argument: JS string literal, then HTML-escaped for the attribute.
+function vfHandlerArg(value) {
+  return vfEscape(JSON.stringify(String(value ?? "")));
+}
+
 function vfEscape(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1178,7 +1183,7 @@ function vfRenderLegacyHistory() {
       : "";
     return `
       <article class="vf-video-card ${isNlm ? 'vf-card-nlm' : ''} ${authFailed ? 'vf-card-auth-error' : ''}" data-video-id="${vfEscape(video.id)}">
-        <div class="vf-video-thumb" ${complete ? `onclick="previewVideoFlow('${vfEscape(video.id)}')"` : ""}>
+        <div class="vf-video-thumb" ${complete ? `onclick="previewVideoFlow(${vfHandlerArg(video.id)})"` : ""}>
           ${complete ? `<img class="vf-thumb-img" src="/api/video-flow/videos/thumb?id=${vfEscape(video.id)}" alt="" loading="lazy" onerror="this.remove()">` : ""}
           <div class="vf-video-thumb-top">
             <span class="vf-mode-chip ${isNlm ? 'nlm-chip' : ''}">${mode}</span>
@@ -1199,19 +1204,19 @@ function vfRenderLegacyHistory() {
               </div>
               <div class="vf-auth-error-actions">
                 <button class="vf-btn-reauth" type="button" onclick="startNotebookLMAuth(true)">Switch Google Account</button>
-                <button class="vf-btn-retry" type="button" onclick="retryVideoFlow('${vfEscape(video.id)}')">↻ 1-Click Retry</button>
+                <button class="vf-btn-retry" type="button" onclick="retryVideoFlow(${vfHandlerArg(video.id)})">↻ 1-Click Retry</button>
               </div>
             </div>
           ` : (complete ? vfRenderTimingBadge(video) : (!failed ? vfRenderCardLiveTimer(video) : (failed && video.error ? `<div class="vf-error-notice" style="font-size:11px;color:#ef4444;margin-top:6px;">${vfEscape(video.error)}</div>` : "")))}
           ${!complete && !failed ? `<div class="vf-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(video.progress || 0)))}%"></span></div>` : ""}
           <div class="vf-video-actions">
             ${complete ? `
-              <button class="vf-icon-button" onclick="previewVideoFlow('${vfEscape(video.id)}')"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
-              <button type="button" class="vf-icon-button vf-download-btn ${video.downloaded ? 'is-downloaded' : ''}" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="${video.downloaded ? 'Downloaded to your Downloads folder (Click to download again)' : 'Download video'}">${video.downloaded ? '✓ Downloaded' : '↓ Download'}</button>
-              <button class="vf-icon-button" onclick="shareVideoFlow('${vfEscape(video.id)}')">↗ Share</button>
+              <button class="vf-icon-button" onclick="previewVideoFlow(${vfHandlerArg(video.id)})"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
+              <button type="button" class="vf-icon-button vf-download-btn ${video.downloaded ? 'is-downloaded' : ''}" onclick="downloadVideoFlow(${vfHandlerArg(video.id)}, this)" title="${video.downloaded ? 'Downloaded to your Downloads folder (Click to download again)' : 'Download video'}">${video.downloaded ? '✓ Downloaded' : '↓ Download'}</button>
+              <button class="vf-icon-button" onclick="shareVideoFlow(${vfHandlerArg(video.id)})">↗ Share</button>
             ` : ""}
-            ${failed && !authFailed ? `<button class="vf-icon-button" onclick="retryVideoFlow('${vfEscape(video.id)}')">↻ 1-Click Retry</button>` : ""}
-            <button class="vf-icon-button danger" onclick="beginVideoDelete('${vfEscape(video.id)}')">⌫ Delete</button>
+            ${failed && !authFailed ? `<button class="vf-icon-button" onclick="retryVideoFlow(${vfHandlerArg(video.id)})">↻ 1-Click Retry</button>` : ""}
+            <button class="vf-icon-button danger" onclick="beginVideoDelete(${vfHandlerArg(video.id)})">⌫ Delete</button>
           </div>
         </div>
       </article>`;
@@ -1461,7 +1466,7 @@ function vfLibraryCardHtml(video) {
     if (authFailed) {
       actionButtons += `<button class="vf-icon-button" type="button" onclick="startNotebookLMAuth(true)">↻ Reconnect</button>`;
     }
-    actionButtons += `<button class="vf-icon-button" type="button" onclick="retryVideoFlow('${vfEscape(video.id)}')">↻ Retry</button>`;
+    actionButtons += `<button class="vf-icon-button" type="button" onclick="retryVideoFlow(${vfHandlerArg(video.id)})">↻ Retry</button>`;
   } else if (cancelled) {
     bodyExtra += `<p class="flow-card-reason flow-card-reason-muted">Cancelled — nothing is generating for this video.</p>`;
   }
@@ -1472,8 +1477,8 @@ function vfLibraryCardHtml(video) {
     const dlTitle = isDl ? "Downloaded to your Downloads folder (Click to download again)" : "Download video";
     const dlText = isDl ? "✓ Downloaded" : "↓ Download";
     actionButtons += `
-      <button class="vf-icon-button" type="button" onclick="previewVideoFlow('${vfEscape(video.id)}')"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
-      <button class="vf-icon-button vf-download-btn ${isDl ? 'is-downloaded' : ''}" type="button" onclick="downloadVideoFlow('${vfEscape(video.id)}', this)" title="${dlTitle}">${dlText}</button>`;
+      <button class="vf-icon-button" type="button" onclick="previewVideoFlow(${vfHandlerArg(video.id)})"><svg class="lucide vf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Play</button>
+      <button class="vf-icon-button vf-download-btn ${isDl ? 'is-downloaded' : ''}" type="button" onclick="downloadVideoFlow(${vfHandlerArg(video.id)}, this)" title="${dlTitle}">${dlText}</button>`;
     menuActions.push("share", "details", "delete");
   } else {
     menuActions.push("details", "delete");
@@ -2097,7 +2102,7 @@ function vfPickerRowHtml(model, activeRef) {
     `data-model-ref="${vfEscape(ref)}"`
   ];
   if (!unavailable) {
-    rowAttrs.push(`onclick="chooseVideoModel('${vfEscape(ref)}')"` );
+    rowAttrs.push(`onclick="chooseVideoModel(${vfHandlerArg(ref)})"` );
   }
   if (isSelected) rowAttrs.push('data-selected="true"', 'aria-checked="true"', 'role="radio"');
   if (unavailable) rowAttrs.push('aria-disabled="true"', `title="${vfEscape(unavailableReason)}"`);
@@ -3879,7 +3884,7 @@ function updateGenerationStepper(activeVideo) {
         </div>
         <div class="vf-auth-error-actions">
           <button type="button" class="vf-btn-reauth" onclick="startNotebookLMAuth(true)">Switch Google Account</button>
-          <button type="button" class="vf-btn-retry" onclick="retryVideoFlow('${vfEscape(activeVideo.id)}')">↻ 1-Click Retry</button>
+          <button type="button" class="vf-btn-retry" onclick="retryVideoFlow(${vfHandlerArg(activeVideo.id)})">↻ 1-Click Retry</button>
         </div>
       `;
       authCardEl.style.display = "flex";
@@ -3915,7 +3920,7 @@ function updateGenerationStepper(activeVideo) {
           <span>${vfEscape(errorMsg)}</span>
         </div>
         <div class="vf-auth-error-actions">
-          <button type="button" class="vf-btn-retry" onclick="retryVideoFlow('${vfEscape(activeVideo.id)}')">↻ 1-Click Retry</button>
+          <button type="button" class="vf-btn-retry" onclick="retryVideoFlow(${vfHandlerArg(activeVideo.id)})">↻ 1-Click Retry</button>
         </div>
       `;
       authCardEl.style.display = "flex";
