@@ -53,7 +53,11 @@ _SETTINGS_URLS = {
     "input_monitoring": f"{_PANE}?Privacy_ListenEvent",
 }
 
-_LAUNCH_AGENT_LABEL = "com.voiceflow.app"
+# The login item is named after the app's bundle id. Builds before v1.0.3 used
+# "com.voiceflow.app"; that file is migrated (removed) whenever the setting is
+# read or written so a user never ends up with two login items.
+_LAUNCH_AGENT_LABEL = "com.uzerkayat.aiproductivityflow"
+_LEGACY_LAUNCH_AGENT_LABELS = ("com.voiceflow.app",)
 
 
 def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0):
@@ -194,13 +198,37 @@ class MacOSBackend:
     # ------------------------------------------------------------------
     # autostart  (LaunchAgent plist — the macOS analogue of the HKCU Run key)
     # ------------------------------------------------------------------
-    def _agent_path(self) -> str:
-        return os.path.expanduser(
-            f"~/Library/LaunchAgents/{_LAUNCH_AGENT_LABEL}.plist"
-        )
+    def _agent_path(self, label: str = _LAUNCH_AGENT_LABEL) -> str:
+        return os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
+
+    def _legacy_agent_paths(self) -> list[str]:
+        return [self._agent_path(label) for label in _LEGACY_LAUNCH_AGENT_LABELS]
+
+    def _remove_legacy_agents(self) -> bool:
+        """Delete old-named login items. Returns True if one was present."""
+        found = False
+        for legacy in self._legacy_agent_paths():
+            if os.path.exists(legacy):
+                found = True
+                try:
+                    os.remove(legacy)
+                except OSError as exc:
+                    log.debug("[MACOS] could not remove legacy login item %s: %s", legacy, exc)
+        return found
+
+    def migrate_legacy_login_item(self) -> bool:
+        """Rename an old "com.voiceflow.app" login item to the bundle id name."""
+        if not IS_MACOS or not any(os.path.exists(p) for p in self._legacy_agent_paths()):
+            return False
+        if os.path.exists(self._agent_path()):
+            self._remove_legacy_agents()
+            return True
+        return self.set_launch_at_login(True)
 
     def get_launch_at_login(self) -> bool:
-        return os.path.exists(self._agent_path())
+        if os.path.exists(self._agent_path()):
+            return True
+        return any(os.path.exists(p) for p in self._legacy_agent_paths())
 
     def set_launch_at_login(self, enabled: bool, command: str | None = None) -> bool:
         if not IS_MACOS:
@@ -208,9 +236,11 @@ class MacOSBackend:
         path = self._agent_path()
         try:
             if not enabled:
+                # Only delete the file. "launchctl unload" would SIGTERM the
+                # running app when it was itself started at login.
                 if os.path.exists(path):
-                    _run(["launchctl", "unload", path])
                     os.remove(path)
+                self._remove_legacy_agents()
                 return True
 
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -240,7 +270,10 @@ class MacOSBackend:
             )
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(plist)
-            _run(["launchctl", "load", path])
+            # launchd reads ~/Library/LaunchAgents at the next login. Do not
+            # "launchctl load" now: RunAtLoad would start a second copy of the
+            # app immediately.
+            self._remove_legacy_agents()
             return True
         except Exception as exc:
             log.debug("[MACOS] set_launch_at_login failed: %s", exc)

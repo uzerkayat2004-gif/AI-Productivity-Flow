@@ -71,6 +71,8 @@ def create_launcher_script() -> None:
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONPATH="$DIR/Resources/src:$DIR/Resources/runtime/site-packages:$DIR/Resources/runtime/python/lib/python3.11/site-packages:$PYTHONPATH"
 export PATH="$DIR/Resources/runtime/python/bin:$PATH"
+# Never write .pyc files into the (signed, often read-only) bundle.
+export PYTHONDONTWRITEBYTECODE=1
 
 PYTHON="$DIR/Resources/runtime/python/bin/python3"
 
@@ -286,6 +288,34 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         print(f"Host platform is '{sys.platform}'. Skipping pip package installation in Darwin binary on non-Darwin host.")
 
     sanitize_runtime_libraries(runtime_dir)
+
+
+def precompile_bundle_bytecode(python_bin: Path | None = None) -> bool:
+    """Ship bytecode so the app never compiles into its own bundle at runtime.
+
+    The launcher sets PYTHONDONTWRITEBYTECODE=1. Unchecked-hash .pyc files stay
+    valid however the bundle's timestamps change (cp -R from the DMG, unzip),
+    so startup speed is kept without writing into the signed bundle.
+    """
+    python_bin = python_bin or (RESOURCES_DIR / "runtime" / "python" / "bin" / "python3")
+    if not python_bin.is_file():
+        print("Bytecode precompile skipped: bundled Python not found.")
+        return False
+    targets = [RESOURCES_DIR / "src", RESOURCES_DIR / "runtime" / "site-packages",
+               RESOURCES_DIR / "runtime" / "python" / "lib" / "python3.11"]
+    targets = [str(t) for t in targets if t.is_dir()]
+    if not targets:
+        return False
+    proc = subprocess.run(
+        # -f rewrites pip's timestamp .pyc files, which go stale when the
+        # bundle is copied without preserving modification times.
+        [str(python_bin), "-m", "compileall", "-q", "-f", "-j", "0",
+         "--invalidation-mode", "unchecked-hash", *targets],
+        check=False,
+    )
+    # A few vendored test fixtures are intentionally invalid Python; that is fine.
+    print(f"Precompiled bundle bytecode (compileall exit {proc.returncode}).")
+    return True
 
 
 def sign_app_bundle(bundle_dir: Path) -> bool:
@@ -568,6 +598,7 @@ def main() -> None:
     if args.bundle_runtime:
         bundle_runtime_dependencies(target_arch=args.target_arch)
         create_native_launcher(target_arch=args.target_arch)
+        precompile_bundle_bytecode()
 
     sign_app_bundle(BUNDLE_DIR)
 

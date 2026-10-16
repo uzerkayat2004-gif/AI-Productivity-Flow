@@ -1,0 +1,374 @@
+"""macOS app lifecycle: single instance, real Quit, reaped children, login item.
+
+These run on any POSIX host: the Mac-only code paths are exercised by
+patching ``sys.platform`` or calling the platform helpers directly.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX process semantics (flock, AF_UNIX, zombies)")
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+
+from voice_flow.platform import macos_lifecycle as ml  # noqa: E402
+
+
+# ---------------------------------------------------------------- locks
+
+def test_instance_lock_is_exclusive_and_released_on_close(tmp_path):
+    first = ml.InstanceLock(tmp_path / "engine.lock")
+    second = ml.InstanceLock(tmp_path / "engine.lock")
+    assert first.acquire()
+    assert first.owner_pid() == os.getpid()
+    assert not second.acquire(), "a second engine must not get the lock"
+    first.release()
+    assert second.acquire(), "lock must be free once the owner releases it"
+    second.release()
+
+
+def test_instance_lock_is_released_when_owner_process_dies(tmp_path):
+    lock_path = tmp_path / "engine.lock"
+    code = (
+        "import sys, time; sys.path.insert(0, %r)\n"
+        "from voice_flow.platform.macos_lifecycle import InstanceLock\n"
+        "l = InstanceLock(%r); assert l.acquire(); print('held', flush=True); time.sleep(60)\n"
+    ) % (str(SRC), str(lock_path))
+    proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "held"
+        probe = ml.InstanceLock(lock_path)
+        assert not probe.acquire(), "lock held by a live process must block a second copy"
+        proc.kill()
+        proc.wait(5)
+        assert probe.acquire(), "kill -9 of the owner must not leave a stale lock"
+        probe.release()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(5)
+
+
+def test_lock_descriptor_is_not_inherited_by_children(tmp_path):
+    lock = ml.InstanceLock(tmp_path / "engine.lock")
+    assert lock.acquire()
+    try:
+        assert os.get_inheritable(lock._fd) is False
+    finally:
+        lock.release()
+
+
+# ---------------------------------------------------------- second launch
+
+def test_second_launch_asks_running_engine_to_show_window():
+    calls = []
+
+    def post(path, **kw):
+        calls.append(path)
+        return {"success": len(calls) >= 3}  # engine still booting for 2 polls
+
+    t = [0.0]
+    ok = ml.ask_running_engine_to_show_window(post=post, sleep=lambda s: t.__setitem__(0, t[0] + s),
+                                              clock=lambda: t[0], wait_seconds=5)
+    assert ok and calls == ["/api/app/open-window"] * 3
+
+
+def test_second_launch_gives_up_without_hanging():
+    t = [0.0]
+
+    def post(path, **kw):
+        raise OSError("refused")
+
+    ok = ml.ask_running_engine_to_show_window(post=post, sleep=lambda s: t.__setitem__(0, t[0] + s),
+                                              clock=lambda: t[0], wait_seconds=3)
+    assert ok is False
+
+
+def test_engine_main_exits_when_lock_held(monkeypatch):
+    import voice_flow.main as main_mod
+
+    shown = []
+    monkeypatch.setattr(ml, "acquire_engine_lock", lambda: False)
+    monkeypatch.setattr(ml, "ask_running_engine_to_show_window", lambda **kw: shown.append(1) or True)
+    assert main_mod._mac_take_engine_lock() is False
+    assert shown == [1]
+
+
+def test_engine_main_does_not_start_second_engine_on_compatible_port(monkeypatch):
+    """Mac: a live engine (old copy without the lock) means show it, never start a 2nd."""
+    import voice_flow.main as main_mod
+    import voice_flow.runtime_guard as rg
+
+    monkeypatch.setattr(main_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(rg, "prepare_runtime_port", lambda **kw: SimpleNamespace(status="compatible"))
+    shown = []
+    monkeypatch.setattr(main_mod, "_mac_show_running_instance", lambda: shown.append(1) or True)
+    started = []
+    monkeypatch.setattr(main_mod, "VoiceFlowApp", lambda *a, **k: started.append(1))
+    monkeypatch.setattr(sys, "argv", ["voice_flow.main"])
+    main_mod.main()
+    assert shown == [1] and started == []
+
+
+# ------------------------------------------------------------- quit API
+
+class _FakeHandler:
+    def __init__(self):
+        self.sent = None
+
+    def send_json_response(self, payload, status=200):
+        self.sent = (status, payload)
+
+
+def _post_api(monkeypatch, path, controller, platform="darwin", body=b"{}"):
+    import voice_flow.gui.api_server as api
+
+    monkeypatch.setattr(api, "runtime_controller", controller)
+    monkeypatch.setattr(api.sys, "platform", platform)
+    handler = api.VoiceFlowApiHandler.__new__(api.VoiceFlowApiHandler)
+    handler.path = path
+    handler.headers = {"Content-Length": str(len(body)), "Content-Type": "application/json"}
+    import io
+    handler.rfile = io.BytesIO(body)
+    sent = []
+    handler.send_json_response = lambda payload, status=200: sent.append((status, payload))
+    handler.client_address = ("127.0.0.1", 5555)
+    return api, handler, sent
+
+
+def test_quit_endpoint_calls_request_quit_on_mac(monkeypatch):
+    calls = []
+    controller = SimpleNamespace(request_quit=lambda reason: calls.append(reason) or True,
+                                 open_desktop_window=lambda: True)
+    api, handler, sent = _post_api(monkeypatch, "/api/app/quit", controller, body=b'{"reason":"window-quit"}')
+    handler.do_POST()
+    assert calls == ["window-quit"]
+    assert sent[-1] == (200, {"success": True})
+
+
+def test_open_window_endpoint_on_mac(monkeypatch):
+    calls = []
+    controller = SimpleNamespace(request_quit=lambda reason: True,
+                                 open_desktop_window=lambda: calls.append(1) or True)
+    api, handler, sent = _post_api(monkeypatch, "/api/app/open-window", controller)
+    handler.do_POST()
+    assert calls == [1] and sent[-1][0] == 200
+
+
+def test_quit_endpoint_not_available_on_windows(monkeypatch):
+    calls = []
+    controller = SimpleNamespace(request_quit=lambda reason: calls.append(reason) or True)
+    api, handler, sent = _post_api(monkeypatch, "/api/app/quit", controller, platform="win32")
+    handler.do_POST()
+    assert calls == [] and sent[-1][0] == 404
+
+
+# ------------------------------------------------- engine quit + reaping
+
+def _bare_app():
+    import voice_flow.main as main_mod
+
+    app = main_mod.VoiceFlowApp.__new__(main_mod.VoiceFlowApp)
+    app.overlay = SimpleNamespace(hide=lambda: None, show=lambda: None, root=None)
+    app.stop = lambda: None
+    return main_mod, app
+
+
+def test_request_quit_kills_window_children_and_exits(monkeypatch):
+    main_mod, app = _bare_app()
+    window = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+    app._desktop_proc = window
+    exited = threading.Event()
+    codes = []
+    monkeypatch.setattr(app, "_final_exit", lambda code=0: (codes.append(code), exited.set()))
+    t0 = time.monotonic()
+    assert app.request_quit("test") is True
+    assert app.request_quit("again") is True  # idempotent
+    assert exited.wait(8), "quit must finish well within the hard deadline"
+    assert time.monotonic() - t0 < ml.QUIT_HARD_DEADLINE_SECONDS
+    assert codes == [0]
+    assert window.poll() is not None, "window process must be stopped on Quit"
+    assert helper.poll() is not None, "helper processes (llama-server, node, ffmpeg) must be stopped"
+    assert app._shutdown_requested is True
+
+
+def test_window_close_reaps_child_no_zombie(monkeypatch):
+    """Closing the window ends the window process; the engine must reap it."""
+    main_mod, app = _bare_app()
+    monkeypatch.setattr(main_mod.sys, "platform", "darwin")
+    import voice_flow.watchdog as wd
+    monkeypatch.setattr(wd, "get_pythonw_executable", lambda: sys.executable)
+    monkeypatch.setattr(wd, "get_pythonw_env", lambda *a, **k: dict(os.environ))
+    real_popen = subprocess.Popen
+
+    def fake_popen(args, **kw):
+        return real_popen([sys.executable, "-c", "pass"], **{k: v for k, v in kw.items() if k in ("env",)})
+
+    monkeypatch.setattr(main_mod.subprocess, "Popen", fake_popen)
+    assert app._spawn_desktop_window()
+    proc = app._desktop_proc
+    deadline = time.time() + 5
+    while time.time() < deadline and getattr(app, "_desktop_proc", None) is not None:
+        time.sleep(0.05)
+    assert app._desktop_proc is None
+    assert proc.returncode is not None, "exited window process must be reaped (no <defunct>)"
+    import psutil
+    assert not any(c.pid == proc.pid for c in psutil.Process().children())
+
+
+def test_open_desktop_window_raises_existing_or_spawns(monkeypatch):
+    main_mod, app = _bare_app()
+    monkeypatch.setattr(ml, "send_desktop_show", lambda *a, **k: False)
+    spawned = []
+    monkeypatch.setattr(app, "_spawn_desktop_window", lambda: spawned.append(1) or True)
+    assert app.open_desktop_window() is True and spawned == [1]
+
+    monkeypatch.setattr(ml, "send_desktop_show", lambda *a, **k: True)
+    spawned.clear()
+    assert app.open_desktop_window() is True and spawned == []
+
+    app._shutdown_requested = True
+    assert app.open_desktop_window() is False
+
+
+def test_stop_process_and_descendants_leave_no_zombies():
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    ml.stop_process(proc, timeout=2)
+    assert proc.returncode is not None
+    stubborn = subprocess.Popen([sys.executable, "-c",
+                                 "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"])
+    time.sleep(0.3)
+    pids = ml.terminate_descendants(timeout=0.5)
+    assert stubborn.pid in pids
+    stubborn.wait(3)
+    import psutil
+    assert not [c for c in psutil.Process().children() if c.status() == psutil.STATUS_ZOMBIE]
+
+
+# ------------------------------------------------- window control socket
+
+def test_window_control_socket_raises_window(tmp_path):
+    sock = tmp_path / "d.sock"
+    shown = threading.Event()
+    assert ml.serve_desktop_control(shown.set, path=sock) is not None
+    assert ml.send_desktop_show(path=sock) is True
+    assert shown.wait(2)
+    assert ml.send_desktop_show(path=tmp_path / "missing.sock") is False
+
+
+def test_duplicate_window_launcher_exits(monkeypatch):
+    import voice_flow.gui.desktop_launcher as dl
+
+    monkeypatch.setattr(dl.sys, "platform", "darwin")
+    monkeypatch.setattr(ml, "acquire_desktop_lock", lambda *a, **k: False)
+    raised = []
+    monkeypatch.setattr(ml, "send_desktop_show", lambda *a, **k: raised.append(1) or True)
+    assert dl._mac_window_already_running() is True and raised == [1]
+    with pytest.raises(SystemExit):
+        dl._run_desktop_launcher()
+
+
+def test_window_quit_notifies_engine():
+    calls = []
+    assert ml.notify_engine_quit(post=lambda path, **kw: calls.append((path, kw.get("body"))) or {"success": True})
+    assert calls == [("/api/app/quit", {"reason": "window-quit"})]
+    assert ml.notify_engine_quit(post=lambda *a, **k: (_ for _ in ()).throw(OSError())) is False
+
+
+def test_mac_engine_lock_probe_used_by_desktop_backend_check(monkeypatch, tmp_path):
+    import voice_flow.gui.desktop_launcher as dl
+
+    monkeypatch.setattr(dl.sys, "platform", "darwin")
+    monkeypatch.setattr(dl, "_data_dir", lambda: tmp_path)
+    assert dl._mac_engine_lock_held() is False
+    holder = ml.InstanceLock(tmp_path / ml.ENGINE_LOCK_NAME)
+    assert holder.acquire()
+    try:
+        assert dl._mac_engine_lock_held() is True
+    finally:
+        holder.release()
+
+
+def test_tk_apple_event_handlers_registered(monkeypatch):
+    monkeypatch.setattr(ml, "IS_MACOS", True)
+    registered = {}
+    root = SimpleNamespace(createcommand=lambda name, fn: registered.__setitem__(name, fn))
+    assert ml.install_tk_app_handlers(root, lambda: "q", lambda: "r")
+    assert registered["::tk::mac::Quit"]() == "q"
+    assert registered["::tk::mac::ReopenApplication"]() == "r"
+
+
+# ------------------------------------------------------------- login item
+
+def test_login_item_uses_bundle_id_and_migrates_legacy(monkeypatch, tmp_path):
+    import voice_flow.platform.macos as mac
+
+    monkeypatch.setattr(mac, "IS_MACOS", True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ran = []
+    monkeypatch.setattr(mac, "_run", lambda cmd, **kw: ran.append(cmd))
+    backend = mac.MacOSBackend.__new__(mac.MacOSBackend)
+    agents = tmp_path / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True)
+    legacy = agents / "com.voiceflow.app.plist"
+    legacy.write_text("<plist/>")
+    assert backend.get_launch_at_login() is True
+    assert backend.migrate_legacy_login_item() is True
+    new = agents / "com.uzerkayat.aiproductivityflow.plist"
+    assert new.exists() and not legacy.exists()
+    assert "<string>com.uzerkayat.aiproductivityflow</string>" in new.read_text()
+    assert not any("load" in c for c in ran), "enabling must not launchctl-load (would start a 2nd copy)"
+    assert backend.set_launch_at_login(False) is True
+    assert not new.exists() and backend.get_launch_at_login() is False
+    assert not any("unload" in c for c in ran), "disabling must not SIGTERM the running app"
+
+
+# ---------------------------------------------------- bytecode in bundle
+
+def test_launchers_disable_bytecode_writes():
+    c_src = (ROOT / "scripts" / "native_macos_launcher.c").read_text()
+    assert 'setenv("PYTHONDONTWRITEBYTECODE", "1", 1)' in c_src
+    build = (ROOT / "scripts" / "build_macos_app.py").read_text()
+    assert "export PYTHONDONTWRITEBYTECODE=1" in build
+    assert '"--invalidation-mode", "unchecked-hash"' in build
+    assert "precompile_bundle_bytecode()" in build
+
+
+# -------------------------------------------- startup console noise (UI)
+
+def test_api_me_optional_probe_is_not_an_error():
+    import voice_flow.google_auth as ga
+
+    sent = []
+    orig = ga._send_json
+    try:
+        ga._send_json = lambda handler, payload, status=200, **kw: sent.append((status, payload))
+        orig_current = ga.current_user
+        ga.current_user = lambda handler: None
+        ga.handle_me(object(), optional=True)
+        ga.handle_me(object())
+    finally:
+        ga._send_json = orig
+        ga.current_user = orig_current
+    assert sent[0][0] == 200 and sent[0][1]["authenticated"] is False
+    assert sent[1][0] == 401
+
+
+def test_video_page_makes_no_render_calls_when_gated_on_mac():
+    js = (SRC / "voice_flow" / "gui" / "video-flow.js").read_text()
+    assert 'fetch("/api/me?optional=1"' in js
+    i = js.index("async function analyzeSourceDocument")
+    body = js[i:i + 2000]
+    assert "vfVideoFlowGatedOnMac" in body and "!vfGated" in body
+    j = js.index('"/api/video-flow/documents/extract"')
+    assert "vfVideoFlowGatedOnMac" in js[j - 900:j]

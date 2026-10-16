@@ -585,6 +585,12 @@ class FloatingOverlayBar:
             self.canvas.bind("<ButtonRelease-1>", self._on_release)
             self.canvas.bind("<Motion>", self._on_motion)
             self.canvas.bind("<Leave>", self._on_leave)
+            if sys.platform == "darwin":
+                # Right-click (Aqua reports Button-2 on Tk 8.6, Button-3 on Tk 9)
+                # opens Open / Quit, so the app stays reachable and quittable
+                # after its window is closed.
+                self.canvas.bind("<ButtonPress-2>", self._show_app_menu)
+                self.canvas.bind("<ButtonPress-3>", self._show_app_menu)
 
         self._position_window()
         if hasattr(self.win, "bind"):
@@ -594,6 +600,34 @@ class FloatingOverlayBar:
         self._schedule_proximity_poll()
         if sys.platform == "darwin" and getattr(self, "_mainloop_running", False):
             self._schedule_mac_repaint()  # recreated bar (restart/refresh)
+
+    def _show_app_menu(self, event=None) -> str | None:
+        """macOS floating-bar context menu: Open the app window / Quit the app."""
+        actions = getattr(self, "app_menu_actions", None) or {}
+        if not actions or self.root is None:
+            return None
+        try:
+            menu = getattr(self, "_app_menu", None)
+            if menu is None:
+                menu = tk.Menu(self.root, tearoff=0)
+                menu.add_command(label="Open AI Productivity Flow",
+                                 command=lambda: (getattr(self, "app_menu_actions", None) or {}).get("open", lambda: None)())
+                menu.add_separator()
+                menu.add_command(label="Quit AI Productivity Flow",
+                                 command=lambda: (getattr(self, "app_menu_actions", None) or {}).get("quit", lambda: None)())
+                self._app_menu = menu
+            x = int(getattr(event, "x_root", 0) or 0)
+            y = int(getattr(event, "y_root", 0) or 0)
+            menu.tk_popup(x, y)
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Floating bar menu error: %s", exc)
+        finally:
+            try:
+                if getattr(self, "_app_menu", None) is not None:
+                    self._app_menu.grab_release()
+            except Exception:
+                pass
+        return "break"
 
     def _init_tk(self) -> None:
         self._create_window()
