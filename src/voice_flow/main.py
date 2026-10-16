@@ -3137,7 +3137,16 @@ class VoiceFlowApp:
                     text_to_read = cached
         if not text_to_read or not text_to_read.strip():
             if sys.platform == "darwin":
-                log.info("[AUDIO FLOW] No selected text found to read (state=%s).", getattr(self, "state", None))
+                try:
+                    from voice_flow.platform import macos_native as _mn
+                    _ax = _mn.focused_selection_info()
+                    _front = _mn.frontmost_window_owner()
+                    _ax_note = "trusted=%s status=%s role=%s chars=%d front=%s" % (
+                        _ax.get("trusted"), _ax.get("status"), _ax.get("role"), len(str(_ax.get("text") or "")),
+                        (_front or {}).get("app"))
+                except Exception as _exc:  # diagnostics only
+                    _ax_note = "unavailable (%s)" % _exc
+                log.info("[AUDIO FLOW] No selected text found to read (state=%s; AX %s).", getattr(self, "state", None), _ax_note)
             if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
                 audio_flow_widget.set_playing(False)
                 self.overlay.show_error("Select text to listen")
