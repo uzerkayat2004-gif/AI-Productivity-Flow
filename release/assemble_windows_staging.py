@@ -202,8 +202,16 @@ def stage_narova(node: Path) -> None:
         source / "tool", target / "tool",
         ignore=shutil.ignore_patterns("node_modules", "__pycache__", "*.pyc", "evals", "live-tests", "tests"),
     )
-    lock = target / "tool" / "package-lock.json"
-    npm(node, ["ci" if lock.is_file() else "install", "--omit=dev"], cwd=target / "tool")
+    # Narova's package.json declares os: darwin/linux, but the CLI is plain
+    # Node and runs on Windows (the app drives it through the bundled node).
+    # It has no runtime dependencies, so npm is only needed if some are added;
+    # then --force skips the os check that would otherwise fail on win32.
+    manifest = json.loads((target / "tool" / "package.json").read_text(encoding="utf-8"))
+    if manifest.get("dependencies"):
+        lock = target / "tool" / "package-lock.json"
+        npm(node, ["ci" if lock.is_file() else "install", "--omit=dev", "--force"], cwd=target / "tool")
+    else:
+        log("narova: no runtime npm dependencies; skipping npm install.")
 
 
 def stage_ffmpeg() -> dict:
