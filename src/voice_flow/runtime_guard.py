@@ -14,6 +14,12 @@ from typing import Iterable
 
 from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION
 from voice_flow.local_server import require_loopback_host
+from voice_flow.local_http import open_local  # also installs the loopback no-proxy opener
+from voice_flow import child_processes
+
+# The engine imports this module from its main thread at startup: register the
+# exit hooks that stop llama-server / Video Flow children on SIGTERM/exit.
+child_processes.install_exit_handlers()
 
 
 @dataclass(frozen=True)
@@ -29,7 +35,7 @@ def _runtime_payload(*, host: str, port: int, timeout: float) -> dict | None:
             f"http://{host}:{port}/api/runtime",
             headers={"User-Agent": "VoiceFlowRuntimeGuard", "Connection": "close"},
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with open_local(request, timeout=timeout) as response:
             payload = json.load(response)
             if response.status != 200 or not isinstance(payload, dict):
                 return None

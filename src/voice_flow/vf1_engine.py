@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -23,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from voice_flow import child_processes
+from voice_flow.local_http import no_proxy_environment, open_local
 from voice_flow.safety_gate import SafetyGateDecision, validate_and_gate_output
 from voice_flow.vf_contract import (
     CONTRACT_VERSION,
@@ -56,9 +59,16 @@ class VF1EngineConfig:
     repetition_penalty: float = 1.0
     enable_thinking: bool = False
     server_host: str = "127.0.0.1"
-    server_port: int = 8080
+    # 0 = pick a free app-private port when we spawn llama-server. A fixed
+    # well-known port (8080) is shared with countless local dev servers.
+    server_port: int = 0
     server_binary_path: Optional[str] = None
     auto_start_server: bool = True
+    # Cold starts load a ~0.5 GB model; a server not ready by then is killed.
+    server_ready_timeout_seconds: float = 30.0
+    # Developer/live-test opt-in only: trust whatever answers /health on
+    # server_host:server_port. Never enabled by the app.
+    trust_external_server: bool = False
 
 
 @dataclass
@@ -100,7 +110,6 @@ class VF1Engine:
         self._loaded_tokenizer: Any = None
         self._mock_generator: Optional[Callable[[str, VF1Request], str]] = None
         self._last_telemetry: Optional[Dict[str, Any]] = None
-        self._server_process: Optional[Any] = None
         self._last_server_timings: Optional[Dict[str, Any]] = None
 
     def set_mock_generator(self, generator: Optional[Callable[[str, VF1Request], str]]) -> None:
@@ -848,26 +857,43 @@ class VF1Engine:
                 return Path(found)
         return None
 
+    def _server_manager(self) -> "LlamaServerManager":
+        return get_llama_server_manager()
+
+    @property
+    def _server_process(self) -> Optional[Any]:
+        """The llama-server process this app spawned (shared by all engines)."""
+        return self._server_manager().process
+
+    def server_endpoint(self) -> Optional[Tuple[str, int]]:
+        """(host, port) of the verified llama-server, or None."""
+        if self.config.trust_external_server and self.config.server_port:
+            return self.config.server_host, int(self.config.server_port)
+        return self._server_manager().endpoint()
+
     def is_server_healthy(self, host: Optional[str] = None, port: Optional[int] = None) -> bool:
-        """Check if local llama-server is healthy and ready for completions."""
-        h = host or self.config.server_host
-        p = port or self.config.server_port
-        url = f"http://{h}:{p}/health"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "VoiceFlow/VF1"})
-            with urllib.request.urlopen(req, timeout=1.5) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
-                    return data.get("status") in ("ok", "loading model") or resp.status == 200
-        except Exception:
-            return False
-        return False
+        """Whether the llama-server *this app spawned* is ready for completions.
+
+        Any other process listening on a local port (a dev server on 8080, a
+        user's own llama-server) is never trusted with dictation text: the
+        server must be our child, alive, and answer ``/v1/models`` (or
+        ``/props``) with the per-launch alias / model path we started it with.
+        """
+        if self.config.trust_external_server:
+            h = host or self.config.server_host
+            p = port or self.config.server_port
+            return bool(p) and _legacy_health_ok(h, int(p))
+        return self._server_manager().is_ready()
 
     def ensure_server_running(self) -> bool:
-        """Ensure llama-server process is running, launching if necessary."""
-        if self.is_server_healthy():
-            return True
+        """Ensure our llama-server is running and verified, launching it if needed.
 
+        Never spawns a second copy: concurrent callers share one start, and a
+        server that does not become ready in time is killed, not leaked.
+        """
+        manager = self._server_manager()
+        if manager.is_ready():
+            return True
         binary = self._find_llama_server_binary()
         if not binary:
             log.warning("[VF-1] llama-server executable not found.")
@@ -878,63 +904,32 @@ class VF1Engine:
         if not model_path:
             log.warning("[VF-1] S1-mini GGUF model file not found.")
             return False
-
-        threads = max(1, min(8, os.cpu_count() or 4))
-        cmd = [
-            str(binary),
-            "-m", str(model_path),
-            "--host", self.config.server_host,
-            "--port", str(self.config.server_port),
-            "-c", str(DEFAULT_CONTEXT_TOKENS),
-            "-ngl", "0",
-            "-t", str(threads),
-        ]
-        log.info("[VF-1] Spawning llama-server: %s", " ".join(cmd))
-        try:
-            creation_flags = 0
-            if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-
-            self._server_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creation_flags,
-            )
-            deadline = time.perf_counter() + 10.0
-            while time.perf_counter() < deadline:
-                if self.is_server_healthy():
-                    log.info("[VF-1] llama-server successfully started on port %d", self.config.server_port)
-                    return True
-                time.sleep(0.25)
-            log.warning("[VF-1] llama-server did not become healthy within timeout.")
-            return False
-        except Exception as exc:
-            log.error("[VF-1] Failed to launch llama-server: %s", exc)
-            return False
+        return manager.ensure_running(
+            binary=Path(binary),
+            model_path=Path(model_path),
+            host=self.config.server_host,
+            port=int(self.config.server_port or 0),
+            ready_timeout=float(self.config.server_ready_timeout_seconds),
+        )
 
     def stop_server(self) -> None:
-        """Stop locally spawned server process if managed by this instance."""
-        if self._server_process is not None:
-            try:
-                self._server_process.terminate()
-                self._server_process.wait(timeout=3.0)
-            except Exception:
-                try:
-                    self._server_process.kill()
-                except Exception:
-                    pass
-            self._server_process = None
+        """Stop the llama-server this app spawned (if any)."""
+        self._server_manager().stop()
 
     def _run_llama_server_inference(self, prompt_text: str, deadline: float) -> str:
         """Execute inference against local llama-server /completion endpoint."""
-        url = f"http://{self.config.server_host}:{self.config.server_port}/completion"
+        endpoint = self.server_endpoint()
+        if endpoint is None:
+            log.warning("[VF-1] llama-server is not running; refusing to send text to an unverified port.")
+            return ""
+        host, port = endpoint
+        url = f"http://{host}:{port}/completion"
         payload = {
             "prompt": prompt_text,
             "n_predict": self.config.max_new_tokens,
             "temperature": self.config.temperature,
             "repeat_penalty": self.config.repetition_penalty,
-            "stop": ["<|im_end|>", "<|endoftext|>"],
+            "stop": ["<​|im_end|>", "<​|endoftext|>"],
             "stream": False,
         }
         data = json.dumps(payload).encode("utf-8")
@@ -944,14 +939,17 @@ class VF1Engine:
             data=data,
             headers={"Content-Type": "application/json", "User-Agent": "VoiceFlow/VF1"},
         )
+        self._server_manager().touch()
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with open_local(req, timeout=timeout) as resp:
                 if resp.status == 200:
                     res_obj = json.loads(resp.read().decode("utf-8", errors="replace"))
                     self._last_server_timings = res_obj.get("timings")
                     return str(res_obj.get("content") or "")
         except Exception as exc:
             log.warning("[VF-1] llama-server inference error: %s", exc)
+        finally:
+            self._server_manager().touch()
         return ""
 
     def _run_native_inference(self, prompt_text: str, deadline: float) -> str:
@@ -964,6 +962,10 @@ class VF1Engine:
                 return self._run_llama_server_inference(prompt_text, deadline)
             elif self.config.backend == "llama_server":
                 return ""
+        # One backend per session: while our llama-server holds the model,
+        # never load a second in-process copy of the same weights.
+        if self._server_manager().process_alive():
+            return ""
 
         # 2. Try llama_cpp in-process if available
         from voice_flow import s1_engine
@@ -1005,6 +1007,411 @@ class VF1Engine:
         return self._last_telemetry
 
 
+_ALIAS_PREFIX = "voiceflow-s1-"
+_GUARD_MARKER = "voiceflow-llama-guard"
+
+# POSIX parent-death guard. llama-server has no "exit when parent dies"
+# option, and nothing in the parent survives `kill -9`, so the server runs
+# under this tiny sh loop (its own session/process group). The loop polls the
+# app (its own parent) once a second and stops the server when the app is
+# gone; SIGTERM to the group (normal app exit) stops it immediately.
+_POSIX_GUARD_SCRIPT = r"""
+parent="$1"; shift
+"$@" &
+child=$!
+stop_child() {
+  kill -TERM "$child" 2>/dev/null
+  i=0
+  while kill -0 "$child" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+  kill -KILL "$child" 2>/dev/null
+  wait "$child" 2>/dev/null
+}
+parent_alive() {
+  # Our PPID changes the moment the app dies, even while it is an unreaped
+  # zombie (kill -0 would still succeed then).
+  p=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')
+  if [ -n "$p" ]; then [ "$p" = "$parent" ]; else kill -0 "$parent" 2>/dev/null; fi
+}
+trap 'stop_child; exit 143' TERM INT HUP
+while parent_alive; do
+  if ! kill -0 "$child" 2>/dev/null; then break; fi
+  sleep 1 &
+  wait $!
+done
+stop_child
+"""
+
+
+def _free_loopback_port(host: str = "127.0.0.1") -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
+def _get_json(host: str, port: int, path: str, timeout: float) -> Any:
+    req = urllib.request.Request(f"http://{host}:{port}{path}", headers={"User-Agent": "VoiceFlow/VF1"})
+    with open_local(req, timeout=timeout) as resp:
+        if resp.status != 200:
+            return None
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+def _same_path(a: Any, b: Any) -> bool:
+    try:
+        return bool(a) and bool(b) and os.path.normcase(os.path.realpath(str(a))) == os.path.normcase(os.path.realpath(str(b)))
+    except Exception:
+        return False
+
+
+def verify_llama_server_identity(
+    host: str, port: int, alias: Optional[str], model_path: Optional[str], timeout: float = 1.0
+) -> bool:
+    """True only if the server on host:port is the llama-server we launched.
+
+    A plain ``/health`` 200 proves nothing (any dev server answers it), so we
+    require the per-launch random ``--alias`` in ``/v1/models`` or, for older
+    builds, the alias / exact model path in ``/props``. llama-server answers
+    503 on these while the model is still loading, which reads as not ready.
+    """
+    try:
+        models = _get_json(host, port, "/v1/models", timeout)
+        if isinstance(models, dict):
+            entries = list(models.get("data") or []) + list(models.get("models") or [])
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                names = {entry.get("id"), entry.get("name"), entry.get("model")}
+                if alias and alias in names:
+                    return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 503:
+            return False
+    except Exception:
+        pass
+    try:
+        props = _get_json(host, port, "/props", timeout)
+        if isinstance(props, dict):
+            if alias and props.get("model_alias") == alias:
+                return True
+            if model_path and _same_path(props.get("model_path"), model_path):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _legacy_health_ok(host: str, port: int) -> bool:
+    """Developer opt-in (trust_external_server): /health says ok."""
+    try:
+        req = urllib.request.Request(f"http://{host}:{port}/health", headers={"User-Agent": "VoiceFlow/VF1"})
+        with open_local(req, timeout=1.5) as resp:
+            if resp.status != 200:
+                return False
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return isinstance(data, dict) and data.get("status") == "ok"
+    except Exception:
+        return False
+
+
+class LlamaServerManager:
+    """Owns at most one llama-server child for the whole app."""
+
+    PID_FILE_NAME = "llama-server.pid"
+
+    def __init__(self, run_dir: Optional[Path] = None) -> None:
+        self._lock = threading.RLock()
+        self._start_lock = threading.Lock()
+        self._run_dir = run_dir
+        self.process: Optional[subprocess.Popen] = None
+        self.host = "127.0.0.1"
+        self.port: Optional[int] = None
+        self.alias: Optional[str] = None
+        self.model_path: Optional[str] = None
+        self._last_used = time.monotonic()
+        self.spawn_count = 0
+
+    # -- state ------------------------------------------------------------
+    @property
+    def run_dir(self) -> Path:
+        if self._run_dir is not None:
+            return Path(self._run_dir)
+        from voice_flow.paths import data_dir
+
+        return data_dir() / "run"  # ~/.voice_flow/run by default
+
+    @property
+    def pid_file(self) -> Path:
+        return self.run_dir / self.PID_FILE_NAME
+
+    def process_alive(self) -> bool:
+        proc = self.process
+        try:
+            return proc is not None and proc.poll() is None
+        except Exception:
+            return False
+
+    def is_ready(self) -> bool:
+        with self._lock:
+            host, port, alias, model = self.host, self.port, self.alias, self.model_path
+        if not self.process_alive() or not port:
+            return False
+        return verify_llama_server_identity(host, int(port), alias, model)
+
+    def endpoint(self) -> Optional[Tuple[str, int]]:
+        with self._lock:
+            host, port = self.host, self.port
+        if port and self.is_ready():
+            return host, int(port)
+        return None
+
+    def touch(self) -> None:
+        self._last_used = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        return max(0.0, time.monotonic() - self._last_used)
+
+    # -- lifecycle ----------------------------------------------------------
+    def ensure_running(
+        self,
+        *,
+        binary: Path,
+        model_path: Path,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        ready_timeout: float = 30.0,
+    ) -> bool:
+        ready_timeout = max(0.5, float(ready_timeout))
+        # A start already in progress (warming up) is waited for and reused.
+        if not self._start_lock.acquire(timeout=ready_timeout + 5.0):
+            log.warning("[VF-1] Timed out waiting for another llama-server start.")
+            return False
+        try:
+            if self.process_alive() and self.model_path == str(model_path) and self.is_ready():
+                self.touch()
+                return True
+            # Wrong model, crashed or wedged: stop it before starting anew.
+            self.stop()
+            self.kill_stale_from_pid_file()
+
+            chosen_port = int(port) if port else _free_loopback_port(host)
+            alias = _ALIAS_PREFIX + secrets.token_hex(8)
+            threads = max(1, min(8, os.cpu_count() or 4))
+            cmd = [
+                str(binary),
+                "-m", str(model_path),
+                "--host", host,
+                "--port", str(chosen_port),
+                "--alias", alias,
+                "-c", str(DEFAULT_CONTEXT_TOKENS),
+                "-ngl", "0",
+                "-t", str(threads),
+            ]
+            log.info("[VF-1] Spawning llama-server on %s:%d", host, chosen_port)
+            proc = self._spawn(cmd)
+            with self._lock:
+                self.process = proc
+                self.host = host
+                self.port = chosen_port
+                self.alias = alias
+                self.model_path = str(model_path)
+                self.spawn_count += 1
+            self._write_pid_file(proc, alias, chosen_port, binary, model_path)
+
+            deadline = time.monotonic() + ready_timeout
+            while time.monotonic() < deadline:
+                if self.process is not proc or proc.poll() is not None:
+                    log.warning("[VF-1] llama-server exited during startup.")
+                    break
+                if verify_llama_server_identity(host, chosen_port, alias, str(model_path), timeout=1.0):
+                    log.info("[VF-1] llama-server ready on port %d", chosen_port)
+                    self.touch()
+                    return True
+                time.sleep(0.25)
+            else:
+                log.warning("[VF-1] llama-server not ready within %.0fs; stopping it.", ready_timeout)
+            if self.process is proc:
+                self.stop()
+            else:
+                child_processes.kill_tree(proc)
+            return False
+        except Exception as exc:
+            log.error("[VF-1] Failed to launch llama-server: %s", exc)
+            self.stop()
+            return False
+        finally:
+            self._start_lock.release()
+
+    def _spawn(self, cmd: List[str]) -> subprocess.Popen:
+        env = no_proxy_environment()
+        if os.name == "nt":
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            proc = subprocess.Popen(
+                ["/bin/sh", "-c", _POSIX_GUARD_SCRIPT, _GUARD_MARKER, str(os.getpid()), *cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+            )
+        # Windows: kill-on-close job object; all: killed at app exit.
+        child_processes.track(proc, "llama-server")
+        return proc
+
+    def stop(self) -> None:
+        with self._lock:
+            proc = self.process
+            self.process = None
+            self.port = None
+            self.alias = None
+            self.model_path = None
+        if proc is not None:
+            child_processes.kill_tree(proc)
+            child_processes.untrack(proc)
+            log.info("[VF-1] Stopped llama-server (pid %s)", proc.pid)
+        self._remove_pid_file(proc)
+
+    def stop_if_idle(self, idle_seconds: float, *, force: bool = False) -> bool:
+        """Stop the server after the same idle timeout as in-process models."""
+        if self.process is None:
+            return False
+        if not force and self.idle_seconds() < idle_seconds:
+            return False
+        if not self._start_lock.acquire(blocking=False):
+            return False  # a start is in progress; try again next sweep
+        try:
+            self.stop()
+            log.info("[VF-1] Released idle llama-server")
+            return True
+        finally:
+            self._start_lock.release()
+
+    # -- pid file (stale server from a crashed / killed app) ---------------
+    def _write_pid_file(self, proc: subprocess.Popen, alias: str, port: int, binary: Path, model_path: Path) -> None:
+        try:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "pid": proc.pid,
+                "owner_pid": os.getpid(),
+                "alias": alias,
+                "port": port,
+                "binary": str(binary),
+                "model": str(model_path),
+                "started": time.time(),
+            }
+            tmp = self.pid_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, self.pid_file)
+        except Exception as exc:
+            log.debug("[VF-1] Could not write llama-server pid file: %s", exc)
+
+    def _remove_pid_file(self, proc: Optional[subprocess.Popen]) -> None:
+        try:
+            data = json.loads(self.pid_file.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if data.get("owner_pid") == os.getpid() and (proc is None or data.get("pid") == proc.pid):
+            try:
+                self.pid_file.unlink()
+            except Exception:
+                pass
+
+    def kill_stale_from_pid_file(self) -> List[int]:
+        """Kill a llama-server left behind by a previous app process.
+
+        Only processes whose command line carries the exact per-launch alias
+        recorded in the pid file are touched, and only when the app process
+        that started them is gone.
+        """
+        try:
+            data = json.loads(self.pid_file.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        alias = str(data.get("alias") or "")
+        owner = int(data.get("owner_pid") or 0)
+        if not alias.startswith(_ALIAS_PREFIX):
+            return []
+        if owner and owner != os.getpid() and _pid_alive(owner):
+            return []  # still owned by a live app instance
+        killed: List[int] = []
+        try:
+            import psutil  # type: ignore
+
+            victims = []
+            for candidate in psutil.process_iter(["pid", "cmdline"]):
+                try:
+                    cmdline = candidate.info.get("cmdline") or []
+                    if candidate.pid != os.getpid() and alias in cmdline:
+                        victims.append(candidate)
+                except Exception:
+                    continue
+            for victim in victims:
+                try:
+                    victim.kill()
+                    killed.append(victim.pid)
+                except Exception:
+                    pass
+            if victims:
+                psutil.wait_procs(victims, timeout=3)
+        except ImportError:
+            log.debug("[VF-1] psutil unavailable; cannot reap stale llama-server")
+        if killed:
+            log.info("[VF-1] Killed stale llama-server process(es): %s", killed)
+        try:
+            self.pid_file.unlink()
+        except Exception:
+            pass
+        return killed
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        import psutil  # type: ignore
+
+        if not psutil.pid_exists(pid):
+            return False
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except ImportError:
+        if os.name == "nt":
+            return True
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    except Exception:
+        return False
+
+
+_llama_server_manager: Optional[LlamaServerManager] = None
+_llama_server_manager_lock = threading.Lock()
+
+
+def get_llama_server_manager() -> LlamaServerManager:
+    global _llama_server_manager
+    with _llama_server_manager_lock:
+        if _llama_server_manager is None:
+            _llama_server_manager = LlamaServerManager()
+        return _llama_server_manager
+
+
+def stop_idle_llama_server(idle_seconds: float, *, force: bool = False) -> bool:
+    """Idle hook for the S1 polish family; no-op when no server is running."""
+    manager = _llama_server_manager
+    if manager is None:
+        return False
+    return manager.stop_if_idle(idle_seconds, force=force)
+
+
 # Global singleton instance for application use
 _default_vf1_engine: Optional[VF1Engine] = None
 
@@ -1018,12 +1425,12 @@ def get_vf1_engine() -> VF1Engine:
 
 
 def _cleanup_engine_servers() -> None:
-    """Atexit hook: cleanly terminate any server child processes on exit."""
-    global _default_vf1_engine
-    if _default_vf1_engine is not None:
-        _default_vf1_engine.stop_server()
+    """App-exit hook: terminate the llama-server this app spawned."""
+    manager = _llama_server_manager
+    if manager is not None:
+        manager.stop()
 
 
 import atexit
 atexit.register(_cleanup_engine_servers)
-
+child_processes.register_exit_callback(_cleanup_engine_servers)
