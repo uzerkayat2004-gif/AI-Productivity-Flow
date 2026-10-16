@@ -394,6 +394,14 @@ def main():
         up = wait_api(120)
         time.sleep(12)
         api("/api/settings/update", {"key": "has_viewed_onboarding", "value": True})
+        # The live welcome tour keeps auto-narrating into the BlackHole loopback
+        # "mic" (it4 af2: "Welcome to our community..." got dictated). Mark it
+        # seen in the backend and relaunch so it never starts.
+        api("/api/settings/update", {"key": "onboarding_seen_flags", "value": {
+            "hasViewedOnboarding": "true", "vf_onboarding.done": "1", "vf_onboarding.v2_seen": "1",
+            "vf_onboarding.af_guided": "1", "vf_onboarding.vf_guided": "1", "vf_onboarding.vf_voice_guided": "1",
+            "vf_onboarding.firstDictation": "1"}})
+        up = restart_app(None)
         qa_voice.click_allow_if_prompt(A)
         record(A, "app up; macOS selection listener started", "ok" if "Quartz mouse listener started" in log_lines("MOUSE HOOK", 5) else "fail",
                f"api after {up}s\nlog: {log_lines('MOUSE HOOK|INPUT', 8)}\nperm={json.dumps(api('/api/platform/permissions')[1])[:800]}")
