@@ -348,6 +348,8 @@ def phase_a():
             errs = []
             pg.on("pageerror", lambda e: errs.append(str(e)))
             pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
+            bad_urls = []
+            pg.on("response", lambda r: bad_urls.append(f"{r.status} {r.request.method} {r.url}") if r.status >= 400 else None)
             pg.goto("http://127.0.0.1:8991/index.html")
             pg.wait_for_timeout(5000)
             pg.evaluate("() => { try { finishOnboarding(); } catch(e){} try { stopAudioFlowGuide(); } catch(e){} try { switchPage('home'); } catch(e){} }")
@@ -357,7 +359,7 @@ def phase_a():
             txt = pg.evaluate("() => (document.getElementById('page-home')||document.body).innerText")
             has = "don't" in txt or "don’t" in txt or "Uzair's" in txt or "It's" in txt
             record(A, "History in the UI shows apostrophe dictations without JS errors", "ok" if has and not errs else "fail",
-                   f"apostrophe text visible={has}; js errors={errs[:5]}", "qa/shots/history-home-webkit.png")
+                   f"apostrophe text visible={has}; js errors={errs[:5]}; http>=400={bad_urls[:8]}", "qa/shots/history-home-webkit.png")
             b.close()
     except Exception as exc:
         record(A, "History UI check", "error", repr(exc))
@@ -367,6 +369,16 @@ def phase_a():
     record(A, "network during local-only dictation", "info",
            f"lsof app connections: {n['lsof_remote']}\npktap: {json.dumps(n['pktap'])[:2500]}\nrdns: {json.dumps(resolve_ips(ips))[:1200]}", "qa/net-voice-local-summary.json")
     record(A, "RAM/CPU during dictation (bundled STT)", "info", json.dumps(r)[:2500])
+    # Integration (c): the Whisper model should stay loaded between dictations.
+    loads = sh("grep -cE 'Loading Whisper|Loading speech model' ~/.voice_flow/logs/voice_flow_debug.log", quiet=True)[1].strip()
+    releases = sh("grep -c 'Released inactive Whisper model memory' ~/.voice_flow/logs/voice_flow_debug.log", quiet=True)[1].strip()
+    n_dict = sh("grep -c 'Pipeline complete' ~/.voice_flow/logs/voice_flow_debug.log", quiet=True)[1].strip()
+    try:
+        ok_cache = int(loads or 0) <= max(6, int(n_dict or 0) // 4)
+    except ValueError:
+        ok_cache = False
+    record(A, "Whisper model cached between dictations (loads vs dictations)", "ok" if ok_cache else "fail",
+           f"model loads={loads} releases={releases} dictations={n_dict}")
     # Permissions: reset TCC for the bundle and see what the app reports + what a dictation does.
     rc, out = sh(f"tccutil reset Microphone {BUNDLE_ID}; tccutil reset Accessibility {BUNDLE_ID}; tccutil reset ListenEvent {BUNDLE_ID}")
     time.sleep(2)

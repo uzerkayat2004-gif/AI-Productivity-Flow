@@ -241,6 +241,40 @@ def phase_summary() -> None:
            f"history newest={json.dumps(newest, default=str)[:1200]}\noverlay={overlay()}\nlog: {log_lines('summary|NotebookLM|AUDIO FLOW', 12)}", s2)
 
 
+def phase_paste_after_widget_click() -> None:
+    """Integration (a): a click on the Audio Flow widget makes our app active;
+    the next dictation must still paste into TextEdit (focus restored)."""
+    clip = str(qa_voice.CLIPS / "af2-paste.aiff")
+    if not Path(clip).exists():
+        sh(f"say -r 175 -o {shlex.quote(clip)} 'Send the report today.'", quiet=True)
+    w = textedit_window() or open_textedit_with_text()
+    if not w:
+        record(A, "paste after widget click: TextEdit window", "fail", "missing")
+        return
+    pid_s = sh("pgrep -x TextEdit", quiet=True)[1].strip().splitlines()
+    pid = int(pid_s[0]) if pid_s else None
+    before_f = floating()
+    end = drag_select(w)
+    time.sleep(2.5)
+    widget = find_widget(before_f, end)
+    if widget:
+        helper("click", str(widget["x"] + widget["w"] / 2), str(widget["y"] + widget["h"] / 2))
+        time.sleep(1.5)
+        helper("key", "53")  # Escape closes the menu (goes to the active app)
+        time.sleep(1.0)
+    front = sh("lsappinfo info -only name `lsappinfo front`", quiet=True)[1].strip()
+    before = qa_voice.textedit_text(pid)
+    row, _ = qa_voice.dictate("af2-paste", clip, "api")
+    time.sleep(1.5)
+    after = qa_voice.textedit_text(pid)
+    ok = bool(row) and row.get("insertion_status") == "pasted" and after != before and "report" in after.lower()
+    record(A, "paste right after clicking the Audio Flow widget lands in TextEdit (focus restored)",
+           "ok" if ok else "fail",
+           f"widget={widget}\nfrontmost app before dictation: {front}\nrow={json.dumps(row, default=str)[:600]}\n"
+           f"TextEdit before={before[-160:]!r}\nafter={after[-200:]!r}\nlog: " + log_lines("focus restore|INJECTOR", 6),
+           shot("af2-paste-after-widget"))
+
+
 def revoke_paste_tcc() -> str:
     """Never-granted state for paste: drop Accessibility + PostEvent from BOTH TCC databases."""
     out = []
@@ -326,6 +360,11 @@ def main():
                 record(A, f"{step.__name__} crashed", "error", traceback.format_exc()[-1500:])
         try:
             qa_voice.select_mic(A, mic)
+            try:
+                phase_paste_after_widget_click()
+            except Exception:
+                import traceback
+                record(A, "paste after widget click crashed", "error", traceback.format_exc()[-1500:])
             phase_paste_honesty(mic)
         except Exception:
             import traceback
