@@ -20,6 +20,9 @@ elif phase in ("voice_a", "voice_b"):
 elif phase == "life":
     import qa_life
     qa_life.main()
+elif phase == "af":
+    import qa_af
+    qa_af.main()
 elif phase == "site":
     import runpy
     runpy.run_path(str(here / "qa_site.py"), run_name="__main__")
