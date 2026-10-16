@@ -1,9 +1,0 @@
-{
- "corpus_vs_heldout_near_dups": 0,
- "validation_vs_train_near_dups": 0,
- "rehearsal_vs_heldout_near_dups": [],
- "rehearsal_vs_corpus_near_dups": [],
- "corpus_reserved_names": [],
- "scenario_overlap_with_heldout": [],
- "heldout_sha256": "e424303519a821739e693c607dda26b511609027f7f44d2a977f348bb0deaa7a"
-}

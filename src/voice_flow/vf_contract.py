@@ -11,7 +11,7 @@ exact strings training data and future local inference must use.
                          transcript="remind them the payment is overdue")
     system, user = render_vf1(request)
 
-See research/voice_flow_phase1_contract/UNIVERSAL_MODEL_CONTRACT.md.
+See docs/vf1/UNIVERSAL_MODEL_CONTRACT.md.
 """
 from __future__ import annotations
 
