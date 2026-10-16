@@ -239,22 +239,36 @@ def audio_history_apostrophes(pw):
     pg.wait_for_timeout(6000)
     pg.evaluate("() => { try { finishOnboarding(); } catch(e){} try { stopAudioFlowGuide(); } catch(e){} try { switchPage('audioflow'); } catch(e){} }")
     pg.wait_for_timeout(3000)
-    txt = pg.evaluate("() => document.getElementById('page-audioflow').innerText")
-    shown = "Uzair" in txt
+    # Wait for the history card itself (the list loads async) and read its title.
+    card = f"#af-card-{sid}"
+    title_txt = ""
+    for _ in range(30):
+        title_txt = pg.evaluate(f"() => {{ const t=document.querySelector('{card} .af-card-title'); return t ? t.textContent : ''; }}") or ""
+        if title_txt:
+            break
+        pg.wait_for_timeout(500)
+    pg.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} }")
+    pg.evaluate(f"() => {{ const c=document.querySelector('{card}'); c && c.scrollIntoView({{block:'center'}}); }}")
+    pg.wait_for_timeout(800)
+    shown = "It's Uzair's notes — don't skip" in title_txt
     s = pshot(pg, "audio-history-apostrophe")
-    btns = pg.evaluate("""() => [...document.querySelectorAll('#page-audioflow button, #page-audioflow [onclick]')].filter(b=>b.getBoundingClientRect().width>0)
-        .map(b=>({t:(b.innerText||b.title||b.getAttribute('aria-label')||'').trim().slice(0,30), oc:(b.getAttribute('onclick')||'').slice(0,120)})).filter(x=>/play|download/i.test(x.t+x.oc)).slice(0,6)""")
+    btns = pg.evaluate(f"""() => [...document.querySelectorAll('{card} button')].filter(b=>b.getBoundingClientRect().width>0)
+        .map(b=>({{t:(b.innerText||b.title||b.getAttribute('aria-label')||'').trim().slice(0,30), oc:(b.getAttribute('onclick')||'').slice(0,120)}})).filter(x=>/play|download/i.test(x.t+x.oc)).slice(0,6)""")
     before = len(errs)
     reqs = []
     pg.on("request", lambda r: reqs.append(r.url) if "audio" in r.url else None)
-    for kind in ("play", "download"):
-        pg.evaluate(f"""() => {{ const b=[...document.querySelectorAll('#page-audioflow button, #page-audioflow [onclick]')].find(b=>b.getBoundingClientRect().width>0 && /{kind}/i.test((b.innerText||'')+(b.title||'')+(b.getAttribute('aria-label')||'')+(b.getAttribute('onclick')||'')));
-            b && b.click(); }}""")
+    # Click the card's own Play and MP3 buttons (a generic /play/ match hit
+    # unrelated onclick="...display..." handlers before).
+    for sel in ("button[onclick^=playAudioSummary]", "button.af-download-btn"):
+        pg.evaluate(f"() => {{ const b=document.querySelector('{card} {sel}'); b && b.click(); }}")
         pg.wait_for_timeout(3500)
     s2 = pshot(pg, "audio-history-after-play-download")
     play_api = api("/api/audio-flow/history/play", {"id": sid})
-    record(A, "Audio Flow history: apostrophe title renders, Play/Download work", "ok" if shown and len(errs) == before and reqs else "fail",
-           f"shown={shown} buttons={btns} new_js_errors={errs[before:][:4]} audio requests={reqs[:6]} play api={str(play_api)[:300]}", s2)
+    played = any("/api/audio-flow/history/play" in u for u in reqs)
+    downloaded = any("/api/audio-flow/summary/save-to-downloads" in u or "/api/audio-flow/summary/media" in u for u in reqs)
+    record(A, "Audio Flow history: apostrophe title renders, Play/Download work",
+           "ok" if shown and len(errs) == before and played and downloaded and play_api[0] == 200 else "fail",
+           f"title={title_txt!r} shown={shown} played={played} downloaded={downloaded} buttons={btns} new_js_errors={errs[before:][:4]} audio requests={reqs[:6]} play api={str(play_api)[:300]}", s2)
     med = api(f"/api/audio-flow/summary/media?id={sid}")
     record(A, "Audio Flow media endpoint for the item", "ok" if med[0] == 200 else "fail", str(med)[:300])
     time.sleep(3)

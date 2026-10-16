@@ -151,7 +151,11 @@ INTEREST = re.compile(r"AI Productivity Flow|ai-productivity-flow|llama-server|n
 def app_tree() -> list[dict]:
     rows = ps_rows()
     me = os.getpid()
+    # "playwright": the QA's own Playwright driver is a `node` process; counting
+    # it as the app made quit_app() never "all gone" and kill_all() killed the
+    # driver ("Connection closed while reading from the driver", ui it4).
     roots = {r["pid"] for r in rows if INTEREST.search(r["cmd"]) and "qa_" not in r["cmd"] and "walkthrough" not in r["cmd"]
+             and "playwright" not in r["cmd"].lower() and "ms-playwright" not in r["cmd"]
              and "screencapture" not in r["cmd"] and r["pid"] != me and "pgrep" not in r["cmd"] and "lsof" not in r["cmd"]
              and "tcpdump" not in r["cmd"]}
     changed = True
