@@ -269,6 +269,7 @@ def phase_paste_after_widget_click() -> None:
         helper("key", "53")  # Escape closes the menu (goes to the active app)
         time.sleep(1.0)
     front = sh("lsappinfo info -only name `lsappinfo front`", quiet=True)[1].strip()
+    focus_probe("after widget click + Escape", pid)
     before = qa_voice.textedit_text(pid)
     row, _ = qa_voice.dictate("af2-paste", clip, "api")
     time.sleep(1.5)
@@ -279,6 +280,38 @@ def phase_paste_after_widget_click() -> None:
            f"widget={widget}\nfrontmost app before dictation: {front}\nrow={json.dumps(row, default=str)[:600]}\n"
            f"TextEdit before={before[-160:]!r}\nafter={after[-200:]!r}\nlog: " + log_lines("focus restore|INJECTOR", 6),
            shot("af2-paste-after-widget"))
+
+
+def focus_probe(label: str, target_pid: int | None) -> None:
+    """Who holds activation / key window right now (diagnostics for paste focus)."""
+    code = (
+        "import json\n"
+        "from AppKit import NSWorkspace\n"
+        "import Quartz\n"
+        "from voice_flow.platform import macos_native as n\n"
+        "ws=NSWorkspace.sharedWorkspace()\n"
+        "fa=ws.frontmostApplication(); mb=ws.menuBarOwningApplication()\n"
+        "d=lambda a: a and {'name': str(a.localizedName()), 'pid': int(a.processIdentifier()), 'active': bool(a.isActive()), 'policy': int(a.activationPolicy())}\n"
+        "wl=Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly|Quartz.kCGWindowListExcludeDesktopElements,0) or []\n"
+        "top=[{'owner': str(w.get('kCGWindowOwnerName')), 'pid': int(w.get('kCGWindowOwnerPID')), 'layer': int(w.get('kCGWindowLayer')), 'name': str(w.get('kCGWindowName') or '')} for w in list(wl)[:8]]\n"
+        "running=[d(a) for a in ws.runningApplications() if a.isActive()]\n"
+        f"tp={target_pid or 0}\n"
+        "ax=None\n"
+        "import ctypes\n"
+        "try:\n"
+        "    lib=ctypes.cdll.LoadLibrary('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')\n"
+        "    lib.AXUIElementCreateApplication.restype=ctypes.c_void_p; lib.AXUIElementCreateApplication.argtypes=[ctypes.c_int]\n"
+        "    lib.AXUIElementCopyAttributeValue.restype=ctypes.c_int; lib.AXUIElementCopyAttributeValue.argtypes=[ctypes.c_void_p,ctypes.c_void_p,ctypes.POINTER(ctypes.c_void_p)]\n"
+        "    el=lib.AXUIElementCreateApplication(tp)\n"
+        "    ax={}\n"
+        "    for attr in ('AXFocusedWindow','AXMainWindow','AXFocusedUIElement','AXFrontmost'):\n"
+        "        k=n.cfstring_from_python(attr); h=ctypes.c_void_p(0)\n"
+        "        ax[attr]=int(lib.AXUIElementCopyAttributeValue(el,k,ctypes.byref(h)))\n"
+        "except Exception as e: ax=repr(e)\n"
+        "print(json.dumps({'frontmost': d(fa), 'menubar_owner': d(mb), 'active_apps': running, 'top_windows': top, 'target_ax_status': ax}, default=str))\n"
+    )
+    rc, out = sh(f"PYTHONPATH={shlex.quote(PYPATH)} {shlex.quote(PY)} -c {shlex.quote(code)}", timeout=60)
+    record(A, f"focus probe ({label})", "info", out.strip()[-2500:])
 
 
 def revoke_paste_tcc() -> str:
