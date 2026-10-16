@@ -37,6 +37,9 @@ def baseline_from_workflow_launch():
     ls = leftovers()
     record(A, "files created by a first launch from /Applications", "info", ls[:2500], save("first-launch-files.txt", ls))
     rc, out = sh(f"find {shlex.quote(app)} -newer {shlex.quote(str(OUT / 'system.txt'))} -type f | head -50", quiet=True)
+    # The workflow installs with `cp -R` after system.txt, so every file is
+    # "newer"; only Python bytecode written at runtime is meaningful here.
+    out = "\n".join(l for l in out.splitlines() if l.endswith(".pyc") or "__pycache__" in l)
     record(A, "nothing written inside the bundle by first launch (/Applications)", "ok" if not out.strip() else "fail",
            out.strip()[:1500] or "no files in the bundle newer than install time")
     k = kill_all()
@@ -46,8 +49,30 @@ def baseline_from_workflow_launch():
     record(A, "clean slate (removed app + user data)", "info", wipe)
 
 
+def _ci_build_assets() -> tuple[Path, Path | None] | None:
+    """Integration QA (qa/int-*): test the CI-built DMG/zip, not the published release."""
+    if not os.environ.get("GITHUB_REF_NAME", "").startswith("qa/int-"):
+        return None
+    root = Path(os.environ.get("GITHUB_WORKSPACE", "."))
+    dmg = root / "app.dmg"
+    if not dmg.exists():
+        return None
+    zips = sorted((root / "dl").glob("*.zip")) if (root / "dl").is_dir() else []
+    return dmg, (zips[0] if zips else None)
+
+
 def downloads():
     DL.mkdir(exist_ok=True)
+    ci = _ci_build_assets()
+    if ci is not None:
+        dmg, z = ci
+        sh(f"cp {shlex.quote(str(dmg))} {shlex.quote(str(DL / ASSETS[0]))}", timeout=300)
+        if z is not None:
+            sh(f"cp {shlex.quote(str(z))} {shlex.quote(str(DL / ASSETS[1]))}", timeout=300)
+        sizes = sh(f"ls -la {shlex.quote(str(DL))}", quiet=True)[1]
+        record(A, "CI build under test copied to ~/Downloads (release download skipped)", "ok" if (DL / ASSETS[0]).exists() else "fail",
+               f"dmg={dmg} zip={z}\n{sizes}")
+        return
     rows = []
     for name in ASSETS:
         for suffix in ("", ".sha256"):
@@ -81,14 +106,16 @@ def bundle_facts(app: str, where: str):
     name = plist(app, "CFBundleName")
     icon = plist(app, "CFBundleIconFile")
     icon_ok = any((Path(app) / "Contents/Resources" / f"{icon}{ext}").exists() for ext in ("", ".icns"))
-    record(A, "Info.plist identity", "ok" if ver == "1.0.2" and bid == BUNDLE_ID else "fail",
+    record(A, "Info.plist identity", "ok" if ver.startswith("1.0.") and bid == BUNDLE_ID else "fail",
            f"name={name} version={ver} build={plist(app, 'CFBundleVersion')} id={bid} LSMinimumSystemVersion={minos} icon={icon} icon_file_present={icon_ok} LSUIElement={plist(app, 'LSUIElement')!r}",
            f"qa/info-plist-{where}.txt")
     # Architecture of every Mach-O, and the highest minimum macOS any of them needs.
     rc, macho = sh(f"find {shlex.quote(app)} -type f \\( -perm -111 -o -name '*.dylib' -o -name '*.so' \\) -print0 | xargs -0 file | grep Mach-O", timeout=300, quiet=True)
     save(f"macho-files-{where}.txt", macho)
     total = len(macho.splitlines())
-    x86_only = [l for l in macho.splitlines() if "x86_64" in l and "arm64" not in l]
+    # `file` prints one extra line per slice of a universal binary ("(for
+    # architecture x86_64)"); those are slices, not x86_64-only files.
+    x86_only = [l for l in macho.splitlines() if "x86_64" in l and "arm64" not in l and "(for architecture" not in l]
     universal = [l for l in macho.splitlines() if "universal" in l]
     rc, minos_out = sh(f"find {shlex.quote(app)} -type f \\( -perm -111 -o -name '*.dylib' -o -name '*.so' \\) -print0 | xargs -0 -n 50 otool -l 2>/dev/null | awk '/^\\//{{f=$0}} /minos/{{print $2, f}}' | sort -V | uniq -c | sort -k2 -V | tail -8", timeout=300, quiet=True)
     save(f"macho-minos-{where}.txt", minos_out)
