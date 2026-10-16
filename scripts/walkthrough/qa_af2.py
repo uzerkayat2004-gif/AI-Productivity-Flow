@@ -229,7 +229,13 @@ def phase_summary() -> None:
         c = warn[0]
         helper("click", str(c["x"] + 290), str(c["y"] + c["h"] - 20))  # "Make Anyway"
         time.sleep(1.5)
-    depth = [x for x in floating() if 240 <= x.get("w", 0) <= 290 and x.get("h", 0) <= 40]
+    # The floating bar itself (248x28) also fits the picker's size filter; on
+    # macOS 14 it was listed first and the "Balanced" click hit the bar, which
+    # (with text selected) starts Read. Skip windows that were already there.
+    def _same(a, b):
+        return all(abs((a.get(k) or 0) - (b.get(k) or 0)) <= 2 for k in ("x", "y", "w", "h"))
+    depth = [x for x in floating() if 240 <= x.get("w", 0) <= 290 and x.get("h", 0) <= 40
+             and x.get("name") != "tk" and not any(_same(x, b) for b in before)]
     record(A, "Summary: depth picker shown (after short-text notice if any)", "ok" if depth else "fail",
            f"short notice={warn} depth={depth} floating={floating()}", s1)
     if not depth:
