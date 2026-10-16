@@ -4,6 +4,7 @@
 > and `pyproject.toml`. Maintained alongside `docs/PRODUCT_FACTS.md`.
 
 ## 1. Video Flow — text/documents → narrated explainer video
+- **Platform**: Windows only for now; Mac support coming later.
 - **Inputs**: Selected text, pasted text, documents (`.txt`, `.md`, `.csv`, `.json`, `.html`, `.htm`, `.xml`, `.rtf`, `.docx`, `.pdf` ≤ 8 MB), Google NotebookLM notebooks.
 - **Modes**: `summary` and `full`.
 - **Planning**: AI-driven concept extraction and pedagogical structuring via user's connected model (Groq, Gemini, OpenAI, Claude, Together, Ollama) or local fallback.
@@ -18,7 +19,7 @@
 - **Modes**:
   - **Read Mode**: Spoken reader articulating selected text with human cadence and natural flow.
   - **Summary Mode**: Multi-depth summaries: **Short**, **Balanced**, **Deep Dive** via connected LLM.
-- **TTS Providers**: Microsoft Edge Neural (default, free), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
+- **TTS Providers**: Microsoft Edge Neural (default, free, online: text is sent to Microsoft), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
 - **Playback**: Mini floating bar and in-app audio player with waveform scrubbing, speed adjustment (0.75x–2.0x), and one-click MP3 download.
 
 ## 3. Voice Flow — speech → polished text
@@ -30,10 +31,11 @@
   - Optional cloud STT: Deepgram, Groq, OpenAI Whisper, Gemini STT.
 - **Dictionary & Snippets**: Custom pronunciation corrections, acronym biasing, and snippet trigger expansions (`trigger -> expansion`) with cross-process SQLite sync.
 - **AI Text Polish**:
-  - Downloadable on-device Liquid LFM 1.3B/3B via llama.cpp.
+  - Downloadable on-device S1-mini by Superwhisper and Liquid LFM 2.5 350M via llama.cpp (cleanup only; voice commands need a cloud polish model).
   - Windows AI Text Rewriter where supported by hardware.
   - Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Ollama).
   - Deterministic cleanup fallback always available.
+- **Voice commands**: "Hey Voice Flow, ..." is spoken inside a hotkey dictation (no always-on listener) and needs a cloud polish model.
 - **Insertion**: System-wide clipboard injection into active target window (Ctrl+V on Windows, Cmd+V on macOS).
 
 ## 4. Platform Shell & Multi-Account
