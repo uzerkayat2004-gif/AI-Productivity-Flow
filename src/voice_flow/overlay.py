@@ -591,6 +591,11 @@ class FloatingOverlayBar:
                 # after its window is closed.
                 self.canvas.bind("<ButtonPress-2>", self._show_app_menu)
                 self.canvas.bind("<ButtonPress-3>", self._show_app_menu)
+                # Control-click is the standard Mac secondary click; its release
+                # must not reach _on_release (which would start dictation).
+                self.canvas.bind("<Control-ButtonPress-1>", self._show_app_menu)
+                self.canvas.bind("<Control-ButtonRelease-1>", lambda _e: "break")
+                self.canvas.bind("<Control-B1-Motion>", lambda _e: "break")
 
         self._position_window()
         if hasattr(self.win, "bind"):

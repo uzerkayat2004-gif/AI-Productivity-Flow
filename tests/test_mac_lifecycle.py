@@ -396,3 +396,32 @@ def test_pyobjc_classes_have_valid_selector_prototypes():
                     assert colons == args, f"{node.name}.{fn.name}: {args} args but selector has {colons} colons"
                     checked += 1
     assert checked >= 4
+
+
+def test_floating_bar_menu_offers_open_and_quit(monkeypatch):
+    import voice_flow.overlay as ov
+
+    items, popups = [], []
+
+    class FakeMenu:
+        def __init__(self, *a, **k): pass
+        def add_command(self, label, command): items.append((label, command))
+        def add_separator(self): items.append(("-", None))
+        def tk_popup(self, x, y): popups.append((x, y))
+        def grab_release(self): pass
+
+    monkeypatch.setattr(ov.tk, "Menu", FakeMenu)
+    bar = ov.FloatingOverlayBar.__new__(ov.FloatingOverlayBar)
+    bar.root = object()
+    calls = []
+    bar.app_menu_actions = {"open": lambda: calls.append("open"), "quit": lambda: calls.append("quit")}
+    assert bar._show_app_menu(SimpleNamespace(x_root=10, y_root=20)) == "break"
+    assert popups == [(10, 20)]
+    labels = [label for label, _ in items]
+    assert labels == ["Open AI Productivity Flow", "-", "Quit AI Productivity Flow"]
+    items[0][1](); items[2][1]()
+    assert calls == ["open", "quit"]
+    # Bound for right-click (Tk 8.6 = Button-2, Tk 9 = Button-3) and Control-click on Mac only.
+    src = (SRC / "voice_flow" / "overlay.py").read_text()
+    for seq in ("<ButtonPress-2>", "<ButtonPress-3>", "<Control-ButtonPress-1>", "<Control-ButtonRelease-1>"):
+        assert f'self.canvas.bind("{seq}"' in src
