@@ -130,8 +130,16 @@ def main():
             if bar:
                 b = bar[0]
                 menus = []
-                for attempt in range(2):  # first click may only activate the app
-                    helper("rclick", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
+                tried = []
+                # Hover first (the rest pill grows under the pointer), then re-read it.
+                helper("move", str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
+                time.sleep(1.5)
+                for attempt, kind in enumerate(("rclick", "rclick", "ctrlclick")):
+                    cur = [w for w in all_windows() if (w.get("h") or 0) < 120 and (w.get("layer") or 0) not in (25,) and (w.get("w") or 0) > 40]
+                    if cur:
+                        b = cur[0]
+                    tried.append({"kind": kind, "bar": b})
+                    helper(kind, str(b["x"] + b["w"] / 2), str(b["y"] + b["h"] / 2))
                     time.sleep(1.5)
                     menus = [w for w in all_windows() if (w.get("layer") or 0) >= 100]
                     if menus:
@@ -141,7 +149,7 @@ def main():
                 sm = shot("bar-right-click-menu")
                 opened = sh("grep -h 'Floating bar menu' ~/.voice_flow/logs/*.log | tail -3", quiet=True)[1]
                 record(A, "floating bar right-click opens Open/Quit menu", "ok" if menus else "fail",
-                       json.dumps({"bar": b, "menu_windows": menus, "log": opened}, indent=1)[:1500], sm)
+                       json.dumps({"tried": tried, "menu_windows": menus, "log": opened}, indent=1)[:2000], sm)
                 helper("key", "53")  # Escape
                 time.sleep(1)
             else:
