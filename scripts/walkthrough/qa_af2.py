@@ -272,7 +272,7 @@ def phase_paste_after_widget_click() -> None:
     row, _ = qa_voice.dictate("af2-paste", clip, "api")
     time.sleep(1.5)
     after = qa_voice.textedit_text(pid)
-    ok = bool(row) and row.get("insertion_status") == "pasted" and after != before and "report" in after.lower()
+    ok = bool(widget) and bool(row) and row.get("insertion_status") == "pasted" and after != before and "report" in after.lower()
     record(A, "paste right after clicking the Audio Flow widget lands in TextEdit (focus restored)",
            "ok" if ok else "fail",
            f"widget={widget}\nfrontmost app before dictation: {front}\nrow={json.dumps(row, default=str)[:600]}\n"
