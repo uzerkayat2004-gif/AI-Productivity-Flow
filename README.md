@@ -25,7 +25,7 @@ AI Productivity Flow is a desktop AI system engineered to operate seamlessly alo
 
 Select any text, notes, or documentation on screen, or tap a global shortcut to speak naturally:
 
-1. **🎬 Video Flow** — Generate visual explainer videos with narration and synchronized motion graphics.
+1. **🎬 Video Flow** — Generate visual explainer videos with narration and synchronized motion graphics. Windows only for now; Mac support is coming later.
 2. **🎧 Audio Flow** — Read text aloud or listen to structured multi-depth audio summaries.
 3. **🎙️ Voice Flow** — Dictate directly into any focused application with instant text injection.
 
@@ -55,13 +55,18 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
 
 #### Installing on Mac
 
-The Mac build is Apple Silicon only (M1 or newer). Download links above stay on the latest stable release.
+The Mac build is Apple Silicon only (M1 or newer). Download links above stay on the latest stable release. On Mac you get Voice Flow and Audio Flow; Video Flow is Windows only for now, and Mac support is coming later.
 
 1. Open the DMG and drag the app to Applications.
-2. The first time you open it, macOS says it can't verify the developer. Go to System Settings → Privacy & Security, scroll down, click **Open Anyway**, then Open. You can also right-click the app and choose Open.
+2. The app is not signed yet, so the first time you open it macOS blocks it. On macOS 15 and later, right-click → Open no longer gets past this. Instead:
+   1. Open the app once. When macOS says it can't verify the developer, click **Done**.
+   2. Go to System Settings → **Privacy & Security** and scroll down to the message about AI Productivity Flow.
+   3. Click **Open Anyway**, then confirm (enter your password if asked).
 3. Allow **Microphone** when asked.
 4. For hotkeys and auto-paste, turn on the app in System Settings → Privacy & Security → **Accessibility** and **Input Monitoring**, then reopen the app.
 5. The default dictation shortcut on Mac is **Cmd + Option**.
+
+**After updating on Mac:** when you install a new version, macOS may quietly stop honouring the permissions you gave the old one, so hotkeys or auto-paste stop working. Go to System Settings → Privacy & Security → **Accessibility**, select AI Productivity Flow, remove it with the **minus (−)** button, then add it again with **+** (or switch it off and on). Do the same under **Input Monitoring**, then restart the app.
 
 ---
 
@@ -70,6 +75,8 @@ The Mac build is Apple Silicon only (M1 or newer). Download links above stay on 
 ### 1. 🎬 Video Flow — Turn Selected Text into Visual Explainer Videos
 
 Video Flow transforms dense articles, technical notes, or documentation into structured, animated MP4 explainer videos with synchronized voiceover narration.
+
+> **Platform note:** Video Flow is Windows only for now. Mac support is coming later.
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/61afd3f3-d75b-4cff-8010-6a7f0d8657a9" controls width="100%"></video>
@@ -115,7 +122,7 @@ Audio Flow gives you two dedicated ways to absorb written content without eye st
   * **Balanced**: Structured conceptual overviews capturing key arguments and takeaways.
   * **Deep Dive**: Thorough breakdown analyzing context, evidence, and implications for long documents.
 * **Integrated Audio Player**: Mini on-screen and full-window player with playback rate controls (0.75x to 2.0x), waveform progress scrubbing, and instant MP3 download.
-* **Voice Ecosystem**: Use high-clarity Edge TTS (free, no account required), or connect premium providers including Cartesia, ElevenLabs, OpenAI TTS, Google Cloud TTS, or local system speech.
+* **Voice Ecosystem**: The default voice is Microsoft Edge's online text-to-speech (free, no account required). It runs online, so the text being read is sent to Microsoft. You can also connect Cartesia, ElevenLabs, OpenAI TTS, or Google Cloud TTS, or use local system speech.
 
 ### 3. 🎙️ Voice Flow — System-Wide Voice Dictation & Text Injection
 
@@ -125,16 +132,19 @@ Voice Flow lets you speak naturally and injects clean, formatted text directly i
 * **Downloadable Streaming Models**: Optional download of **NVIDIA Nemotron Speech Streaming English 0.6B** and **Nemotron 3.5 ASR Streaming 0.6B** for real-time streaming speech recognition.
 * **Cloud STT Providers**: Connect Deepgram, Groq Whisper, OpenAI Whisper, or Gemini STT for instant cloud-accelerated transcription.
 * **On-Device & Cloud AI Polish**:
-  * Downloadable on-device **Liquid LFM 1.3B/3B** via llama.cpp for private text polishing.
+  * Downloadable on-device polish models (**S1-mini by Superwhisper**, **Liquid LFM 2.5 350M**) via llama.cpp for private text cleanup.
   * Windows AI Text Rewriter where supported by hardware.
   * Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Ollama) for smart cleanup, conversational rewriting, and prompt formulation.
+* **Voice Commands**: Commands such as "make this an email" or "summarize this" need a cloud polish model (for example Gemini with your own API key). Local polish (S1-mini, LFM) cleans up your dictation but does not run commands.
+* **"Hey Voice Flow"**: This works inside a normal dictation, not as an always-on listener. Press your dictation hotkey, then say something like "Hey Voice Flow, make this an email..." The app only listens while you are dictating.
 * **Personal Dictionary & Snippets**: Add custom acronyms, jargon, and snippet abbreviations that expand automatically with cross-process memory.
 
 ---
 
 ## 🔒 Privacy & Security Architecture
 
-* **Local-First by Design**: Core features run on-device. Audio processed by local Faster-Whisper or on-device models never leaves your computer.
+* **Local-First by Design**: Voice Flow speech recognition (Faster-Whisper, Nemotron) and local polish (S1-mini, LFM) run on your device, and that audio and text never leave your computer.
+* **When the cloud is used**: only for cloud polish or cloud speech providers you set up with your own key, online text-to-speech voices (including the default Microsoft Edge voice for Audio Flow and Video Flow, which sends the text being read to Microsoft), and NotebookLM features.
 * **Explicit Cloud Routing (BYOK)**: When you select a cloud provider, only the text or audio required for that specific request is transmitted to that provider. No central tracking intermediary is used.
 * **Local Storage**: Dictation history, audio recordings, and provider credentials reside locally in SQLite databases inside `~/.voice_flow/`.
 * **Encrypted Backups**: The `.flowvault` export/import format secures account profiles, preferences, and custom dictionaries using **AES-256-GCM** encryption.
