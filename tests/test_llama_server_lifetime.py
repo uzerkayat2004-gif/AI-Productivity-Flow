@@ -296,6 +296,7 @@ def test_windows_job_object_assignment_path(monkeypatch):
     job, info_class, flags, size = calls["set"]
     assert job == 4321 and info_class == 9 and size > 0
     assert flags & child_processes.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    assert flags & child_processes.JOB_OBJECT_LIMIT_BREAKAWAY_OK
     assert calls["assign"] == (4321, 77)
     assert "close" not in calls  # job handle must stay open for the app lifetime
     # The job is created once and reused.

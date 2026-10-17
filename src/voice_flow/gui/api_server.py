@@ -1128,10 +1128,16 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/updates/check":
             from voice_flow.update_checker import check_for_updates
+            from voice_flow.app_updater import get_manager
             qs = urllib.parse.parse_qs(parsed.query)
             force = qs.get("force", ["0"])[0] in ("1", "true", "yes")
             result = check_for_updates(force=force)
+            get_manager().remember(result.get("update_plan"))
             self.send_json_response({**result, "success": bool(result.get("checked")) and not result.get("error")})
+            return
+        if path == "/api/updates/progress":
+            from voice_flow.app_updater import get_manager
+            self.send_json_response(get_manager().status())
             return
         if path == "/api/auth/status":
             _sync_active_storage()
@@ -4124,6 +4130,48 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"success": ok}, 200 if ok else 503)
             except Exception as exc:
                 self.send_json_response({"success": False, "error": str(exc)}, 500)
+
+        elif path == "/api/updates/download":
+            from voice_flow.app_updater import UpdateError, get_manager
+            try:
+                self.send_json_response(get_manager().start())
+            except UpdateError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 409)
+            return
+
+        elif path == "/api/updates/cancel":
+            from voice_flow.app_updater import get_manager
+            self.send_json_response(get_manager().cancel())
+            return
+
+        elif path == "/api/updates/install":
+            from voice_flow.app_updater import UpdateError, get_manager
+            try:
+                self.send_json_response(get_manager().begin_install())
+            except UpdateError as exc:
+                payload = get_manager().status()
+                payload["success"] = False
+                payload["error"] = str(exc)
+                self.send_json_response(payload, 409)
+            return
+
+        elif path == "/api/updates/fallback":
+            from voice_flow.app_updater import UpdateError, assert_public_release_url, get_manager
+            import webbrowser
+            plan = get_manager().plan or {}
+            url = str(plan.get("fallback_url") or "")
+            try:
+                assert_public_release_url(url)
+            except UpdateError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 409)
+                return
+            try:
+                webbrowser.open(url)
+            except Exception as exc:
+                self.send_json_response({"success": False, "error": str(exc), "url": url}, 500)
+                return
+            self.send_json_response({"success": True, "url": url})
+            return
 
         elif path == "/api/app/restart":
             try:

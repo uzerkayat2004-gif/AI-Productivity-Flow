@@ -14082,6 +14082,190 @@ try {
   }, 4000);
 } catch (_) {}
 
+function escapeUpdateText(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+let _updateProgressTimer = null;
+
+function stopUpdateProgress() {
+  if (_updateProgressTimer) {
+    clearInterval(_updateProgressTimer);
+    _updateProgressTimer = null;
+  }
+}
+
+function renderUpdateCard(data) {
+  const row = document.getElementById("update-status-row");
+  const msg = document.getElementById("update-status-message");
+  if (!row || !msg) return;
+  const plan = data.update_plan || {};
+  const versionText = `AI Productivity Flow v${data.latest_version || ""} is available`;
+  const sizeText = plan.size_label ? escapeUpdateText(plan.size_label) : "";
+  const kindText = plan.kind === "app" ? "App update" : "Full installer";
+  const sizeLine = sizeText ? `${kindText} · ${sizeText}` : kindText;
+  const releaseUrl = data.release_url || "";
+  const notes = releaseUrl
+    ? `<a href="${escapeUpdateText(releaseUrl)}" target="_blank" class="action-btn apf-update-notes">View what's new</a>`
+    : "";
+  row.style.display = "flex";
+  msg.innerHTML = `
+    <div class="apf-update-card">
+      <div class="apf-update-copy">
+        <strong>${escapeUpdateText(versionText)}</strong>
+        <div class="apf-update-size">${sizeLine}</div>
+        <div class="apf-update-reason">${escapeUpdateText(plan.reason || "")}</div>
+      </div>
+      <div class="apf-update-actions">
+        ${notes}
+        <button type="button" class="btn-secondary" id="btn-update-now">Update now</button>
+      </div>
+      <div class="apf-update-progress" id="apf-update-progress" hidden>
+        <div class="apf-update-bar" aria-hidden="true"><div class="apf-update-bar-fill" id="apf-update-bar-fill"></div></div>
+        <span id="apf-update-progress-label"></span>
+        <button type="button" class="btn-secondary" id="btn-update-cancel">Cancel</button>
+      </div>
+      <div class="apf-update-followup" id="apf-update-followup" hidden></div>
+    </div>
+  `;
+  const start = document.getElementById("btn-update-now");
+  if (start) start.addEventListener("click", () => startInAppUpdate());
+}
+
+function showUpdateFollowup(html) {
+  const slot = document.getElementById("apf-update-followup");
+  if (!slot) return;
+  slot.hidden = !html;
+  slot.innerHTML = html || "";
+}
+
+async function startInAppUpdate() {
+  const progress = document.getElementById("apf-update-progress");
+  const start = document.getElementById("btn-update-now");
+  if (start) start.disabled = true;
+  if (progress) progress.hidden = false;
+  showUpdateFollowup("");
+  try {
+    const data = await safeFetchJson("/api/updates/download", { method: "POST" });
+    if (!data || data.success === false && data.state !== "downloading") {
+      throw new Error((data && data.error) || "Could not start the download.");
+    }
+  } catch (err) {
+    if (start) start.disabled = false;
+    showUpdateFailure(err.message || "Could not start the download.");
+    return;
+  }
+  stopUpdateProgress();
+  _updateProgressTimer = setInterval(pollUpdateProgress, 400);
+  pollUpdateProgress();
+}
+
+async function pollUpdateProgress() {
+  let data = null;
+  try {
+    const res = await fetch("/api/updates/progress");
+    data = await res.json();
+  } catch (err) {
+    return;
+  }
+  if (!data) return;
+  const fill = document.getElementById("apf-update-bar-fill");
+  const label = document.getElementById("apf-update-progress-label");
+  const progress = document.getElementById("apf-update-progress");
+  const percent = Number(data.progress || 0);
+  if (fill) fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  if (label) {
+    label.textContent = data.label || (data.state === "verifying" ? "Checking the download…" : "");
+  }
+  const cancel = document.getElementById("btn-update-cancel");
+  if (cancel && !cancel.dataset.bound) {
+    cancel.dataset.bound = "1";
+    cancel.addEventListener("click", cancelInAppUpdate);
+  }
+  if (data.state === "downloading" || data.state === "verifying") {
+    if (progress) progress.hidden = false;
+    return;
+  }
+  stopUpdateProgress();
+  if (progress) progress.hidden = true;
+  if (data.state === "ready") {
+    const installLabel = escapeUpdateText(data.install_label || "Restart to install");
+    showUpdateFollowup(`<button type="button" class="action-btn" id="btn-update-install">${installLabel}</button>`);
+    const install = document.getElementById("btn-update-install");
+    if (install) install.addEventListener("click", installDownloadedUpdate);
+    return;
+  }
+  if (data.state === "installing") {
+    showUpdateFollowup(`<span>${escapeUpdateText(data.message || "Restarting to install…")}</span>`);
+    return;
+  }
+  if (data.state === "manual") {
+    showUpdateFollowup(`<span>${escapeUpdateText(data.message || "")}</span>`);
+    return;
+  }
+  if (data.state === "cancelled" || data.state === "failed") {
+    showUpdateFailure(data.error || data.message || "The download did not finish.", data.fallback_url);
+  }
+}
+
+function showUpdateFailure(message, fallbackUrl) {
+  const safe = escapeUpdateText(message || "The download did not finish.");
+  let extra = `<button type="button" class="btn-secondary" id="btn-update-retry">Retry</button>`;
+  if (fallbackUrl && String(fallbackUrl).includes("/releases/download/")) {
+    extra += `<button type="button" class="btn-secondary" id="btn-update-fallback">Download the file</button>`;
+  }
+  showUpdateFollowup(`<span class="apf-update-error">${safe}</span>${extra}`);
+  const retry = document.getElementById("btn-update-retry");
+  if (retry) retry.addEventListener("click", () => startInAppUpdate());
+  const fallback = document.getElementById("btn-update-fallback");
+  if (fallback) fallback.addEventListener("click", () => openUpdateFallback(fallback));
+  const start = document.getElementById("btn-update-now");
+  if (start) start.disabled = false;
+}
+
+async function openUpdateFallback(button) {
+  if (button) button.disabled = true;
+  try {
+    const data = await safeFetchJson("/api/updates/fallback", { method: "POST" });
+    if (!data || data.success === false) {
+      throw new Error((data && data.error) || "Could not open the download.");
+    }
+  } catch (err) {
+    if (button) button.disabled = false;
+  }
+}
+
+async function cancelInAppUpdate() {
+  stopUpdateProgress();
+  try {
+    await safeFetchJson("/api/updates/cancel", { method: "POST" });
+  } catch (err) {}
+  showUpdateFailure("Download cancelled.");
+}
+
+async function installDownloadedUpdate() {
+  const install = document.getElementById("btn-update-install");
+  if (install) install.disabled = true;
+  try {
+    const data = await safeFetchJson("/api/updates/install", { method: "POST" });
+    if (!data || data.success === false) {
+      const failure = new Error((data && data.error) || "Could not start the installer.");
+      failure.fallbackUrl = data && data.fallback_url;
+      throw failure;
+    }
+    if (data.state === "manual") {
+      showUpdateFollowup(`<span>${escapeUpdateText(data.message || "")}</span>`);
+      return;
+    }
+    showUpdateFollowup(`<span>${escapeUpdateText(data.message || "Restarting to install…")}</span>`);
+  } catch (err) {
+    if (install) install.disabled = false;
+    showUpdateFailure(err.message || "Could not start the installer.", err.fallbackUrl);
+  }
+}
+
 async function checkForAppUpdates(manual = false) {
   if(_updateCheckPending)return;
   _updateCheckPending=true;
@@ -14100,6 +14284,8 @@ async function checkForAppUpdates(manual = false) {
     const res = await fetch(`/api/updates/check${manual ? "?force=1" : ""}`);
     const data = await res.json();
     if (btn) btn.textContent = "Check for updates";
+    const badge = document.querySelector(".about-version-badge");
+    if (badge && data && data.current_version) badge.textContent = `Version ${data.current_version}`;
 
     if (!res.ok || !data || !data.success) {
       if (manual && row && msg) {
@@ -14110,22 +14296,12 @@ async function checkForAppUpdates(manual = false) {
     }
 
     if (data.update_available) {
-      const releaseUrl = data.release_url || "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest";
+      renderUpdateCard(data);
+      const plan = data.update_plan || {};
       const versionText = `AI Productivity Flow v${data.latest_version || ""} is available`;
-      if (row && msg) {
-        row.style.display = "flex";
-        msg.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:12px;flex-wrap:wrap;background:rgba(234,88,12,0.08);padding:8px 12px;border-radius:6px;border:1px solid rgba(234,88,12,0.2);">
-            <div><strong>${versionText}</strong></div>
-            <div style="display:flex;gap:8px;">
-              <a href="${releaseUrl}" target="_blank" class="action-btn" style="background:var(--primary-orange,#ea580c);color:#fff;text-decoration:none;padding:4px 10px;font-size:12px;border-radius:4px;">View what's new</a>
-              <a href="${releaseUrl}" target="_blank" class="btn-secondary" style="text-decoration:none;padding:4px 10px;font-size:12px;border-radius:4px;">Download update</a>
-            </div>
-          </div>
-        `;
-      }
+      const sizeNote = plan.size_label ? ` (${plan.size_label})` : "";
       if (!manual && typeof vfToast === "function") {
-        vfToast(`${versionText} - Check System settings to update.`);
+        vfToast(`${versionText}${sizeNote}. Check System settings to update.`);
       }
     } else {
       if (manual && row && msg) {
