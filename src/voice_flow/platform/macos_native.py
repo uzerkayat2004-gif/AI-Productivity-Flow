@@ -413,6 +413,13 @@ def send_return_key() -> bool:
 # ---------------------------------------------------------------------------
 
 
+# Window owners that are system UI, never the app the user is typing into.
+_SYSTEM_WINDOW_OWNERS = frozenset({
+    "Window Server", "WindowServer", "Dock", "SystemUIServer", "Control Center",
+    "ControlCenter", "Notification Center", "NotificationCenter", "loginwindow",
+})
+
+
 def frontmost_window_owner() -> dict[str, Any]:
     """Return {'app': str, 'title': str, 'pid': int} for the frontmost window.
 
@@ -493,7 +500,10 @@ def frontmost_window_owner() -> dict[str, Any]:
                 continue
             app = _string("owner")
             title = _string("title")
-            if not app:
+            if not app or app in _SYSTEM_WINDOW_OWNERS:
+                # macOS 14 CI (it7 af2 38985457171): a layer-0 "Window Server"
+                # window sat above TextEdit after Escape on our widget menu, so
+                # paste focus restore targeted pid 138 and gave up.
                 continue
             pid = 0
             pid_ref = key_refs.get("pid")

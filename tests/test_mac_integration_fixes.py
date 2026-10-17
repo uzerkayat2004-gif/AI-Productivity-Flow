@@ -402,3 +402,15 @@ def test_restore_focus_launchservices_names_another_app_leaves_it_alone(monkeypa
     assert report["restored"] is False
     assert report["skipped"] == "another app is active"
     assert apps[target].activated == 0
+
+
+def test_frontmost_window_owner_skips_window_server_layer0_window(monkeypatch):
+    """macOS 14 CI it7 af2 (38985457171): after Escape on the widget menu a
+    layer-0 Window Server window was first, restore targeted pid 138 and skipped."""
+    windows = [
+        {"owner": "AI Productivity Flow", "title": "", "pid": 8196, "layer": 19},
+        {"owner": "Window Server", "title": "", "pid": 138, "layer": 0},
+        {"owner": "TextEdit", "title": "af.txt", "pid": 5740, "layer": 0},
+    ]
+    native = _fake_window_list(monkeypatch, windows)
+    assert native.frontmost_window_owner() == {"app": "TextEdit", "title": "af.txt", "pid": 5740}
