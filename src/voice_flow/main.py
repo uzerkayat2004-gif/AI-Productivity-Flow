@@ -3002,6 +3002,18 @@ class VoiceFlowApp:
                 hit = {}
             own_click = bool(hit)
             if not own_click:
+                # The window server can miss the Audio Flow widget while a click
+                # on it is resizing it (e.g. short-text notice 384x96 -> depth
+                # picker 265x32: "Make Anyway" sits outside the new frame). The
+                # widget's own geometry, with its stage-transition grace period,
+                # is pure Python state, so it is safe to read on this worker.
+                try:
+                    own_click = bool(audio_flow_widget.contains_point(x, y))
+                except Exception:
+                    own_click = False
+            if not own_click:
+                if getattr(audio_flow_widget, "_is_visible", False):
+                    log.info("[AUDIO FLOW] macOS click outside our windows at %s,%s; hiding the Audio Flow widget.", x, y)
                 self.overlay.clear_selected_text()
                 audio_flow_widget.hide()
             return

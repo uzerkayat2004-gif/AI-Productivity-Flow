@@ -337,6 +337,34 @@ def test_mac_click_elsewhere_clears_selection(monkeypatch):
     assert app.overlay.cleared == 1 and hidden == [True]
 
 
+def test_mac_click_on_widget_while_it_resizes_keeps_it(monkeypatch):
+    """'Make Anyway' on the short-text notice resizes the widget to the depth
+    picker; the window server can miss it at the click point. The widget's own
+    geometry (with its stage-transition grace) must keep the click ours."""
+    app, _shown, hidden = _mac_app(monkeypatch, object(), {"app": "TextEdit", "pid": 4242}, hit={})
+    monkeypatch.setattr(main_module.audio_flow_widget, "contains_point", lambda x, y: (x, y) == (1128, 265))
+    app._on_mouse_release(1128, 265, 0.0, 1128, 265)
+    assert app.overlay.cleared == 0 and hidden == []
+    app._on_mouse_release(20, 300, 0.0, 20, 300)
+    assert app.overlay.cleared == 1 and hidden == [True]
+
+
+def test_widget_contains_point_covers_old_frame_during_stage_transition(monkeypatch):
+    from voice_flow import audio_flow_widget as afw
+
+    w = object.__new__(afw.AudioFlowFloatingWidget)
+    w._is_visible = True
+    w.win = object()
+    w._pos_x, w._pos_y = 838, 205
+    w._stage = w.STAGE_DEPTH_SELECT
+    w._prev_dimensions = (384, 96)
+    w._last_stage_change_time = time.time()
+    assert w.contains_point(1128, 265)  # "Make Anyway" spot, outside the 265x32 picker
+    w._last_stage_change_time = time.time() - 5
+    assert not w.contains_point(1128, 265)
+    assert w.contains_point(964, 221)  # "Balanced"
+
+
 def test_mac_capture_skipped_while_dictating(monkeypatch):
     class Injector:
         def get_selected_text_strict(self, target_hwnd=None):
