@@ -12,7 +12,9 @@ import sys
 import time
 
 MUTEX_NAME = "Local\\VoiceFlowDesktopLauncherMutex_v1"
-WINDOW_TITLE = "AI Productivity Flow"
+APP_WINDOW_TITLES = ("AI Productivity Flow", "Voice Flow")
+SPLASH_CLASS_NAME = "APFEarlySplash"
+SPLASH_WINDOW_TITLE = "APFEarlySplash"
 
 
 def _install_root() -> str:
@@ -50,7 +52,33 @@ def _launch_log(message: str) -> None:
         pass
 
 
-def _focus_existing() -> bool:
+def _window_text(user32, hwnd, getter_name: str) -> str:
+    import ctypes
+    getter = getattr(user32, getter_name)
+    getter.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    getter.restype = ctypes.c_int
+    buf = ctypes.create_unicode_buffer(512)
+    if not getter(hwnd, buf, len(buf)):
+        return ""
+    return buf.value or ""
+
+
+def _is_splash(hwnd, user32, splash) -> bool:
+    try:
+        title = _window_text(user32, hwnd, "GetWindowTextW")
+        class_name = _window_text(user32, hwnd, "GetClassNameW")
+    except Exception:
+        return False
+    if splash is not None:
+        try:
+            return bool(splash.is_startup_splash(title, class_name))
+        except Exception:
+            pass
+    return class_name == SPLASH_CLASS_NAME or title == SPLASH_WINDOW_TITLE
+
+
+def _focus_existing(splash=None) -> bool:
+    """Focus the real main window. The startup splash is not that window."""
     if not sys.platform.startswith("win"):
         return False
     import ctypes
@@ -63,7 +91,12 @@ def _focus_existing() -> bool:
     user32.ShowWindow.restype = wintypes.BOOL
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.SetForegroundWindow.restype = wintypes.BOOL
-    hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+    hwnd = None
+    for title in APP_WINDOW_TITLES:
+        candidate = user32.FindWindowW(None, title)
+        if candidate and not _is_splash(candidate, user32, splash):
+            hwnd = candidate
+            break
     if not hwnd:
         return False
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -106,10 +139,10 @@ def main() -> None:
         if handle is None:
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
-                if _focus_existing():
+                if _focus_existing(splash):
                     return
                 time.sleep(0.1)
-            _focus_existing()
+            _focus_existing(splash)
             return
         os.environ["VOICE_FLOW_LAUNCHER_MUTEX_HANDLE"] = str(int(handle))
         if splash is not None:

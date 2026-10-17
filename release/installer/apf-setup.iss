@@ -5,7 +5,7 @@
 ; (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppDisplayVersion "1.0"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://aiproductivityflow.site/"
@@ -32,6 +32,8 @@ DefaultDirName={localappdata}\Programs\{#MyAppName}
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
+; Without this, DisableProgramGroupPage stores the shortcut in Programs\(Default).
+DefaultGroupName={#MyAppName}
 DisableWelcomePage=yes
 DisableFinishedPage=no
 PrivilegesRequired=lowest
@@ -60,6 +62,12 @@ VersionInfoCopyright=Copyright (C) 2026 Uzer Kayat
 FinishedHeadingLabel=AI Productivity Flow is installed
 FinishedLabel=Version 1.0 is on this PC. Launch is selected below. You can open the app any time from the desktop shortcut.%n%nCopyright 2026 Uzer Kayat. License and third-party notices are installed with the app.
 ClickFinish=Finish
+; Inno still opens this page when it would be the first one, and ignores
+; DisableReadyPage. The labels below match the Installing page until Next fires.
+WizardReady=Installing AI Productivity Flow
+ReadyLabel1=Installing AI Productivity Flow...
+ReadyLabel2a=Installing AI Productivity Flow...
+ReadyLabel2b=Installing AI Productivity Flow...
 StatusExtractFiles=Installing AI Productivity Flow...
 StatusCreatingIcons=Adding the desktop shortcut...
 
@@ -81,8 +89,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeNa
 [Run]
 Filename: "{app}\runtime\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden; Check: NeedsVcRedist
 Filename: "{app}\runtime\webview2\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Flags: runhidden; Check: NeedsWebView2
-Filename: "{app}\runtime\node\node.exe"; Parameters: """{app}\runtime\hyperframes\node_modules\hyperframes\bin\hyperframes.mjs"" browser ensure"; Flags: runhidden
-Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Description: "Launch AI Productivity Flow"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\runtime\node\node.exe"; Parameters: """{app}\runtime\hyperframes\node_modules\hyperframes\bin\hyperframes.mjs"" browser ensure"; Flags: runhidden nowait
+Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Description: "Launch AI Productivity Flow"; Flags: shellexec nowait postinstall skipifsilent runasoriginaluser
 ; /SILENT and /VERYSILENT skip the Finish checkbox above. Launch anyway so a
 ; one-click update opens the app again when the installer is done.
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsSilentSetup
@@ -100,11 +108,17 @@ Filename: "{app}\runtime\python\python.exe"; Parameters: "-m voice_flow.release_
 [Code]
 const
   PBM_SETBARCOLOR = $0409;
+  BM_CLICK = $00F5;
+
+var
+  ReadyPageAdvanced: Boolean;
 
 procedure SetWindowTheme(Wnd: HWND; SubAppName, SubIdList: String);
   external 'SetWindowTheme@uxtheme.dll stdcall';
 function SendMessageW(hWnd: HWND; Msg: Cardinal; wParam, lParam: Longint): Longint;
   external 'SendMessageW@user32.dll stdcall';
+function PostMessageW(hWnd: HWND; Msg: Cardinal; wParam, lParam: Longint): Longint;
+  external 'PostMessageW@user32.dll stdcall';
 
 procedure StyleProgressBar;
 begin
@@ -148,6 +162,13 @@ begin
     DeleteStaleShortcut(ExpandConstant('{userprograms}\{#MyAppName}.lnk'));
     DeleteStaleShortcut(ExpandConstant('{commonprograms}\{#MyAppName}.lnk'));
     DeleteStaleShortcut(ExpandConstant('{group}\{#MyAppName}.lnk'));
+    { Upgrades from a build that had no DefaultGroupName. }
+    DeleteStaleShortcut(ExpandConstant('{userprograms}\(Default)\{#MyAppName}.lnk'));
+    DeleteStaleShortcut(ExpandConstant('{autoprograms}\(Default)\{#MyAppName}.lnk'));
+    DeleteStaleShortcut(ExpandConstant('{commonprograms}\(Default)\{#MyAppName}.lnk'));
+    RemoveDir(ExpandConstant('{userprograms}\(Default)'));
+    RemoveDir(ExpandConstant('{autoprograms}\(Default)'));
+    RemoveDir(ExpandConstant('{commonprograms}\(Default)'));
   end;
 end;
 
@@ -166,6 +187,19 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   StyleWizard;
+  { DisableReadyPage is ignored when Ready would be the first wizard page.
+    Advance immediately so the only screens are Installing and Finish.
+    shellexec nowait on the Finish launch keeps that click from waiting. }
+  if (CurPageID = wpReady) and (not ReadyPageAdvanced) then
+  begin
+    ReadyPageAdvanced := True;
+    WizardForm.PageNameLabel.Caption := 'Installing AI Productivity Flow';
+    WizardForm.PageDescriptionLabel.Caption := 'Please wait while Setup installs AI Productivity Flow on your computer.';
+    WizardForm.ReadyLabel.Caption := 'Installing AI Productivity Flow...';
+    WizardForm.ReadyMemo.Visible := False;
+    WizardForm.BackButton.Visible := False;
+    PostMessageW(WizardForm.NextButton.Handle, BM_CLICK, 0, 0);
+  end;
   if CurPageID = wpInstalling then
   begin
     WizardForm.StatusLabel.Visible := True;
