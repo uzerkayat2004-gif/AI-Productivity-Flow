@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
 if ($Tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Refusing tag '$Tag'" }
 
 New-Item -ItemType Directory -Force -Path $Artifacts | Out-Null
@@ -29,28 +30,69 @@ function Log([string]$Message) {
     Write-Host $line
 }
 
-function Save-State {
-    $doc = @{
-        tag = $Tag
-        steps = @($script:Steps)
-        timings = $script:Timings
-        screenshots = @($script:ShotNotes)
-        bugs = @($script:Bugs)
+function Escape-JsonText([string]$Text) {
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $Text.ToCharArray()) {
+        $code = [int]$ch
+        if ($ch -eq '"') { [void]$sb.Append('\"') }
+        elseif ($ch -eq '\') { [void]$sb.Append('\\') }
+        elseif ($ch -eq "`n") { [void]$sb.Append('\n') }
+        elseif ($ch -eq "`r") { [void]$sb.Append('\r') }
+        elseif ($ch -eq "`t") { [void]$sb.Append('\t') }
+        elseif ($code -lt 32) { [void]$sb.Append(("\u{0:x4}" -f $code)) }
+        else { [void]$sb.Append($ch) }
     }
-    ($doc | ConvertTo-Json -Depth 8) | Set-Content -Path (Join-Path $Artifacts "results.json") -Encoding UTF8
+    return $sb.ToString()
+}
+
+function ConvertTo-StateJson($Value, [int]$Depth = 8) {
+    if ($null -eq $Value -or $Depth -lt 0) { return "null" }
+    if ($Value -is [bool]) { if ($Value) { return "true" } else { return "false" } }
+    if ($Value -is [byte] -or $Value -is [int16] -or $Value -is [int] -or $Value -is [int64] -or $Value -is [uint32] -or $Value -is [uint64] -or $Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
+        return [System.Convert]::ToString($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [string]) { return '"' + (Escape-JsonText $Value) + '"' }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($key in @($Value.Keys)) {
+            $parts.Add((ConvertTo-StateJson ([string]$key) ($Depth - 1)) + ":" + (ConvertTo-StateJson $Value[$key] ($Depth - 1)))
+        }
+        return "{" + ($parts -join ",") + "}"
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $parts = New-Object System.Collections.Generic.List[string]
+        foreach ($item in @($Value)) { $parts.Add((ConvertTo-StateJson $item ($Depth - 1))) }
+        return "[" + ($parts -join ",") + "]"
+    }
+    return '"' + (Escape-JsonText ([string]$Value)) + '"'
+}
+
+function Save-State {
+    try {
+        $doc = @{
+            tag = [string]$Tag
+            steps = @($script:Steps)
+            timings = $script:Timings
+            screenshots = @($script:ShotNotes)
+            bugs = @($script:Bugs)
+        }
+        [System.IO.File]::WriteAllText((Join-Path $Artifacts "results.json"), (ConvertTo-StateJson $doc))
+    } catch {
+        Log ("results.json write failed: " + $_.Exception.Message)
+    }
 }
 
 function Add-Step([string]$Id, [bool]$Pass, [string]$Detail, [string]$Kind) {
-    $script:Steps.Add([ordered]@{ id = $Id; pass = $Pass; detail = $Detail; kind = $Kind })
+    $script:Steps.Add(@{ id = $Id; pass = $Pass; detail = $Detail; kind = $Kind })
     Log ("STEP {0} {1} {2}" -f $(if ($Pass) { "PASS" } else { "FAIL" }), $Id, $Detail)
     if (-not $Pass -and $Kind -eq "app") {
-        $script:Bugs.Add([ordered]@{ step = $Id; detail = $Detail })
+        $script:Bugs.Add(@{ step = $Id; detail = $Detail })
     }
     Save-State
 }
 
 function Add-Shot([string]$Name, [string]$Note) {
-    $script:ShotNotes.Add([ordered]@{ file = $Name; note = $Note })
+    $script:ShotNotes.Add(@{ file = $Name; note = $Note })
     Log ("SHOT {0} {1}" -f $Name, $Note)
     Save-State
 }
@@ -275,7 +317,7 @@ function Get-WindowRows {
             width = [int]$parts[4]
             height = [int]$parts[5]
             class = $parts[6]
-            title = ($parts[7..($parts.Count - 1)] -join " ").Trim()
+            title = (@($parts[7..($parts.Count - 1)]) -join " ").Trim()
         }
     }
     return $rows
@@ -934,7 +976,9 @@ try {
     if (Test-Path $updateResult) {
         $ur = Get-Content -Raw -Path $updateResult | ConvertFrom-Json
         $updateOk = [bool]$ur.pass
-        $updateDetail = "up_to_date=$($ur.up_to_date) dry_run=$($ur.dry_run_ok) plan=$($ur.plan.kind) asset=$($ur.plan.asset_name) reason=$($ur.plan.reason) error=$($ur.error) check=$($ur.check | ConvertTo-Json -Compress)"
+        $checkJson = ""
+        try { $checkJson = ($ur.check | ConvertTo-Json -Compress -Depth 4) } catch { $checkJson = "unserializable" }
+        $updateDetail = "up_to_date=$($ur.up_to_date) dry_run=$($ur.dry_run_ok) plan=$($ur.plan.kind) asset=$($ur.plan.asset_name) reason=$($ur.plan.reason) error=$($ur.error) check=$checkJson"
     }
     Add-Step "7-updater" $updateOk $updateDetail $(if ($updateOk) { "ok" } else { "app" })
 
@@ -950,7 +994,9 @@ try {
         if ($text -and $text -match "Traceback \(most recent call last\)") { $traceback += $file.Name }
     }
     $logsOk = (Test-Path $launchLog) -and $debugLogs.Count -gt 0 -and $traceback.Count -eq 0
-    Add-Step "4-logs" $logsOk ("launch_log=$(Test-Path $launchLog) debug=$($debugLogs.Name -join ',') tracebacks=$($traceback -join ',')") $(if ($logsOk) { "ok" } else { "app" })
+    $debugNames = @($debugLogs | ForEach-Object { $_.Name })
+    $tracebackNames = @($traceback | ForEach-Object { $_ })
+    Add-Step "4-logs" $logsOk ("launch_log=$(Test-Path $launchLog) debug=$($debugNames -join ',') tracebacks=$($tracebackNames -join ',')") $(if ($logsOk) { "ok" } else { "app" })
 
     $pngCount = @(Get-ChildItem -Path $Artifacts -Filter "*.png" -ErrorAction SilentlyContinue).Count
     Add-Step "8-artifacts" ($pngCount -ge 10) "png_count=$pngCount dir=$Artifacts" $(if ($pngCount -ge 10) { "ok" } else { "harness" })
