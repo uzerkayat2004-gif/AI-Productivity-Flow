@@ -2070,7 +2070,9 @@ class VoiceFlowApp:
             dictionary_trace=dictionary_trace,
             speed_mode=_normalize_polish_speed_mode(speed_mode or getattr(session, "polish_speed_mode", None) or (session.get("polish_speed_mode") if isinstance(session, dict) else None)),
         )
-        if deterministic_preserve and observed_outcome["value"] == "local":
+        if deterministic_preserve and observed_outcome["value"] in {"local", "model_not_downloaded"}:
+            # Keep-wording never runs S1. A missing polish model must not
+            # relabel this local cleanup as "model not downloaded".
             observed_outcome["value"] = "local_preserved"
         if deterministic_local_rewrite and observed_outcome["value"] == "local":
             # Privacy can change during preflight. Validate the actual cleaned,

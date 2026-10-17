@@ -66,6 +66,7 @@ StatusCreatingIcons=Adding the desktop shortcut...
 PageFlow=APF_WIZARD_PAGES:installing,finished
 
 [Files]
+; runtime\* is the whole private runtime. That includes runtime\code2video.
 Source: "{#STAGING_ROOT}\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
 Source: "{#STAGING_ROOT}\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#STAGING_ROOT}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
