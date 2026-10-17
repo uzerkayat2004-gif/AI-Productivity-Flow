@@ -47,7 +47,7 @@ def main() -> int:
         }
 
         if assets_path and assets_path.is_file():
-            assets = json.loads(assets_path.read_text(encoding="utf-8"))
+            assets = json.loads(assets_path.read_text(encoding="utf-8-sig"))
             if isinstance(assets, dict):
                 assets = assets.get("assets") or [assets]
         else:

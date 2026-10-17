@@ -30,41 +30,62 @@ function Log([string]$Message) {
     Write-Host $line
 }
 
-function Escape-JsonText([string]$Text) {
-    $sb = New-Object System.Text.StringBuilder
-    foreach ($ch in $Text.ToCharArray()) {
-        $code = [int]$ch
-        if ($ch -eq '"') { [void]$sb.Append('\"') }
-        elseif ($ch -eq '\') { [void]$sb.Append('\\') }
-        elseif ($ch -eq "`n") { [void]$sb.Append('\n') }
-        elseif ($ch -eq "`r") { [void]$sb.Append('\r') }
-        elseif ($ch -eq "`t") { [void]$sb.Append('\t') }
-        elseif ($code -lt 32) { [void]$sb.Append(("\u{0:x4}" -f $code)) }
-        else { [void]$sb.Append($ch) }
+function Add-JsonString([System.Text.StringBuilder]$Sb, [string]$Text) {
+    [void]$Sb.Append('"')
+    if ($Text) {
+        foreach ($ch in $Text.ToCharArray()) {
+            $code = [int]$ch
+            if ($ch -eq '"') { [void]$Sb.Append('\"') }
+            elseif ($ch -eq '\') { [void]$Sb.Append('\\') }
+            elseif ($ch -eq "`n") { [void]$Sb.Append('\n') }
+            elseif ($ch -eq "`r") { [void]$Sb.Append('\r') }
+            elseif ($ch -eq "`t") { [void]$Sb.Append('\t') }
+            elseif ($code -lt 32) {
+                [void]$Sb.Append('\u')
+                [void]$Sb.Append($code.ToString("x4"))
+            } else { [void]$Sb.Append($ch) }
+        }
     }
-    return $sb.ToString()
+    [void]$Sb.Append('"')
 }
 
-function ConvertTo-StateJson($Value, [int]$Depth = 8) {
-    if ($null -eq $Value -or $Depth -lt 0) { return "null" }
-    if ($Value -is [bool]) { if ($Value) { return "true" } else { return "false" } }
-    if ($Value -is [byte] -or $Value -is [int16] -or $Value -is [int] -or $Value -is [int64] -or $Value -is [uint32] -or $Value -is [uint64] -or $Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
-        return [System.Convert]::ToString($Value, [System.Globalization.CultureInfo]::InvariantCulture)
+function Add-Json([System.Text.StringBuilder]$Sb, $Value, [int]$Depth) {
+    if ($null -eq $Value -or $Depth -lt 0) { [void]$Sb.Append('null'); return }
+    if ($Value -is [bool]) {
+        if ($Value) { [void]$Sb.Append('true') } else { [void]$Sb.Append('false') }
+        return
     }
-    if ($Value -is [string]) { return '"' + (Escape-JsonText $Value) + '"' }
+    if ($Value -is [string]) { Add-JsonString $Sb $Value; return }
+    $typeName = $Value.GetType().FullName
+    if ($typeName -eq 'System.Byte' -or $typeName -eq 'System.Int16' -or $typeName -eq 'System.Int32' -or $typeName -eq 'System.Int64' -or $typeName -eq 'System.UInt32' -or $typeName -eq 'System.UInt64' -or $typeName -eq 'System.Single' -or $typeName -eq 'System.Double' -or $typeName -eq 'System.Decimal') {
+        [void]$Sb.Append($Value.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+        return
+    }
     if ($Value -is [System.Collections.IDictionary]) {
-        $parts = New-Object System.Collections.Generic.List[string]
+        [void]$Sb.Append('{')
+        $first = $true
         foreach ($key in @($Value.Keys)) {
-            $parts.Add((ConvertTo-StateJson ([string]$key) ($Depth - 1)) + ":" + (ConvertTo-StateJson $Value[$key] ($Depth - 1)))
+            if (-not $first) { [void]$Sb.Append(',') }
+            $first = $false
+            Add-JsonString $Sb ([string]$key)
+            [void]$Sb.Append(':')
+            Add-Json $Sb $Value[$key] ($Depth - 1)
         }
-        return "{" + ($parts -join ",") + "}"
+        [void]$Sb.Append('}')
+        return
     }
     if ($Value -is [System.Collections.IEnumerable]) {
-        $parts = New-Object System.Collections.Generic.List[string]
-        foreach ($item in @($Value)) { $parts.Add((ConvertTo-StateJson $item ($Depth - 1))) }
-        return "[" + ($parts -join ",") + "]"
+        [void]$Sb.Append('[')
+        $first = $true
+        foreach ($item in @($Value)) {
+            if (-not $first) { [void]$Sb.Append(',') }
+            $first = $false
+            Add-Json $Sb $item ($Depth - 1)
+        }
+        [void]$Sb.Append(']')
+        return
     }
-    return '"' + (Escape-JsonText ([string]$Value)) + '"'
+    Add-JsonString $Sb ([string]$Value)
 }
 
 function Save-State {
@@ -76,7 +97,10 @@ function Save-State {
             screenshots = @($script:ShotNotes)
             bugs = @($script:Bugs)
         }
-        [System.IO.File]::WriteAllText((Join-Path $Artifacts "results.json"), (ConvertTo-StateJson $doc))
+        $sb = New-Object System.Text.StringBuilder
+        Add-Json $sb $doc 8
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $Artifacts "results.json"), $sb.ToString(), $utf8)
     } catch {
         Log ("results.json write failed: " + $_.Exception.Message)
     }
@@ -123,6 +147,8 @@ public static class ApfNative {
     [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern bool EnumDisplaySettings(string device, int mode, ref DEVMODE devMode);
     [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int ChangeDisplaySettings(ref DEVMODE devMode, int flags);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowText(IntPtr hWnd, string text);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
@@ -159,6 +185,20 @@ public static class ApfNative {
         public int dmReserved2;
         public int dmPanningWidth;
         public int dmPanningHeight;
+    }
+
+    public static long FindByClass(string className) {
+        return FindWindow(className, null).ToInt64();
+    }
+
+    public static void Retitle(long hwndValue, string title) {
+        SetWindowText(new IntPtr(hwndValue), title);
+    }
+
+    public static string WindowTitle(long hwndValue) {
+        StringBuilder title = new StringBuilder(512);
+        GetWindowText(new IntPtr(hwndValue), title, title.Capacity);
+        return title.ToString();
     }
 
     public static string ScreenSize() {
@@ -479,6 +519,10 @@ function Save-WindowShot([string]$Name, [int64]$Hwnd, [string]$Note) {
     if ($status -ne "ok" -and $script:CdpWs -and $Name -notlike "*installer*" -and $Name -notlike "*splash*" -and $Name -notlike "*browser*") {
         try { $status = Save-CdpShot $path } catch { $status = "cdp-error: $($_.Exception.Message)" }
     }
+    if ($status -ne "ok" -and $status -ne "cdp") {
+        $desktopStatus = [ApfNative]::CaptureScreen($path)
+        $status = "window=$status desktop=$desktopStatus"
+    }
     Add-Shot $Name ("{0} capture={1}" -f $Note, $status)
     return $status
 }
@@ -548,9 +592,9 @@ try {
 
     $wizardTrace = Join-Path $Artifacts "wizard-trace.txt"
     $wizardLog = Join-Path $Artifacts "wizard-install.log"
-    $wizard = Start-Process -FilePath $installer -ArgumentList ('/LOG="' + $wizardLog + '"') -PassThru
+    $wizard = Start-Process -FilePath $installer -ArgumentList ('/LOG=' + $wizardLog) -PassThru
     Log "wizard pid $($wizard.Id)"
-    $wizardDeadline = (Get-Date).AddMinutes(35)
+    $wizardDeadline = (Get-Date).AddMinutes(8)
     $sawInstalling = $false
     $shotInstalling = $false
     $shotFinish = $false
@@ -559,13 +603,36 @@ try {
     $titles = New-Object System.Collections.Generic.List[string]
     $wizardHwnd = [int64]0
     $lastBlob = ""
+    $lastCensus = ""
     while ((Get-Date) -lt $wizardDeadline -and -not $wizard.HasExited) {
-        $wins = @(Get-WindowRows | Where-Object { $_.pid -eq $wizard.Id -and $_.width -ge 400 })
-        if ($wins.Count -gt 0) {
-            $top = $wins | Sort-Object { $_.width * $_.height } -Descending | Select-Object -First 1
+        $rows = @(Get-WindowRows)
+        $censusLines = New-Object System.Collections.Generic.List[string]
+        foreach ($row in $rows) { $censusLines.Add(("{0}`t{1}`t{2}x{3}`t{4}`t{5}" -f $row.pid, $row.hwnd, $row.width, $row.height, $row.class, $row.title)) }
+        $census = [string]::Join("`n", $censusLines.ToArray())
+        if ($census -ne $lastCensus) {
+            $lastCensus = $census
+            Add-Content -Path $wizardTrace -Value ("{0} WINDOWS`n{1}" -f (Get-Date -Format "HH:mm:ss"), $census) -Encoding UTF8
+        }
+        $setupHwnd = [ApfNative]::FindByClass("TWizardForm")
+        $top = $null
+        if ($setupHwnd -ne 0) {
+            $top = $rows | Where-Object { $_.hwnd -eq $setupHwnd } | Select-Object -First 1
+            if (-not $top) {
+                $top = [pscustomobject]@{ pid = $wizard.Id; hwnd = $setupHwnd; left = 0; top = 0; width = 640; height = 480; class = "TWizardForm"; title = [ApfNative]::WindowTitle($setupHwnd) }
+            }
+        }
+        if (-not $top) {
+            $owned = @($rows | Where-Object { $_.pid -eq $wizard.Id -and $_.width -ge 300 })
+            if ($owned.Count -gt 0) { $top = $owned | Sort-Object { $_.width * $_.height } -Descending | Select-Object -First 1 }
+        }
+        if (-not $top) {
+            $titled = @($rows | Where-Object { $_.title -like "Setup -*" })
+            if ($titled.Count -gt 0) { $top = $titled | Select-Object -First 1 }
+        }
+        if ($top) {
             $wizardHwnd = $top.hwnd
             if ($titles -notcontains $top.title) { $titles.Add($top.title) }
-            $names = Get-UiNames $wizard.Id
+            $names = Get-UiNames ([int]$top.pid)
             $blob = (($names + @($top.title)) -join " | ")
             if ($blob -ne $lastBlob) {
                 $lastBlob = $blob
@@ -599,7 +666,7 @@ try {
                 Save-WindowShot "02-installer-finish.png" $wizardHwnd ("Finish page. title='$($top.title)'") | Out-Null
                 $shotFinish = $true
                 try {
-                    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wizard.Id)
+                    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, ([int]$top.pid))
                     $roots = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
                     foreach ($root in $roots) {
                         $desc = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
@@ -656,22 +723,37 @@ try {
 
     $shell = New-Object -ComObject WScript.Shell
     $desktop = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Productivity Flow.lnk"
-    $programs = Join-Path ([Environment]::GetFolderPath("Programs")) "AI Productivity Flow\AI Productivity Flow.lnk"
-    $shortcutNotes = @()
+    $programsRoot = [Environment]::GetFolderPath("Programs")
+    $startLinks = @()
+    if ($programsRoot -and (Test-Path -LiteralPath $programsRoot)) {
+        $startLinks = @(Get-ChildItem -LiteralPath $programsRoot -Recurse -Filter "AI Productivity Flow.lnk" -ErrorAction SilentlyContinue)
+    }
+    $shortcutNotes = New-Object System.Collections.Generic.List[string]
     $shortcutOk = $true
-    foreach ($lnk in @($desktop, $programs)) {
-        if (-not (Test-Path $lnk)) {
+    $links = New-Object System.Collections.Generic.List[string]
+    $links.Add($desktop)
+    foreach ($link in $startLinks) { $links.Add($link.FullName) }
+    if ($startLinks.Count -eq 0) {
+        $shortcutOk = $false
+        $shortcutNotes.Add("missing Start Menu shortcut under $programsRoot")
+    }
+    foreach ($lnk in $links) {
+        if (-not (Test-Path -LiteralPath $lnk)) {
             $shortcutOk = $false
-            $shortcutNotes += "missing $lnk"
+            $shortcutNotes.Add("missing $lnk")
             continue
         }
         $sc = $shell.CreateShortcut($lnk)
         $targetOk = $sc.TargetPath -like "*\pythonw.exe"
         $argOk = $sc.Arguments -like "*launch_apf.pyw*"
         if (-not $targetOk -or -not $argOk) { $shortcutOk = $false }
-        $shortcutNotes += ("{0} target={1} args={2}" -f $lnk, $sc.TargetPath, $sc.Arguments)
+        $shortcutNotes.Add(("{0} target={1} args={2}" -f $lnk, $sc.TargetPath, $sc.Arguments))
     }
-    Add-Step "3-shortcuts" $shortcutOk ($shortcutNotes -join " || ") $(if ($shortcutOk) { "ok" } else { "app" })
+    Add-Step "3-shortcuts" $shortcutOk ([string]::Join(" || ", $shortcutNotes.ToArray())) $(if ($shortcutOk) { "ok" } else { "app" })
+    $defaultFolder = @($startLinks | Where-Object { $_.Directory.Name -eq "(Default)" })
+    $folderOk = ($startLinks.Count -gt 0 -and $defaultFolder.Count -eq 0)
+    $folderDetail = $(if ($folderOk) { "Start Menu shortcut is outside a (Default) folder" } else { "Start Menu shortcut landed in '(Default)' instead of 'AI Productivity Flow': " + $(if ($defaultFolder.Count -gt 0) { $defaultFolder[0].FullName } else { $programsRoot }) })
+    Add-Step "3-start-menu-folder" $folderOk $folderDetail $(if ($folderOk) { "ok" } else { "app" })
 
     if (-not (Test-Path $script:Pythonw)) { throw "installed pythonw missing" }
     $launchWatch = [Diagnostics.Stopwatch]::StartNew()
@@ -684,7 +766,13 @@ try {
     $launchDeadline = (Get-Date).AddMinutes(4)
     while ((Get-Date) -lt $launchDeadline) {
         $rows = @(Get-WindowRows)
-        $splash = $rows | Where-Object { $_.class -eq "APFEarlySplash" -or ($_.title -eq "AI Productivity Flow" -and $_.width -lt 650 -and $_.height -lt 400) } | Select-Object -First 1
+        foreach ($row in $rows) {
+            if ($row.class -eq "APFEarlySplash" -and $row.title -eq "AI Productivity Flow") {
+                [ApfNative]::Retitle([int64]$row.hwnd, "APF Splash")
+                $row.title = "APF Splash"
+            }
+        }
+        $splash = $rows | Where-Object { $_.class -eq "APFEarlySplash" } | Select-Object -First 1
         if ($splash -and $splashHwnd -eq 0) {
             $splashHwnd = $splash.hwnd
             $splashAt = $launchWatch.Elapsed.TotalSeconds
@@ -964,7 +1052,9 @@ try {
     if ($token) { $headers["Authorization"] = "Bearer $token" }
     try {
         $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/uzerkayat2004-gif/AI-Productivity-Flow/releases/tags/$Tag" -TimeoutSec 30
-        @($release.assets) | ConvertTo-Json -Depth 6 | Set-Content -Path $assetsFile -Encoding UTF8
+        $assetJson = @($release.assets) | ConvertTo-Json -Depth 6
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($assetsFile, $assetJson, $utf8)
     } catch {
         Log "release asset list failed: $($_.Exception.Message)"
     }
