@@ -367,3 +367,38 @@ def test_restore_focus_when_no_app_is_active_but_menu_bar_names_users_app(monkey
     report = backend.restore_paste_target_focus(timeout=0.3)
     assert report["restored"] is True
     assert apps[target].activated == 1
+
+
+# ---------------------------------------------------------------------------
+# macOS 14 CI it6 af2 (38982431970): cached AppKit state (worker thread) said
+# TextEdit was active; LaunchServices had no front app -> restore skipped.
+# ---------------------------------------------------------------------------
+
+def test_restore_focus_trusts_launchservices_when_appkit_state_is_stale(monkeypatch):
+    target = os.getpid() + 1000
+    apps, _ = _fake_appkit(monkeypatch, target, target)
+    apps[target].registry["active"] = apps[target]  # stale: TextEdit "active"
+    calls = {"n": 0}
+
+    def ls_front():
+        calls["n"] += 1
+        return 0 if calls["n"] == 1 else target  # none front, then TextEdit after activation
+
+    monkeypatch.setattr(macos_backend_module, "_launchservices_front_pid", ls_front)
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    report = backend.restore_paste_target_focus(timeout=0.3)
+    assert report["ls_front_pid"] == 0
+    assert report["restored"] is True
+    assert apps[target].activated == 1
+
+
+def test_restore_focus_launchservices_names_another_app_leaves_it_alone(monkeypatch):
+    target = os.getpid() + 1000
+    other = os.getpid() + 2000
+    apps, _ = _fake_appkit(monkeypatch, 0, target)
+    monkeypatch.setattr(macos_backend_module, "_launchservices_front_pid", lambda: other)
+    backend = macos_backend_module.MacOSBackend.__new__(macos_backend_module.MacOSBackend)
+    report = backend.restore_paste_target_focus(timeout=0.2)
+    assert report["restored"] is False
+    assert report["skipped"] == "another app is active"
+    assert apps[target].activated == 0

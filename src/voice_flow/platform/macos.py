@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -152,6 +153,21 @@ def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0)
     except Exception as exc:
         log.debug("[MACOS] command %s failed: %s", cmd[:1], exc)
         return None
+
+
+def _launchservices_front_pid() -> int | None:
+    """Front app pid straight from LaunchServices (fresh on any thread).
+
+    0 = no front app, None = could not ask (not macOS / lsappinfo missing)."""
+    if not IS_MACOS or not os.path.exists("/usr/bin/lsappinfo"):
+        return None
+    try:
+        out = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "pid", "front"],
+                             capture_output=True, text=True, timeout=1.0, check=False).stdout
+    except Exception:
+        return None
+    m = re.search(r'"pid"\s*=\s*(\d+)', out or "")
+    return int(m.group(1)) if m else 0
 
 
 class MacOSBackend:
@@ -282,6 +298,18 @@ class MacOSBackend:
             if front_active is None:
                 front_active = front is not None
             report["own_active"] = own_active
+            # NSRunningApplication/NSWorkspace values are only refreshed on the
+            # main run loop, and this runs on a worker thread: on macOS 14 CI
+            # (it6 af2 38982431970) they still said TextEdit was active while
+            # LaunchServices had no front app, so we returned early and Cmd+V
+            # was lost. Ask LaunchServices directly when we can.
+            fresh_front = _launchservices_front_pid()
+            report["ls_front_pid"] = fresh_front
+            if fresh_front is not None:
+                if fresh_front in (0, os.getpid()):
+                    own_active = True
+                elif fresh_front != front_pid:
+                    front_pid, front_active = fresh_front, True
             # Act when we hold keyboard activation -- even if frontmostApplication
             # (the menu-bar owner) still names the user's app: macOS 14 CI, Escape
             # on our widget menu left our accessory app active while TextEdit kept
@@ -289,14 +317,20 @@ class MacOSBackend:
             # Never take focus from another app the user activated
             # (Spotlight-style panels too).
             if not own_active and front_pid not in (0, os.getpid()) and front_active:
+                report["skipped"] = "another app is active"
+                log.info("[MACOS] Paste target focus restore: %s", report)
                 return report
             target = native.frontmost_window_owner() or {}
             pid = target.get("pid")
             report["target"] = {"app": target.get("app"), "pid": pid}
             if not isinstance(pid, int) or pid <= 0 or pid == os.getpid() or self.is_own_app(target):
+                report["skipped"] = "no user window behind us"
+                log.info("[MACOS] Paste target focus restore: %s", report)
                 return report
             app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
             if app is None:
+                report["skipped"] = "target app not found"
+                log.info("[MACOS] Paste target focus restore: %s", report)
                 return report
             try:
                 # macOS 14+: cooperative activation -- the active app yields.
@@ -316,7 +350,10 @@ class MacOSBackend:
             used_open = False
             while time.monotonic() < deadline:
                 time.sleep(0.04)
-                target_active = _active(app)
+                if fresh_front is not None:
+                    target_active = _launchservices_front_pid() == pid
+                else:
+                    target_active = _active(app)
                 if target_active is None:
                     now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
                     target_active = now_front is not None and int(now_front.processIdentifier()) == pid
