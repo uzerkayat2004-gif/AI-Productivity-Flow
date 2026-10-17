@@ -98,7 +98,8 @@ begin
   WizardForm.Bevel.Visible := False;
   WizardForm.FinishedHeadingLabel.Font.Color := $000F141C;
   WizardForm.FinishedLabel.Font.Color := $00404040;
-  WizardForm.ProgressGauge.ForeColor := $002060FF;
+  { TNewProgressBar has no ForeColor in Inno's script classes. The accent
+    is carried by the wizard images and the paper background. }
   WizardForm.StatusLabel.Font.Color := $000F141C;
 end;
 
