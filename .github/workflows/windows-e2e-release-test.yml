@@ -1,0 +1,52 @@
+name: Windows release E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to install
+        required: false
+        default: v1.0.4
+        type: string
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/windows-e2e-release-test.yml
+      - .github/workflows/windows-e2e/**
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: windows-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-release-e2e:
+    name: Published Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || 'v1.0.4' }}
+    steps:
+      - name: Checkout test harness
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run published-release end-to-end test
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          & .\.github\workflows\windows-e2e\Invoke-ReleaseE2E.ps1 -Tag $env:RELEASE_TAG -Artifacts (Join-Path (Get-Location) "e2e-artifacts")
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-e2e-release-test
+          path: e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 14
