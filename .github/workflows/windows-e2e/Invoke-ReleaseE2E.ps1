@@ -702,9 +702,11 @@ try {
             foreach ($forbidden in @("select destination", "select start menu", "license agreement", "ready to install", "select additional tasks", "welcome to the")) {
                 if ($lower.Contains($forbidden)) { $page = "forbidden:$forbidden" }
             }
-            if ($page -eq "unknown" -and ($lower.Contains("ai productivity flow is installed") -or ($lower.Contains("version 1.0") -and $lower.Contains("finish")))) {
+            if ($lower.Contains("if you exit now") -or $lower.Contains("setup is not complete")) {
+                $page = "exit-confirm"
+            } elseif ($page -eq "unknown" -and ($lower.Contains("ai productivity flow is installed") -or ($lower.Contains("version 1.0") -and $lower.Contains("finish")))) {
                 $page = "finish"
-            } elseif ($page -eq "unknown" -and $lower.Contains("installing")) {
+            } elseif ($page -eq "unknown" -and $lower.Contains("installing ai productivity flow")) {
                 $page = "installing"
             }
             if ($pages -notcontains $page) { $pages.Add($page); Log "wizard page $page" }
@@ -712,11 +714,16 @@ try {
                 Save-WindowShot "01-installer-ready.png" $wizardHwnd ("Unexpected wizard page. title='$($top.title)'") | Out-Null
                 $shotReady = $true
             }
+            if ($page -eq "exit-confirm") {
+                $dismissed = Invoke-UiClick ([int]$top.pid) "No"
+                Log "wizard exit prompt dismissed=$dismissed"
+                Start-Sleep -Seconds 1
+                continue
+            }
             if ($page -like "forbidden:*" -and $installAttempts -lt 4 -and (Get-Date) -ge $nextInstallTry) {
                 $installAttempts++
                 $nextInstallTry = (Get-Date).AddSeconds(4)
                 $clickedInstall = Invoke-UiClick ([int]$top.pid) "Install"
-                [ApfNative]::PressEnter([int64]$wizardHwnd)
                 Log "wizard Install attempt=$installAttempts click=$clickedInstall"
             }
             if ($page -eq "installing" -and -not $sawInstalling) {
