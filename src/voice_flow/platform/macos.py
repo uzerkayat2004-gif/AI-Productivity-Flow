@@ -362,10 +362,12 @@ class MacOSBackend:
             used_open = False
             while time.monotonic() < deadline:
                 time.sleep(0.04)
-                if fresh_front is not None:
+                # LaunchServices when it names an app; AppKit otherwise (on
+                # macOS 14 CI `lsappinfo front` stays empty, it9 38989028815,
+                # and waiting for it cost the full timeout on every paste).
+                target_active = _active(app)
+                if fresh_front is not None and not target_active:
                     target_active = _launchservices_front_pid() == pid
-                else:
-                    target_active = _active(app)
                 if target_active is None:
                     now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
                     target_active = now_front is not None and int(now_front.processIdentifier()) == pid
