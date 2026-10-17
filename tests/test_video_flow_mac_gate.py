@@ -178,7 +178,7 @@ def test_vf_guide_timelines_no_longer_claim_mac_support() -> None:
     raw = (GUI / "assets" / "onboarding" / "vf_guide_timelines.json").read_text(encoding="utf-8")
     data = json.loads(raw)
     assert "works anywhere across your Mac" not in raw
-    mac_text = " ".join(cue["text"] for cue in data["step4_mac"])
-    assert "coming to Mac soon, available on Windows now" in mac_text
-    # Windows copy is unchanged.
-    assert data["step4"][0]["text"] == "Finally, Video Flow works anywhere across Windows."
+    # v1.0.3: there is no Video Flow guide on Mac at all, so no Mac cut exists.
+    assert "step4_mac" not in data
+    assert not (GUI / "assets" / "onboarding" / "vf_guide_step4_mac_mixed.mp3").exists()
+    assert data["step4"][0]["text"] == "Finally, Video Flow works anywhere in Windows."

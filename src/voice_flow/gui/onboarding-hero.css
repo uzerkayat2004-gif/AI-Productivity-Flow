@@ -4415,3 +4415,107 @@ body.vf-guide-step3-active #page-videoflow .flow-tabs {
 [data-theme="light"] .vf-key-jump-btn:hover {
   background: #bd4d1f;
 }
+/* ==========================================================================
+   v1.0.3: one bottom control bar for every welcome-tour scene.
+   Step badge | live caption | [Skip Tour][Auto][Theme][Back][Next]
+   Fixed widths for the step badge and the Next button keep the caption the
+   same size in every scene; Skip Tour lives in the bottom-right group.
+   ========================================================================== */
+.s1-controls.ob-controls {
+  position: absolute !important;
+  left: 64px !important;
+  right: 64px !important;
+  bottom: 28px !important;
+  height: 52px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  z-index: 30 !important;
+}
+
+.ob-controls .s1-step {
+  position: static !important;
+  transform: none !important;
+  top: auto !important;
+  left: auto !important;
+  width: 300px !important;
+  flex: 0 0 300px !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+}
+
+.ob-controls .s1-caption {
+  position: static !important;
+  transform: none !important;
+  top: auto !important;
+  left: auto !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 52px !important;
+  margin: 0 16px !important;
+  box-sizing: border-box !important;
+}
+
+.ob-controls .s1-actions,
+.ob-controls .s2-actions,
+.ob-controls .s3-actions,
+.ob-controls .s4-actions,
+.ob-controls .s5-actions {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  flex: 0 0 auto !important;
+}
+
+.ob-controls .s1-actions .s1-theme,
+.ob-controls .s1-actions .s1-next {
+  position: static !important;
+}
+
+.ob-controls .s1-next,
+.ob-controls .s2-next-btn,
+.ob-controls .s3-next-btn,
+.ob-controls .s4-next-btn,
+.ob-controls .s5-finish-btn {
+  position: relative !important;
+  height: 48px !important;
+  width: 300px !important;
+  padding: 0 18px !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  font-size: 15px !important;
+  box-sizing: border-box !important;
+}
+
+.ob-controls .s1-theme,
+.ob-controls .s2-theme-btn {
+  width: 150px !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+}
+
+.ob-controls .ob-back-placeholder {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.ob-controls .ob-skip-btn {
+  position: static !important;
+  transform: none !important;
+  height: 48px !important;
+  padding: 0 18px !important;
+  white-space: nowrap !important;
+}
+.ob-controls .ob-skip-btn:hover { transform: translateY(-1px) !important; }
+.ob-controls .scene1-auto-badge { width: 112px !important; justify-content: center !important; box-sizing: border-box !important; }
+.ob-controls .s2-back-btn,
+.ob-controls .s3-back-btn,
+.ob-controls .s4-back-btn,
+.ob-controls .s5-back-btn { width: 116px !important; justify-content: center !important; box-sizing: border-box !important; }
+.ob-controls .ob-skip-btn { width: 132px !important; justify-content: center !important; box-sizing: border-box !important; }
