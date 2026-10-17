@@ -35,9 +35,9 @@
   * [x] AES-256-GCM encrypted `.flowvault` archives for full account backup and migration.
 * [x] **Cross-Platform Packaging & Release Baseline**
   * [x] Windows 10/11 x64 single-file installer (`AI-Productivity-Flow-Setup-x64.exe`) with isolated private runtime.
-  * [x] macOS 12+ application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
+  * [x] macOS 14 Sonoma or later application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`), Apple Silicon only.
   * [x] Safe, non-intrusive update checker querying GitHub Releases for stable updates.
-  * [x] Canonical product versioning pinned strictly to `1.0.0` with CI consistency enforcement.
+  * [x] Canonical product versioning pinned in `src/voice_flow/_version.py` (currently 1.0.3) with CI consistency enforcement.
 
 ---
 

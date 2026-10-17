@@ -186,7 +186,7 @@
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright 2026 Flow Contributors
+   Copyright 2026 Uzer Kayat
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -206,9 +206,14 @@
 
 This repository links to and utilizes open-source and third-party libraries that remain subject to their respective licenses:
 
-- **Remotion** (`video_flow_renderer`): Distributed under the Remotion Company License (free for individuals and companies with under $500K annual revenue; see https://remotion.dev/license for commercial licensing terms).
-- **Faster-Whisper / CTranslate2**: MIT License / Apache License 2.0.
+- **Narova** and **HyperFrames**: MIT License. Bundled for Video Flow rendering.
+- **FFmpeg**: LGPL / GPL build, bundled for media processing. See `release/THIRD_PARTY_NOTICES.txt`.
+- **Node.js** 20: MIT License. Bundled runtime.
+- **Faster-Whisper / CTranslate2** and the bundled **faster-whisper base.en** model: MIT / Apache License 2.0.
+- **llama.cpp** (via llama-cpp-python): MIT License. Used for on-device polish.
+- **NVIDIA Nemotron** speech models: downloaded by the user, not bundled in the installer. NVIDIA license terms apply.
+- **S1-mini** by Superwhisper: downloaded by the user, not bundled. Apache License 2.0 (derivative of Qwen).
 - **SoundDevice / PortAudio**: MIT License.
 - **PyWebView**: BSD 3-Clause License.
-- **PyAutoGUI / PyPerperclip / Pynput**: BSD / MIT / LGPL Licenses.
+- **PyAutoGUI / Pyperclip / Pynput**: BSD / MIT / LGPL Licenses.
 - **React / React-DOM / TypeScript**: MIT / Apache 2.0 Licenses.

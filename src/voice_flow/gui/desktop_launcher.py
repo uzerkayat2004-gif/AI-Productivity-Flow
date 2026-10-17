@@ -42,6 +42,15 @@ if sys.platform != "win32":
             except Exception:
                 pass
 
+# A direct `pythonw -m voice_flow.gui.desktop_launcher` still imports this
+# module before the window. Paint the splash before WebView and the API stack.
+if __name__ == "__main__" and not os.environ.get("VOICE_FLOW_EARLY_SPLASH_HWND"):
+    try:
+        from voice_flow.gui.early_splash import show_early_splash
+        show_early_splash()
+    except Exception:
+        pass
+
 # Ensure WebView2 allows audio autoplay without requiring initial user gesture
 _wv2_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
 if "--autoplay-policy=no-user-gesture-required" not in _wv2_args:
@@ -566,24 +575,37 @@ def _fallback_to_browser(url: str, on_quit_callback=None, keep_alive: bool = Tru
                 pass
 
 
-def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) -> None:
-    """Launch API server, system auto-startup configuration, and native desktop window."""
-    configure_macos_app("desktop")
-    # Configure auto-startup based on user setting (default enabled on first launch)
+def _close_startup_splash() -> None:
+    try:
+        from voice_flow.gui.early_splash import close_early_splash
+        close_early_splash()
+    except Exception:
+        pass
+
+
+def _defer_autostart_registration() -> None:
+    """Register login startup off the window path. Task Scheduler can take seconds."""
     try:
         from voice_flow.storage import storage
         autostart_pref = storage.get_setting("autostart_enabled", None)
         if autostart_pref is None:
-            # First launch is an explicit default-on registration. Persist it
-            # only when the operating-system change actually succeeded.
             if set_windows_auto_startup(True):
                 storage.save_setting("autostart_enabled", True)
         else:
-            # Reconcile the registration but leave stored intent to explicit UI
-            # toggles. The status API reads the actual OS state independently.
             reconcile_windows_auto_startup(bool(autostart_pref))
     except Exception as exc:
         _launcher_log(f"Auto-startup initialization warning: {exc}")
+
+
+def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) -> None:
+    """Launch API server, system auto-startup configuration, and native desktop window."""
+    configure_macos_app("desktop")
+    try:
+        from voice_flow.gui.early_splash import show_early_splash
+        show_early_splash()
+    except Exception:
+        pass
+    threading.Thread(target=_defer_autostart_registration, name="apf-autostart", daemon=True).start()
 
     # Start the supervisor whenever the dictation engine is missing. API
     # readiness remains a separate concern below so an API-only listener can
@@ -685,6 +707,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         return
 
     try:
+        _close_startup_splash()
         window = webview.create_window(**create_kwargs)
 
         def on_shown():
@@ -890,6 +913,8 @@ def _focus_existing_window() -> bool:
 _LAUNCHER_MUTEX_NAME = "Local\\VoiceFlowDesktopLauncherMutex_v1"
 _LAUNCHER_MUTEX_HANDLE = None
 
+# Long enough for the early splash to appear, short enough that a second
+# click is not stuck. Timeout still refuses to open another window.
 _DUPLICATE_LAUNCH_WAIT_SECONDS = 5.0
 _DUPLICATE_LAUNCH_POLL_INTERVAL = 0.1
 
@@ -916,6 +941,13 @@ def _get_kernel32():
 def _acquire_launcher_mutex() -> bool:
     """Ensure only one desktop launcher process runs at a time."""
     global _LAUNCHER_MUTEX_HANDLE
+    inherited = os.environ.get("VOICE_FLOW_LAUNCHER_MUTEX_HANDLE")
+    if inherited:
+        try:
+            _LAUNCHER_MUTEX_HANDLE = int(inherited)
+            return True
+        except ValueError:
+            pass
     if not sys.platform.startswith("win"):
         return True
     try:
@@ -1006,6 +1038,12 @@ def _run_desktop_launcher() -> None:
         if outcome == "focused":
             _launcher_log("existing window focused after waiting - exiting duplicate launcher")
             print("[GUI] Desktop App window already open — focusing it instead of launching a duplicate.")
+            sys.exit(0)
+        if outcome == "timeout":
+            # The first launch still holds the mutex. Opening another window
+            # is what stacked two apps when the first start was slow.
+            _launcher_log("another launcher still holds the mutex; not opening a second window")
+            print("[GUI] AI Productivity Flow is already starting.")
             sys.exit(0)
         _launcher_log(f"launcher mutex {outcome} without a window appearing - proceeding with launch")
 

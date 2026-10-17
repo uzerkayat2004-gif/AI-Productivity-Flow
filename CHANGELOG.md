@@ -3,6 +3,20 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## 1.0.3 - 2026-10-17
+
+### Install and first launch
+- Windows setup is two branded screens: install progress, then Finish with Launch checked. Per-user only, no license or folder pages, desktop shortcut on by default.
+- The app shows a window within a couple of seconds and a second click focuses the existing window.
+
+### Voice, audio, and NotebookLM
+- Fresh installs ask for a one-click Nemotron download and an on-device polish model. Whisper stays a temporary fallback.
+- Read-aloud playback no longer waits between paragraphs when the next chunk is ready.
+- A new NotebookLM user sees Sign in with Google, plus Switch account and Sign out. A missing profile is not treated as a saved session.
+
+### Privacy
+- Crash reports are on unless you turn them off. The opt-out is a Privacy row under About & Updates and applies immediately.
+
 ## 1.0.2 - 2026-10-16
 
 ### Voice Flow

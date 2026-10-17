@@ -188,12 +188,13 @@ def test_disabled_local_and_timeout_outcomes_do_not_leak_between_calls():
             return "local/deterministic"
         return default
 
-    with patch("voice_flow.polisher.storage.get_setting", side_effect=local_settings):
+    with patch("voice_flow.polisher.storage.get_setting", side_effect=local_settings), \
+         patch("voice_flow.s1_engine.is_s1_downloaded", return_value=False):
         polisher.polish("Make this a message.", force_ai=True, task="rewrite", outcome_callback=outcomes.append)
     with patch("voice_flow.polisher.storage.get_setting", side_effect=_settings):
         polisher.polish("Make this a message.", deadline=time.monotonic(), outcome_callback=outcomes.append)
 
-    assert outcomes == ["disabled", "local", "timeout"]
+    assert outcomes == ["disabled", "model_not_downloaded", "timeout"]
 
 
 def test_fidelity_accepts_unambiguous_contractions_without_losing_negation():

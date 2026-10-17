@@ -3333,7 +3333,6 @@ body.vf-mac-gated #vf-generate-button {
   pointer-events: none;
 }
 .vf-mac-gate-tour-note {
-  margin-top: 8px;
   font-weight: 600;
 }
 body.vf-mac-gated #page-videoflow .vf-page-heading .pill-chip {

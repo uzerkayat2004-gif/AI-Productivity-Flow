@@ -179,6 +179,12 @@ def copy_resources() -> None:
     if vendor_src.is_dir():
         copy_code2video(vendor_src, RESOURCES_DIR / "third_party" / "code2video")
         print(f"Bundled Code2Video into {RESOURCES_DIR / 'third_party' / 'code2video'}")
+    for notice_name, notice_src in (
+        ("LICENSE", REPO_ROOT / "LICENSE"),
+        ("THIRD_PARTY_NOTICES.txt", REPO_ROOT / "release" / "THIRD_PARTY_NOTICES.txt"),
+    ):
+        if notice_src.is_file():
+            shutil.copy2(notice_src, RESOURCES_DIR / notice_name)
 
 
 def sanitize_runtime_libraries(runtime_dir: Path) -> None:

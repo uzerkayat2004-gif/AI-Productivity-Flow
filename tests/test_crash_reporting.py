@@ -29,7 +29,7 @@ SRC_DIR = str(REPO_ROOT / "src")
 
 
 def test_crash_reporting_default_disabled():
-    """Crash reporting must be completely disabled by default with zero network overhead."""
+    """An explicit opt-out stays off and never initializes the SDK."""
     storage.save_setting("anonymous_crash_reports", False)
     assert not is_crash_reporting_enabled()
 
@@ -190,7 +190,7 @@ def test_cli_flag_disabled():
     cmd = [sys.executable, "-m", "voice_flow.main", "--test-crash-reporting"]
     proc = subprocess.run(cmd, env=_get_subprocess_env(), capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0
-    assert "Crash reporting is currently disabled (opt-in only). Enable it in Settings to test." in proc.stdout
+    assert "Crash reporting is turned off." in proc.stdout
 
 
 def test_cli_flag_enabled():

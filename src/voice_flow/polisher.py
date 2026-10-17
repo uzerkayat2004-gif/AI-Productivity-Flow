@@ -1397,7 +1397,16 @@ class TextPolisher:
             explicit_model = saved_model.strip() if isinstance(saved_model, str) else ""
         if explicit_model == "local/deterministic":
             self._last_attempt_status = "local"
-            self._notify_outcome(outcome_callback, "local")
+            # Deterministic cleanup is not S1-mini. A fresh install (no polish
+            # model on disk) must not be logged as polish=local.
+            polish_ready = False
+            try:
+                from voice_flow import s1_engine
+                polish_ready = bool(s1_engine.is_s1_downloaded())
+            except Exception:
+                polish_ready = False
+            outcome = "local" if polish_ready else "model_not_downloaded"
+            self._notify_outcome(outcome_callback, outcome)
             return _apply_dictionary_with_trace(self._deterministic_cleanup(raw_text, instruction, level), dictionary_trace)
 
         # S1 is a selected, offline engine. Route it before the generic API
@@ -1545,7 +1554,7 @@ class TextPolisher:
                         self._last_attempt_status = "unsupported"
                         attempt_outcome = "command_unfulfilled"
                 if not s1_engine.is_s1_downloaded():
-                    attempt_outcome = "command_unfulfilled" if task != "cleanup" else "provider_failure"
+                    attempt_outcome = "model_not_downloaded"
                 cleaned = self._apply_style_register(
                     self._deterministic_cleanup(raw_text, "", level),
                     style_id or instruction,

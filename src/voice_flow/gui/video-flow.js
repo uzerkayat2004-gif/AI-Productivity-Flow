@@ -245,11 +245,12 @@ function vfNotebookLMConnectionState(authStatus) {
   if (authStatus && authStatus.checking) return "checking";
   if (authStatus && authStatus.online_verified === true) return "connected";
   if (authStatus && (authStatus.available === false || authStatus.status === "dependency_missing")) return "cli_missing";
-  if (authStatus && authStatus.recovery_state === "restoring") return "restoring";
-  if (authStatus && authStatus.recovery_state === "transient_error") return "unavailable";
-  if (authStatus && authStatus.recovery_state === "sign_in_required" && accountSaved) return "expired";
-  if (authStatus && authStatus.online_verified === false && accountSaved) return "expired";
-  if (authStatus && authStatus.verification_unavailable) return "unavailable";
+  if (accountSaved && authStatus && authStatus.recovery_state === "restoring") return "restoring";
+  // Delayed / retry is only for a real saved session. A new install with no
+  // cookies must show Sign in, even if a background check hit a transient error.
+  if (accountSaved && authStatus && authStatus.recovery_state === "transient_error") return "unavailable";
+  if (accountSaved && authStatus && (authStatus.recovery_state === "sign_in_required" || authStatus.online_verified === false || authStatus.expired)) return "expired";
+  if (accountSaved && authStatus && authStatus.verification_unavailable) return "unavailable";
   if (accountSaved) return "saved";
   return "disconnected";
 }
@@ -346,7 +347,9 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
       loginBtn.title = "Switch or change your Google account";
       loginBtn.onclick = function () { startNotebookLMAuth(true); };
     }
-    if (loginLabel) loginLabel.textContent = "Switch Google Account";
+    if (loginLabel) loginLabel.textContent = "Switch account";
+    const disconnectLabel = document.getElementById("vf-nlm-disconnect-label");
+    if (disconnectLabel) disconnectLabel.textContent = "Sign out";
     if (disconnectBtn) {
       disconnectBtn.classList.remove("hidden");
       disconnectBtn.disabled = false;
@@ -368,14 +371,16 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
   } else if (connectionState === "expired") {
     badge.classList.add("disconnected");
     dot.classList.add("disconnected");
-    text.textContent = email ? `Expired: ${email}` : "Reconnect required";
-    if (desc) desc.textContent = "NotebookLM could not verify this Google sign-in. Reconnect to continue.";
+    text.textContent = "Signed out of NotebookLM";
+    if (desc) desc.textContent = email
+      ? `Signed out of NotebookLM (${email}). Sign in again to continue.`
+      : "Signed out of NotebookLM. Sign in again to continue.";
     if (loginBtn) {
       loginBtn.className = "btn-primary vf-nlm-login-btn";
-      loginBtn.title = "Reconnect your NotebookLM account";
+      loginBtn.title = "Sign in with Google";
       loginBtn.onclick = function () { startNotebookLMAuth(false); };
     }
-    if (loginLabel) loginLabel.textContent = "Reconnect";
+    if (loginLabel) loginLabel.textContent = "Sign in with Google";
     if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !accountSaved);
     if (showToast) vfToast("NotebookLM needs reconnection.", true);
   } else if (connectionState === "unavailable") {
@@ -402,19 +407,19 @@ function renderNotebookLMAuthStatus(authStatus, showToast = false) {
       loginBtn.title = "Connect your saved NotebookLM account";
       loginBtn.onclick = function () { startNotebookLMAuth(false); };
     }
-    if (loginLabel) loginLabel.textContent = "Connect NotebookLM";
+    if (loginLabel) loginLabel.textContent = "Sign in with Google";
     if (disconnectBtn) disconnectBtn.classList.remove("hidden");
   } else {
     badge.classList.add("disconnected");
     dot.classList.add("disconnected");
     text.textContent = "Not connected";
-    if (desc) desc.textContent = "Connect your Google account to use NotebookLM for cloud video generation.";
+    if (desc) desc.textContent = "Sign in with Google to use NotebookLM.";
     if (loginBtn) {
       loginBtn.className = "btn-primary vf-nlm-login-btn";
-      loginBtn.title = "Connect your NotebookLM account";
+      loginBtn.title = "Sign in with Google";
       loginBtn.onclick = function () { startNotebookLMAuth(false); };
     }
-    if (loginLabel) loginLabel.textContent = "Connect NotebookLM";
+    if (loginLabel) loginLabel.textContent = "Sign in with Google";
     if (disconnectBtn) disconnectBtn.classList.add("hidden");
   }
 }
@@ -1203,7 +1208,7 @@ function vfRenderLegacyHistory() {
                 <span>Google Authentication Expired</span>
               </div>
               <div class="vf-auth-error-actions">
-                <button class="vf-btn-reauth" type="button" onclick="startNotebookLMAuth(true)">Switch Google Account</button>
+                <button class="vf-btn-reauth" type="button" onclick="startNotebookLMAuth(true)">Switch account</button>
                 <button class="vf-btn-retry" type="button" onclick="retryVideoFlow(${vfHandlerArg(video.id)})">↻ 1-Click Retry</button>
               </div>
             </div>
@@ -3890,7 +3895,7 @@ function updateGenerationStepper(activeVideo) {
           <span>Google Authentication Expired</span>
         </div>
         <div class="vf-auth-error-actions">
-          <button type="button" class="vf-btn-reauth" onclick="startNotebookLMAuth(true)">Switch Google Account</button>
+          <button type="button" class="vf-btn-reauth" onclick="startNotebookLMAuth(true)">Switch account</button>
           <button type="button" class="vf-btn-retry" onclick="retryVideoFlow(${vfHandlerArg(activeVideo.id)})">↻ 1-Click Retry</button>
         </div>
       `;
@@ -3978,6 +3983,35 @@ function isVideoModelExternal(modelRef) {
   });
 }
 
+function askVideoTreatmentChoice() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay vf-treatment-overlay";
+    overlay.style.zIndex = "1400";
+    overlay.innerHTML = `
+      <div class="modal-card vf-treatment-card" role="dialog" aria-modal="true" aria-labelledby="vf-treatment-title">
+        <h3 id="vf-treatment-title">How should this video look?</h3>
+        <p>Choose a style before NotebookLM starts.</p>
+        <div class="vf-treatment-actions">
+          <button type="button" class="btn-primary" data-choice="explainer">Normal</button>
+          <button type="button" class="btn-secondary" data-choice="cinematic">Cinematic</button>
+          <button type="button" class="btn-secondary" data-choice="cancel">Cancel</button>
+        </div>
+      </div>`;
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector("[data-choice=explainer]").addEventListener("click", () => finish("explainer"));
+    overlay.querySelector("[data-choice=cinematic]").addEventListener("click", () => finish("cinematic"));
+    overlay.querySelector("[data-choice=cancel]").addEventListener("click", () => finish(null));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(null);
+    });
+    document.body.appendChild(overlay);
+  });
+}
+
 async function generateVideoFlow() {
   if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
     vfToast("Video Flow is coming to Mac soon, available on Windows now", true);
@@ -4001,7 +4035,16 @@ async function generateVideoFlow() {
   if (button) button.disabled = true;
 
   if (vfSelectedEngine === "notebooklm") {
-    const isAutoAdaptive = (vfSelectedFormat === "auto" || !vfSelectedFormat);
+    const treatment = await askVideoTreatmentChoice();
+    if (!treatment) {
+      if (button) button.disabled = false;
+      return;
+    }
+    vfSelectedFormat = treatment;
+    if (typeof selectNotebookLMFormat === "function") {
+      try { selectNotebookLMFormat(treatment); } catch (_) {}
+    }
+    const isAutoAdaptive = false;
     const resolvedFormat = isAutoAdaptive ? (vfCurrentDocStats.resolvedFormat || "brief") : vfSelectedFormat;
     let targetDurationSec;
     if (isAutoAdaptive) {
@@ -4109,7 +4152,7 @@ async function generateVideoFlow() {
                 <span>Google Authentication Expired</span>
               </div>
               <div class="vf-auth-error-actions">
-                <button type="button" class="vf-btn-reauth" onclick="startNotebookLMAuth(true)">Switch Google Account</button>
+                <button type="button" class="vf-btn-reauth" onclick="startNotebookLMAuth(true)">Switch account</button>
                 <button type="button" class="vf-btn-retry" onclick="generateVideoFlow()">↻ 1-Click Retry</button>
               </div>
             </div>`;

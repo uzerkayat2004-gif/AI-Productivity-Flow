@@ -72,7 +72,7 @@ def test_live_foreign_listener_is_still_occupied():
 
 def test_skip_tour_never_auto_starts_audio_flow_guide():
     html = _read("index.html")
-    skip_buttons = re.findall(r'<button class="scene1-skip-badge" onclick="([^"]+)"', html)
+    skip_buttons = re.findall(r'<button class="[^"]*\bscene1-skip-badge\b[^"]*" onclick="([^"]+)"', html)  # v1.0.3: also ob-skip-btn
     assert skip_buttons and all(b == "finishOnboarding({ skipped: true })" for b in skip_buttons)
     assert 'onclick="stopOnboardingNarration(); finishOnboarding({ skipped: true });"' in html
     source = _read("app.js")

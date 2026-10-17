@@ -4153,3 +4153,77 @@ html[data-theme="dark"] #page-audioflow.studio-page #af-summary-model-hero {
   #page-audioflow .flow-mode.af-art-running .flow-mode-art,
   #page-audioflow .flow-mode.af-art-running .flow-mode-art * { animation: none !important; }
 }
+
+/* Settings: one control column, a quiet privacy row, and a tidy About card. */
+#settings-modal.preferences-workspace .about-title {
+  grid-template-columns: max-content auto auto !important;
+}
+#settings-modal.preferences-workspace .about-version-badge {
+  background: rgba(255, 96, 32, 0.12);
+  color: #c2410c;
+  font-weight: 700;
+}
+#settings-modal.preferences-workspace .about-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+#settings-modal.preferences-workspace .about-links a,
+#settings-modal.preferences-workspace .about-text-btn {
+  color: #c2410c;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+#settings-modal.preferences-workspace .privacy-row .setting-desc,
+#settings-modal.preferences-workspace .setting-desc {
+  margin-top: 4px;
+  color: var(--polish-muted, #6b625c);
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.45;
+  max-width: 46ch;
+}
+#settings-modal.preferences-workspace #update-status-row {
+  grid-template-columns: 1fr !important;
+  min-height: 0 !important;
+  padding-top: 0 !important;
+}
+#settings-modal.preferences-workspace .update-status-message {
+  font-size: 13px;
+  width: 100%;
+}
+#settings-modal.preferences-workspace .modal-body {
+  padding: 28px 32px 36px;
+}
+#settings-modal.preferences-workspace .settings-tab-head {
+  margin-bottom: 22px;
+}
+
+.vf-first-run-models {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 96, 32, 0.35);
+  border-radius: 12px;
+  background: #fff7f2;
+  color: #1c140f;
+}
+.vf-first-run-models.hidden { display: none !important; }
+.vf-first-run-models p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; }
+.vf-first-run-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.vf-treatment-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 22px;
+  background: #f7f4f1;
+  color: #1c140f;
+  border-radius: 16px;
+}
+.vf-treatment-card h3 { margin: 0 0 6px; font-size: 18px; }
+.vf-treatment-card p { margin: 0 0 16px; color: #5c534e; }
+.vf-treatment-actions { display: flex; flex-wrap: wrap; gap: 8px; }

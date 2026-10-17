@@ -5,9 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const appSource = fs.readFileSync(path.join(__dirname, '../src/voice_flow/gui/app.js'), 'utf8');
-const videoSource = fs.readFileSync(path.join(__dirname, '../src/voice_flow/gui/video-flow.js'), 'utf8');
-const section = (source, start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+const appSource = fs.readFileSync(path.join(__dirname, '../src/voice_flow/gui/app.js'), 'utf8').replace(/\r\n/g, '\n');
+const videoSource = fs.readFileSync(path.join(__dirname, '../src/voice_flow/gui/video-flow.js'), 'utf8').replace(/\r\n/g, '\n');
+const section = (source, start, end) => {
+  const from = source.indexOf(start);
+  const to = from < 0 ? -1 : source.indexOf(end, from);
+  if (from < 0 || to < 0) {
+    throw new Error(`UI section not found (${start} .. ${end})`);
+  }
+  return source.slice(from, to);
+};
 
 function makeElement() {
   const classes = new Set();

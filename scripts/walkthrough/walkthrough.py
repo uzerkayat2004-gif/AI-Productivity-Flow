@@ -291,6 +291,62 @@ def lock_click(page, label: str, selector: str, wait: float = 2.0, win: dict | N
     return st
 
 
+def onboarding_phase(page, win) -> None:
+    """v1.0.3 onboarding on Mac: tour scenes (Mac scene 2 clip), Skip Tour in the bottom bar,
+    no Video Flow guide, Voice Flow guide starts on first open with the Command + Option step."""
+    dismiss = "() => { const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }"
+    is_mac = page.evaluate("typeof vfIsMacPlatform === 'function' && vfIsMacPlatform()")
+    record("onboarding: platform detected as Mac", "ok" if is_mac else "fail", f"vfIsMacPlatform()={is_mac}")
+    page.evaluate("() => { try { stopAudioFlowGuide(); stopVoiceFlowGuide(); stopVideoFlowGuide(); } catch(e){} }")
+    page.evaluate("replayOnboarding()")
+    page.wait_for_timeout(1500)
+    for i in range(5):
+        page.evaluate(f"gotoOnboardingSlide({i})")
+        page.wait_for_timeout(4000)
+        clips = page.evaluate("[...new Set(performance.getEntriesByType('resource').map(e=>e.name.split('/').pop().split('?')[0]).filter(n=>/^scene_.*_mixed\\.mp3$/.test(n)))]")
+        text = page.evaluate("document.getElementById('onboarding-overlay').innerText")
+        note = ""
+        status = "ok"
+        if i == 1:
+            mac_clip = "scene_2_mac_mixed.mp3" in clips
+            mac_note = "coming to Mac soon" in text
+            status = "ok" if (mac_clip and mac_note) else "fail"
+            note = f"mac clip loaded={mac_clip} note shown={mac_note}"
+        if "Ctrl + Win" in text:
+            status, note = "fail", note + " shows Ctrl + Win on Mac"
+        record(f"onboarding: tour scene {i+1}", status, f"{note} clips={clips}", shot(page, f"onb-tour-scene-{i+1}"))
+    skip = page.evaluate("""() => { const b=[...document.querySelectorAll('#onboarding-overlay .scene1-skip-badge')].find(b=>b.getBoundingClientRect().width>0);
+      if (!b) return null; const r=b.getBoundingClientRect(); return {x:r.x, y:r.y, right: innerWidth-r.right, bottom: innerHeight-r.bottom}; }""")
+    record("onboarding: Skip Tour sits bottom-right", "ok" if skip and skip["bottom"] < 200 and skip["right"] < 300 else "fail", f"{skip}")
+    lock_click(page, "onboarding: Skip Tour", "#onboarding-overlay .scene1-skip-badge:visible", win=win,
+               check=lambda p, s: (not s["onboardingVisible"], "tour closed by Skip"))
+    page.wait_for_timeout(1500)
+    page.evaluate(dismiss)
+    page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} }")
+    page.evaluate("switchPage('insights')")
+    page.wait_for_timeout(800)
+    page.evaluate("document.querySelector(\".sidebar .nav-item[data-page='videoflow']\").click()")
+    page.wait_for_timeout(4000)
+    vf_guide = page.evaluate("!document.getElementById('videoflow-guide-overlay').classList.contains('hidden')")
+    record("onboarding: no Video Flow guide on Mac", "fail" if vf_guide else "ok", f"videoflow guide visible={vf_guide}", shot(page, "onb-videoflow-no-guide"))
+    page.evaluate(dismiss)
+    page.evaluate("document.getElementById('voiceflow-nav-toggle').click()")
+    page.wait_for_timeout(4000)
+    vo = page.evaluate("!document.getElementById('voiceflow-guide-overlay').classList.contains('hidden')")
+    record("onboarding: Voice Flow guide starts on first open", "ok" if vo else "fail", f"visible={vo}", shot(page, "onb-voice-guide-step1"))
+    if vo:
+        page.evaluate("gotoVoiceFlowGuideStep(4)")
+        page.wait_for_timeout(5000)
+        info = page.evaluate("""() => ({src: (_voiceflowGuideAudioPlayer && _voiceflowGuideAudioPlayer.currentSrc || '').split('/').pop(),
+          t: _voiceflowGuideAudioPlayer ? _voiceflowGuideAudioPlayer.currentTime : null,
+          text: document.getElementById('voiceflow-guide-overlay').innerText})""")
+        ok = info["src"] == "voiceflow_guide_step4_mac_mixed.mp3" and "Command" in info["text"] and "Ctrl + Win" not in info["text"]
+        record("onboarding: Voice Flow step 4 uses the Mac clip and Command + Option", "ok" if ok else "fail",
+               f"src={info['src']} t={info['t']} text={info['text'][:200]!r}", shot(page, "onb-voice-guide-step4"))
+        page.evaluate("stopVoiceFlowGuide(true)")
+    page.wait_for_timeout(800)
+
+
 def main() -> int:
     from playwright.sync_api import sync_playwright
 
@@ -442,6 +498,12 @@ def main() -> int:
         page.evaluate("finishOnboarding()")
         page.evaluate("() => { try { stopAudioFlowGuide(); } catch(e){} const b=[...document.querySelectorAll('button')].find(b=>/No Thanks/i.test(b.textContent) && b.getBoundingClientRect().width>0); b && b.click(); }")
         page.wait_for_timeout(800)
+
+        # ---- v1.0.3 onboarding phase: every tour scene, Skip Tour, and the per-page guides on Mac.
+        try:
+            onboarding_phase(page, win)
+        except Exception as exc:  # informational: never abort the rest of the walkthrough
+            record("onboarding phase", "fail", f"{exc!r}")
 
         # ---- The native window is now stuck behind the unstyled guide. Restart the app
         # (what a stuck user would do) so the native sidebar can be exercised.

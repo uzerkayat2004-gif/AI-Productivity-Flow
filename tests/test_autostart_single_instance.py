@@ -179,14 +179,11 @@ def test_duplicate_launcher_exits_focused_without_spawning_suite(monkeypatch: py
     launch.assert_not_called()
 
 
-@pytest.mark.parametrize("outcome", ["released", "timeout"])
-def test_launcher_starts_fresh_when_mutex_released_or_wait_times_out(
-    monkeypatch: pytest.MonkeyPatch, outcome: str
-) -> None:
+def test_launcher_starts_fresh_when_mutex_released(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(desktop_launcher, "_launcher_log", lambda _msg: None)
     monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
     monkeypatch.setattr(desktop_launcher, "_acquire_launcher_mutex", lambda: False)
-    monkeypatch.setattr(desktop_launcher, "_wait_for_existing_window", lambda: outcome)
+    monkeypatch.setattr(desktop_launcher, "_wait_for_existing_window", lambda: "released")
 
     launch = MagicMock()
     monkeypatch.setattr(desktop_launcher, "launch_desktop_gui", launch)
@@ -194,6 +191,22 @@ def test_launcher_starts_fresh_when_mutex_released_or_wait_times_out(
     desktop_launcher._run_desktop_launcher()  # must not raise SystemExit
 
     launch.assert_called_once()
+
+
+def test_launcher_does_not_open_a_second_window_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_launcher, "_launcher_log", lambda _msg: None)
+    monkeypatch.setattr(desktop_launcher, "_focus_existing_window", lambda: False)
+    monkeypatch.setattr(desktop_launcher, "_acquire_launcher_mutex", lambda: False)
+    monkeypatch.setattr(desktop_launcher, "_wait_for_existing_window", lambda: "timeout")
+
+    launch = MagicMock()
+    monkeypatch.setattr(desktop_launcher, "launch_desktop_gui", launch)
+
+    with pytest.raises(SystemExit) as excinfo:
+        desktop_launcher._run_desktop_launcher()
+
+    assert excinfo.value.code == 0
+    launch.assert_not_called()
 
 
 def test_launcher_focuses_existing_window_immediately(monkeypatch: pytest.MonkeyPatch) -> None:

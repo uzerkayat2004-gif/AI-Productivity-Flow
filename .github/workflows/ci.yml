@@ -59,7 +59,10 @@ jobs:
 
       - name: Run test data isolation & crash reporting (Sentry) tests
         run: |
-          pytest tests/test_data_dir_isolation.py tests/test_crash_reporting.py -v --timeout=120
+          pytest tests/test_data_dir_isolation.py tests/test_crash_reporting.py tests/test_v103_launch_fixes.py -v --timeout=120
+
+      - name: Run NotebookLM recovery UI checks
+        run: node --test tests/test_notebooklm_recovery_ui.cjs
 
   macos-build:
     name: macOS Validation & App Packaging
@@ -113,7 +116,10 @@ jobs:
 
       - name: Run test data isolation & crash reporting (Sentry) tests
         run: |
-          pytest tests/test_data_dir_isolation.py tests/test_crash_reporting.py -v --timeout=120
+          pytest tests/test_data_dir_isolation.py tests/test_crash_reporting.py tests/test_v103_launch_fixes.py -v --timeout=120
+
+      - name: Run NotebookLM recovery UI checks
+        run: node --test tests/test_notebooklm_recovery_ui.cjs
 
       - name: Capture privacy state after macOS regression tests
         run: screencapture -x out/mac-native-identity/screen-after-regression-tests.png
