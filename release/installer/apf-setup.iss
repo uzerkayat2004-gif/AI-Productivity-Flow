@@ -87,16 +87,12 @@ Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_ap
 ; one-click update opens the app again when the installer is done.
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsSilentSetup
 
-[Tasks]
-Name: "removedata"; Description: "Remove my data (dictionary, history, and settings in %USERPROFILE%\.voice_flow)"; Flags: unchecked
-
 [UninstallDelete]
-; App files, shortcuts group, and the bundled runtime. User data under
-; %USERPROFILE%\.voice_flow stays unless the user ticks "Remove my data".
+; Installed files, the bundled runtime, and the shortcut group.
+; Personal files stay unless uninstall asks and the user agrees.
 Type: filesandordirs; Name: "{app}\runtime"
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{group}"
-Type: filesandordirs; Name: "{userprofile}\.voice_flow"; Tasks: removedata
 
 [UninstallRun]
 Filename: "{app}\runtime\python\python.exe"; Parameters: "-m voice_flow.release_cleanup_autorun"; Flags: runhidden; RunOnceId: "remove_autorun"
@@ -202,6 +198,24 @@ begin
   Result := not RegQueryStringValue(HKLM,
     'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
     'Version', version);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    DataDir := ExpandConstant('{userprofile}\.voice_flow');
+    if DirExists(DataDir) then
+    begin
+      { No is the default, so a silent uninstall keeps personal files. }
+      if MsgBox('Remove my data (dictionary, history, and settings)?' + #13#10 + #13#10 +
+        'Choose No to keep them on this PC.',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(DataDir, True, True, True);
+    end;
+  end;
 end;
 
 function NeedsWebView2: Boolean;

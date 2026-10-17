@@ -681,12 +681,11 @@ def _download_worker(
                 f"({format_mb(downloaded_bytes)} MB of {format_mb(total_bytes)} MB)"
             )
 
-        # SHA-256 of the published file, before the optional tokenizer repair
-        # rewrites Nemotron bytes. A short test or partial body is not the
-        # published artifact, so it is not checked against that digest.
+        # Hash the downloaded bytes before tokenizer repair rewrites a
+        # Nemotron file. Every pinned model is checked, including a short
+        # body, so a wrong digest is never saved as a finished download.
         expected_sha256 = str(spec.get("sha256") or "").strip().lower()
-        published_size = int(spec.get("size_bytes") or 0)
-        if expected_sha256 and published_size and part_file.is_file() and part_file.stat().st_size == published_size:
+        if expected_sha256 and part_file.is_file():
             calculated_sha256 = _sha256_file(part_file)
             if calculated_sha256 != expected_sha256:
                 try:

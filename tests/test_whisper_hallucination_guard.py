@@ -281,12 +281,19 @@ def test_download_resumes_a_partial_file(temp_models_dir, monkeypatch):
 
     storage.save_setting("voice_flow_stt_model", "local/faster-whisper-base.en")
     monkeypatch.setattr(downloadable_models, "_maybe_repair_nemotron_tokenizer", lambda *a, **k: False)
+    pinned = next(item for item in downloadable_models.ALL_DOWNLOADABLE_MODELS_REGISTRY if item["id"] == model_id)
+    saved_sha = pinned.get("sha256")
+    pinned["sha256"] = hashlib.sha256(prefix + rest).hexdigest()
     try:
         with patch("urllib.request.urlopen", side_effect=_urlopen):
             ok, _msg, _st = downloadable_models.start_model_download(model_id)
             assert ok
             final = _wait_status(model_id, "downloaded")
     finally:
+        if saved_sha is None:
+            pinned.pop("sha256", None)
+        else:
+            pinned["sha256"] = saved_sha
         downloadable_models._ACTIVE_DOWNLOADS.pop(model_id, None)
 
     assert captured, "download never opened a request"

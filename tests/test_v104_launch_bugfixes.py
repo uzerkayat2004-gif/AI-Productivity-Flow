@@ -102,7 +102,16 @@ def test_uninstaller_keeps_user_data_unless_asked() -> None:
     from pathlib import Path
 
     iss = Path("release/installer/apf-setup.iss").read_text(encoding="utf-8")
-    assert 'Name: "removedata"' in iss
-    assert r"{userprofile}\.voice_flow" in iss
-    assert "Tasks: removedata" in iss
-    assert r"{app}\runtime" in iss
+    assert "\n[Tasks]" not in iss
+    uninstall = iss.split("[UninstallDelete]", 1)[1].split("[", 1)[0]
+    assert ".voice_flow" not in uninstall
+    assert r"{app}\runtime" in uninstall
+    assert r'Name: "{app}"' in uninstall
+    assert r'Name: "{group}"' in uninstall
+    code = iss.split("[Code]", 1)[1]
+    assert "CurUninstallStepChanged" in code
+    assert "usUninstall" in code
+    assert r"{userprofile}\.voice_flow" in code
+    assert "MB_DEFBUTTON2" in code
+    assert "DelTree" in code
+    assert "Remove my data" in code
