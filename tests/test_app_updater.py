@@ -504,8 +504,8 @@ def test_about_page_offers_update_now_instead_of_the_github_download():
     assert "/api/updates/progress" in script
     assert "/api/updates/fallback" in script
     assert "Version 1.0" in html
-    assert "build 1.0.4" in html
-    assert "Version 1.0.4" not in html
+    assert "build 1.0.5" in html
+    assert "Version 1.0.5" not in html
     assert "Crash reports help fix bugs (you can turn this off in Privacy)" in html
 
 
