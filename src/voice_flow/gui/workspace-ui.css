@@ -4156,12 +4156,19 @@ html[data-theme="dark"] #page-audioflow.studio-page #af-summary-model-hero {
 
 /* Settings: one control column, a quiet privacy row, and a tidy About card. */
 #settings-modal.preferences-workspace .about-title {
-  grid-template-columns: max-content auto auto !important;
+  grid-template-columns: max-content auto auto auto !important;
+  align-items: center;
 }
 #settings-modal.preferences-workspace .about-version-badge {
-  background: rgba(255, 96, 32, 0.12);
+  background: rgba(255, 106, 26, 0.12);
   color: #c2410c;
   font-weight: 700;
+}
+#settings-modal.preferences-workspace .about-build-id {
+  color: #8a8178;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 #settings-modal.preferences-workspace .about-links {
   display: flex;

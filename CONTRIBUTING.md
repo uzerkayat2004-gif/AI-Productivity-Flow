@@ -62,12 +62,13 @@ AI Productivity Flow adheres strictly to [Semantic Versioning (SemVer 2.0.0)](ht
 * **PRERELEASE (`1.1.0-beta.1`)**: Test builds and release candidates. GitHub prereleases **must** be explicitly flagged with `--prerelease` so that website download links continue serving the latest verified stable release.
 
 ### Canonical Version Source
-The single source of truth for the product version is:
+The product version lives in one file:
 ```python
 # src/voice_flow/_version.py
-VERSION = "1.0.3"
+VERSION = "1.0.4"            # internal build; bump every release
+DISPLAY_VERSION = "1.0"     # user-facing label
 ```
-All build scripts, installer definitions, CI workflows, and runtime endpoints derive from or validate against this file. The CI suite runs `tests/test_version_consistency.py` on every commit and PR.
+`VERSION` is the build number for update checks, Sentry, git tags, and installer upgrades. `DISPLAY_VERSION` is what Settings, the installer, the splash, and the GitHub release title show. Build scripts, installer definitions, CI workflows, and runtime endpoints derive from this file. The CI suite runs `tests/test_version_consistency.py` on every commit and PR.
 
 ---
 

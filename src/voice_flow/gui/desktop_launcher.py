@@ -546,6 +546,7 @@ def _apply_window_icon(ico_path: str, window=None, hwnd=None) -> None:
 
 def _fallback_to_browser(url: str, on_quit_callback=None, keep_alive: bool = True) -> None:
     """Fallback to opening URL in the system default browser if pywebview fails."""
+    _close_startup_splash()
     import webbrowser
     print(f"[GUI] Launching Voice Flow Desktop in default browser at {url}...")
     try:
@@ -707,10 +708,14 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         return
 
     try:
-        _close_startup_splash()
         window = webview.create_window(**create_kwargs)
+        # If the native window never reports shown, don't leave the splash up.
+        splash_watch = threading.Timer(15.0, _close_startup_splash)
+        splash_watch.daemon = True
+        splash_watch.start()
 
         def on_shown():
+            _close_startup_splash()
             _apply_taskbar_visibility(window, show_in_taskbar)
             if ico_path:
                 _apply_window_icon(ico_path, window=window)
@@ -774,6 +779,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             webview.start(private_mode=False, http_server=False)
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
+        _close_startup_splash()
         _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
 
 

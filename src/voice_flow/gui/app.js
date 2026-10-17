@@ -14097,12 +14097,17 @@ function stopUpdateProgress() {
   }
 }
 
+function updateDisplayVersion(data) {
+  const shown = data && data.display_version ? String(data.display_version) : "1.0";
+  return shown;
+}
+
 function renderUpdateCard(data) {
   const row = document.getElementById("update-status-row");
   const msg = document.getElementById("update-status-message");
   if (!row || !msg) return;
   const plan = data.update_plan || {};
-  const versionText = `AI Productivity Flow v${data.latest_version || ""} is available`;
+  const versionText = `An update for AI Productivity Flow ${updateDisplayVersion(data)} is available`;
   const sizeText = plan.size_label ? escapeUpdateText(plan.size_label) : "";
   const kindText = plan.kind === "app" ? "App update" : "Full installer";
   const sizeLine = sizeText ? `${kindText} · ${sizeText}` : kindText;
@@ -14284,8 +14289,10 @@ async function checkForAppUpdates(manual = false) {
     const res = await fetch(`/api/updates/check${manual ? "?force=1" : ""}`);
     const data = await res.json();
     if (btn) btn.textContent = "Check for updates";
-    const badge = document.querySelector(".about-version-badge");
-    if (badge && data && data.current_version) badge.textContent = `Version ${data.current_version}`;
+    const badge = document.querySelector && document.querySelector(".about-version-badge");
+    if (badge && data) badge.textContent = `Version ${updateDisplayVersion(data)}`;
+    const build = document.querySelector && document.querySelector(".about-build-id");
+    if (build && data && data.current_version) build.textContent = `build ${data.current_version}`;
 
     if (!res.ok || !data || !data.success) {
       if (manual && row && msg) {
@@ -14298,7 +14305,7 @@ async function checkForAppUpdates(manual = false) {
     if (data.update_available) {
       renderUpdateCard(data);
       const plan = data.update_plan || {};
-      const versionText = `AI Productivity Flow v${data.latest_version || ""} is available`;
+      const versionText = `An update for AI Productivity Flow ${updateDisplayVersion(data)} is available`;
       const sizeNote = plan.size_label ? ` (${plan.size_label})` : "";
       if (!manual && typeof vfToast === "function") {
         vfToast(`${versionText}${sizeNote}. Check System settings to update.`);
@@ -14306,7 +14313,7 @@ async function checkForAppUpdates(manual = false) {
     } else {
       if (manual && row && msg) {
         row.style.display = "flex";
-        msg.innerHTML = `<span style="color:var(--success,#22c55e);">✓ You are running the latest version (v${data.current_version || "1.0.0"}).</span>`;
+        msg.innerHTML = `<span style="color:var(--success,#22c55e);">✓ You are running the latest version (Version ${updateDisplayVersion(data)}).</span>`;
       }
     }
   } catch (err) {

@@ -1,6 +1,7 @@
 """Tests for safe update checker."""
 
 import pytest
+from voice_flow._version import DISPLAY_VERSION, VERSION
 from voice_flow.update_checker import parse_semver, is_version_newer, check_for_updates
 
 
@@ -31,4 +32,6 @@ def test_check_for_updates_offline(monkeypatch):
     res = check_for_updates(force=True, timeout=0.1)
     assert res["checked"] is False
     assert res["update_available"] is False
+    assert res["current_version"] == VERSION
+    assert res["display_version"] == DISPLAY_VERSION
     assert "Network unreachable" in res["error"]
