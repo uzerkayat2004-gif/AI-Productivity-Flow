@@ -10513,6 +10513,11 @@ function stopVoiceFlowGuide(markCompleted = false) {
 
 function replayOnboarding() {
   cancelAutomaticGuide();
+  // v1.0.3: Replay Tour re-arms every page guide for this session too (the
+  // Mac CI walkthrough showed the Voice Flow guide stayed off after a replay
+  // because this session had already used its one automatic attempt).
+  _automaticGuideAttempts.clear();
+  for (const k of Object.keys(_interruptedGuideSteps)) delete _interruptedGuideSteps[k];
   _onboardingWelcomeShown = true;
   setOnboardingFlag("vf_onboarding.done", "");
   setOnboardingFlag("hasViewedOnboarding", "");
