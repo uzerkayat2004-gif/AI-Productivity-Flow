@@ -13802,13 +13802,13 @@ function vfApplyMacVideoFlowGate() {
   if (tourCard) tourCard.textContent = VF_MAC_GATE_NOTE;
   const startDesc = document.getElementById("s5-start-desc");
   if (startDesc) startDesc.textContent = "Tour complete! Read mode and Voice Flow work right away with built-in voices and local models. Summary just needs a Google sign-in for NotebookLM.";
+  // v1.0.3: the note replaces the subtitle (same one line) instead of adding a
+  // second line, which the demo monitor covered at 1440x900.
   const tourSub = document.querySelector(".s2-sub");
-  if (tourSub && !document.getElementById("vf-mac-gate-tour-note")) {
-    const tourNote = document.createElement("p");
-    tourNote.id = "vf-mac-gate-tour-note";
-    tourNote.className = "vf-mac-gate-tour-note";
-    tourNote.textContent = VF_MAC_GATE_NOTE;
-    tourSub.after(tourNote);
+  if (tourSub && !tourSub.classList.contains("vf-mac-gate-tour-note")) {
+    tourSub.id = "vf-mac-gate-tour-note";
+    tourSub.classList.add("vf-mac-gate-tour-note");
+    tourSub.textContent = "Paste any text or select an article and get an animated explainer video with voiceover. " + VF_MAC_GATE_NOTE + ".";
   }
 }
 window.vfApplyMacVideoFlowGate = vfApplyMacVideoFlowGate;
