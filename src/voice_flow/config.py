@@ -40,7 +40,7 @@ class Config:
     selected_mic_device: str | int | None = None  # Selected hardware mic device index/name
 
     # --- Clipboard Injection ---
-    clipboard_restore_delay_ms: int = 180  # Delay before restoring clipboard after paste
+    clipboard_restore_delay_ms: int = 650  # Wait until the target app has read the paste
 
     # --- Hotkeys & Shortcuts ---
     push_to_talk_shortcut: str = "Ctrl+Win"

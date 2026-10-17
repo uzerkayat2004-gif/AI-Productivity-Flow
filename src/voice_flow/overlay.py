@@ -1641,7 +1641,17 @@ class FloatingOverlayBar:
         if getattr(self, "_is_dragging", False):
             self._is_dragging = False
             self._persist_position()
+        elif self.state == "ERROR" and str(getattr(self, "error_message", "")).startswith("Microphone access is off"):
+            self._open_microphone_settings()
         self._press_zone = None
+
+    def _open_microphone_settings(self) -> None:
+        try:
+            from voice_flow.platform import get_backend
+
+            get_backend().open_permission_settings("microphone")
+        except Exception:
+            logging.getLogger(__name__).debug("[OVERLAY] Could not open microphone settings.", exc_info=True)
 
     def _on_motion(self, event: tk.Event) -> None:
         was_over = self._is_mouse_over

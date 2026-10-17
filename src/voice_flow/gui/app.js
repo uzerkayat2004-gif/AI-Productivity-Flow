@@ -252,6 +252,7 @@ if (typeof window !== "undefined") {
 
 // Global modal event listener initialization
 document.addEventListener("DOMContentLoaded", () => {
+  if (typeof refreshMicrophonePermissionBanner === "function") refreshMicrophonePermissionBanner();
   const modal = document.getElementById("vf-universal-modal");
   const confirmBtn = document.getElementById("vf-modal-btn-confirm");
   const cancelBtn = document.getElementById("vf-modal-btn-cancel");
@@ -6864,7 +6865,7 @@ function openAudioSummaryModelPicker() {
 
 // Edge voices are synthesized by Microsoft's online TTS service: the text being
 // read is sent to Microsoft. Show that next to any selected Edge voice.
-const EDGE_ONLINE_VOICE_HINT = "Online voice: the text is sent to Microsoft's text-to-speech service. Pick an offline voice to keep it on this device.";
+const EDGE_ONLINE_VOICE_HINT = "online (free): this text is sent to Microsoft's text-to-speech service. Use an offline voice to keep it on this device.";
 
 function isOnlineEdgeVoiceRef(ref) {
   return String(ref || "").split("/", 1)[0].toLowerCase() === "edge";
@@ -6876,6 +6877,45 @@ function updateOnlineVoiceHint(hintId, modelRef) {
   const online = isOnlineEdgeVoiceRef(modelRef);
   hintEl.textContent = online ? EDGE_ONLINE_VOICE_HINT : "";
   hintEl.hidden = !online;
+  const offlineBtn = document.getElementById("exec-audio-offline-switch");
+  if (offlineBtn) offlineBtn.hidden = !online;
+}
+
+async function switchReadingVoiceOffline() {
+  const result = await updateExecAudioFlowPolicy("offline/system");
+  if (result && result.ok) {
+    const label = document.getElementById("exec-audio-policy-model-label");
+    if (label && !label.textContent) label.textContent = "Offline voice";
+    if (typeof vfToast === "function") vfToast("Reading voice is now offline. No text is sent to Microsoft.");
+  } else if (typeof vfToast === "function") {
+    vfToast((result && result.error) || "Could not switch to an offline voice.");
+  }
+}
+
+async function refreshMicrophonePermissionBanner() {
+  const banner = document.getElementById("mic-permission-banner");
+  if (!banner) return;
+  try {
+    const res = await fetch("/api/platform/permissions", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const perms = (data && data.permissions) || (data && data.states) || [];
+    const mic = perms.find(item => item && item.key === "microphone");
+    const denied = !!(mic && mic.granted === false && !mic.indeterminate);
+    banner.hidden = !denied;
+    banner.style.display = denied ? "flex" : "none";
+  } catch (_) { /* Permissions endpoint is optional on this platform. */ }
+}
+
+async function openMicrophonePrivacySettings() {
+  try {
+    await fetch("/api/platform/permissions/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "microphone" }),
+    });
+  } catch (_) {}
+  setTimeout(refreshMicrophonePermissionBanner, 1500);
 }
 
 // Audio Flow TTS voice picker state (shared with video-flow.js).
@@ -8543,7 +8583,9 @@ function startOnboardingTour() {
 }
 
 function finishOnboarding(options) {
-  // Skip Tour / Exit tour must never chain into the Audio Flow guide.
+  // Skip ends the welcome tour only. It must not mark the per-page guides
+  // as seen and must not chain straight into one (that locked the app).
+  // Each page still auto-starts its own guide the first time it is opened.
   const skipped = !!(options && options.skipped);
   stopOnboardingNarration();
   const source = document.getElementById("onboarding-source");
@@ -8566,8 +8608,10 @@ function finishOnboarding(options) {
     switchPage("audioflow");
   }
 
-  // Launch the interactive Audio Flow in-app guide automatically, but only
-  // after a completed tour (never after Skip Tour / Exit tour).
+  // A completed tour may open the Audio Flow guide. Skip does not: the
+  // guides stay unseen and scheduleAutomaticGuide starts each one on the
+  // first visit to its page.
+  if (skipped && typeof flushOnboardingFlags === "function") flushOnboardingFlags();
   if (skipped) return;
   setTimeout(() => {
     if (typeof startAudioFlowGuide === "function") {
@@ -10531,6 +10575,7 @@ function replayOnboarding() {
   setOnboardingFlag("vf_onboarding.vf_guided", "");
   setOnboardingFlag("vf_onboarding.vf_voice_guided", "");
   setOnboardingFlag("vf_onboarding.guides_enrolled", "1");
+  if (typeof flushOnboardingFlags === "function") flushOnboardingFlags();
   fetch("/api/settings/update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

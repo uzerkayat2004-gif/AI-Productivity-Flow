@@ -87,9 +87,16 @@ Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_ap
 ; one-click update opens the app again when the installer is done.
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsSilentSetup
 
+[Tasks]
+Name: "removedata"; Description: "Remove my data (dictionary, history, and settings in %USERPROFILE%\.voice_flow)"; Flags: unchecked
+
 [UninstallDelete]
+; App files, shortcuts group, and the bundled runtime. User data under
+; %USERPROFILE%\.voice_flow stays unless the user ticks "Remove my data".
 Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{group}"
+Type: filesandordirs; Name: "{userprofile}\.voice_flow"; Tasks: removedata
 
 [UninstallRun]
 Filename: "{app}\runtime\python\python.exe"; Parameters: "-m voice_flow.release_cleanup_autorun"; Flags: runhidden; RunOnceId: "remove_autorun"

@@ -64,7 +64,7 @@ class TestAudioFlowProviderResilienceAndStress:
     """Stress tests for multi-provider TTS and Summary services."""
 
     def test_tts_engine_graceful_fallback_when_keys_invalid(self):
-        """When cloud provider keys fail or are invalid, TTS must fall back to Edge/SAPI without raising unhandled exceptions."""
+        """A failed cloud voice falls back to the offline voice, not to another cloud call."""
         engine = TTSEngine()
         text = "Audio Flow provides resilient fallback across all speech synthesis providers."
 
@@ -72,25 +72,31 @@ class TestAudioFlowProviderResilienceAndStress:
         with patch.object(engine, "_get_active_keys_for_provider", return_value=[{"id": 1, "api_key": "invalid_key"}]):
             with patch("urllib.request.urlopen", side_effect=Exception("HTTP 401 Unauthorized")):
                 with patch.object(engine, "_synthesize_edge_tts", return_value=b"fake_edge_audio_bytes") as mock_edge:
-                    res = engine._synthesize_elevenlabs(text, "21m00Tcm4TlvDq8ikWAM")
-                    assert res == b"fake_edge_audio_bytes"
-                    assert mock_edge.called
+                    with patch.object(engine, "_synthesize_sapi", return_value=b"offline_audio") as mock_offline:
+                        res = engine._synthesize_elevenlabs(text, "21m00Tcm4TlvDq8ikWAM")
+                        assert res == b"offline_audio"
+                        assert mock_offline.called
+                        assert not mock_edge.called
 
         # Simulate invalid Deepgram key
         with patch.object(engine, "_get_active_keys_for_provider", return_value=[{"id": 2, "api_key": "invalid_key"}]):
             with patch("urllib.request.urlopen", side_effect=Exception("HTTP 401 Unauthorized")):
                 with patch.object(engine, "_synthesize_edge_tts", return_value=b"fake_edge_audio_bytes") as mock_edge:
-                    res = engine._synthesize_deepgram(text, "aura-asteria-en")
-                    assert res == b"fake_edge_audio_bytes"
-                    assert mock_edge.called
+                    with patch.object(engine, "_synthesize_sapi", return_value=b"offline_audio") as mock_offline:
+                        res = engine._synthesize_deepgram(text, "aura-asteria-en")
+                        assert res == b"offline_audio"
+                        assert mock_offline.called
+                        assert not mock_edge.called
 
         # Simulate invalid OpenAI key
         with patch.object(engine, "_get_active_keys_for_provider", return_value=[{"id": 3, "api_key": "invalid_key"}]):
             with patch("urllib.request.urlopen", side_effect=Exception("HTTP 401 Unauthorized")):
                 with patch.object(engine, "_synthesize_edge_tts", return_value=b"fake_edge_audio_bytes") as mock_edge:
-                    res = engine._synthesize_openai(text, "tts-1:alloy")
-                    assert res == b"fake_edge_audio_bytes"
-                    assert mock_edge.called
+                    with patch.object(engine, "_synthesize_sapi", return_value=b"offline_audio") as mock_offline:
+                        res = engine._synthesize_openai(text, "tts-1:alloy")
+                        assert res == b"offline_audio"
+                        assert mock_offline.called
+                        assert not mock_edge.called
 
     def test_audio_summary_sub_millisecond_caching_stress(self):
         """Stress test SQLite cache hits under rapid consecutive requests."""

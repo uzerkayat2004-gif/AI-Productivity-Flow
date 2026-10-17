@@ -814,6 +814,43 @@ def _extract_transcript(text: str) -> tuple[str, str | None]:
     return text.strip(), None
 
 
+_S1_IN_PROCESS_RETRY_BASE_S = 5.0
+_S1_IN_PROCESS_RETRY_CAP_S = 120.0
+
+
+def _s1_in_process_retry_blocked(model_path: Path) -> bool:
+    """True only during the backoff after an in-process load failure.
+
+    One failure used to set a flag that disabled in-process S1 for the rest
+    of the process. The flag now expires so a later dictation can recover.
+    """
+    failed_path = getattr(polish_with_s1, "_s1_in_process_failed_path", None)
+    legacy = getattr(polish_with_s1, "_s1_server_backend_path", None)
+    if failed_path != str(model_path) and legacy != str(model_path):
+        return False
+    retry_after = float(getattr(polish_with_s1, "_s1_in_process_retry_after", 0.0) or 0.0)
+    if retry_after <= 0.0:
+        return False
+    return time.monotonic() < retry_after
+
+
+def _s1_note_in_process_failure(model_path: Path) -> None:
+    fails = int(getattr(polish_with_s1, "_s1_in_process_failures", 0) or 0) + 1
+    delay = min(_S1_IN_PROCESS_RETRY_CAP_S, _S1_IN_PROCESS_RETRY_BASE_S * (2 ** (fails - 1)))
+    setattr(polish_with_s1, "_s1_in_process_failures", fails)
+    setattr(polish_with_s1, "_s1_in_process_failed_path", str(model_path))
+    setattr(polish_with_s1, "_s1_in_process_retry_after", time.monotonic() + delay)
+    setattr(polish_with_s1, "_s1_server_backend_path", str(model_path))
+    log.warning("[S1] In-process load failed (%d). Will retry in %.0fs.", fails, delay)
+
+
+def _s1_clear_in_process_failure() -> None:
+    setattr(polish_with_s1, "_s1_in_process_failures", 0)
+    setattr(polish_with_s1, "_s1_in_process_failed_path", None)
+    setattr(polish_with_s1, "_s1_in_process_retry_after", 0.0)
+    setattr(polish_with_s1, "_s1_server_backend_path", None)
+
+
 def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
     """Load S1-mini once so the first dictation avoids cold-start latency."""
     model_path = get_s1_model_path()
@@ -831,8 +868,7 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
         ):
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
-        if getattr(polish_with_s1, "_s1_server_backend_path", None) == str(model_path):
-            # In-process load already failed this session: one backend only.
+        if _s1_in_process_retry_blocked(model_path):
             if _s1_server_ready():
                 setattr(polish_with_s1, "_last_used", idle_time())
                 return True
@@ -853,13 +889,13 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
                 _release_cached_s1(old_llm)
             setattr(polish_with_s1, "_cached_llm", llm)
             setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-            setattr(polish_with_s1, "_s1_server_backend_path", None)
+            _s1_clear_in_process_failure()
             setattr(polish_with_s1, "_last_used", idle_time())
             return True
         except Exception:
-            # Fall back to llama-server. Do not mark the in-process cache as
-            # loaded (that made later polishes skip loading with llm=None).
-            setattr(polish_with_s1, "_s1_server_backend_path", str(model_path))
+            # Fall back to llama-server for this attempt. The in-process load
+            # is retried after a backoff instead of staying disabled.
+            _s1_note_in_process_failure(model_path)
             if _s1_server_ready():
                 setattr(polish_with_s1, "_last_used", idle_time())
                 return True
@@ -1122,7 +1158,7 @@ def _polish_with_s1_impl(
         if llm is None:
             # One backend per session: once the in-process load failed, use
             # only the app's llama-server (never both copies of the model).
-            in_process_failed = getattr(polish_with_s1, "_s1_server_backend_path", None) == str(model_path)
+            in_process_failed = _s1_in_process_retry_blocked(model_path)
             if not in_process_failed:
                 try:
                     from llama_cpp import Llama  # type: ignore
@@ -1138,10 +1174,10 @@ def _polish_with_s1_impl(
                     llm = replacement
                     setattr(polish_with_s1, "_cached_llm", llm)
                     setattr(polish_with_s1, "_cached_llm_path", str(model_path))
-                    setattr(polish_with_s1, "_s1_server_backend_path", None)
+                    _s1_clear_in_process_failure()
                 except Exception:
                     in_process_failed = True
-                    setattr(polish_with_s1, "_s1_server_backend_path", str(model_path))
+                    _s1_note_in_process_failure(model_path)
             if llm is None:
                 if _s1_server_ready():
                     use_server = True

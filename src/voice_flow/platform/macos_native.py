@@ -318,12 +318,14 @@ def _set_event_flags(event: int, flags: int) -> None:
     fn(event, flags)
 
 
-def _post_event(event: int, tap: int = kCGHIDEventTap) -> None:
+def _post_event(event: int, tap: int = kCGHIDEventTap) -> bool:
+    """Post one event. False when CoreGraphics cannot post (the key never lands)."""
     fn = _loader.symbol("CoreGraphics", "CGEventPost")
-    if fn is None:
-        return
+    if fn is None or not event:
+        return False
     fn.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
     fn(tap, event)
+    return True
 
 
 def _event_flags() -> int:
@@ -392,10 +394,12 @@ def send_key_combo(keycode: int, flags: int = 0, *, key_delay: float = 0.012) ->
         if flags:
             _set_event_flags(down, flags)
             _set_event_flags(up, flags)
-        _post_event(down)
+        # CGEventPost has no status code. A missing post function, or a
+        # failure to post either half of the chord, is not a successful paste.
+        if not _post_event(down):
+            return False
         time.sleep(key_delay)
-        _post_event(up)
-        return True
+        return _post_event(up)
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("[MACOS] send_key_combo failed: %s", exc)
         return False

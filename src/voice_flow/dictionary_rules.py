@@ -68,12 +68,38 @@ def term_problem(term: object) -> str | None:
     folded = normalize(clean)
     if folded in BUILTIN_TERMS:
         return f"\u201c{clean}\u201d is built in. Flow already understands it."
-    if is_ordinary(clean):
+    if is_ordinary(clean) and not is_proper_noun_entry(clean):
         return (
             f"\u201c{clean}\u201d is an ordinary word, so Flow leaves it as you say it. "
             "Add names and special terms here."
         )
     return None
+
+
+# Common English words that are also given names. Title case (Bill) is a
+# name; the lowercase word (bill) stays refused so normal speech is unchanged.
+_COMMON_WORD_NAMES = frozenset({
+    "amber", "april", "art", "august", "bill", "bob", "brook", "chase", "dale",
+    "faith", "frank", "grace", "ginger", "harmony", "hope", "hunter", "ivy",
+    "jean", "joy", "june", "lee", "mark", "may", "melody", "pat", "pearl",
+    "penny", "ray", "rose", "ruby", "sue", "will",
+})
+
+
+def is_proper_noun_entry(term: str) -> bool:
+    """True for a title-case name that is also an ordinary word.
+
+    ``Bill`` is allowed. ``bill``, ``Meeting``, and ``Hey`` are not.
+    """
+    tokens = str(term or "").split()
+    if len(tokens) != 1:
+        return False
+    token = tokens[0]
+    if token.islower() or token.isupper() or not token[:1].isupper():
+        return False
+    if not any(ch.islower() for ch in token[1:]):
+        return False
+    return token.casefold() in _COMMON_WORD_NAMES
 
 
 def replacement_problem(heard: object, correct: object) -> str | None:

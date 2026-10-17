@@ -142,6 +142,14 @@ def _pasteboard_restore(pasteboard, snapshot: list[dict]) -> None:
 def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0):
     """Run a short-lived helper process. Returns CompletedProcess or None."""
     try:
+        env = None
+        # pbcopy/pbpaste follow the locale. A non-UTF-8 locale mangles
+        # non-ASCII dictation on the way to and from the clipboard.
+        if cmd and cmd[0] in {"pbcopy", "pbpaste"}:
+            env = os.environ.copy()
+            env["LANG"] = "en_US.UTF-8"
+            env["LC_CTYPE"] = "UTF-8"
+            env["LC_ALL"] = "en_US.UTF-8"
         return subprocess.run(
             cmd,
             input=text_input,
@@ -149,6 +157,7 @@ def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0)
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
         )
     except Exception as exc:
         log.debug("[MACOS] command %s failed: %s", cmd[:1], exc)

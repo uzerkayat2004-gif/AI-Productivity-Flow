@@ -29,6 +29,30 @@ from voice_flow.microphone_devices import (
 
 log = logging.getLogger(__name__)
 
+MIC_ACCESS_OFF_MESSAGE = "Microphone access is off. Open Settings to allow it."
+
+
+def _microphone_access_blocked() -> str | None:
+    """A clear message when the OS has denied the microphone, else None.
+
+    An unknown or not-yet-asked status is not a denial: the stream open is
+    what triggers the system prompt.
+    """
+    try:
+        from voice_flow.platform import get_backend
+
+        report = get_backend().permission_report()
+    except Exception:
+        return None
+    for state in getattr(report, "states", ()) or ():
+        if getattr(state, "key", None) != "microphone":
+            continue
+        if getattr(state, "indeterminate", False):
+            return None
+        if getattr(state, "granted", True) is False:
+            return MIC_ACCESS_OFF_MESSAGE
+    return None
+
 # Chunk-split tuning: a pause this quiet for this long closes the current
 # streaming chunk; nonstop speech is force-split at the hard cap.
 # _SILENCE_RMS calibrated to 0.0012 so distant speech (~10ft away) is not truncated.
@@ -52,6 +76,7 @@ class AudioRecorder:
         self._uncertain_stream = None
         self._recording = False
         self.last_device_error: str | None = None
+        self.last_device_error_action: str | None = None
         self._lock = threading.Lock()
         # Serializes stream construction/start against stop/close.  The audio
         # callback still uses _lock only, so it cannot block device teardown.
@@ -198,6 +223,13 @@ class AudioRecorder:
                       "blocksize": 1024, "callback": self._audio_callback}
             if target_device is not None:
                 kwargs["device"] = target_device
+            blocked = _microphone_access_blocked()
+            if blocked:
+                self.last_device_error = blocked
+                self.last_device_error_action = "microphone_settings"
+                log.warning("[AUDIO] %s", self.last_device_error)
+                return False
+            self.last_device_error_action = None
             stream = None
             last_error = None
             # Format negotiation always stays on the chosen endpoint. A rate
