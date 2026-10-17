@@ -237,12 +237,17 @@ def test_modulated_room_noise_is_not_lifted_to_speech_level():
 def _wait_status(model_id: str, wanted: str) -> dict:
     import time
 
+    # The worker records "downloaded" and only then switches the active model.
+    # Join it so the assertion does not race that second step.
+    for thread in threading.enumerate():
+        if thread.name == f"Download-{model_id}":
+            thread.join(timeout=5)
     last = {}
     for _ in range(50):
-        time.sleep(0.05)
         last = downloadable_models.get_model_status(model_id) or {}
         if last.get("status") == wanted:
             return last
+        time.sleep(0.05)
     return last
 
 
@@ -286,9 +291,9 @@ def test_download_resumes_a_partial_file(temp_models_dir, monkeypatch):
 
     assert captured, "download never opened a request"
     request = captured[0]
-    range_header = request.get_header("Range") if hasattr(request, "get_header") else request.headers.get("Range")
-    assert range_header == f"bytes={len(prefix)}-"
-    assert final["status"] == "downloaded"
+    range_header = request.get_header("Range") if hasattr(request, "get_header") else None
+    assert range_header == f"bytes={len(prefix)}-", range_header
+    assert final.get("status") == "downloaded", final.get("error") or final.get("status")
     target = temp_models_dir / spec["filename"]
     assert target.read_bytes() == prefix + rest
     assert not part.exists()
