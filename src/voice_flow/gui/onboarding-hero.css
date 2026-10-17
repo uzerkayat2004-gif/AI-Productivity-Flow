@@ -4519,3 +4519,15 @@ body.vf-guide-step3-active #page-videoflow .flow-tabs {
 .ob-controls .s4-back-btn,
 .ob-controls .s5-back-btn { width: 116px !important; justify-content: center !important; box-sizing: border-box !important; }
 .ob-controls .ob-skip-btn { width: 132px !important; justify-content: center !important; box-sizing: border-box !important; }
+
+/* v1.0.3 Audio Flow guide step 2: show the voice providers (Edge online,
+   offline system voices, optional API-key providers) at scrollTop = 0. */
+body.af-guide-step2-active #audio-providers-view-overview .flow-landing-audio > .page-header,
+body.af-guide-step2-active #audio-providers-view-overview .flow-cards,
+body.af-guide-step2-active #audio-providers-view-overview .flow-audio-help,
+body.af-guide-step2-active #af-history-panel {
+  display: none !important;
+}
+body.af-guide-step2-active #af-providers-panel {
+  margin-top: 8px !important;
+}

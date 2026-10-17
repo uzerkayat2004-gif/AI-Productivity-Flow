@@ -8567,9 +8567,8 @@ const AUDIOFLOW_GUIDE_STEPS = [
     counter: "STEP 2 OF 4 · VOICES & OPTIONAL KEYS",
     title: "Built-in Voices & Optional Keys",
     desc: "Offline voices stay on your device; Edge voices are online and free. API keys are optional, only for extra voices like Gemini.",
-    targetId: "audio-detail-header-bar",
-    secondaryTargetId: "audio-detail-connections-card",
-    spotlightLabel: "Optional API Keys",
+    targetId: "af-providers-panel",
+    spotlightLabel: "Built-in Voices & Optional Keys",
     nextLabel: "Next: History & Downloads →",
     audioSrc: "assets/onboarding/af_guide_step2_mixed.mp3",
     timeline: ONBOARDING_NARRATION_TIMELINES.af_guide_step2.lines
@@ -8938,6 +8937,7 @@ async function gotoAudioFlowGuideStep(stepIdx) {
 
   // Cleanup leaving Step 2: restore provider overview and disconnect observer
   if (prevStep === 2 && stepIdx !== 2) {
+    document.body.classList.remove("af-guide-step2-active");
     if (window._afGuideConnCardObserver) {
       window._afGuideConnCardObserver.disconnect();
       window._afGuideConnCardObserver = null;
@@ -8962,14 +8962,16 @@ async function gotoAudioFlowGuideStep(stepIdx) {
     if (vid) vid.pause();
   }
 
-  // Step 2 Action: Open Gemini detail view & observe connections card
+  // Step 2 Action: lift the voice providers (Edge online + offline voices +
+  // optional key providers) to the top so they match the narration (v1.0.3).
   if (stepIdx === 2) {
     document.body.classList.remove("af-guide-step3-active");
-    if (typeof openAudioProviderDetail === "function") {
-      await openAudioProviderDetail("gemini");
+    document.body.classList.add("af-guide-step2-active");
+    if (typeof closeAudioProviderDetail === "function" && typeof currentAudioProvider !== "undefined" && currentAudioProvider) {
+      closeAudioProviderDetail();
     }
     if (window.ResizeObserver && !window._afGuideConnCardObserver) {
-      const connCard = document.getElementById("audio-detail-connections-card");
+      const connCard = document.getElementById("audio-providers-grid-container");
       if (connCard) {
         window._afGuideConnCardObserver = new ResizeObserver(() => {
           if (_currentAfGuideStep === 2) {
@@ -9201,6 +9203,7 @@ function stopAudioFlowGuide(markCompleted = false) {
   // Restore CSS state
   document.body.classList.remove("af-guide-active");
   document.body.classList.remove("af-guide-step3-active");
+  document.body.classList.remove("af-guide-step2-active");
 
   const card = document.getElementById("af-guide-card");
   if (card) card.classList.remove("is-step4");
