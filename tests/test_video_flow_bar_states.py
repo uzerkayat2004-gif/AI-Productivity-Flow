@@ -68,6 +68,40 @@ def test_working_state_does_not_expose_error_copy_or_decorative_lines() -> None:
     assert canvas.lines == []
 
 
+def test_sign_in_chip_is_drawn_and_starts_login_instead_of_the_composer() -> None:
+    from types import SimpleNamespace
+
+    bar, canvas = _bar_with_canvas()
+    canvas.create_polygon = lambda *args, **kwargs: None
+    bar.state = "READY"
+    bar._is_mouse_over = True
+    bar._nlm_signin_override = True
+    bar.width = bar.ready_actions_width
+    bar.height = bar.hover_height
+    bar._draw_ready(bar.width, bar.hover_height)
+    assert "Sign in" in canvas.texts
+
+    calls: list[object] = []
+    bar._start_notebooklm_sign_in = lambda: calls.append("signin")
+    bar.on_video_flow = lambda text: calls.append(("video", text))
+    # The signed-out chip is wider than "⋯ Video". Pick a point that is the
+    # video zone in both layouts so the second click still hits it.
+    bar._nlm_signin_override = False
+    zone_x = next(
+        x for x in range(bar.width)
+        if bar._get_zone(x, bar.hover_height // 2) == "video_flow"
+    )
+    bar._nlm_signin_override = True
+    assert bar._get_zone(zone_x, bar.hover_height // 2) == "video_flow"
+    bar._on_press(SimpleNamespace(x=zone_x, y=bar.hover_height // 2))
+    assert calls == ["signin"]
+
+    bar._nlm_signin_override = False
+    calls.clear()
+    bar._on_press(SimpleNamespace(x=zone_x, y=bar.hover_height // 2))
+    assert calls == [("video", "")]
+
+
 def test_hover_bar_uses_the_orange_product_accent() -> None:
     bar, canvas = _bar_with_canvas()
     bar.state = "READY"

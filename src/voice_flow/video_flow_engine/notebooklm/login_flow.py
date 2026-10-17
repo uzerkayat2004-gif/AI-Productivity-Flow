@@ -28,6 +28,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -45,6 +46,9 @@ _LOGIN_TIMEOUT_SECONDS = 300
 _ONLINE_CHECK_TIMEOUT_SECONDS = 75
 _ONLINE_CACHE_SECONDS = 120.0
 _HIDE_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+# Keep the real Popen class. Tests replace subprocess.Popen with a lambda, and
+# isinstance() against that attribute then raises TypeError.
+_REAL_POPEN = subprocess.Popen
 
 # Reentrant: start_login's already-running branch reads state while holding
 # the lock, and get_login_state() re-acquires it.
@@ -59,6 +63,10 @@ _STATE: dict[str, Any] = {
     "note": None,
     "durable": None,
     "log_path": None,
+    "exit_code": None,
+    "window_opened": None,
+    "cancelled": False,
+    "browser": None,
 }
 # Verdicts are scoped to the exact CLI profile.  A Google account switch must
 # never inherit another profile's cached green status.
@@ -70,6 +78,14 @@ _LOGIN_BROWSER_HANDOFF_SECONDS = 20.0
 _LOGIN_MAX_CREDENTIAL_WATCH_SECONDS = 300.0
 _LOGIN_WINDOW_POLL_SECONDS = 0.2
 _LOGIN_CREDENTIAL_POLL_SECONDS = 0.5
+# A pip console-script shim that dies in init_sys_streams does so well under a second.
+# Anything still running after this opened a browser or is waiting on one.
+_LOGIN_FAST_FAIL_SECONDS = 2.5
+_LOGIN_OUTPUT_LIMIT = 32_000
+_ACTIVE_LOGIN_PROCESS: subprocess.Popen | None = None
+_ACTIVE_LOGIN_PROFILE: str | None = None
+_LOGIN_CANCEL = threading.Event()
+_RICH_TAG = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9 _#.=:,+-]*\]")
 
 
 def _cache_online_verification(profile: str, result: dict[str, Any], checked_at: float | None = None) -> None:
@@ -972,6 +988,305 @@ def _prepare_browser_profile(profile: str, switch_account: bool = False) -> None
         pass
 
 
+def _console_interpreter_for_cli(cli_path: Path) -> Path | None:
+    """Return the console Python beside a pip script shim, never pythonw.
+
+    Installed layout is ``runtime/python/Scripts/notebooklm.exe`` next to
+    ``runtime/python/python.exe``. A venv on macOS uses ``bin/notebooklm``
+    next to ``bin/python3``.
+    """
+    parent = cli_path.parent
+    candidates: list[Path] = []
+    if parent.name.lower() == "scripts":
+        runtime = parent.parent
+        candidates.extend((runtime / "python.exe", runtime / "python"))
+    elif parent.name == "bin":
+        candidates.extend((parent / "python3", parent / "python", parent / "python.exe"))
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and "pythonw" not in candidate.name.lower():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _cli_argv(command: list[str]) -> list[str]:
+    """Launch ``python -m notebooklm`` instead of the console-script shim.
+
+    ``notebooklm.exe`` is a console-subsystem pip launcher. From pythonw
+    (no console) plus CREATE_NO_WINDOW, Windows does not allocate a console
+    and the shim starts its Python child without the redirected std handles.
+    That child aborts in ``init_sys_streams`` in well under a second, so no
+    browser window appears and stdout/stderr never reach the log. The same
+    command stays alive from PowerShell because that parent has a console.
+    Invoking python.exe directly with real pipes avoids the shim.
+    """
+    if not command:
+        return list(command)
+    cli = Path(command[0])
+    if cli.name.lower() not in {"notebooklm", "notebooklm.exe"}:
+        return list(command)
+    interpreter = _console_interpreter_for_cli(cli)
+    if interpreter is None:
+        return list(command)
+    return [str(interpreter), "-m", "notebooklm", *command[1:]]
+
+
+def _default_playwright_browsers_dir() -> Path | None:
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA", "")
+        return Path(local) / "ms-playwright" if local else None
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    return Path.home() / ".cache" / "ms-playwright"
+
+
+def _login_child_env(interpreter: Path | None = None) -> dict[str, str]:
+    """Environment for the CLI child. Never point ``__PYVENV_LAUNCHER__`` at pythonw."""
+    env = {key: value for key, value in os.environ.items() if isinstance(value, str)}
+    launcher = env.get("__PYVENV_LAUNCHER__", "")
+    if launcher.lower().endswith(("pythonw.exe", "pythonw")):
+        if interpreter is not None:
+            env["__PYVENV_LAUNCHER__"] = str(interpreter)
+        else:
+            env.pop("__PYVENV_LAUNCHER__", None)
+    if interpreter is not None:
+        runtime = interpreter.parent
+        prefix = [str(runtime)]
+        for extra in (runtime / "Scripts", runtime / "bin"):
+            if extra.is_dir():
+                prefix.append(str(extra))
+        current = env.get("PATH", "")
+        env["PATH"] = os.pathsep.join(prefix + ([current] if current else []))
+    if not env.get("PLAYWRIGHT_BROWSERS_PATH"):
+        browsers = _default_playwright_browsers_dir()
+        try:
+            if browsers is not None and browsers.is_dir():
+                env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
+        except OSError:
+            pass
+    return env
+
+
+def _spawn_cwd() -> str:
+    try:
+        cwd = Path.cwd()
+        if cwd.is_dir():
+            return str(cwd)
+    except Exception:
+        pass
+    return str(Path.home())
+
+
+def _login_spawn_kwargs(*, show_browser: bool = True) -> dict[str, Any]:
+    """Popen kwargs that keep a console interpreter alive and the browser visible.
+
+    Stdio is fully redirected, so python.exe does not need its own console.
+    STARTF_USESHOWWINDOW hides that console. CREATE_NO_WINDOW is used only for
+    headless refresh: on an interactive login it can keep Playwright's browser
+    window from appearing, and combined with the pip shim it kills the child
+    before Chrome starts.
+    """
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "cwd": _spawn_cwd(),
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        kwargs["startupinfo"] = startupinfo
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if not show_browser:
+            flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        kwargs["creationflags"] = flags
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def spawn_notebooklm_process(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    interactive: bool | None = None,
+) -> subprocess.Popen:
+    """Spawn the NotebookLM CLI the way the installed app must.
+
+    A pythonw parent has no console. The returned process is the console
+    interpreter (when the shim sits beside one) with live stdout and stderr
+    pipes, so a login waits out ``--browser-timeout`` instead of exiting
+    immediately.
+    """
+    argv = _cli_argv(list(command))
+    if interactive is None:
+        interactive = "login" in command
+    interpreter: Path | None = None
+    if len(argv) >= 3 and argv[1] == "-m" and argv[2] == "notebooklm":
+        candidate = Path(argv[0])
+        if candidate.is_file():
+            interpreter = candidate
+    child_env = _login_child_env(interpreter)
+    if env:
+        child_env.update(env)
+    return subprocess.Popen(argv, env=child_env, **_login_spawn_kwargs(show_browser=interactive))
+
+
+def _browser_installed(browser: str) -> bool:
+    """True when a system Chrome or Edge the CLI can drive is installed."""
+    kind = (browser or "").strip().lower()
+    if kind == "chrome":
+        relative = Path("Google") / "Chrome" / "Application" / "chrome.exe"
+        app_names = ("Google Chrome.app",)
+        which_names = ("google-chrome", "google-chrome-stable", "chrome")
+    elif kind == "msedge":
+        relative = Path("Microsoft") / "Edge" / "Application" / "msedge.exe"
+        app_names = ("Microsoft Edge.app",)
+        which_names = ("microsoft-edge", "microsoft-edge-stable", "msedge")
+    else:
+        return False
+    if os.name == "nt":
+        roots: list[Path] = []
+        for key in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            value = os.environ.get(key, "")
+            if value:
+                roots.append(Path(value))
+        for root in roots:
+            try:
+                if (root / relative).is_file():
+                    return True
+            except OSError:
+                continue
+    if sys.platform == "darwin":
+        for base in (Path("/Applications"), Path.home() / "Applications"):
+            for app_name in app_names:
+                try:
+                    if (base / app_name).exists():
+                        return True
+                except OSError:
+                    continue
+    for name in which_names:
+        if shutil.which(name):
+            return True
+    return False
+
+
+def resolve_interactive_browser(preferred: str | None = None) -> str:
+    """Prefer system Chrome, then Edge, then Playwright's bundled Chromium.
+
+    The bundled browser is the last resort. It uses the CLI's persistent
+    profile directory, not the user's daily Chrome profile (Chrome 127+
+    app-bound cookies cannot be imported).
+    """
+    requested = (preferred or "chrome").strip().lower() or "chrome"
+    if requested == "chromium":
+        return "chromium"
+    if requested in {"chrome", "msedge"} and _browser_installed(requested):
+        return requested
+    if _browser_installed("chrome"):
+        return "chrome"
+    if _browser_installed("msedge"):
+        return "msedge"
+    return "chromium"
+
+
+def _clean_cli_output(text: str) -> str:
+    cleaned = _RICH_TAG.sub("", text or "")
+    cleaned = re.sub(r"https?://\S+", "<redacted URL>", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:500]
+
+
+def _infer_window_opened(elapsed: float, output: str) -> bool:
+    lowered = output.lower()
+    if "waiting for login" in lowered:
+        return True
+    if any(marker in lowered for marker in (
+        "executable doesn't exist",
+        "failed to launch",
+        "spawn unknown",
+        "init_sys_streams",
+        "traceback (most recent call last)",
+        "no such file",
+        "not found",
+    )):
+        return False
+    return elapsed >= _LOGIN_FAST_FAIL_SECONDS
+
+
+def _login_failure_message(code: int, output: str, elapsed: float, *, cancelled: bool, interactive: bool) -> tuple[str, bool | None]:
+    if cancelled:
+        return "Sign-in cancelled.", None
+    cleaned = _clean_cli_output(output)
+    if not interactive:
+        if code == 0:
+            return "", None
+        return (cleaned or f"exit {code}"), None
+    window_opened = _infer_window_opened(elapsed, cleaned)
+    if code == 0:
+        return "", True
+    if not window_opened:
+        if cleaned:
+            return f"The Google sign-in window did not open (exit {code}): {cleaned}", False
+        return (
+            "The Google sign-in window did not open. "
+            f"The sign-in program exited immediately with code {code}.",
+            False,
+        )
+    if cleaned:
+        return cleaned, True
+    return (
+        "Google sign-in did not finish. Choose your Google account in the browser window, then try again.",
+        True,
+    )
+
+
+def _kill_process_tree(process: subprocess.Popen | None) -> None:
+    if process is None:
+        return
+    # Only a real Popen has a process tree we started. Test doubles use a
+    # stand-in pid and must not be resolved through psutil.
+    if isinstance(process, _REAL_POPEN):
+        try:
+            import psutil
+            owned = psutil.Process(process.pid)
+            for child in owned.children(recursive=True):
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception:
+            pass
+    try:
+        process.kill()
+    except Exception:
+        pass
+
+
+def _drain_stream(stream: Any, chunks: list[str], limit: int) -> None:
+    if stream is None:
+        return
+    total = 0
+    try:
+        while True:
+            piece = stream.read(4096)
+            if not piece:
+                break
+            if total >= limit:
+                continue
+            remaining = limit - total
+            chunks.append(piece[:remaining])
+            total += len(piece[:remaining])
+    except Exception:
+        pass
+
+
 def _login_command(
     cli_path: Path,
     profile: str,
@@ -1021,70 +1336,140 @@ def _redact_command_for_log(command: list[str]) -> str:
     return " ".join(redacted)
 
 
+def _remember_login_detail(*, exit_code: int | None, window_opened: bool | None, cancelled: bool, elapsed: float) -> None:
+    _run_login_once.last_detail = {
+        "exit_code": exit_code,
+        "window_opened": window_opened,
+        "cancelled": cancelled,
+        "elapsed": elapsed,
+    }
+
+
 def _run_login_once(
     command: list[str],
     log_path: Path,
     timeout_seconds: int,
 ) -> tuple[int, str]:
-    """Run one login attempt, streaming CLI output into the log file."""
-    env = dict(os.environ)
+    """Run one CLI attempt and append stdout, stderr, and the exit code to the log.
+
+    Interactive login is spawned through :func:`spawn_notebooklm_process` so a
+    pythonw parent does not lose the child's output or kill it on startup.
+    """
+    global _ACTIVE_LOGIN_PROCESS
+    interactive = "login" in command
+    argv = _cli_argv(command)
+    started = time.monotonic()
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    readers: list[threading.Thread] = []
+    process: subprocess.Popen[Any] | None = None
+    handoff_stop_event: threading.Event | None = None
+    code: int | None = None
+    error = ""
+    cancelled = False
+    window_opened: bool | None = None
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] $ {_redact_command_for_log(command)}\n")
+        if argv != list(command):
+            log_handle.write(f"[spawn] {_redact_command_for_log(argv)}\n")
         log_handle.flush()
-        process: subprocess.Popen[Any] | None = None
-        handoff_stop_event: threading.Event | None = None
         # A Windows Security dialog can appear almost immediately after browser
         # launch. Snapshot before Popen so the watcher can identify it as new.
         prelaunch_hwnds: set[int] | None = None
-        if "login" in command:
+        if interactive:
             prelaunch_hwnds = {hwnd for hwnd, *_rest in _visible_top_level_windows()}
         try:
-            process = subprocess.Popen(
-                command,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                env=env,
-                creationflags=_HIDE_FLAGS,
-            )
-            # The CLI owns browser startup.  This tiny daemon only requests
-            # foreground once when its exact profile window appears; waiting
-            # for the CLI remains in this background login worker.
-            if "login" in command:
-                handoff_stop_event = threading.Event()
-                _start_login_foreground_handoff(
-                    command,
-                    getattr(process, "pid", None),
-                    prelaunch_hwnds,
-                    handoff_stop_event,
-                    min(_LOGIN_MAX_CREDENTIAL_WATCH_SECONDS, max(0.0, float(timeout_seconds))),
-                )
-            wait_timeout = max(60, int(timeout_seconds)) if "login" in command else max(8, int(timeout_seconds))
-            return process.wait(timeout=wait_timeout), ""
+            if interactive and _LOGIN_CANCEL.is_set():
+                code = 130
+                cancelled = True
+                error = "Sign-in cancelled."
+            else:
+                process = spawn_notebooklm_process(command)
+                if interactive:
+                    _ACTIVE_LOGIN_PROCESS = process
+                if getattr(process, "stdout", None) is not None:
+                    reader = threading.Thread(
+                        target=_drain_stream,
+                        args=(process.stdout, stdout_chunks, _LOGIN_OUTPUT_LIMIT),
+                        name="notebooklm-login-stdout",
+                        daemon=True,
+                    )
+                    reader.start()
+                    readers.append(reader)
+                if getattr(process, "stderr", None) is not None:
+                    reader = threading.Thread(
+                        target=_drain_stream,
+                        args=(process.stderr, stderr_chunks, _LOGIN_OUTPUT_LIMIT),
+                        name="notebooklm-login-stderr",
+                        daemon=True,
+                    )
+                    reader.start()
+                    readers.append(reader)
+                # The CLI owns browser startup. This daemon only requests
+                # foreground once when its exact profile window appears.
+                if interactive:
+                    handoff_stop_event = threading.Event()
+                    _start_login_foreground_handoff(
+                        command,
+                        getattr(process, "pid", None),
+                        prelaunch_hwnds,
+                        handoff_stop_event,
+                        min(_LOGIN_MAX_CREDENTIAL_WATCH_SECONDS, max(0.0, float(timeout_seconds))),
+                    )
+                wait_timeout = max(60, int(timeout_seconds)) if interactive else max(8, int(timeout_seconds))
+                code = int(process.wait(timeout=wait_timeout))
         except subprocess.TimeoutExpired:
             if process is not None:
                 try:
-                    try:
-                        import psutil
-                        owned = psutil.Process(process.pid)
-                        for child in owned.children(recursive=True):
-                            try:
-                                child.kill()
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except Exception:
-                        pass
-                    process.kill()
+                    _kill_process_tree(process)
                     process.wait(timeout=5)
                 except Exception:
                     logger.warning("Timed-out NotebookLM CLI could not be reaped", exc_info=True)
-            return 124, f"sign-in timed out after {timeout_seconds}s"
-        except OSError:
+            code = 124
+            error = f"sign-in timed out after {timeout_seconds}s"
+        except OSError as exc:
             logger.warning("NotebookLM CLI could not launch the requested browser", exc_info=True)
-            return 1, "Could not launch the NotebookLM sign-in browser. Check that the selected browser is installed."
+            code = 1
+            error = (
+                "Could not launch the NotebookLM sign-in browser. "
+                f"Check that the selected browser is installed. ({exc})"
+            )
         finally:
             if handoff_stop_event is not None:
                 handoff_stop_event.set()
+            if _ACTIVE_LOGIN_PROCESS is process:
+                _ACTIVE_LOGIN_PROCESS = None
+        for reader in readers:
+            reader.join(timeout=2)
+        output = "".join(stdout_chunks)
+        err_output = "".join(stderr_chunks)
+        combined = "\n".join(part for part in (output, err_output) if part)
+        elapsed = time.monotonic() - started
+        if code is None:
+            code = 1
+        if not error:
+            cancelled = bool(interactive and _LOGIN_CANCEL.is_set() and code != 0)
+            error, window_opened = _login_failure_message(
+                code, combined, elapsed, cancelled=cancelled, interactive=interactive,
+            )
+        elif interactive and code != 0:
+            window_opened = _infer_window_opened(elapsed, _clean_cli_output(combined))
+        log_handle.write("--- stdout ---\n")
+        log_handle.write(output)
+        if output and not output.endswith("\n"):
+            log_handle.write("\n")
+        log_handle.write("--- stderr ---\n")
+        log_handle.write(err_output)
+        if err_output and not err_output.endswith("\n"):
+            log_handle.write("\n")
+        log_handle.write(f"[exit code {code} after {elapsed:.2f}s]\n")
+        log_handle.flush()
+    _remember_login_detail(exit_code=code, window_opened=window_opened, cancelled=cancelled, elapsed=elapsed)
+    return code, error
 
 
 def _watch_login(
@@ -1115,7 +1500,19 @@ def _watch_login(
 
         code, err = None, ""
         durable = False
-        _set_note("Google NotebookLM sign-in is opening — finish the sign-in there.")
+        email = None
+        global _ACTIVE_LOGIN_PROFILE
+        _ACTIVE_LOGIN_PROFILE = profile
+        resolved_browser = resolve_interactive_browser(browser)
+        if resolved_browser != (browser or "").strip().lower():
+            logger.info(
+                "NotebookLM sign-in browser %s is not installed; using %s",
+                browser, resolved_browser,
+            )
+        browser = resolved_browser
+        with _STATE_LOCK:
+            _STATE["browser"] = browser
+        _set_note("Waiting for Google sign-in…")
         _terminate_stale_login_processes(profile, log_path)
         if switch_account:
             time.sleep(0.3)
@@ -1132,6 +1529,7 @@ def _watch_login(
         if os.environ.get("PYTEST_CURRENT_TEST") and getattr(_run_login_once, "__name__", "") in ("_run_login_once", ""):
             return
 
+        _run_login_once.last_detail = {}
         if mode == "master-token" and account_email:
             force = bool(switch_account or (_storage_email() and account_email != _storage_email()))
             code, err = _run_login_once(
@@ -1284,8 +1682,14 @@ def _watch_login(
             except Exception:
                 pass
 
+        detail = getattr(_run_login_once, "last_detail", None)
+        if not isinstance(detail, dict):
+            detail = {}
         note = None
-        if success and mode == "master-token" and not durable:
+        if detail.get("cancelled"):
+            note = "Sign-in cancelled."
+            success = False
+        elif success and mode == "master-token" and not durable:
             note = ("Signed in — but the one-time durable setup didn't finish this time. "
                     "Click Sign in once more when convenient.")
         elif success and email and not _is_placeholder(email):
@@ -1304,6 +1708,10 @@ def _watch_login(
                 error=None if success else note,
                 email=email if (success and not _is_placeholder(email)) else None,
                 note=note,
+                exit_code=detail.get("exit_code", code),
+                window_opened=True if success else detail.get("window_opened"),
+                cancelled=bool(detail.get("cancelled")),
+                browser=browser,
             )
             if success:
                 _cache_online_verification(profile, {
@@ -1324,7 +1732,11 @@ def _watch_login(
                 success=False,
                 error="Sign-in could not start. Check the NotebookLM CLI and browser, then try again.",
                 note=None,
+                window_opened=False,
             )
+    finally:
+        if _ACTIVE_LOGIN_PROFILE == profile:
+            _ACTIVE_LOGIN_PROFILE = None
 
 
 def record_successful_login(email: str, profile: str | None = None) -> None:
@@ -1512,6 +1924,41 @@ def disconnect_login(profile: str | None = None) -> dict[str, Any]:
     return {"success": True, "authenticated": False, "profile": profile}
 
 
+def cancel_login(profile: str | None = None) -> dict[str, Any]:
+    """Stop an in-progress interactive sign-in without touching a saved session.
+
+    Kills the CLI process and any browser it opened against this profile's
+    dedicated directory. Cookie refresh and keepalive are left alone.
+    """
+    global _ACTIVE_LOGIN_PROCESS
+    target = resolve_notebooklm_profile(profile or _ACTIVE_LOGIN_PROFILE)
+    with _STATE_LOCK:
+        running = bool(_STATE.get("running"))
+    process = _ACTIVE_LOGIN_PROCESS
+    if not running and (process is None or process.poll() is not None):
+        return {"cancelled": False, "already_finished": True, "profile": target, "state": get_login_state()}
+    _LOGIN_CANCEL.set()
+    if process is not None and process.poll() is None:
+        _kill_process_tree(process)
+    try:
+        _terminate_stale_login_processes(target, _login_log_path())
+    except Exception:
+        pass
+    with _STATE_LOCK:
+        if not _STATE.get("running"):
+            return {"cancelled": True, "profile": target, "state": get_login_state()}
+        _STATE.update(
+            running=False,
+            finished_at=time.time(),
+            success=False,
+            cancelled=True,
+            error="Sign-in cancelled.",
+            note="Sign-in cancelled.",
+            window_opened=False,
+        )
+    return {"cancelled": True, "profile": target, "state": get_login_state()}
+
+
 def start_login(
     *,
     profile: str | None = None,
@@ -1540,6 +1987,16 @@ def start_login(
         return {"launched": False, "error": "Invalid NotebookLM profile name"}
 
     if switch_account:
+        with _STATE_LOCK:
+            if _STATE.get("running"):
+                return {
+                    "launched": True,
+                    "already_running": True,
+                    "mode": _STATE.get("mode"),
+                    "profile": profile,
+                    "message": "Waiting for Google sign-in…",
+                    "state": get_login_state(),
+                }
         _clean_account_state_for_switch(profile)
 
     if mode in ("sync-browser", "browser-cookies"):
@@ -1602,10 +2059,18 @@ def start_login(
         run_mode = "master-token" if (mode in ("master-token", "durable") and account_email) else "browser"
         with _STATE_LOCK:
             if _STATE.get("running"):
-                if switch_account:
-                    _STATE["running"] = False
-                else:
-                    return {"launched": False, "already_running": True, "state": get_login_state()}
+                # A second click, including Switch account, must not start another
+                # browser. The open attempt stays in Waiting until it finishes
+                # or the user presses Cancel.
+                return {
+                    "launched": True,
+                    "already_running": True,
+                    "mode": _STATE.get("mode"),
+                    "profile": profile,
+                    "message": "Waiting for Google sign-in…",
+                    "state": get_login_state(),
+                }
+            _LOGIN_CANCEL.clear()
             log_path = _login_log_path()
             _STATE.update(
                 running=True,
@@ -1614,17 +2079,13 @@ def start_login(
                 finished_at=None,
                 success=None,
                 error=None,
-                note=(
-                    "Google NotebookLM account chooser is opening in browser — choose an account."
-                    if switch_account
-                    else (
-                        "Google NotebookLM sign-in is opening — finish sign-in to establish this session."
-                        if run_mode == "master-token"
-                        else "Google NotebookLM sign-in is opening — finish the sign-in there."
-                    )
-                ),
+                note="Waiting for Google sign-in…",
                 durable=None,
                 log_path=str(log_path),
+                exit_code=None,
+                window_opened=None,
+                cancelled=False,
+                browser=browser,
             )
         thread = threading.Thread(
             target=_watch_login,
@@ -1753,14 +2214,18 @@ def verify_online(
         return {"status": "dependency_missing", "authenticated": False,
                 "message": "NotebookLM CLI not found"}
     command = [str(cli_path), "--profile", profile, "auth", "check", "--test", "--passive", "--json"]
+    argv = _cli_argv(command)
+    interpreter = Path(argv[0]) if len(argv) >= 3 and argv[1] == "-m" else None
     try:
         result = subprocess.run(
-            command,
+            argv,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=max(8.0, float(timeout)),
+            env=_login_child_env(interpreter if interpreter is not None and interpreter.is_file() else None),
+            cwd=_spawn_cwd(),
             creationflags=_HIDE_FLAGS,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

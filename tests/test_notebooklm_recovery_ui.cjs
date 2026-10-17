@@ -113,3 +113,121 @@ test('audio summary state mapping describes transient errors as delayed connecti
   const mapped = context._afMapNlmState({ account_saved: true, online_verified: null, recovery_state: 'transient_error' });
   assert.deepEqual({ key: mapped.key, label: mapped.label }, { key: 'attention', label: 'Connection delayed' });
 });
+
+function signInHarness() {
+  const ids = [
+    'vf-nlm-status-badge', 'vf-nlm-status-dot', 'vf-nlm-status-text', 'vf-nlm-login-btn',
+    'vf-nlm-login-label', 'vf-nlm-disconnect-btn', 'vf-nlm-disconnect-label', 'vf-nlm-account-desc',
+    'vf-nlm-cancel-login-btn', 'vf-nlm-show-signin-btn',
+  ];
+  const elements = new Map(ids.map(id => [id, makeElement()]));
+  elements.get('vf-nlm-cancel-login-btn').classList.add('hidden');
+  const requests = [];
+  const toasts = [];
+  const timers = [];
+  let loginState = {
+    running: true, started_at: 1, success: null, window_opened: null, error: null, note: null,
+  };
+  const context = vm.createContext({
+    console: { warn() {}, error() {} },
+    document: { getElementById: id => elements.get(id) || null, visibilityState: 'visible' },
+    setTimeout(fn) { timers.push(fn); return timers.length; },
+    clearTimeout() {},
+    setInterval: () => 3,
+    clearInterval() {},
+    safeFetchJson: async (url, opts) => {
+      requests.push({ url: String(url), body: opts && opts.body ? JSON.parse(opts.body) : null });
+      if (String(url).includes('/auth/start')) return { success: true, launched: true };
+      if (String(url).includes('/auth/state')) return { success: true, login: loginState };
+      if (String(url).includes('/auth/cancel')) return { success: true, cancelled: true };
+      if (String(url).includes('/auth/disconnect')) return { success: true };
+      return { success: true, account_saved: false, online_verified: false, available: true, email: null };
+    },
+    vfToast(message, isError) { toasts.push({ message: String(message), isError: Boolean(isError) }); },
+    cleanErrorMessage: String,
+    clearNlmRecoveryPollTimer() {},
+    clearNlmAuthPollTimer() {
+      context.vfNlmAuthPollTimer = null;
+    },
+  });
+  context.vfNlmAuthStatus = {
+    authenticated: false, account_saved: false, online_verified: null, checking: false,
+    email: null, profile: 'video-flow-experiment', available: true,
+  };
+  context.vfNlmAuthRequestSequence = 0;
+  context.vfNlmAuthInProgress = false;
+  context.vfNlmAuthFocusDelayTimer = null;
+  context.vfNlmAuthPollTimer = null;
+  context.vfNlmRecoveryPollTimer = null;
+  context.vfNlmRecoveryPollCount = 0;
+  vm.runInContext(
+    section(videoSource, 'function vfNotebookLMConnectionState', 'const VF_PERMANENT_CONFIRMATION'),
+    context,
+  );
+  return {
+    context, elements, requests, toasts, timers,
+    setLoginState(next) { loginState = next; },
+    async flush() {
+      while (timers.length) {
+        const fn = timers.shift();
+        if (fn) await fn();
+      }
+    },
+  };
+}
+
+test('sign-in shows waiting and cancel, and a second click does not start another login', async () => {
+  const h = signInHarness();
+  const first = h.context.startNotebookLMAuth(false);
+  const second = h.context.startNotebookLMAuth(false);
+  await first;
+  await second;
+  assert.equal(h.requests.filter(req => req.url.includes('/auth/start')).length, 1);
+  assert.equal(h.elements.get('vf-nlm-status-text').textContent, 'Waiting for Google sign-in…');
+  assert.equal(h.elements.get('vf-nlm-cancel-login-btn').classList.contains('hidden'), false);
+
+  await h.context.cancelNotebookLMAuth();
+  assert.equal(h.requests.filter(req => req.url.includes('/auth/cancel')).length, 1);
+  assert.match(h.toasts.at(-1).message, /cancelled/i);
+  assert.equal(h.elements.get('vf-nlm-cancel-login-btn').classList.contains('hidden'), true);
+});
+
+test('immediate sign-in failure shows the child error instead of a finished-window message', async () => {
+  const h = signInHarness();
+  h.setLoginState({
+    running: false,
+    started_at: 1,
+    success: false,
+    window_opened: false,
+    cancelled: false,
+    error: 'The Google sign-in window did not open (exit 1): chrome failed to launch',
+  });
+  await h.context.startNotebookLMAuth(false);
+  await h.flush();
+  assert.equal(h.toasts.length, 1);
+  assert.match(h.toasts[0].message, /did not open/);
+  assert.match(h.toasts[0].message, /chrome failed to launch/);
+  assert.doesNotMatch(h.toasts[0].message, /Choose your Google account in the Chrome sign-in window/);
+  assert.equal(h.toasts[0].isError, true);
+});
+
+test('switch account sends switch_account and sign out returns to not connected', async () => {
+  const h = signInHarness();
+  h.context.vfNlmAuthStatus = {
+    authenticated: true, account_saved: true, online_verified: true, checking: false,
+    email: 'reader@example.com', profile: 'video-flow-experiment', available: true,
+  };
+  const pending = h.context.startNotebookLMAuth(true);
+  await pending;
+  const start = h.requests.find(req => req.url.includes('/auth/start'));
+  assert.equal(start.body.switch_account, true);
+  assert.equal(start.body.mode, 'cli');
+
+  h.context.vfNlmAuthInProgress = false;
+  await h.context.disconnectNotebookLM();
+  const disconnect = h.requests.find(req => req.url.includes('/auth/disconnect'));
+  assert.ok(disconnect);
+  assert.equal(disconnect.body.profile, 'video-flow-experiment');
+  assert.equal(h.elements.get('vf-nlm-status-text').textContent, 'Not connected');
+  assert.equal(h.elements.get('vf-nlm-login-label').textContent, 'Sign in with Google');
+});

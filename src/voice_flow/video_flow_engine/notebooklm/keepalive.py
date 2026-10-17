@@ -150,15 +150,24 @@ class NotebookLMKeepaliveService:
                     storage = _app_settings_storage()
                     explicit_disc = storage.get_setting("video_flow_notebooklm_disconnected")
                     saved_email = str(storage.get_setting("video_flow_notebooklm_email") or "").strip()
-                    from .config import get_storage_state_path
+                    from .config import get_storage_state_path, has_nonempty_cookies
                     st_file = get_storage_state_path(target_profile)
                     has_cookies = False
                     if st_file and st_file.is_file():
                         try:
-                            raw = json.loads(st_file.read_text(encoding="utf-8"))
-                            has_cookies = bool(isinstance(raw, dict) and raw.get("cookies"))
+                            has_cookies = has_nonempty_cookies(st_file)
                         except Exception:
-                            has_cookies = False
+                            try:
+                                raw = json.loads(st_file.read_text(encoding="utf-8"))
+                                has_cookies = bool(isinstance(raw, dict) and raw.get("cookies"))
+                            except Exception:
+                                has_cookies = False
+                    has_master = False
+                    try:
+                        from .login_flow import master_token_present
+                        has_master = bool(master_token_present(target_profile))
+                    except Exception:
+                        has_master = False
 
                     if explicit_disc in (True, "true", "True", 1, "1"):
                         self._refresh_state = "idle"
@@ -168,9 +177,12 @@ class NotebookLMKeepaliveService:
                             "profile": target_profile,
                             "authenticated": False,
                         }
-                    # Email left in settings is not a session. A new install, or a
-                    # profile whose cookies are gone, must not call the CLI.
-                    if not has_cookies:
+                    # Email left in settings is not a session. A new install, a
+                    # signed-out profile, or a file with no usable cookies and no
+                    # master token must not call the CLI or log a verify failure.
+                    # A master token with empty cookies is still a session: refresh
+                    # re-mints cookies and is what keeps a sign-in alive for weeks.
+                    if not has_cookies and not has_master:
                         self._refresh_state = "idle"
                         return {"ran": False, "reason": "no_saved_session", "profile": target_profile}
             except Exception:
