@@ -4258,6 +4258,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             "/api/video-flow/notebooklm/sync",
             "/api/video-flow/notebooklm/auth/sync-browser",
             "/api/video-flow/notebooklm/auth/import-cookies",
+            "/api/video-flow/notebooklm/auth/cancel",
             "/api/video-flow/notebooklm/auth/disconnect",
             "/api/video-flow/notebooklm/disconnect",
             "/api/video-flow/notebooklm/mcp/refresh",
@@ -4288,6 +4289,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     # it must never create another browser or sign-in attempt.
                     focused = bool(login_flow.bring_login_window_forward(profile=data.get("profile")))
                     self.send_json_response({"success": focused, "focused": focused})
+                elif path == "/api/video-flow/notebooklm/auth/cancel":
+                    result = login_flow.cancel_login(profile=data.get("profile") if isinstance(data, dict) else None)
+                    self.send_json_response({"success": True, **result})
                 elif path in ("/api/video-flow/notebooklm/auth/disconnect", "/api/video-flow/notebooklm/disconnect"):
                     stop_keepalive_daemon()
                     result = login_flow.disconnect_login(profile=data.get("profile"))

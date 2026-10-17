@@ -68,6 +68,9 @@ jobs:
       - name: Run NotebookLM recovery UI checks
         run: node --test tests/test_notebooklm_recovery_ui.cjs
 
+      - name: Run NotebookLM login spawn checks
+        run: pytest tests/test_notebooklm_login_spawn.py -v --timeout=60
+
   macos-build:
     name: macOS Validation & App Packaging
     runs-on: macos-latest
@@ -124,6 +127,9 @@ jobs:
 
       - name: Run NotebookLM recovery UI checks
         run: node --test tests/test_notebooklm_recovery_ui.cjs
+
+      - name: Run NotebookLM login spawn checks
+        run: pytest tests/test_notebooklm_login_spawn.py -v --timeout=60
 
       - name: Capture privacy state after macOS regression tests
         run: screencapture -x out/mac-native-identity/screen-after-regression-tests.png

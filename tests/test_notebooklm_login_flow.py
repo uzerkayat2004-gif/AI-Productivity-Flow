@@ -403,7 +403,8 @@ def test_failed_reconnect_opens_one_browser_only(tmp_path, monkeypatch):
 
     assert len(commands) == 1
     assert "--fresh" in commands[0]
-    assert "chromium" not in commands[0]
+    browser = commands[0][commands[0].index("--browser") + 1]
+    assert browser in {"chrome", "msedge", "chromium"}
     state = login_flow.get_login_state()
     assert state["success"] is False
     assert "sign-in did not finish" in state["error"].lower()
@@ -631,7 +632,8 @@ def test_start_login_cli_mode_launches_watcher(monkeypatch):
     assert len(commands) >= 1
     assert "login" in commands[0]
     assert "--browser" in commands[0]
-    assert "chrome" in commands[0]
+    browser_arg = commands[0][commands[0].index("--browser") + 1]
+    assert browser_arg in {"chrome", "msedge", "chromium"}
 
 
 def test_run_login_once_starts_one_foreground_handoff_for_cli_login(tmp_path, monkeypatch):

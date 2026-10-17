@@ -261,6 +261,7 @@ function setNotebookLMAuthProgress(stage) {
   const showButton = document.getElementById("vf-nlm-show-signin-btn");
   const messages = {
     opening: ["Opening sign-in…", "Opening the Google sign-in window…"],
+    waiting: ["Waiting for Google sign-in…", "Finish in the browser window. Cancel if it does not appear."],
     account: ["Choose your Google account in Chrome", "Choose your Google account in Chrome. If Windows asks for a passkey, approve its prompt."],
     verifying: ["Verifying connection…", "Checking that NotebookLM is ready to use…"],
   };
@@ -279,6 +280,16 @@ function stopNotebookLMAuthProgress() {
   }
   const showButton = document.getElementById("vf-nlm-show-signin-btn");
   if (showButton) showButton.classList.add("hidden");
+  const cancelBtn = document.getElementById("vf-nlm-cancel-login-btn");
+  if (cancelBtn) cancelBtn.classList.add("hidden");
+}
+
+function notebookLMSignInFailureMessage(login, fallback) {
+  if (login && login.cancelled) return "Sign-in cancelled.";
+  const reason = String((login && (login.error || login.note)) || "").trim();
+  if (reason) return reason;
+  if (login && login.window_opened === false) return "The Google sign-in window did not open.";
+  return fallback;
 }
 
 async function focusNotebookLMAuthWindow() {
@@ -633,6 +644,7 @@ async function syncNotebookLMBrowser() {
 }
 
 async function startNotebookLMAuth(switchAccount = false) {
+  if (vfNlmAuthInProgress) return;
   vfNlmAuthRequestSequence += 1;
   clearNlmRecoveryPollTimer();
   if (typeof cancelAudioSummaryNotebookLMRecoveryPoll === "function") cancelAudioSummaryNotebookLMRecoveryPoll();
@@ -680,7 +692,9 @@ async function startNotebookLMAuth(switchAccount = false) {
       throw new Error("Could not open the Chrome sign-in window.");
     }
 
-    setNotebookLMAuthProgress("account");
+    setNotebookLMAuthProgress("waiting");
+    const cancelBtn = document.getElementById("vf-nlm-cancel-login-btn");
+    if (cancelBtn) cancelBtn.classList.remove("hidden");
     const showButton = document.getElementById("vf-nlm-show-signin-btn");
     if (showButton) {
       showButton.classList.add("hidden");
@@ -701,7 +715,7 @@ async function startNotebookLMAuth(switchAccount = false) {
         if (loginBtn) loginBtn.disabled = false;
         if (disconnectBtn) disconnectBtn.disabled = false;
         await checkNotebookLMAuth(false);
-        vfToast("Sign-in did not finish. In the Chrome sign-in window, choose your Google account, then click Reconnect to try again.", true);
+        vfToast(notebookLMSignInFailureMessage(null, "Sign-in did not finish. In the browser window, choose your Google account, then try again."), true);
         return;
       }
 
@@ -719,7 +733,7 @@ async function startNotebookLMAuth(switchAccount = false) {
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
           await checkNotebookLMAuth(false);
-          vfToast("We couldn’t finish switching accounts. Choose an account in the Chrome sign-in window, then try again.", true);
+          vfToast(notebookLMSignInFailureMessage(login, "We couldn’t finish switching accounts. Choose an account in the browser window, then try again."), true);
           return;
         }
 
@@ -730,7 +744,7 @@ async function startNotebookLMAuth(switchAccount = false) {
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
           await checkNotebookLMAuth(false);
-          vfToast("Sign-in did not finish. Choose your Google account in the Chrome sign-in window, then click Reconnect to try again.", true);
+          vfToast(notebookLMSignInFailureMessage(login, "Sign-in did not finish. Choose your Google account in the browser window, then try again."), true);
           return;
         }
 
@@ -805,6 +819,30 @@ async function startNotebookLMAuth(switchAccount = false) {
     vfToast("Could not open the Chrome sign-in window. Try Reconnect again; if Chrome opens, choose your Google account there.", true);
     checkNotebookLMAuth(false);
   }
+}
+
+async function cancelNotebookLMAuth() {
+  const cancelBtn = document.getElementById("vf-nlm-cancel-login-btn");
+  if (cancelBtn) cancelBtn.disabled = true;
+  clearNlmAuthPollTimer();
+  try {
+    const activeProfile = (vfNlmAuthStatus && vfNlmAuthStatus.profile) || "video-flow-experiment";
+    await safeFetchJson("/api/video-flow/notebooklm/auth/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: activeProfile }),
+    });
+  } catch (_) {
+    // The local waiting state still ends; the next status check shows the truth.
+  }
+  stopNotebookLMAuthProgress();
+  const loginBtn = document.getElementById("vf-nlm-login-btn");
+  const disconnectBtn = document.getElementById("vf-nlm-disconnect-btn");
+  if (loginBtn) loginBtn.disabled = false;
+  if (disconnectBtn) disconnectBtn.disabled = false;
+  if (cancelBtn) cancelBtn.disabled = false;
+  vfToast("Sign-in cancelled.");
+  checkNotebookLMAuth(false);
 }
 
 async function disconnectNotebookLM() {
