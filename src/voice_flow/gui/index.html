@@ -40,7 +40,7 @@
   <link rel="stylesheet" href="usability.css?v=20260912-dialog-10">
   <link rel="stylesheet" href="studio.css?v=20261006-dictionary-auto">
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
-  <link rel="stylesheet" href="workspace-ui.css?v=20261005-audiopolish">
+  <link rel="stylesheet" href="workspace-ui.css?v=20261017-notice">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
   <link rel="stylesheet" href="onboarding-hero.css?v=20261017-onboarding-v103">
 
@@ -681,6 +681,13 @@
 <p class="flow-page-subtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">Choose how your speech becomes text.</p>
 </div>
 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+<div class="apf-notice-anchor">
+<button type="button" class="apf-notice-bell" id="vf-notice-bell" hidden aria-label="Notifications" aria-expanded="false" onclick="toggleWhisperFallbackPopover(event)">
+<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+<span class="apf-notice-bell-dot" id="vf-notice-bell-dot" hidden></span>
+</button>
+<div id="vf-notice-popover" class="apf-notice-popover" hidden role="dialog" aria-label="Voice Flow notification"></div>
+</div>
 <div class="pill-chip" style="display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.35); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color);">
 <span style="font-size: 12px; font-weight: 700; color: var(--text-main);">Enabled</span>
 <label class="toggle-switch">
@@ -691,12 +698,15 @@
 <span hidden="" id="exec-policy-status-badge" style="display: none;">● Voice Flow Active</span>
 </div>
 </div>
-<div id="vf-first-run-models" class="vf-first-run-models hidden" hidden>
-  <p id="vf-first-run-models-copy">Whisper is a temporary fallback. Download Nemotron for clearer dictation, and the polish model so cleanup runs on your computer.</p>
-  <div class="vf-first-run-actions">
-    <button type="button" class="action-btn" id="btn-download-nemotron" onclick="startRecommendedModelDownload('nvidia/nemotron-speech-streaming-en-0.6b')">Download Nemotron speech</button>
-    <button type="button" class="action-btn" id="btn-download-s1" onclick="startRecommendedModelDownload('superwhisper/s1-mini-q4_k_m')">Download polish model</button>
+<div id="vf-first-run-models" class="apf-notice hidden" hidden data-notice-id="whisper-fallback">
+  <div class="apf-notice-body">
+    <p id="vf-first-run-models-copy">Whisper is a temporary fallback. Download Nemotron for clearer dictation, and the polish model so cleanup runs on your computer.</p>
+    <div class="apf-notice-actions vf-first-run-actions">
+      <button type="button" class="apf-notice-primary" id="btn-download-nemotron" onclick="startRecommendedModelDownload('nvidia/nemotron-speech-streaming-en-0.6b')">Download Nemotron (700 MB)</button>
+      <button type="button" class="apf-notice-secondary" id="btn-download-s1" onclick="startRecommendedModelDownload('superwhisper/s1-mini-q4_k_m')">Download polish model (484 MB)</button>
+    </div>
   </div>
+  <button type="button" class="apf-notice-close" id="vf-first-run-dismiss" aria-label="Dismiss notification" onclick="dismissApfNotice('whisper-fallback')">&times;</button>
 </div>
 <!-- Two primary settings cards (usability redesign: .flow-cards). -->
 <div class="flow-cards" id="vf-flow-cards-panel">
@@ -704,6 +714,7 @@
 <span aria-hidden="true" class="flow-feature-icon"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewbox="0 0 24 24"><rect height="12" rx="3" width="6" x="9" y="2"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"></path></svg></span>
 <h2 class="flow-card-title">Speech recognition</h2>
 <p class="flow-card-sub">Turns your speech into text.</p>
+<button type="button" class="apf-status-chip" id="vf-whisper-fallback-chip" hidden onclick="reopenWhisperFallbackNotice()">Whisper fallback · Download Nemotron</button>
 </div><div class="flow-mode-controls">
 
 <div class="flow-value-row">
@@ -4259,7 +4270,7 @@
   <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
 
   <script src="provider-logos.js?v=20260913-icons-all"></script>
-  <script src="app.js?v=20261017-onboarding-v103"></script>
+  <script src="app.js?v=20261017-notice"></script>
   <script src="video-flow.js?v=20261006_nlm_recovery"></script>
   <script src="splash.js?v=20260913-cinematic-studio"></script>
   <script src="onboarding-hero.js?v=20261017-onboarding-v103"></script>

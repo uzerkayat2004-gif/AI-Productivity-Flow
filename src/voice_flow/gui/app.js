@@ -10603,7 +10603,7 @@ function applyFeatureDisabledUI() {
     let banner = page.querySelector(".feature-disabled-banner");
     if (b.active && !banner) {
       banner = document.createElement("div");
-      banner.className = "feature-disabled-banner";
+      banner.className = "apf-notice feature-disabled-banner";
       banner.textContent = b.label;
       page.insertBefore(banner, page.firstChild);
     } else if (!b.active && banner) {
@@ -11846,6 +11846,90 @@ async function loadVoiceDownloadableModels() {
 const VF_NEMOTRON_MODEL_ID = "nvidia/nemotron-speech-streaming-en-0.6b";
 const VF_S1_MODEL_ID = "superwhisper/s1-mini-q4_k_m";
 
+const APF_NOTICE_STORAGE_KEY = "apf.dismissedNotices";
+const APF_NOTICE_SETTING_KEY = "apf_dismissed_notices";
+
+function apfNoticeStore() {
+  try {
+    const raw = localStorage.getItem(APF_NOTICE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function apfNoticeFingerprint(missingIds) {
+  return ["whisper-fallback-v1", ...(missingIds || [])].join("|");
+}
+
+function apfNoticeIsDismissed(id, fingerprint) {
+  return apfNoticeStore()[id] === fingerprint;
+}
+
+function persistApfNoticeDismissal(store) {
+  try { localStorage.setItem(APF_NOTICE_STORAGE_KEY, JSON.stringify(store)); } catch (_) {}
+  fetch("/api/settings/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: APF_NOTICE_SETTING_KEY, value: store }),
+  }).catch(() => {});
+}
+
+function dismissApfNotice(id) {
+  const missing = window.__apfNoticeMissingIds || [];
+  const store = apfNoticeStore();
+  store[id || "whisper-fallback"] = apfNoticeFingerprint(missing);
+  persistApfNoticeDismissal(store);
+  const pop = document.getElementById("vf-notice-popover");
+  if (pop) pop.hidden = true;
+  refreshFirstRunModelBanner();
+}
+
+function reopenWhisperFallbackNotice() {
+  const store = apfNoticeStore();
+  delete store["whisper-fallback"];
+  persistApfNoticeDismissal(store);
+  const pop = document.getElementById("vf-notice-popover");
+  if (pop) pop.hidden = true;
+  refreshFirstRunModelBanner();
+}
+
+function toggleWhisperFallbackPopover(event) {
+  if (event) event.stopPropagation();
+  const pop = document.getElementById("vf-notice-popover");
+  const bell = document.getElementById("vf-notice-bell");
+  if (!pop) return;
+  const open = pop.hidden;
+  pop.hidden = !open;
+  if (bell) bell.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open && !pop.childElementCount) {
+    const source = document.getElementById("vf-first-run-models");
+    if (source) {
+      const clone = source.cloneNode(true);
+      clone.hidden = false;
+      clone.classList.remove("hidden");
+      clone.id = "vf-first-run-models-popover";
+      pop.appendChild(clone);
+    }
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const pop = document.getElementById("vf-notice-popover");
+  const bell = document.getElementById("vf-notice-bell");
+  if (!pop || pop.hidden) return;
+  if (bell && bell.contains(event.target)) return;
+  if (pop.contains(event.target)) return;
+  pop.hidden = true;
+  if (bell) bell.setAttribute("aria-expanded", "false");
+});
+
+function modelSizeLabel(model, fallback) {
+  if (model && model.size_display) return model.size_display;
+  return fallback;
+}
+
 async function refreshFirstRunModelBanner() {
   const box = document.getElementById("vf-first-run-models");
   if (!box) return;
@@ -11862,25 +11946,43 @@ async function refreshFirstRunModelBanner() {
   };
   const nemoNeeded = needs(VF_NEMOTRON_MODEL_ID);
   const s1Needed = needs(VF_S1_MODEL_ID);
+  const nemoModel = (vfDownloadableModels || []).find(item => item.id === VF_NEMOTRON_MODEL_ID);
+  const s1Model = (vfDownloadableModels || []).find(item => item.id === VF_S1_MODEL_ID);
   const nemoBtn = document.getElementById("btn-download-nemotron");
   const s1Btn = document.getElementById("btn-download-s1");
   if (nemoBtn) {
-    const model = (vfDownloadableModels || []).find(item => item.id === VF_NEMOTRON_MODEL_ID);
-    nemoBtn.classList.toggle("hidden", !nemoNeeded);
-    nemoBtn.textContent = model && model.status === "downloading"
-      ? `Downloading Nemotron… ${Math.round((model.progress || 0) * 100)}%`
-      : "Download Nemotron speech";
+    nemoBtn.hidden = !nemoNeeded;
+    nemoBtn.disabled = false;
+    nemoBtn.setAttribute("aria-disabled", "false");
+    nemoBtn.textContent = nemoModel && nemoModel.status === "downloading"
+      ? `Downloading Nemotron… ${Math.round(Number(nemoModel.progress) || 0)}%`
+      : `Download Nemotron (${modelSizeLabel(nemoModel, "700 MB")})`;
   }
   if (s1Btn) {
-    const model = (vfDownloadableModels || []).find(item => item.id === VF_S1_MODEL_ID);
-    s1Btn.classList.toggle("hidden", !s1Needed);
-    s1Btn.textContent = model && model.status === "downloading"
-      ? `Downloading polish model… ${Math.round((model.progress || 0) * 100)}%`
-      : "Download polish model";
+    s1Btn.hidden = !s1Needed;
+    s1Btn.disabled = false;
+    s1Btn.setAttribute("aria-disabled", "false");
+    s1Btn.textContent = s1Model && s1Model.status === "downloading"
+      ? `Downloading polish model… ${Math.round(Number(s1Model.progress) || 0)}%`
+      : `Download polish model (${modelSizeLabel(s1Model, "484 MB")})`;
   }
-  const show = nemoNeeded || s1Needed;
-  box.classList.toggle("hidden", !show);
-  box.hidden = !show;
+  const missing = [];
+  if (nemoNeeded) missing.push(VF_NEMOTRON_MODEL_ID);
+  if (s1Needed) missing.push(VF_S1_MODEL_ID);
+  window.__apfNoticeMissingIds = missing;
+  const show = missing.length > 0;
+  const dismissed = show && apfNoticeIsDismissed("whisper-fallback", apfNoticeFingerprint(missing));
+  box.classList.toggle("hidden", !show || dismissed);
+  box.hidden = !show || dismissed;
+  const chip = document.getElementById("vf-whisper-fallback-chip");
+  const bell = document.getElementById("vf-notice-bell");
+  const dot = document.getElementById("vf-notice-bell-dot");
+  if (chip) {
+    chip.hidden = !(show && dismissed);
+    chip.textContent = nemoNeeded ? "Whisper fallback · Download Nemotron" : "Download polish model";
+  }
+  if (bell) bell.hidden = !(show && dismissed);
+  if (dot) dot.hidden = !(show && dismissed);
 }
 
 async function startRecommendedModelDownload(modelId) {
@@ -11888,10 +11990,23 @@ async function startRecommendedModelDownload(modelId) {
   refreshFirstRunModelBanner();
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => { refreshFirstRunModelBanner(); });
-} else {
+async function hydrateApfNotices() {
+  try {
+    if (!localStorage.getItem(APF_NOTICE_STORAGE_KEY)) {
+      const res = await fetch("/api/settings/get?key=" + encodeURIComponent(APF_NOTICE_SETTING_KEY), { cache: "no-store" });
+      const data = await res.json();
+      if (data && data.success && data.value && typeof data.value === "object") {
+        localStorage.setItem(APF_NOTICE_STORAGE_KEY, JSON.stringify(data.value));
+      }
+    }
+  } catch (_) {}
   refreshFirstRunModelBanner();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => { hydrateApfNotices(); });
+} else {
+  hydrateApfNotices();
 }
 
 let vfDownloadableModelsFilter = "all";
@@ -11997,6 +12112,7 @@ function checkDownloadPolling() {
             const prevDownloaded = new Set(vfDownloadableModels.filter(m => m.status === "downloaded").map(m => m.id));
             vfDownloadableModels = data.models;
             renderVoiceDownloadableModels();
+            if (typeof refreshFirstRunModelBanner === "function") refreshFirstRunModelBanner();
             data.models.forEach(m => {
               if (m.status === "downloaded" && !prevDownloaded.has(m.id)) {
                 const isPolish = m.category === "voice_polishing" || String(m.tag || "").toLowerCase().includes("polish");

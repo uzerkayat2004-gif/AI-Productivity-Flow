@@ -514,7 +514,10 @@ class StreamTranscriber:
                             import numpy as _np  # cheap local re-check
                             peak = float(_np.max(_np.abs(aud))) if aud.size > 0 else 0.0
                             rms = float(_np.sqrt(_np.mean(aud**2))) if aud.size > 0 else 0.0
-                            if rms < 0.035 or peak < 0.08:
+                            # Quiet tails (the 0.07–0.09 far-mic chunks in the
+                            # hallucination log) are silence, not lost words.
+                            # Marking them failed discarded the other chunks.
+                            if rms < 0.04 or peak < 0.10:
                                 inaudible = True
                         except Exception:
                             inaudible = False
