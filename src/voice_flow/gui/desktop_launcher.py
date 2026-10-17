@@ -913,7 +913,9 @@ def _focus_existing_window() -> bool:
 _LAUNCHER_MUTEX_NAME = "Local\\VoiceFlowDesktopLauncherMutex_v1"
 _LAUNCHER_MUTEX_HANDLE = None
 
-_DUPLICATE_LAUNCH_WAIT_SECONDS = 45.0
+# Long enough for the early splash to appear, short enough that a second
+# click is not stuck. Timeout still refuses to open another window.
+_DUPLICATE_LAUNCH_WAIT_SECONDS = 5.0
 _DUPLICATE_LAUNCH_POLL_INTERVAL = 0.1
 
 
