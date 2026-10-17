@@ -197,3 +197,18 @@ def test_s1_warm_lease_covers_active_capture_and_releases_when_session_ends(monk
         ("warm", {"timeout_seconds": 5.0}),
         ("release", s1_engine.S1_WARM_IDLE_SECONDS),
     ]
+
+
+@pytest.mark.parametrize(
+    "source,candidate",
+    [
+        ("hello team I can attend tomorrow thanks Alex", "Hello team,\n\nI can attend tomorrow.\n\nThanks,\nAlex"),
+        ("tell Priya I can attend tomorrow thanks Alex", "Hi Priya,\n\nI can attend tomorrow.\n\nThanks,\nAlex"),
+    ],
+)
+def test_email_guard_only_rejects_a_replaced_dictated_greeting(source, candidate):
+    from voice_flow.polisher import _candidate_preserves_content
+    assert _candidate_preserves_content(source, candidate, task="rewrite", command_format="email")
+    swapped = candidate.replace("Hello", "Hey", 1) if candidate.startswith("Hello") else None
+    if swapped:
+        assert not _candidate_preserves_content(source, swapped, task="rewrite", command_format="email")

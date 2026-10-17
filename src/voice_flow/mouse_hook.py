@@ -1,5 +1,9 @@
 """Native Win32 Low-Level Mouse Hook (WH_MOUSE_LL) with Auto-Rehook Watchdog.
 
+On macOS the same class runs a listen-only Quartz event tap (via pynput's
+Darwin backend, left button only) that feeds the identical drag-selection
+pipeline, so selecting text shows the Audio Flow widget on both platforms.
+
 Features:
 - 64-bit safe Win32 Low-Level Mouse Hook running on a dedicated message-pump thread.
 - Minimal hook procedure that queues work and returns immediately.
@@ -17,11 +21,13 @@ import ctypes
 from voice_flow.platform.wincompat import wintypes, windll, WINFUNCTYPE, IS_WINDOWS
 import logging
 import queue
+import sys
 import threading
 import time
 from typing import Any, Callable
 
 log = logging.getLogger(__name__)
+IS_MACOS = sys.platform == "darwin"
 _selection_context = threading.local()
 
 
@@ -98,6 +104,76 @@ def _get_cursor_pos() -> tuple[int, int] | None:
     return None
 
 
+# CGEventType values macOS sends to a tap's callback when it switched the tap
+# off (callback too slow / secure input). pynput ignores them, so the tap would
+# stay off for the rest of the session.
+_kCGEventTapDisabledByTimeout = 0xFFFFFFFE
+_kCGEventTapDisabledByUserInput = 0xFFFFFFFF
+
+
+def _create_macos_mouse_listener(on_click: Callable[..., None]) -> Any:
+    """Listen-only Quartz tap for left-button down/up (no move/scroll traffic).
+
+    The pynput listener is extended so the tap can be supervised: it keeps the
+    CGEventTap it created (``_apf_tap``), records whether creating it failed
+    (``_apf_tap_failed``), re-enables the tap when macOS disables it, and logs
+    when its run loop ends."""
+    from pynput import mouse as _mouse
+
+    listener_type = _mouse.Listener
+    if getattr(listener_type, "__module__", "") == "pynput.mouse._darwin":
+        import Quartz
+
+        class _LeftButtonListener(listener_type):  # type: ignore[misc, valid-type]
+            _EVENTS = Quartz.CGEventMaskBit(Quartz.kCGEventLeftMouseDown) | Quartz.CGEventMaskBit(
+                Quartz.kCGEventLeftMouseUp
+            )
+            _apf_tap: Any = None
+            _apf_tap_failed = False
+
+            def _create_event_tap(self):  # type: ignore[override]
+                tap = super()._create_event_tap()
+                self._apf_tap = tap
+                self._apf_tap_failed = tap is None
+                if tap is None:
+                    log.warning("[MOUSE HOOK] macOS refused the mouse event tap (CGEventTapCreate returned NULL).")
+                return tap
+
+            def _handler(self, proxy, event_type, event, refcon):  # type: ignore[override]
+                if event_type in (_kCGEventTapDisabledByTimeout, _kCGEventTapDisabledByUserInput):
+                    tap = self._apf_tap
+                    if tap is not None:
+                        try:
+                            Quartz.CGEventTapEnable(tap, True)
+                        except Exception:
+                            pass
+                    log.warning("[MOUSE HOOK] macOS disabled the mouse event tap (type 0x%X); re-enabled.", int(event_type) & 0xFFFFFFFF)
+                    return event
+                return super()._handler(proxy, event_type, event, refcon)
+
+            def _run(self):  # type: ignore[override]
+                try:
+                    super()._run()
+                finally:
+                    if getattr(self, "running", False):
+                        log.warning("[MOUSE HOOK] macOS mouse event tap run loop ended unexpectedly.")
+
+        listener_type = _LeftButtonListener
+    return listener_type(on_click=on_click)
+
+
+def _macos_tap_enabled(tap: Any) -> bool | None:
+    """CGEventTapIsEnabled(tap), or None when it cannot be asked."""
+    if tap is None:
+        return None
+    try:
+        import Quartz
+
+        return bool(Quartz.CGEventTapIsEnabled(tap))
+    except Exception:
+        return None
+
+
 class Win32MouseHook:
     """Robust Win32 Low-Level Mouse Hook with auto-recovery and thread safety."""
 
@@ -160,6 +236,9 @@ class Win32MouseHook:
         # Watchdog
         self._watchdog_thread: threading.Thread | None = None
 
+        # macOS: Quartz listener feeding the same selection pipeline.
+        self._mac_listener: Any = None
+
     def set_enabled(self, enabled: bool) -> None:
         """Dynamically enable or disable middle-click dictation interception."""
         with self._lock:
@@ -172,6 +251,9 @@ class Win32MouseHook:
 
     def start(self) -> None:
         """Start the Win32 mouse hook thread and watchdog."""
+        if IS_MACOS:
+            self._start_macos()
+            return
         if not IS_WINDOWS:
             log.info("[MOUSE HOOK] Non-Windows platform; mouse hook inactive.")
             return
@@ -205,6 +287,12 @@ class Win32MouseHook:
         self._selection_epoch += 1
         if not IS_WINDOWS:
             self._stop_event.set()
+            listener, self._mac_listener = self._mac_listener, None
+            if listener is not None:
+                try:
+                    listener.stop()
+                except Exception:
+                    pass
             self._stop_workers()
             return
         self._stop_event.set()
@@ -241,10 +329,150 @@ class Win32MouseHook:
 
     def is_healthy(self) -> bool:
         """Check whether the mouse hook is currently active and healthy."""
+        if IS_MACOS:
+            listener = self._mac_listener
+            return listener is not None and bool(getattr(listener, "is_alive", lambda: False)())
         if not IS_WINDOWS:
             return True
         with self._lock:
             return self._is_hooked and self._hook_handle is not None and self._hook_thread is not None and self._hook_thread.is_alive()
+
+    # -- macOS (Quartz) selection listener --
+
+    def _start_macos(self) -> None:
+        """Start the listen-only Quartz mouse tap used for Audio Flow selection."""
+        with self._lock:
+            listener = self._mac_listener
+            if listener is not None and getattr(listener, "is_alive", lambda: False)():
+                return
+            self._stop_event.clear()
+            self._start_workers_locked()
+            try:
+                listener = _create_macos_mouse_listener(self._on_macos_click)
+                listener.daemon = True
+                listener.start()
+            except Exception as exc:
+                self._mac_listener = None
+                log.warning("[MOUSE HOOK] macOS mouse listener unavailable; Audio Flow selection widget disabled: %s", exc)
+                return
+            self._mac_listener = listener
+            self._is_hooked = True
+            self._mac_listener_restarts = getattr(self, "_mac_listener_restarts", 0)
+            if not self._watchdog_thread or not self._watchdog_thread.is_alive():
+                self._watchdog_thread = threading.Thread(
+                    target=self._macos_watchdog_loop,
+                    name="MacMouseTapWatchdog",
+                    daemon=True,
+                )
+                self._watchdog_thread.start()
+        log.info("[MOUSE HOOK] macOS Quartz mouse listener started (text selection for Audio Flow).")
+
+    # Seconds between checks of the macOS selection tap.
+    MAC_WATCHDOG_INTERVAL = 2.0
+    # Restarts of a dead tap made right away; after that one try per
+    # MAC_SLOW_RESTART_SECONDS (a tap refused for lack of permission).
+    MAC_FAST_RESTARTS = 5
+    MAC_SLOW_RESTART_SECONDS = 30.0
+
+    def _macos_watchdog_tick(self) -> str:
+        """One supervision pass over the macOS selection tap.
+
+        The Audio Flow widget depends on one listen-only Quartz tap. macOS can
+        switch a tap off, and its thread can end (tap refused at launch, run
+        loop finished); either way selecting text silently stops showing the
+        widget for the rest of the session (seen on macOS 14 and 15 CI, Oct
+        2026). Restart a dead listener; re-enable a disabled tap.
+
+        Returns what was done: "ok", "reenabled", "restarted", "waiting",
+        "stopped"."""
+        if self._stop_event.is_set():
+            return "stopped"
+        listener = self._mac_listener
+        alive = listener is not None and bool(getattr(listener, "is_alive", lambda: False)())
+        if alive:
+            tap = getattr(listener, "_apf_tap", None)
+            if _macos_tap_enabled(tap) is False:
+                try:
+                    import Quartz
+
+                    Quartz.CGEventTapEnable(tap, True)
+                except Exception as exc:
+                    log.warning("[MOUSE HOOK] could not re-enable the macOS mouse tap: %s", exc)
+                    return "ok"
+                log.warning("[MOUSE HOOK] macOS mouse tap was disabled; re-enabled by the watchdog.")
+                return "reenabled"
+            return "ok"
+        restarts = getattr(self, "_mac_listener_restarts", 0)
+        now = time.monotonic()
+        if restarts >= self.MAC_FAST_RESTARTS and now < getattr(self, "_mac_next_restart_at", 0.0):
+            return "waiting"  # e.g. no permission yet: retry slowly, never give up
+        self._mac_listener_restarts = restarts + 1
+        self._mac_next_restart_at = now + self.MAC_SLOW_RESTART_SECONDS
+        if restarts < self.MAC_FAST_RESTARTS or restarts % 10 == 0:
+            log.warning(
+                "[MOUSE HOOK] macOS mouse listener is not running (tap refused=%s); restarting it (%d).",
+                bool(getattr(listener, "_apf_tap_failed", False)), restarts + 1,
+            )
+        with self._lock:
+            if self._stop_event.is_set():
+                return "stopped"
+            if self._mac_listener is listener:
+                self._mac_listener = None
+        if listener is not None:
+            try:
+                listener.stop()
+            except Exception:
+                pass
+        self._start_macos()
+        return "restarted"
+
+    def _macos_watchdog_loop(self) -> None:
+        while not self._stop_event.wait(self.MAC_WATCHDOG_INTERVAL):
+            try:
+                if self._macos_watchdog_tick() == "stopped":
+                    return
+            except Exception:
+                log.debug("[MOUSE HOOK] macOS watchdog tick failed", exc_info=True)
+
+    def _on_macos_click(self, x: float, y: float, button: Any, pressed: bool, injected: bool = False) -> None:
+        """Quartz tap callback: mirror the Win32 left-button drag tracking.
+
+        Runs on the tap thread, so it only records coordinates and queues work
+        (never blocks); the selection worker does the Accessibility read."""
+        try:
+            if getattr(button, "name", None) != "left":
+                return
+            self._last_event_time = time.time()
+            x, y = int(round(x)), int(round(y))
+            if pressed:
+                self._is_left_down = True
+                self._last_left_down_x = x
+                self._last_left_down_y = y
+                return
+            if not self._on_mouse_release:
+                return
+            if self._is_left_down:
+                dx = x - self._last_left_down_x
+                dy = y - self._last_left_down_y
+                drag_dist = (dx * dx + dy * dy) ** 0.5
+                start_x = self._last_left_down_x
+                start_y = self._last_left_down_y
+                self._is_left_down = False
+            else:
+                drag_dist = 0.0
+                start_x = x
+                start_y = y
+            self._selection_epoch += 1
+            selection_epoch = self._selection_epoch
+            if drag_dist < 16.0:
+                self._dispatch_action(self._safe_on_mouse_release, x, y, drag_dist, start_x, start_y, selection_epoch)
+            else:
+                log.info("[MOUSE HOOK] macOS drag release (%.0f px) queued for selection capture.", drag_dist)
+                self._enqueue_selection(self._safe_on_mouse_release, x, y, drag_dist, start_x, start_y, selection_epoch)
+        except Exception:
+            self._callback_error_count += 1
+            if self._callback_error_count <= 3:
+                log.warning("[MOUSE HOOK] macOS click callback failed", exc_info=True)
 
     # -- Internal Hook Lifecycle --
 

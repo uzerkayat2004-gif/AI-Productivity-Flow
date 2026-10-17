@@ -48,7 +48,7 @@ from voice_flow.style_engine import get_window_title_for_hwnd, style_engine
 from voice_flow.text_processing import apply_spoken_punctuation, cleanup_text, collapse_stutter_fragments, format_dictated_email, format_email_command_fallback, smart_format, split_press_enter
 from voice_flow.stream_stt import StreamTranscriber
 from voice_flow.transcriber import Transcriber
-from voice_flow.voice_commands import detect_voice_command
+from voice_flow.voice_commands import detect_voice_command, remove_activation_phrases
 from voice_flow.activation import DEFAULT_ACTIVATION, activation_from_settings
 from voice_flow.recovery import AudioArchive, AUDIO_RETENTION_SECONDS, MIN_RETRY_SECONDS
 
@@ -146,6 +146,8 @@ NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 # hotkey press (~1-2.5s on low-power CPUs) made the first words of each
 # dictation decode while the recognizer was still cold.
 NEMOTRON_CLOUD_POLISH_WARM_SECONDS = 600.0
+# macOS keeps the local speech model warm this long after a dictation.
+MAC_SPEECH_WARM_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 # Re-decode short recordings offline after release: the full-context pass is
 # more accurate than the cache-aware streaming result and merges stutter
 # fragments that streaming finalized separately ("Q? Q. Quest? Question.").
@@ -418,6 +420,10 @@ def get_cached_setting(key: str, default: Any = None, ttl: float = 5.0) -> Any:
     return val
 
 
+# Polish outcomes that mean a spoken command was NOT carried out.
+_COMMAND_NOT_PERFORMED = frozenset({"local", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
+
+
 def _polish_outcome_label(outcome: str) -> str:
     """Describe delivery without claiming a failed AI pass was successful."""
     return {
@@ -432,7 +438,7 @@ def _polish_outcome_label(outcome: str) -> str:
         "timeout": "AI timed out — basic cleanup applied",
         "provider_failure": "AI unavailable — basic cleanup applied",
         "fidelity_reject": "AI output rejected — basic cleanup applied",
-        "command_unfulfilled": "Voice command could not be completed — basic cleanup applied",
+        "command_unfulfilled": "Voice command not done — your full text was kept",
     }.get(str(outcome or ""), "AI unavailable — basic cleanup applied")
 
 
@@ -580,6 +586,25 @@ def _dictionary_bias_terms() -> list[str]:
         return []
 
 
+_PASTE_FAILED_MESSAGE = "Could not paste transcript into the original target; retrieve the text from history."
+
+
+def _paste_failure_details() -> tuple[str, str]:
+    """(history error message, insertion_status) for the last failed paste.
+
+    On macOS a paste without Accessibility leaves the text on the clipboard;
+    report exactly that instead of a generic failure (or a fake success)."""
+    if sys.platform == "darwin":
+        try:
+            from voice_flow.injector import PASTE_PERMISSION_MESSAGE, last_injection_outcome
+
+            if last_injection_outcome() == "copied_needs_permission":
+                return PASTE_PERMISSION_MESSAGE, "copied_to_clipboard"
+        except Exception:
+            pass
+    return _PASTE_FAILED_MESSAGE, "failed"
+
+
 class VoiceFlowApp:
     """Core Coordinator for Voice Flow Dictation System."""
 
@@ -680,7 +705,9 @@ class VoiceFlowApp:
             on_cancel=self._on_dictation_cancel,
             on_paste_last=self._paste_last_transcript,
             on_copy_last=self._copy_last_transcript,
-            on_audio_flow=self._process_audio_flow_pipeline,
+            # The Audio Flow hotkey (macOS: Ctrl+Option+L) reads the current
+            # selection with the user's default mode (Read unless changed).
+            on_audio_flow=lambda: self._process_audio_flow_pipeline(mode="default"),
             on_mouse_release=self._on_mouse_release,
             has_pending_deferred_paste=lambda: self.has_pending_deferred_paste,
         )
@@ -1033,6 +1060,12 @@ class VoiceFlowApp:
                         release_after_idle(NEMOTRON_CLOUD_POLISH_WARM_SECONDS)
                 elif keep_nemotron_warm and callable(release_after_idle):
                     release_after_idle(NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
+                elif sys.platform == "darwin" and callable(release_after_idle):
+                    # macOS: keep the speech model (bundled Whisper base.en)
+                    # resident between dictations instead of reloading it from
+                    # disk every time (seen: one load per dictation, Oct 2026).
+                    # Idle cleanup still frees it after MAC_SPEECH_WARM_SECONDS.
+                    release_after_idle(MAC_SPEECH_WARM_SECONDS)
                 else:
                     release()
             except Exception:
@@ -1732,6 +1765,8 @@ class VoiceFlowApp:
             self._overlay_call("show_done", f"Pasted: {text_to_paste[:60]}")
         else:
             log.error("Could not paste last transcript; it remains on the clipboard.")
+            if _paste_failure_details()[1] == "copied_to_clipboard":
+                self._overlay_call("show_error", "Copied — press Cmd+V (allow Accessibility to auto-paste)")
         return success
 
     def _history_update(self, record_id: int | None, **fields) -> None:
@@ -1819,6 +1854,53 @@ class VoiceFlowApp:
                 log.warning("Could not persist dictation history: %s", exc)
 
         threading.Thread(target=_write, args=(), kwargs={}, daemon=True).start()
+
+    def _command_fallback_text(
+        self,
+        source: str,
+        session: Any,
+        press_enter_enabled: bool,
+        deadline: float | None = None,
+        dictionary_trace: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Deterministic cleanup of the dictation when its command could not run.
+
+        Never calls a model: the selected one just failed (or none exists),
+        and a second attempt would only add latency.
+        """
+        level = getattr(session, "cleanup_level", None) or (
+            session.get("cleanup_level") if isinstance(session, dict) else "cleanup_light"
+        ) or "cleanup_light"
+        style = getattr(session, "style_id", None) or (
+            session.get("style_id") if isinstance(session, dict) else "smart_clean"
+        ) or "smart_clean"
+        try:
+            text = apply_spoken_punctuation(split_press_enter(source, press_enter_enabled).text)
+            cleaned = _call_with_optional_deadline(
+                polisher.polish,
+                text,
+                deadline=deadline,
+                model_ref="local/deterministic",
+                style_instruction=style,
+                cleanup_level=level,
+                force_ai=False,
+                task="cleanup",
+                style_id=str(style),
+                dictionary_trace=dictionary_trace,
+            )
+        except Exception:
+            log.debug("[COMMAND] fallback cleanup failed; using the wake-stripped dictation", exc_info=True)
+            cleaned = source
+        cleaned = str(cleaned or "").strip() or str(source or "").strip()
+        guard = getattr(dictionary_engine, "guard_polished_output", None)
+        if guard is not None and cleaned:
+            try:
+                guarded = guard(source, cleaned)
+                if isinstance(guarded, str) and guarded:
+                    cleaned = guarded
+            except Exception:
+                log.debug("[DICTIONARY] fallback guard failed", exc_info=True)
+        return cleaned
 
     def _finalize_text(self, raw_action_text: str, *args: Any, **kwargs: Any) -> str:
         """Finalize on every route, then guard the user's dictionary words.
@@ -2326,6 +2408,10 @@ class VoiceFlowApp:
                     log.debug("[STT] stutter collapse skipped", exc_info=True)
                 command = None
                 command_content = raw_transcript
+                # The user's own words minus the wake phrase. Pasted instead
+                # of the command's content fragment when nothing could
+                # perform a spoken command (see _COMMAND_NOT_PERFORMED).
+                command_fallback_source: str | None = None
                 if polishing_enabled:
                     # Deterministic wake-phrase command detection. The raw
                     # transcript is first repaired for known mis-hearings.
@@ -2351,6 +2437,15 @@ class VoiceFlowApp:
                         command_content = detection.content or ""
                         if command is None and detect_input != raw_transcript:
                             command_content = raw_transcript
+                        if command is not None and (command_content or "").strip():
+                            try:
+                                command_fallback_source = remove_activation_phrases(
+                                    detect_input,
+                                    None if activation == DEFAULT_ACTIVATION else activation,
+                                ) or None
+                            except Exception:
+                                log.debug("[COMMAND] wake-phrase strip failed", exc_info=True)
+                                command_fallback_source = None
                         if command is not None and command.operation == "unsupported":
                             log.info("[COMMAND] unsupported voice command ignored: %r", command.raw_phrase[:80])
                             self._overlay_call("show_done", "Unsupported voice command skipped; your text was only cleaned up.")
@@ -2498,6 +2593,35 @@ class VoiceFlowApp:
                     dictionary_trace=dictionary_trace,
                     attempt_outcome_callback=lambda outcome: polish_attempt_outcome.update(value=str(outcome)),
                 )
+                if (
+                    command is not None
+                    and command_fallback_source
+                    and effective is not None
+                    and bool(getattr(effective, "requires_ai", False))
+                    and polish_outcome["value"] in _COMMAND_NOT_PERFORMED
+                ):
+                    # Nothing could perform the spoken command (no AI model,
+                    # provider/offline failure, rejected output). Pasting the
+                    # command's content alone loses words ("make this an
+                    # email to Priya ..." became "To Priya ..."), so deliver
+                    # the whole dictation minus the wake phrase, cleaned.
+                    fallback_text = self._command_fallback_text(
+                        command_fallback_source,
+                        session,
+                        bool(press_enter_enabled),
+                        deadline=polish_deadline,
+                        dictionary_trace=dictionary_trace,
+                    )
+                    if fallback_text:
+                        log.info(
+                            "[COMMAND] %s could not be performed (polish=%s); pasting the dictation without the wake phrase.",
+                            command.label(), polish_outcome["value"],
+                        )
+                        polished_text = fallback_text
+                        if polish_outcome["value"] == "local":
+                            # "Cleaned locally" would hide that the command
+                            # did not run; failures keep their own label.
+                            polish_outcome["value"] = "command_unfulfilled"
                 polish_elapsed = time.perf_counter() - polish_started
                 processing_metadata = _processing_metadata(
                     polish_outcome=polish_outcome["value"],
@@ -2598,15 +2722,16 @@ class VoiceFlowApp:
                         if len(recent) > 100:
                             self.recent_dictations = set(list(recent)[-50:])
                     self._history_update(record_id, insertion_status="pasted")
-                elif not success:
-                    self._history_update(record_id, status="paste_failed", error_message="Could not paste transcript into the original target; retrieve the text from history.", insertion_status="failed")
+                failure_message, failure_insertion = _paste_failure_details()
+                if not success:
+                    self._history_update(record_id, status="paste_failed", error_message=failure_message, insertion_status=failure_insertion)
 
                 self._defer_history_insert(
                     recovery, session, duration, raw_text=raw_transcript,
                     polished_text=polished_text,
                     status="success" if success else "paste_failed",
-                    error_message=outcome_note if success else "Could not paste transcript into the original target; retrieve the text from history.",
-                    insertion_status="pasted" if success else "failed",
+                    error_message=outcome_note if success else failure_message,
+                    insertion_status="pasted" if success else failure_insertion,
                     processing_metadata=processing_metadata,
                 )
 
@@ -2630,6 +2755,8 @@ class VoiceFlowApp:
                     else:
                         prefix = _polish_outcome_label(polish_outcome["value"])
                         self._overlay_call("show_done", prefix)
+                elif failure_insertion == "copied_to_clipboard":
+                    self._overlay_call("show_error", "Copied — press Cmd+V (allow Accessibility to auto-paste)")
                 else:
                     self._overlay_call("show_error", "Paste failed — retrieve text from history")
 
@@ -2742,8 +2869,17 @@ class VoiceFlowApp:
         audio_enabled = self._get_cached_setting("audio_flow_enabled", True)
         video_enabled = self._get_cached_setting("video_flow_enabled", True)
         if (not audio_enabled and not video_enabled) or getattr(self, "state", DictationState.IDLE) != DictationState.IDLE or self.is_recording:
+            if sys.platform == "darwin" and drag_distance >= 16.0:
+                log.info(
+                    "[AUDIO FLOW] Selection ignored on macOS: audio=%s video=%s state=%s recording=%s",
+                    audio_enabled, video_enabled, getattr(self, "state", None), self.is_recording,
+                )
             self.overlay.clear_selected_text()
             audio_flow_widget.hide()
+            return
+
+        if sys.platform == "darwin":
+            self._on_mouse_release_macos(x, y, drag_distance, selection_generation)
             return
 
         # Distinguish intentional text selection drags (>= 16px) from normal clicks
@@ -2839,6 +2975,94 @@ class VoiceFlowApp:
         else:
             threading.Thread(target=_check, daemon=True).start()
 
+    # macOS keeps a captured selection on the floating bar longer than Windows
+    # (6 s): the bar sits above the Dock, further from the text than on Windows.
+    MAC_SELECTION_TIMEOUT_MS = 15000
+
+    def _on_mouse_release_macos(self, x: int, y: int, drag_distance: float, selection_generation: int) -> None:
+        """macOS equivalent of the Win32 selection capture in _on_mouse_release.
+
+        Runs on the mouse hook's workers. Never touches Tk directly: the
+        click-on-our-own-window test uses the window server (CGWindowList) and
+        UI updates go through the overlay/widget dispatchers."""
+        from voice_flow.mouse_hook import selection_event_is_current
+        from voice_flow.platform import get_backend
+        from voice_flow.platform import macos_native
+
+        backend = get_backend()
+        is_own_app = getattr(backend, "is_own_app", None)
+
+        if drag_distance < 16.0:
+            # A plain click: keep the selection when it landed on our floating
+            # bar / Audio Flow widget (so clicking them can act on it), clear it
+            # anywhere else, exactly like Windows.
+            try:
+                hit = macos_native.window_owner_at_point(x, y, only_pids={os.getpid()})
+            except Exception:
+                hit = {}
+            own_click = bool(hit)
+            if not own_click:
+                # The window server can miss the Audio Flow widget while a click
+                # on it is resizing it (e.g. short-text notice 384x96 -> depth
+                # picker 265x32: "Make Anyway" sits outside the new frame). The
+                # widget's own geometry, with its stage-transition grace period,
+                # is pure Python state, so it is safe to read on this worker.
+                try:
+                    own_click = bool(audio_flow_widget.contains_point(x, y))
+                except Exception:
+                    own_click = False
+            if not own_click:
+                if getattr(audio_flow_widget, "_is_visible", False):
+                    log.info("[AUDIO FLOW] macOS click outside our windows at %s,%s; hiding the Audio Flow widget.", x, y)
+                self.overlay.clear_selected_text()
+                audio_flow_widget.hide()
+            return
+
+        def _still_current() -> bool:
+            return (
+                selection_generation == self._selection_generation
+                and selection_event_is_current()
+                and getattr(self, "state", DictationState.IDLE) == DictationState.IDLE
+                and not self.is_recording
+            )
+
+        def _check() -> None:
+            try:
+                if not _still_current():
+                    log.info("[AUDIO FLOW] macOS selection superseded before capture (state=%s).", getattr(self, "state", None))
+                    return
+                owner = macos_native.frontmost_window_owner()
+                if callable(is_own_app) and is_own_app(owner):
+                    log.info("[AUDIO FLOW] macOS selection skipped: frontmost window is ours (%s).", owner.get("app"))
+                    return  # never read our own windows
+                app_name = str(owner.get("app", "")).lower()
+                if any(kw in app_name for kw in ("screenshot", "screencapture")):
+                    return
+                # Let the target app finish handling the mouse-up first.
+                time.sleep(0.08)
+                selected = self.injector.get_selected_text_strict()
+                if not _still_current():
+                    log.info("[AUDIO FLOW] macOS selection superseded during capture.")
+                    return
+                if selected and len(selected.strip()) > 1:
+                    log.info("[AUDIO FLOW] Selection captured on macOS (%d chars) from %s.", len(selected.strip()), owner.get("app") or "frontmost app")
+                    self.overlay.set_selected_text(selected, timeout_ms=self.MAC_SELECTION_TIMEOUT_MS)
+                    audio_flow_widget.show_at(x, y, selected)
+                else:
+                    log.info("[AUDIO FLOW] macOS drag ended with no readable selection in %s.", owner.get("app") or "frontmost app")
+                    self.overlay.clear_selected_text()
+                    audio_flow_widget.hide()
+            except Exception as exc:
+                log.warning("[AUDIO FLOW] macOS selection capture failed: %s", exc, exc_info=True)
+                if _still_current():
+                    self.overlay.clear_selected_text()
+                    audio_flow_widget.hide()
+
+        if threading.current_thread().name == "Win32MouseHookSelectionWorker":
+            _check()
+        else:
+            threading.Thread(target=_check, name="AudioFlowSelectionCapture", daemon=True).start()
+
     def _normalize_for_comparison(self, s: str) -> str:
         if not s:
             return ""
@@ -2899,6 +3123,7 @@ class VoiceFlowApp:
             with self._get_read_generation_lock():
                 player_active = bool(getattr(self, "_active_summary_player_token", None))
                 if player_active or tts_engine.is_speaking():
+                    log.info("[AUDIO FLOW] Audio is playing (player=%s); this press stops it.", player_active)
                     self._stop_audio_flow_pipeline()
                     return
 
@@ -2913,7 +3138,27 @@ class VoiceFlowApp:
         if not text_to_read:
             target_hwnd = getattr(self, "target_hwnd", None)
             text_to_read = self.injector.get_selected_text(target_hwnd=target_hwnd)
+            if sys.platform == "darwin" and (not text_to_read or not str(text_to_read).strip()):
+                # The Mac hotkey fires while Ctrl+Option are still held, so a
+                # live read can come back empty. The selection the mouse hook
+                # captured moments ago (kept on the bar for 15 s and cleared on
+                # any click elsewhere) is the same text: use it.
+                cached = str(getattr(self.overlay, "selected_text", "") or "").strip()
+                if cached:
+                    log.info("[AUDIO FLOW] Using the selection captured from the mouse (%d chars).", len(cached))
+                    text_to_read = cached
         if not text_to_read or not text_to_read.strip():
+            if sys.platform == "darwin":
+                try:
+                    from voice_flow.platform import macos_native as _mn
+                    _ax = _mn.focused_selection_info()
+                    _front = _mn.frontmost_window_owner()
+                    _ax_note = "trusted=%s status=%s role=%s chars=%d front=%s" % (
+                        _ax.get("trusted"), _ax.get("status"), _ax.get("role"), len(str(_ax.get("text") or "")),
+                        (_front or {}).get("app"))
+                except Exception as _exc:  # diagnostics only
+                    _ax_note = "unavailable (%s)" % _exc
+                log.info("[AUDIO FLOW] No selected text found to read (state=%s; AX %s).", getattr(self, "state", None), _ax_note)
             if not is_summary or (self.state == DictationState.IDLE and not getattr(self, "_read_active", False)):
                 audio_flow_widget.set_playing(False)
                 self.overlay.show_error("Select text to listen")
@@ -2937,6 +3182,7 @@ class VoiceFlowApp:
             if player_active or tts_engine.is_speaking():
                 self._stop_audio_flow_pipeline()
             if self.state != DictationState.IDLE:
+                log.info("[AUDIO FLOW] Read not started: dictation state is %s.", self.state)
                 return
             generation = getattr(self, "_read_generation", 0) + 1
             self._read_generation = generation
@@ -3706,7 +3952,10 @@ class VoiceFlowApp:
             args = getattr(self, "args", None)
             headless = getattr(args, "headless", False) if args else False
             no_gui = getattr(args, "no_gui", False) if args else False
-            if not headless and not no_gui:
+            if sys.platform == "darwin":
+                if not headless and not no_gui:
+                    self.open_desktop_window()
+            elif not headless and not no_gui:
                 window_open = False
                 try:
                     from voice_flow.gui.desktop_launcher import _focus_existing_window
@@ -3739,6 +3988,9 @@ class VoiceFlowApp:
         log.info(" - Release to transcribe, clean up, and auto-paste!")
         log.info("==========================================================")
 
+        if sys.platform == "darwin":
+            self._install_mac_lifecycle_ui()
+
         # Run Tkinter Floating Overlay Bar on the MAIN THREAD
         while not getattr(self, "_shutdown_requested", False):
             try:
@@ -3747,6 +3999,154 @@ class VoiceFlowApp:
             except Exception as e:
                 log.error("Overlay main loop error: %s", e)
                 time.sleep(1.0)
+
+    # ------------------------------------------------------------------
+    # macOS lifecycle: window process, real Quit, menu bar item.
+    # ------------------------------------------------------------------
+    def _desktop_process_alive(self) -> bool:
+        proc = getattr(self, "_desktop_proc", None)
+        try:
+            return proc is not None and proc.poll() is None
+        except Exception:
+            return False
+
+    def _spawn_desktop_window(self) -> bool:
+        """Start the window process as a reaped child of the engine (macOS)."""
+        from voice_flow.platform import macos_lifecycle
+        from voice_flow.watchdog import get_pythonw_env, get_pythonw_executable
+
+        with self._desktop_lock():
+            if self._desktop_process_alive():
+                return True
+            try:
+                proc = subprocess.Popen(
+                    [get_pythonw_executable(), "-m", "voice_flow.gui.desktop_launcher"],
+                    cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+                    env=get_pythonw_env(),
+                    close_fds=True,
+                )
+            except Exception as exc:
+                log.warning("Could not launch Desktop GUI: %s", exc)
+                return False
+            self._desktop_proc = proc
+
+        def _on_exit(code: int, proc=proc) -> None:
+            log.info("[MAC] Window process %s exited (code %s); dictation keeps running.", proc.pid, code)
+            if getattr(self, "_desktop_proc", None) is proc:
+                self._desktop_proc = None
+
+        macos_lifecycle.reap_when_done(proc, _on_exit)
+        return True
+
+    def _desktop_lock(self):
+        lock = getattr(self, "_desktop_proc_lock", None)
+        if lock is None:
+            lock = self._desktop_proc_lock = threading.Lock()
+        return lock
+
+    def open_desktop_window(self) -> bool:
+        """Show the main window: raise the running one or start it (macOS)."""
+        if getattr(self, "_shutdown_requested", False):
+            return False
+        from voice_flow.platform import macos_lifecycle
+
+        if self._desktop_process_alive():
+            if macos_lifecycle.send_desktop_show():
+                return True
+            proc = getattr(self, "_desktop_proc", None)
+            return macos_lifecycle.activate_process(proc.pid) if proc is not None else False
+        # A window process not started by this engine (e.g. opened directly).
+        if macos_lifecycle.send_desktop_show():
+            return True
+        return self._spawn_desktop_window()
+
+    def request_quit(self, reason: str = "user") -> bool:
+        """End the whole app: window, engine, helpers. Idempotent, never blocks."""
+        if getattr(self, "_quit_started", False):
+            return True
+        self._quit_started = True
+        self._shutdown_requested = True
+        log.info("[QUIT] Quit requested (%s): stopping AI Productivity Flow.", reason)
+        from voice_flow.platform import macos_lifecycle
+
+        def _hard_exit() -> None:
+            log.warning("[QUIT] Cleanup exceeded %.0fs; exiting now.", macos_lifecycle.QUIT_HARD_DEADLINE_SECONDS)
+            self._final_exit()
+
+        watchdog_timer = threading.Timer(macos_lifecycle.QUIT_HARD_DEADLINE_SECONDS, _hard_exit)
+        watchdog_timer.daemon = True
+        watchdog_timer.start()
+
+        def _bounded(fn, seconds: float) -> None:
+            worker = threading.Thread(target=fn, daemon=True)
+            worker.start()
+            worker.join(seconds)
+
+        def _cleanup() -> None:
+            macos_lifecycle.stop_process(getattr(self, "_desktop_proc", None), timeout=1.0)
+            _bounded(self._stop_for_quit, 2.0)
+            try:
+                from voice_flow import child_processes
+                _bounded(child_processes.shutdown, 2.0)
+            except Exception:
+                pass
+            macos_lifecycle.terminate_descendants(timeout=1.0)
+            macos_lifecycle.stop_supervisor_parent()
+            log.info("[QUIT] AI Productivity Flow stopped.")
+            watchdog_timer.cancel()
+            self._final_exit()
+
+        threading.Thread(target=_cleanup, daemon=True, name="VoiceFlowQuit").start()
+        return True
+
+    def _stop_for_quit(self) -> None:
+        try:
+            self.overlay.hide()
+        except Exception:
+            pass
+        try:
+            self.stop()
+        except Exception as exc:
+            log.debug("[QUIT] stop() error: %s", exc)
+
+    def _final_exit(self, code: int = 0) -> None:
+        try:
+            from voice_flow.platform import macos_lifecycle
+            macos_lifecycle.release_engine_lock()
+        except Exception:
+            pass
+        try:
+            logging.shutdown()
+        except Exception:
+            pass
+        os._exit(code)
+
+    def _install_mac_lifecycle_ui(self) -> None:
+        """Quit/Reopen Apple Events, menu bar item, floating-bar menu (macOS)."""
+        from voice_flow.platform import macos_lifecycle
+
+        overlay = getattr(self, "overlay", None)
+        root = getattr(overlay, "root", None)
+        if root is None and overlay is not None:
+            try:  # early creation failed in __init__; run_loop reuses this window
+                overlay._create_window()
+                root = getattr(overlay, "root", None)
+            except Exception as exc:
+                log.debug("[MAC] Could not create Tk root for lifecycle hooks: %s", exc)
+        quit_from_ui = lambda: self.request_quit("menu")  # noqa: E731
+        reopen = lambda: threading.Thread(target=self.open_desktop_window, daemon=True).start()  # noqa: E731
+        show_bar = lambda: overlay.show() if overlay is not None else None  # noqa: E731
+        macos_lifecycle.install_tk_app_handlers(
+            root, lambda: (self.request_quit("apple-event"), "")[1], reopen)
+        if overlay is not None:
+            overlay.app_menu_actions = {"open": reopen, "quit": quit_from_ui}
+        if root is not None and hasattr(root, "after"):
+            def _add_status_item() -> None:
+                self._status_item = macos_lifecycle.install_status_item(reopen, quit_from_ui, show_bar)
+            try:
+                root.after(200, _add_status_item)
+            except Exception:
+                pass
 
     def reset_state_and_refresh(self) -> None:
         """Reset dictation/audio state, cancel any in-flight/stuck recordings, and restart/refresh overlay."""
@@ -3788,6 +4188,33 @@ VoiceFlowController = VoiceFlowApp
 
 
 _ENGINE_MUTEX_HANDLE = None
+
+
+def _mac_show_running_instance() -> bool:
+    try:
+        from voice_flow.platform import macos_lifecycle
+        return macos_lifecycle.ask_running_engine_to_show_window()
+    except Exception as exc:
+        log.debug("Signaling running instance error: %s", exc)
+        return False
+
+
+def _mac_take_engine_lock() -> bool:
+    """True when this process may run the engine (macOS single instance)."""
+    from voice_flow.platform import macos_lifecycle
+
+    if macos_lifecycle.acquire_engine_lock():
+        try:
+            from voice_flow.platform import get_backend
+            migrate = getattr(get_backend(), "migrate_legacy_login_item", None)
+            if callable(migrate) and migrate():
+                log.info("[MAC] Login item renamed to com.uzerkayat.aiproductivityflow.")
+        except Exception as exc:
+            log.debug("Login item migration skipped: %s", exc)
+        return True
+    log.info("[MAC] AI Productivity Flow is already running; bringing it forward and exiting this copy.")
+    _mac_show_running_instance()
+    return False
 
 
 def main() -> None:
@@ -3839,6 +4266,13 @@ def main() -> None:
         except Exception:
             pass
 
+    # macOS: one engine per user. A second launch (e.g. the copy inside the
+    # DMG while the /Applications copy runs) must not register a second set
+    # of hotkeys (double paste); it brings the running app forward instead.
+    if sys.platform == "darwin" and "pytest" not in sys.modules:
+        if not _mac_take_engine_lock():
+            return
+
     app: VoiceFlowApp | None = None
     try:
         from voice_flow.gui.api_server import PORT
@@ -3847,6 +4281,12 @@ def main() -> None:
         runtime_port = prepare_runtime_port(port=PORT, require_engine=True)
         if runtime_port.status == "occupied":
             log.warning("Port 8991 is currently occupied by another listener.")
+            return
+        if sys.platform == "darwin" and runtime_port.status == "compatible":
+            # A live engine (an older copy without the lock) already serves
+            # dictation; starting another would double every paste.
+            log.info("[MAC] AI Productivity Flow is already running; showing it instead.")
+            _mac_show_running_instance()
             return
         app = VoiceFlowApp()
         app.run()

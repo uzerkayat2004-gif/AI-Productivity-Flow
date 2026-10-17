@@ -3323,7 +3323,10 @@ async function analyzeSourceDocument(immediate = false) {
   const localStats = calculateDocumentScaling(text, vfSelectedFormat, { focus, title });
   applyDocumentProfile(localStats);
 
-  if (text && text.trim()) {
+  // macOS has no Video Flow render toolchain yet (server answers 501): keep
+  // the local estimate and make no background request while typing/pasting.
+  const vfGated = typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac();
+  if (text && text.trim() && !vfGated) {
     try {
       const data = await safeFetchJson("/api/video-flow/analyze-source", {
         method: "POST",
@@ -3410,6 +3413,10 @@ async function loadVideoSourceFile(file) {
   const title = document.getElementById("vf-title-input");
   try {
     if (extension === ".docx" || extension === ".pdf") {
+      if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
+        if (typeof vfShowVideoFlowMacNote === "function") vfShowVideoFlowMacNote();
+        return;
+      }
       if (label) label.textContent = "Extracting " + file.name + "…";
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -5574,7 +5581,9 @@ function vfGoogleRenderAccount(user) {
 
 async function vfGoogleLoadAccount() {
   try {
-    const res = await fetch("/api/me", { headers: { "Accept": "application/json" } });
+    // optional=1: "not signed in" is a normal state, answered with 200 so the
+    // console does not log a failed request on every launch.
+    const res = await fetch("/api/me?optional=1", { headers: { "Accept": "application/json" } });
     if (res.status === 401) {
       vfGoogleRenderAccount(null);
       return null;

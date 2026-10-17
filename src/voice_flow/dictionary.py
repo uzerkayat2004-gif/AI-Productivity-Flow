@@ -161,6 +161,44 @@ def already_applied():
         _ALREADY_APPLIED.reset(token)
 
 
+# Product and language names that are also everyday English words. A user
+# who saves "React" or "Swift" wants the name spelled right, not every verb
+# or adjective re-cased ("I will react to the email" must stay lowercase).
+# Mac QA 2026-10-16 (voice_a2 dictionary-on): "I will React to the email".
+_ENGLISH_HOMOGRAPH_NAMES = frozenset("""
+react swift rust go express flutter spring rails ember jest mocha spark flask
+notion slack zoom linear next bun angular apple amazon chrome edge gem pod
+pandas torch hive dart elixir crystal sass less babel remix astro solid ionic
+electron compose helm vault consul nomad puppet chef salt keras scrum agile
+""".split())
+# Words before a homograph that make it the ordinary verb/adjective.
+_ORDINARY_USE_BEFORE = frozenset("""
+i you we they he she it people users someone everyone to will would can could
+should might must may shall did do does don't dont didn't doesn't won't wont
+can't cant never always not also just please let's lets often quickly how
+be is are was were am been being very too so more most
+""".split())
+# Words after a homograph that make it the ordinary verb ("react to").
+_ORDINARY_USE_AFTER = frozenset("to quickly badly well calmly fast strongly immediately differently".split())
+
+
+def _is_homograph_name(term: str) -> bool:
+    """A single-token name whose lowercase form is an ordinary English word."""
+    return (
+        bool(term) and " " not in term.strip() and term != term.lower()
+        and term.casefold() in _ENGLISH_HOMOGRAPH_NAMES
+    )
+
+
+def _ordinary_use_context(text: str, start: int, end: int) -> bool:
+    """True when the lowercase word at text[start:end] is used as plain English."""
+    before = re.search(r"([\w'\u2019]+)[^\w\n]*$", text[:start])
+    if before is not None and before.group(1).casefold().replace("\u2019", "'") in _ORDINARY_USE_BEFORE:
+        return True
+    after = re.match(r"\W*?([\w']+)", text[end:])
+    return after is not None and after.group(1).casefold() in _ORDINARY_USE_AFTER
+
+
 def _apply(text: str, rules: tuple[_Rule, ...], pattern: re.Pattern[str] | None,
            trace: list[dict[str, str]] | None = None) -> str:
     """One left-to-right pass outside protected spans; no cascading."""
@@ -177,6 +215,13 @@ def _apply(text: str, rules: tuple[_Rule, ...], pattern: re.Pattern[str] | None,
         if rule is None:
             return original
         if rule.kind == REPLACEMENT and _ALREADY_APPLIED.get() and original.casefold() in outputs:
+            return original
+        if (
+            rule.kind == WORD and original.islower() and _is_homograph_name(rule.replacement)
+            and _ordinary_use_context(match.string, match.start(), match.end())
+        ):
+            # "I will react to it" keeps the verb; "a react component" or
+            # "built with react" still gets the saved spelling.
             return original
         if rule.kind != WORD and _inside_existing_target(match, rule.replacement):
             # "grok" -> "Grok Bot" must not turn "Grok Bot" into "Grok Bot Bot".

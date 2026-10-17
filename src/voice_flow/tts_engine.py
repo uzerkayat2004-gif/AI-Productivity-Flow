@@ -371,6 +371,26 @@ class TTSEngine:
                         break
                     continue
 
+                if not winmm:
+                    # macOS / no MCI: play each synthesized sentence with afplay.
+                    start_cb = None
+                    if not started_fired:
+                        started_fired = True
+                        start_cb = on_start
+                    if not self._play_file_blocking(s_path, _cancelled, on_start=start_cb):
+                        if not played_any:
+                            return False
+                        break
+                    played_any = True
+                    if not _cancelled() and not is_last:
+                        pause_sec = self._get_inter_sentence_pause_sec(pause_class)
+                        deadline = time.perf_counter() + pause_sec
+                        while time.perf_counter() < deadline and not _cancelled():
+                            time.sleep(0.02)
+                    if is_last or _cancelled():
+                        break
+                    continue
+
                 alias = f"vf_pipe_{time.time_ns()}_{idx}"
                 pipeline_alias = alias
                 self._active_mci_alias = alias
@@ -509,6 +529,12 @@ class TTSEngine:
                 if _cancelled():
                     return
 
+                if not winmm:
+                    # macOS / no MCI: afplay. on_start fires once playback begins.
+                    if self._play_file_blocking(tmp_path, _cancelled, on_start=on_start) and not _cancelled():
+                        playback_completed_cleanly = True
+                    return
+
                 open_res = winmm.mciSendStringW(f'open "{safe_path}" type MPEGVideo alias {alias}', None, 0, 0)
                 if open_res == 0:
                     if _cancelled():
@@ -562,6 +588,66 @@ class TTSEngine:
                     os.remove(tmp_path)
             except Exception:
                 pass
+
+    def _play_file_blocking(
+        self,
+        path: str,
+        cancelled: Callable[[], bool],
+        on_start: Callable[[], None] | None = None,
+    ) -> bool:
+        """Play one audio file with a native CLI player (macOS ``afplay``).
+
+        Blocks until playback ends. Honours stop() (terminates the player) and
+        pause()/resume() (SIGSTOP/SIGCONT). Returns True when it played to the
+        end, False when it could not start or was cancelled."""
+        import shutil
+        import signal
+        import subprocess
+
+        player = shutil.which("afplay") if sys.platform == "darwin" else None
+        if not player or not path or not os.path.exists(path) or cancelled():
+            return False
+        try:
+            proc = subprocess.Popen([player, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as exc:
+            log.warning("Audio playback could not start: %s", exc)
+            return False
+        self._player_proc = proc
+        stopped_for_pause = False
+        started = False
+        try:
+            while proc.poll() is None:
+                if cancelled():
+                    try:
+                        if stopped_for_pause:
+                            proc.send_signal(signal.SIGCONT)
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    return False
+                if not started:
+                    started = True
+                    if on_start:
+                        on_start()
+                if self._is_paused and not stopped_for_pause:
+                    try:
+                        proc.send_signal(signal.SIGSTOP)
+                        stopped_for_pause = True
+                    except Exception:
+                        pass
+                elif not self._is_paused and stopped_for_pause:
+                    try:
+                        proc.send_signal(signal.SIGCONT)
+                        stopped_for_pause = False
+                    except Exception:
+                        pass
+                time.sleep(0.04)
+            if not started and on_start and proc.returncode == 0 and not cancelled():
+                on_start()
+            return proc.returncode == 0 and not cancelled()
+        finally:
+            if self._player_proc is proc:
+                self._player_proc = None
 
     def _get_fallback_edge_voice(self) -> str:
         active_model = storage.get_setting("exec_audio_policy_model", "edge/en-US-AvaNeural")

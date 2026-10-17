@@ -43,7 +43,7 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
   ```
 * **SmartScreen**: Windows may say it protected your PC. Choose **More info**, then **Run anyway**.
 
-### macOS 12+ (Apple Silicon only, M1 or newer)
+### macOS 14 Sonoma or later (Apple Silicon only, M1 or newer)
 
 * **DMG Installer**: Download the drag-to-Applications installer **[`AI-Productivity-Flow-macOS.dmg`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg)**.
 * **Checksum**: [`AI-Productivity-Flow-macOS.dmg.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg.sha256)
@@ -116,6 +116,7 @@ Audio Flow gives you two dedicated ways to absorb written content without eye st
   <sub>🎧 <b><a href="https://ai-productivity-flow.vercel.app/assets/video/audioflow_demo.mp4">Watch or download Audio Flow demo (MP4)</a></b></sub>
 </p>
 
+* **How to start it**: select text with the mouse in any app, then click the small Listen button that appears next to it (or the floating bar) and pick Read or Summary. On Mac you can also press **Control+Option+L** to read the current selection aloud; press it again to stop. On Mac, reading your selection needs the Accessibility permission.
 * **Read Mode (Spoken Explainer)**: An intelligent reader designed to articulate selected paragraphs, articles, or documentation naturally. Rather than robotic text playback, it speaks with natural human cadence, clear phrasing, and synchronized playback.
 * **Summary Mode (Multi-Depth Audio Summaries)**:
   * **Short**: Fast high-level briefs for quick updates.

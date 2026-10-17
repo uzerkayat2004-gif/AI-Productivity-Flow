@@ -1143,10 +1143,17 @@ def handle_logout(handler: Any) -> None:
     ])
 
 
-def handle_me(handler: Any) -> None:
-    """GET /api/me — the signed-in profile, or 401."""
+def handle_me(handler: Any, optional: bool = False) -> None:
+    """GET /api/me — the signed-in profile, or 401.
+
+    ``optional`` (``?optional=1``) is the UI's startup probe: "not signed in"
+    is then a normal answer (200, authenticated false) instead of an error.
+    """
     user = current_user(handler)
     if not user:
+        if optional:
+            _send_json(handler, {"success": True, "authenticated": False, "user": None})
+            return
         _send_json(handler, {"success": False, "error": "not_authenticated"}, status=401)
         return
     _send_json(handler, {"authenticated": True, "user": user})

@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 
 from voice_flow.platform import macos_native as native
 from voice_flow.platform.base import PermissionReport, PermissionState
@@ -53,7 +55,88 @@ _SETTINGS_URLS = {
     "input_monitoring": f"{_PANE}?Privacy_ListenEvent",
 }
 
-_LAUNCH_AGENT_LABEL = "com.voiceflow.app"
+# The login item is named after the app's bundle id. Builds before v1.0.3 used
+# "com.voiceflow.app"; that file is migrated (removed) whenever the setting is
+# read or written so a user never ends up with two login items.
+_LAUNCH_AGENT_LABEL = "com.uzerkayat.aiproductivityflow"
+_LEGACY_LAUNCH_AGENT_LABELS = ("com.voiceflow.app",)
+
+
+# Accessibility roles whose AXSelectedText answer is authoritative (an empty
+# answer really means "nothing selected"), so no Cmd+C probe is sent.
+_NATIVE_TEXT_ROLES = frozenset({"AXTextArea", "AXTextField", "AXComboBox"})
+# Apps where a synthetic Cmd+C after a drag copies files/objects, not text.
+_NO_COPY_FALLBACK_APPS = frozenset({"Finder", "Dock", "SystemUIServer", "Screenshot", "screencaptureui"})
+_FILE_PASTEBOARD_TYPES = frozenset({"public.file-url", "NSFilenamesPboardType", "com.apple.pasteboard.promised-file-url"})
+_OWN_APP_NAMES = frozenset({"ai productivity flow", "voice flow", "voiceflow"})
+_selection_ax_warned = False
+
+
+def _warn_selection_needs_accessibility() -> None:
+    global _selection_ax_warned
+    if _selection_ax_warned:
+        return
+    _selection_ax_warned = True
+    log.warning(
+        "[MACOS] Reading selected text for Audio Flow needs Accessibility. Enable AI Productivity Flow in "
+        "System Settings > Privacy & Security > Accessibility."
+    )
+
+
+def _general_pasteboard():
+    try:
+        from AppKit import NSPasteboard
+    except Exception:
+        return None
+    try:
+        return NSPasteboard.generalPasteboard()
+    except Exception:
+        return None
+
+
+class _NullContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _autorelease_pool():
+    try:
+        import objc
+
+        return objc.autorelease_pool()
+    except Exception:
+        return _NullContext()
+
+
+def _pasteboard_snapshot(pasteboard) -> list[dict]:
+    """Copy every item/type currently on the pasteboard (text, images, files...)."""
+    items: list[dict] = []
+    for item in list(pasteboard.pasteboardItems() or []):
+        entry: dict = {}
+        for kind in list(item.types() or []):
+            data = item.dataForType_(kind)
+            if data is not None:
+                entry[str(kind)] = data
+        if entry:
+            items.append(entry)
+    return items
+
+
+def _pasteboard_restore(pasteboard, snapshot: list[dict]) -> None:
+    from AppKit import NSPasteboardItem
+
+    pasteboard.clearContents()
+    restored = []
+    for entry in snapshot:
+        item = NSPasteboardItem.alloc().init()
+        for kind, data in entry.items():
+            item.setData_forType_(data, kind)
+        restored.append(item)
+    if restored:
+        pasteboard.writeObjects_(restored)
 
 
 def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0):
@@ -70,6 +153,33 @@ def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0)
     except Exception as exc:
         log.debug("[MACOS] command %s failed: %s", cmd[:1], exc)
         return None
+
+
+def _launchservices_front_pid() -> int | None:
+    """Front app pid straight from LaunchServices (fresh on any thread).
+
+    0 = no front app, None = could not tell (not macOS / lsappinfo missing or
+    output not understood) -- callers then fall back to AppKit."""
+    if not IS_MACOS or not os.path.exists("/usr/bin/lsappinfo"):
+        return None
+    try:
+        front = subprocess.run(["/usr/bin/lsappinfo", "front"], capture_output=True,
+                               text=True, timeout=1.0, check=False)
+    except Exception:
+        return None
+    if front.returncode != 0:
+        return None
+    m = re.search(r"ASN:0x[0-9a-fA-F]+-0x[0-9a-fA-F]+:", front.stdout or "")
+    if not m:
+        # "[ NULL ]" / empty: LaunchServices has no front application.
+        return 0
+    try:
+        info = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "pid", m.group(0)],
+                              capture_output=True, text=True, timeout=1.0, check=False).stdout
+    except Exception:
+        return None
+    pm = re.search(r'"pid"\s*=\s*(\d+)', info or "")
+    return int(pm.group(1)) if pm else None
 
 
 class MacOSBackend:
@@ -97,14 +207,29 @@ class MacOSBackend:
     # ------------------------------------------------------------------
     # synthetic input
     # ------------------------------------------------------------------
+    def can_post_events(self) -> bool:
+        """Whether macOS will deliver our synthetic Cmd+V / Cmd+C to other apps."""
+        return native.can_post_events()
+
     def send_paste(self) -> bool:
-        """Cmd+V. Requires Accessibility trust; returns False when untrusted."""
+        """Cmd+V. Returns False when macOS would silently drop the event.
+
+        Without Accessibility (or the post-event grant) ``CGEventPost`` still
+        "succeeds" but no app ever receives the keystroke, so reporting True
+        there turned a lost paste into a fake success.
+        """
+        if not native.can_post_events():
+            return False
         return native.send_key_combo(native.KEY_V, native.kCGEventFlagMaskCommand)
 
     def send_copy(self) -> bool:
+        if not native.can_post_events():
+            return False
         return native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand)
 
     def send_enter(self) -> bool:
+        if not native.can_post_events():
+            return False
         return native.send_return_key()
 
     # ------------------------------------------------------------------
@@ -134,37 +259,236 @@ class MacOSBackend:
         app = str(info.get("app", "")).lower()
         return "voice flow" in app or "voiceflow" in app or "python" in app
 
+    def is_own_app(self, info: dict | None) -> bool:
+        """True when a window-owner record belongs to AI Productivity Flow.
+
+        The engine (floating bar, Audio Flow widget) and the main window run
+        in separate processes of the same app, so match the app name too."""
+        if not info:
+            return False
+        pid = info.get("pid")
+        if isinstance(pid, int) and pid > 0 and pid == os.getpid():
+            return True
+        app = str(info.get("app", "")).strip().lower()
+        return bool(app) and app in _OWN_APP_NAMES
+
+    def restore_paste_target_focus(self, timeout: float = 0.8) -> dict:
+        """Give keyboard focus back to the user's app before Cmd+V.
+
+        Clicking the floating bar or the Audio Flow widget makes this engine
+        process the active app. Its windows are not normal (layer 0) windows,
+        so the frontmost document window still belongs to e.g. TextEdit, but
+        the Cmd+V keystroke goes to the active app -- us -- and the paste is
+        lost (seen on macOS 15, Oct 2026). When that happens, re-activate the
+        app that owns the frontmost normal window and wait until it is active.
+
+        Returns a small report for logging; never raises."""
+        report: dict = {"restored": False}
+        if not IS_MACOS:
+            return report
+        try:
+            from AppKit import NSApplication, NSRunningApplication, NSWorkspace
+
+            def _active(running) -> bool | None:
+                try:
+                    return bool(running.isActive()) if running is not None else False
+                except Exception:
+                    return None
+
+            front = NSWorkspace.sharedWorkspace().frontmostApplication()
+            front_pid = int(front.processIdentifier()) if front is not None else 0
+            report["active_pid"] = front_pid
+            own = None
+            try:
+                own = NSRunningApplication.currentApplication()
+            except Exception:
+                own = None
+            own_active = _active(own)
+            if own_active is None:
+                own_active = front_pid == os.getpid()
+            front_active = _active(front)
+            if front_active is None:
+                front_active = front is not None
+            report["own_active"] = own_active
+            # NSRunningApplication/NSWorkspace values are only refreshed on the
+            # main run loop, and this runs on a worker thread: on macOS 14 CI
+            # (it6 af2 38982431970) they still said TextEdit was active while
+            # LaunchServices had no front app, so we returned early and Cmd+V
+            # was lost. Ask LaunchServices directly when we can.
+            fresh_front = _launchservices_front_pid()
+            report["ls_front_pid"] = fresh_front
+            if fresh_front is not None:
+                if fresh_front in (0, os.getpid()):
+                    own_active = True
+                elif fresh_front != front_pid:
+                    front_pid, front_active = fresh_front, True
+            # Act when we hold keyboard activation -- even if frontmostApplication
+            # (the menu-bar owner) still names the user's app: macOS 14 CI, Escape
+            # on our widget menu left our accessory app active while TextEdit kept
+            # the menu bar, and Cmd+V reached us -- or when nothing is active.
+            # Never take focus from another app the user activated
+            # (Spotlight-style panels too).
+            if not own_active and front_pid not in (0, os.getpid()) and front_active:
+                report["skipped"] = "another app is active"
+                log.info("[MACOS] Paste target focus restore: %s", report)
+                return report
+            target = native.frontmost_window_owner() or {}
+            pid = target.get("pid")
+            report["target"] = {"app": target.get("app"), "pid": pid}
+            if not isinstance(pid, int) or pid <= 0 or pid == os.getpid() or self.is_own_app(target):
+                report["skipped"] = "no user window behind us"
+                log.info("[MACOS] Paste target focus restore: %s", report)
+                return report
+            app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+            if app is None:
+                report["skipped"] = "target app not found"
+                log.info("[MACOS] Paste target focus restore: %s", report)
+                return report
+            try:
+                # macOS 14+: cooperative activation -- the active app yields.
+                ns_app = NSApplication.sharedApplication()
+                if hasattr(ns_app, "yieldActivationToApplication_"):
+                    ns_app.yieldActivationToApplication_(app)
+            except Exception:
+                pass
+            try:
+                from AppKit import NSApplicationActivateIgnoringOtherApps
+
+                options = NSApplicationActivateIgnoringOtherApps
+            except Exception:
+                options = 2
+            app.activateWithOptions_(options)
+            deadline = time.monotonic() + max(0.1, timeout)
+            used_open = False
+            while time.monotonic() < deadline:
+                time.sleep(0.04)
+                # LaunchServices when it names an app; AppKit otherwise (on
+                # macOS 14 CI `lsappinfo front` stays empty, it9 38989028815,
+                # and waiting for it cost the full timeout on every paste).
+                target_active = _active(app)
+                if fresh_front is not None and not target_active:
+                    target_active = _launchservices_front_pid() == pid
+                if target_active is None:
+                    now_front = NSWorkspace.sharedWorkspace().frontmostApplication()
+                    target_active = now_front is not None and int(now_front.processIdentifier()) == pid
+                if target_active:
+                    report["restored"] = True
+                    break
+                if not used_open and time.monotonic() > deadline - timeout / 2:
+                    # Fallback through LaunchServices (no Automation permission).
+                    used_open = True
+                    url = app.bundleURL()
+                    path = str(url.path()) if url is not None else ""
+                    if path:
+                        subprocess.run(["/usr/bin/open", "-a", path], timeout=2,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            report["used_open"] = used_open
+            if report["restored"]:
+                # Let the target's key window take first responder again.
+                time.sleep(0.08)
+            log.info("[MACOS] Paste target focus restore: %s", report)
+        except Exception as exc:
+            report["error"] = repr(exc)
+            log.debug("[MACOS] restore_paste_target_focus failed", exc_info=True)
+        return report
+
     # ------------------------------------------------------------------
     # selection
     # ------------------------------------------------------------------
     def get_selected_text(self) -> str:
-        """Read the selection via the Accessibility API.
+        """Read the user's current selection without disturbing their clipboard.
 
-        Falls back to a clipboard round-trip (Cmd+C, read, restore) when the
-        Accessibility query returns nothing — many Electron and Java apps do
-        not expose ``AXSelectedText``. The original clipboard is restored so
-        the user's copy buffer is not silently clobbered.
+        1. Accessibility ``AXSelectedText`` of the focused element. Native text
+           views (TextEdit, Notes, Mail, Safari fields, ...) answer this
+           directly; when such a view answers "no selection" we trust it and
+           never send a keystroke.
+        2. Otherwise (Electron, Chrome web content, Java apps) fall back to a
+           synthetic Cmd+C, read the copied text and restore every pasteboard
+           item that was there before, so the user's clipboard (including
+           images and files) is unchanged. Nothing is restored or touched when
+           Cmd+C copied nothing.
+
+        Without Accessibility neither path works (macOS drops synthetic keys),
+        so this returns "" and logs once instead of pretending.
         """
-        direct = native.focused_selected_text()
-        if direct:
-            return direct
-
-        if not native.accessibility_trusted():
+        info = native.focused_selection_info()
+        if not info.get("trusted"):
+            _warn_selection_needs_accessibility()
             return ""
+        text = str(info.get("text") or "")
+        if text.strip():
+            return text
+        if info.get("status") == 0 and str(info.get("role") or "") in _NATIVE_TEXT_ROLES:
+            return ""
+        owner = native.frontmost_window_owner()
+        if self.is_own_app(owner) or str(owner.get("app", "")) in _NO_COPY_FALLBACK_APPS:
+            return ""
+        return self._copy_selection_preserving_clipboard()
 
+    def _copy_selection_preserving_clipboard(self) -> str:
+        if not native.can_post_events():
+            return ""
+        # After a hotkey such as Ctrl+Option+L the user may still hold the
+        # modifiers; Cmd+C would then arrive as Cmd+Ctrl+Option+C.
+        if not native.wait_for_modifiers_released(1.0):
+            log.debug("[MACOS] modifiers still held; skipping Cmd+C selection probe")
+            return ""
+        pasteboard = _general_pasteboard()
+        if pasteboard is None:
+            return self._copy_selection_via_pbcopy()
         import time
 
-        saved = self.read_clipboard()
-        try:
-            if not self.send_copy():
+        with _autorelease_pool():
+            try:
+                before = int(pasteboard.changeCount())
+                snapshot = _pasteboard_snapshot(pasteboard)
+            except Exception as exc:
+                log.debug("[MACOS] pasteboard snapshot failed: %s", exc)
                 return ""
-            time.sleep(0.12)
-            grabbed = self.read_clipboard()
-            if grabbed and grabbed != saved:
-                return grabbed
+            if not native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand):
+                return ""
+            deadline = time.monotonic() + 0.4
+            while time.monotonic() < deadline and int(pasteboard.changeCount()) == before:
+                time.sleep(0.02)
+            after = int(pasteboard.changeCount())
+            if after == before:
+                return ""  # nothing was selected/copied; clipboard untouched
+            text = ""
+            try:
+                types = {str(t) for t in (pasteboard.types() or [])}
+                if not types.intersection(_FILE_PASTEBOARD_TYPES):
+                    text = str(pasteboard.stringForType_("public.utf8-plain-text") or "")
+            finally:
+                # Restore unless something else (the user) wrote meanwhile.
+                if int(pasteboard.changeCount()) == after:
+                    try:
+                        _pasteboard_restore(pasteboard, snapshot)
+                    except Exception as exc:
+                        log.warning("[MACOS] could not restore clipboard after selection read: %s", exc)
+            return text
+
+    def _copy_selection_via_pbcopy(self) -> str:
+        """Fallback without AppKit: sentinel round-trip through pbcopy/pbpaste."""
+        import time
+        import uuid
+
+        saved = self.read_clipboard()
+        sentinel = f"__apf_selection_probe_{uuid.uuid4().hex}__"
+        if not self.copy_to_clipboard(sentinel):
             return ""
+        grabbed = ""
+        try:
+            if not native.send_key_combo(native.KEY_C, native.kCGEventFlagMaskCommand):
+                return ""
+            for _ in range(10):
+                time.sleep(0.04)
+                grabbed = self.read_clipboard()
+                if grabbed and grabbed != sentinel:
+                    break
+            return grabbed if grabbed and grabbed != sentinel else ""
         finally:
-            if saved:
+            current = self.read_clipboard()
+            if current in (sentinel, grabbed):
                 self.copy_to_clipboard(saved)
 
     # ------------------------------------------------------------------
@@ -194,13 +518,37 @@ class MacOSBackend:
     # ------------------------------------------------------------------
     # autostart  (LaunchAgent plist — the macOS analogue of the HKCU Run key)
     # ------------------------------------------------------------------
-    def _agent_path(self) -> str:
-        return os.path.expanduser(
-            f"~/Library/LaunchAgents/{_LAUNCH_AGENT_LABEL}.plist"
-        )
+    def _agent_path(self, label: str = _LAUNCH_AGENT_LABEL) -> str:
+        return os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
+
+    def _legacy_agent_paths(self) -> list[str]:
+        return [self._agent_path(label) for label in _LEGACY_LAUNCH_AGENT_LABELS]
+
+    def _remove_legacy_agents(self) -> bool:
+        """Delete old-named login items. Returns True if one was present."""
+        found = False
+        for legacy in self._legacy_agent_paths():
+            if os.path.exists(legacy):
+                found = True
+                try:
+                    os.remove(legacy)
+                except OSError as exc:
+                    log.debug("[MACOS] could not remove legacy login item %s: %s", legacy, exc)
+        return found
+
+    def migrate_legacy_login_item(self) -> bool:
+        """Rename an old "com.voiceflow.app" login item to the bundle id name."""
+        if not IS_MACOS or not any(os.path.exists(p) for p in self._legacy_agent_paths()):
+            return False
+        if os.path.exists(self._agent_path()):
+            self._remove_legacy_agents()
+            return True
+        return self.set_launch_at_login(True)
 
     def get_launch_at_login(self) -> bool:
-        return os.path.exists(self._agent_path())
+        if os.path.exists(self._agent_path()):
+            return True
+        return any(os.path.exists(p) for p in self._legacy_agent_paths())
 
     def set_launch_at_login(self, enabled: bool, command: str | None = None) -> bool:
         if not IS_MACOS:
@@ -208,9 +556,11 @@ class MacOSBackend:
         path = self._agent_path()
         try:
             if not enabled:
+                # Only delete the file. "launchctl unload" would SIGTERM the
+                # running app when it was itself started at login.
                 if os.path.exists(path):
-                    _run(["launchctl", "unload", path])
                     os.remove(path)
+                self._remove_legacy_agents()
                 return True
 
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -240,7 +590,10 @@ class MacOSBackend:
             )
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(plist)
-            _run(["launchctl", "load", path])
+            # launchd reads ~/Library/LaunchAgents at the next login. Do not
+            # "launchctl load" now: RunAtLoad would start a second copy of the
+            # app immediately.
+            self._remove_legacy_agents()
             return True
         except Exception as exc:
             log.debug("[MACOS] set_launch_at_login failed: %s", exc)
