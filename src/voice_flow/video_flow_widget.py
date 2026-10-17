@@ -353,6 +353,76 @@ def _local_analyze_fallback(
     }
 
 
+def notebooklm_format_for_treatment(choice: str) -> str:
+    """Map the two-button prompt onto NotebookLM's video format."""
+    return "cinematic" if str(choice or "").strip().lower() == "cinematic" else "explainer"
+
+
+def ask_video_treatment(parent: Any = None) -> str | None:
+    """Ask Cinematic or Normal. Returns a NotebookLM format, or None if cancelled."""
+    choice: dict[str, str | None] = {"value": None}
+
+    def _build() -> None:
+        host = parent
+        if host is None:
+            host = getattr(tk, "_default_root", None)
+        dialog = tk.Toplevel(host) if host is not None else tk.Tk()
+        dialog.title("Video")
+        dialog.configure(bg="#1c140f")
+        dialog.resizable(False, False)
+        try:
+            dialog.attributes("-topmost", True)
+        except Exception:
+            pass
+        frame = tk.Frame(dialog, bg="#1c140f", padx=22, pady=18)
+        frame.pack()
+        tk.Label(frame, text="How should this video look?", bg="#1c140f", fg="#fff7f2", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        tk.Label(frame, text="Normal is a clear explainer. Cinematic is a short documentary.", bg="#1c140f", fg="#f0c2a8", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 14))
+        row = tk.Frame(frame, bg="#1c140f")
+        row.pack(fill="x")
+
+        def _pick(name: str) -> None:
+            choice["value"] = notebooklm_format_for_treatment(name)
+            dialog.destroy()
+
+        for label, name in (("Normal", "normal"), ("Cinematic", "cinematic")):
+            tk.Button(
+                row, text=label, command=lambda n=name: _pick(n),
+                bg="#ff6020", fg="#1c140f", activebackground="#ff8a4c",
+                relief="flat", padx=16, pady=8, font=("Segoe UI", 10, "bold"),
+            ).pack(side="left", padx=(0, 8))
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        try:
+            dialog.grab_set()
+        except Exception:
+            pass
+        dialog.wait_window()
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            _build()
+        else:
+            done = threading.Event()
+
+            def _on_ui() -> None:
+                try:
+                    _build()
+                finally:
+                    done.set()
+
+            root = getattr(tk, "_default_root", None)
+            if root is not None and hasattr(root, "after"):
+                root.after(0, _on_ui)
+                if not done.wait(timeout=120):
+                    return "explainer"
+            else:
+                _build()
+    except Exception:
+        log.debug("Video treatment prompt failed", exc_info=True)
+        return "explainer"
+    return choice["value"]
+
+
 class VideoFlowScreenWidget:
     """Always-on-top composer that delegates queued jobs to the main runtime."""
 
@@ -503,7 +573,7 @@ class VideoFlowScreenWidget:
                 self.win.withdraw()
         self._run_on_ui(_hide)
 
-    def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None) -> None:
+    def show_composer(self, selected_text: str = "", mode: str = "summary", anchor_bar: Any = None, ask_treatment: bool = False, video_format: str | None = None) -> None:
         from voice_flow.video_flow_platform import video_flow_supported
 
         if not video_flow_supported():
@@ -512,6 +582,12 @@ class VideoFlowScreenWidget:
         clean = (selected_text or "").strip()
 
         def _show() -> None:
+            chosen = video_format
+            if ask_treatment and not chosen:
+                chosen = ask_video_treatment(self.root or getattr(tk, "_default_root", None))
+                if not chosen:
+                    return
+            self._pending_format = chosen
             self._mode = mode if mode in {"summary", "full"} else "summary"
             self._source_text = clean
             self._source_name = "Selected text" if clean else ""
@@ -531,6 +607,11 @@ class VideoFlowScreenWidget:
                 self._build()
             if not self.win:
                 return
+            pending = getattr(self, "_pending_format", None)
+            if pending:
+                match = next((opt for opt in NOTEBOOKLM_FORMAT_OPTIONS if opt["ref"] == pending), None)
+                if match:
+                    self._set_format_option(match)
 
             source_txt = getattr(self, "_source_text", "") or ""
             if "source" in self._controls:

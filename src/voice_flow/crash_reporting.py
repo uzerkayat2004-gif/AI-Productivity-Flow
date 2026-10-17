@@ -1,7 +1,8 @@
-"""Opt-in, privacy-preserving Sentry crash reporting for AI Productivity Flow.
+"""Privacy-preserving Sentry crash reporting for AI Productivity Flow.
 
 Strict privacy rules:
-- Completely opt-in: disabled by default (zero network calls, zero SDK overhead when disabled).
+- On by default for every install, including existing users who never set the
+  toggle. An explicit opt-out turns it off immediately, with no restart.
 - Never sends audio data, transcripts, dictation, clipboard text, or request payloads:
   no local variables, no breadcrumbs, no log events, and exception messages are
   replaced by '[redacted]' (only the exception type and code location are kept).
@@ -179,14 +180,21 @@ def _drop_breadcrumb(crumb: dict[str, Any], hint: dict[str, Any]) -> None:
 
 
 def is_crash_reporting_enabled() -> bool:
-    """Return True if the user has explicitly opted into anonymous crash reporting."""
-    return bool(storage.get_setting("anonymous_crash_reports", False))
+    """True unless the user has explicitly turned crash reports off.
+
+    A missing setting means the user never touched the control, so reporting
+    stays on. Stored False is an opt-out and stays off.
+    """
+    value = storage.get_setting("anonymous_crash_reports", None)
+    if value is None:
+        return True
+    return bool(value)
 
 
 def init_crash_reporting(force: bool = False) -> bool:
-    """Initialize Sentry crash reporting if opted-in or force=True.
+    """Initialize Sentry crash reporting when enabled or force=True.
 
-    Zero network requests and zero SDK overhead when disabled (default).
+    An explicit opt-out skips initialization entirely.
     """
     global _CRASH_REPORTING_INITIALIZED
     enabled = is_crash_reporting_enabled()

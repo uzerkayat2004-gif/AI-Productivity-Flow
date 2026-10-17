@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,6 +31,7 @@ jobs:
           pip install pytest pytest-asyncio pytest-timeout cryptography pillow
 
       - name: Verify Git Tag Matches Canonical Version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
@@ -42,7 +45,7 @@ jobs:
 
       - name: Run Version Consistency Test
         run: |
-          pytest tests/test_version_consistency.py tests/test_update_checker.py -vv
+          pytest tests/test_version_consistency.py tests/test_update_checker.py tests/test_v103_launch_fixes.py -vv
 
       - name: Run Platform & Core Feature Tests
         run: |
@@ -134,8 +137,14 @@ jobs:
             exit 1
           }
 
-          # 4. Guard against version and product metadata mismatch
-          $expectedVersion = $tag.TrimStart("v").Split("-")[0]
+          # 4. Guard against version and product metadata mismatch.
+          # Tag pushes must match the tag. Pull-request builds match the canonical VERSION.
+          $ref = "${{ github.ref }}"
+          if ($ref.StartsWith("refs/tags/v")) {
+            $expectedVersion = $tag.TrimStart("v").Split("-")[0]
+          } else {
+            $expectedVersion = (python -c "import sys; sys.path.insert(0, 'src'); from voice_flow._version import VERSION; print(VERSION)").Trim()
+          }
           $installerVersion = (Get-Item $exe).VersionInfo.ProductVersion
           if ($installerVersion) {
             $installerVersion = $installerVersion.Trim()
@@ -382,6 +391,7 @@ jobs:
 
   publish-github-release:
     name: Publish Stable GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [validate-and-test, build-macos, package-windows]
     runs-on: ubuntu-latest
     steps:

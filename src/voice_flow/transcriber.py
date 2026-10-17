@@ -678,8 +678,15 @@ class Transcriber:
             input_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
             audio, enhance_profile = enhance_for_stt(audio, config.sample_rate, profile=enhance_profile)
             if enhance_profile not in ("off", "silence"):
-                log.info("[ENHANCE] profile=%s (peak in %.4f -> out %.3f)", enhance_profile,
-                         input_peak, float(np.max(np.abs(audio))) if audio.size else 0.0)
+                out_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+                log.info("[ENHANCE] profile=%s (peak in %.4f -> out %.3f)", enhance_profile, input_peak, out_peak)
+                try:
+                    from voice_flow.voice_enhance import consume_enhance_hint
+                    if consume_enhance_hint() == "too_quiet":
+                        log.warning("[MIC] Input is very quiet (peak %.3f). Move closer or raise the microphone level.", input_peak)
+                        self._mic_hint = "too_quiet"
+                except Exception:
+                    pass
             self._last_vad_threshold = vad_threshold_for(enhance_profile) if enhance_profile not in ("off", "silence") else 0.20
             self._last_vad_parameters = calibrate_vad_parameters(enhance_profile) if enhance_profile not in ("off", "silence") else calibrate_vad_parameters("normal")
         except Exception:

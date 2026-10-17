@@ -103,5 +103,15 @@ next to these notices.
     Testing endpoints and governed by Google's terms.
 
 18. S1-mini-GGUF, Copyright 2026 Superwhisper. Derivative of Qwen3-0.6B, Copyright 2024 Alibaba Cloud, Apache License 2.0. Must be identified as "S1-mini" by "Superwhisper".
+    Downloaded by the user when they choose the polish model. Not bundled in the installer.
     https://huggingface.co/superwhisper/s1-mini-GGUF
+
+19. llama.cpp and llama-cpp-python — MIT License. The Windows build ships a CPU
+    wheel so on-device polish can run after the user downloads a GGUF model.
+    https://github.com/ggerganov/llama.cpp
+
+20. NVIDIA Nemotron speech models (nemotron-speech-streaming-en-0.6b and
+    nemotron-3.5-asr-streaming-0.6b) are NOT bundled. They are downloaded from
+    Hugging Face when the user asks, and remain subject to NVIDIA's model terms.
+    https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 

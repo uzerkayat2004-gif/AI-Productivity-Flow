@@ -29,6 +29,8 @@ test_gemini_output.wav
 *.png
 !docs/assets/*.png
 !scripts/assets/*.png
+!release/installer/wizard-large.png
+!release/installer/wizard-small.png
 *.jpg
 !docs/assets/*.jpg
 *.jpeg

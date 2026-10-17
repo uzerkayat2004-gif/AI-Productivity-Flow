@@ -421,14 +421,15 @@ def get_cached_setting(key: str, default: Any = None, ttl: float = 5.0) -> Any:
 
 
 # Polish outcomes that mean a spoken command was NOT carried out.
-_COMMAND_NOT_PERFORMED = frozenset({"local", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
+_COMMAND_NOT_PERFORMED = frozenset({"local", "model_not_downloaded", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
 
 
 def _polish_outcome_label(outcome: str) -> str:
     """Describe delivery without claiming a failed AI pass was successful."""
     return {
         "ai_accepted": "AI polished",
-        "local": "Cleaned locally",
+        "local": "Basic cleanup only",
+        "model_not_downloaded": "Polish model not downloaded — basic cleanup only",
         "local_model": "Cleaned locally (offline model)",
         "local_format": "Formatted locally",
         "local_rewrite": "Rewritten locally",
@@ -1015,6 +1016,14 @@ class VoiceFlowApp:
         raise RuntimeError("Dictation session cannot own its speech-model demand")
 
     @staticmethod
+    def _keep_local_whisper_warm(model_ref: object) -> bool:
+        """True for on-device Whisper. Nemotron has its own warm window."""
+        ref = str(model_ref or "").strip().lower()
+        if not ref.startswith("local/"):
+            return False
+        return "nemotron" not in ref and "whisper" in ref
+
+    @staticmethod
     def _release_session_model_resource(session: Any) -> None:
         """Idempotently end one session's model demand, including test/plugin sessions."""
         if session is None:
@@ -1060,11 +1069,9 @@ class VoiceFlowApp:
                         release_after_idle(NEMOTRON_CLOUD_POLISH_WARM_SECONDS)
                 elif keep_nemotron_warm and callable(release_after_idle):
                     release_after_idle(NEMOTRON_OFF_BURST_IDLE_GRACE_SECONDS)
-                elif sys.platform == "darwin" and callable(release_after_idle):
-                    # macOS: keep the speech model (bundled Whisper base.en)
-                    # resident between dictations instead of reloading it from
-                    # disk every time (seen: one load per dictation, Oct 2026).
-                    # Idle cleanup still frees it after MAC_SPEECH_WARM_SECONDS.
+                elif callable(release_after_idle) and VoiceFlowApp._keep_local_whisper_warm(stt_model_ref):
+                    # Keep bundled Whisper resident between dictations. Idle
+                    # cleanup still frees it after MAC_SPEECH_WARM_SECONDS.
                     release_after_idle(MAC_SPEECH_WARM_SECONDS)
                 else:
                     release()
@@ -2244,6 +2251,7 @@ class VoiceFlowApp:
                 stt_started = time.perf_counter()
                 raw_transcript = ""
                 used_stream_text = False
+                session_salvage = ""
                 failure: Exception | None = None
                 part = ""
                 stream_input_incomplete = False
@@ -2339,12 +2347,19 @@ class VoiceFlowApp:
                             if redecoded:
                                 raw_transcript = redecoded
                         elif part:
+                            # pending=0 with failures means a chunk or overlap
+                            # seam was unsafe. Keep the text only as a last
+                            # resort if the full recording produces nothing.
                             log.warning(
-                                "[STREAM STT] discarded %d streamed chars; pending=%d failures=%s.",
+                                "[STREAM STT] not using %d streamed chars (pending=%d failures=%s); transcribing the full recording.",
                                 len(str(part)),
                                 still_pending,
                                 stream_had_failures,
                             )
+                            if still_pending <= 0:
+                                session_salvage = str(part).strip()
+                            else:
+                                session_salvage = ""
                 # A complete-recording attempt is the correctness path.  Its
                 # provider owns a duration-aware bound; the short streaming
                 # target above must never turn into a transcription cutoff.
@@ -2373,6 +2388,10 @@ class VoiceFlowApp:
                             model_ref=getattr(session, "stt_model_ref", None) or (session.get("stt_model_ref") if isinstance(session, dict) else None),
                         ) or ""
                         if raw_transcript.strip():
+                            break
+                        if session_salvage:
+                            raw_transcript = session_salvage
+                            log.warning("[STREAM STT] full recording was empty; keeping the streamed text.")
                             break
                         failure = RuntimeError("No text was transcribed")
                     except Exception as exc:
@@ -2738,6 +2757,13 @@ class VoiceFlowApp:
                 self._reset_to_idle(session)
 
                 if success:
+                    quiet_mic = False
+                    try:
+                        if getattr(self.transcriber, "_mic_hint", "") == "too_quiet":
+                            quiet_mic = True
+                            self.transcriber._mic_hint = ""
+                    except Exception:
+                        quiet_mic = False
                     polishing_enabled = _polishing_enabled()
                     if effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_model", "local_format", "local_rewrite", "local_preserved"}:
                         # Spec §50: never silently pretend a transformation ran.
@@ -2752,6 +2778,8 @@ class VoiceFlowApp:
                         self._overlay_call("show_done", f"Local model polished — {effective.label}")
                     elif effective is not None and effective.label and polish_outcome["value"] == "ai_accepted":
                         self._overlay_call("show_done", f"AI polished — {effective.label}")
+                    elif quiet_mic:
+                        self._overlay_call("show_done", "Mic is very quiet — move closer")
                     else:
                         prefix = _polish_outcome_label(polish_outcome["value"])
                         self._overlay_call("show_done", prefix)
@@ -3648,7 +3676,7 @@ class VoiceFlowApp:
         if not text:
             text = self._capture_selected_text_for_video()
         target_mode = "full" if mode == "full" else "summary"
-        video_flow_widget.show_composer(text or "", target_mode, anchor_bar=self.overlay)
+        video_flow_widget.show_composer(text or "", target_mode, anchor_bar=self.overlay, ask_treatment=True)
 
     def _capture_selected_text_for_video(self) -> str:
         """Copy foreground selection swiftly without hanging UI or destroying clipboard.
@@ -3964,6 +3992,13 @@ class VoiceFlowApp:
                     window_open = False
 
                 if not window_open:
+                    try:
+                        from voice_flow.gui.desktop_launcher import _launcher_mutex_held
+                        if _launcher_mutex_held():
+                            window_open = True
+                    except Exception:
+                        pass
+                if not window_open:
                     from voice_flow.watchdog import get_pythonw_executable, get_pythonw_env, get_silent_windows_spawn_kwargs
                     pythonw_exe = get_pythonw_executable()
                     src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -4238,7 +4273,7 @@ def main() -> None:
                 print("Failed to send test crash report.")
             sys.exit(0)
         else:
-            print("Crash reporting is currently disabled (opt-in only). Enable it in Settings to test.")
+            print("Crash reporting is turned off. Turn it on under Settings, System, Privacy, to test.")
             sys.exit(0)
 
     try:

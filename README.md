@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.2-orange.svg" alt="Release: v1.0.2"></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20macOS%2012%2B-0078D4.svg" alt="Platforms">
+  <a href="https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.3-orange.svg" alt="Release: v1.0.3"></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20macOS%2014%20Sonoma%2B-0078D4.svg" alt="Platforms">
   <img src="https://img.shields.io/badge/Architecture-Local--first%20%2F%20BYOK-success.svg" alt="Local-first / BYOK">
   <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0">
   <a href="https://ai-productivity-flow.vercel.app/"><img src="https://img.shields.io/badge/Website-ai--productivity--flow.vercel.app-emerald.svg" alt="Official Website"></a>
@@ -42,8 +42,11 @@ Select any text, notes, or documentation on screen, or tap a global shortcut to 
   irm https://raw.githubusercontent.com/uzerkayat2004-gif/AI-Productivity-Flow/main/scripts/install.ps1 | iex
   ```
 * **SmartScreen**: Windows may say it protected your PC. Choose **More info**, then **Run anyway**.
+* **Size**: the Windows installer is about **546 MB**. Installed size is about **1.5 GB**.
 
 ### macOS 14 Sonoma or later (Apple Silicon only, M1 or newer)
+
+The Mac disk image is about **271 MB**. The zip archive is about **287 MB**.
 
 * **DMG Installer**: Download the drag-to-Applications installer **[`AI-Productivity-Flow-macOS.dmg`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg)**.
 * **Checksum**: [`AI-Productivity-Flow-macOS.dmg.sha256`](https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/latest/download/AI-Productivity-Flow-macOS.dmg.sha256)
@@ -154,13 +157,13 @@ Voice Flow lets you speak naturally and injects clean, formatted text directly i
 ### Telemetry & Crash Reporting
 
 AI Productivity Flow is strictly privacy-first:
-* **Completely Opt-In & Disabled by Default**: Zero telemetry or diagnostic network requests occur unless you explicitly toggle crash reporting on.
+* **On by default, with an opt-out**: Crash reports are on for every install, including existing users who never changed the setting. Open **Settings → System → About & Updates → Privacy** and choose **Turn off**. That takes effect immediately, with no restart. An explicit opt-out stays off.
 * **Zero Audio / Transcript Exposure**: Crash reports never contain microphone audio, speech transcripts, dictation text, clipboard contents, or request payloads.
 * **Strict Privacy Scrubbing**: Stack traces and error messages pass through a local privacy scrubber before leaving your machine:
   * Personal username paths (e.g. `/Users/<username>/...` and `C:\Users\<username>\...`) are scrubbed and replaced with `[REDACTED]`.
   * API keys and secrets (`OPENAI_*`, `ANTHROPIC_*`, `GROQ_*`, `GEMINI_*`, `DEEPGRAM_*`, `SENTRY_*`, `AWS_*`, etc.) are stripped.
   * Performance tracing and user profiling are completely disabled (0% sample rate).
-* **How to Verify or Change**: Open **Settings -> System -> Maintenance** to toggle "Send anonymous crash reports (via Sentry)" at any time. You can also run `voice-flow --test-crash-reporting` to test your current preference.
+* **How to Verify or Change**: The Privacy row under **Settings → System → About & Updates** turns crash reports off or back on. You can also run `voice-flow --test-crash-reporting` to test your current preference.
 
 ---
 

@@ -3124,7 +3124,7 @@ async function saveSettingControl(key, value, apply, message) {
   _settingConfirmed[key] = previous;
   const generation = _settingsGeneration;
   _settingPending[key] = true;
-  const controlIds={click_to_paste_enabled:"toggle-click-to-paste",show_in_taskbar:"toggle-show-in-taskbar",on_screen_ui_theme:"toggle-on-screen-ui-theme",anonymous_crash_reports:"toggle-anonymous-crash-reports"};
+  const controlIds={click_to_paste_enabled:"toggle-click-to-paste",show_in_taskbar:"toggle-show-in-taskbar",on_screen_ui_theme:"toggle-on-screen-ui-theme",anonymous_crash_reports:"btn-crash-reports-opt"};
   const control=document.getElementById(controlIds[key]);if(control)control.disabled=true;
   _settingEpoch[key] = (_settingEpoch[key] || 0) + 1;
   try {
@@ -3153,7 +3153,7 @@ function openSettings(tab = "general") {
     loadHardwareMicrophones();
     loadSettingControl("click_to_paste_enabled", value => {const el=document.getElementById("toggle-click-to-paste");if(el)el.checked=value===true;});
     loadSettingControl("show_in_taskbar", value => {const el=document.getElementById("toggle-show-in-taskbar");if(el)el.checked=value!==false;});
-    loadSettingControl("anonymous_crash_reports", value => {const el=document.getElementById("toggle-anonymous-crash-reports");if(el)el.checked=value===true;});
+    loadSettingControl("anonymous_crash_reports", value => syncCrashReportsPrivacy(value !== false));
     loadSettingControl("on_screen_ui_theme", value => updateOnScreenUIThemeButtons(value === "dark" ? "dark" : "light"));
     // Sync Auto-Startup status
     checkAutoStartStatus();
@@ -3246,16 +3246,40 @@ async function toggleAutoStartSetting(checked) {
   finally {_settingPending[key]=false;if(toggle)toggle.disabled=false;if(generation===_settingsGeneration){if(toggle){toggle.checked=value;toggle.disabled=unavailable;}if(badge){badge.textContent=unavailable?"Unavailable":value?"✓ Enabled":"✕ Disabled";badge.className=`status-badge ${!unavailable&&value?"status-connected":"status-error"}`;}}}
 }
 
+function syncCrashReportsPrivacy(on) {
+  const btn = document.getElementById("btn-crash-reports-opt");
+  if (!btn) return;
+  const enabled = on !== false;
+  if (!btn.dataset) btn.dataset = {};
+  btn.dataset.enabled = enabled ? "1" : "0";
+  btn.textContent = enabled ? "Turn off" : "Turn on";
+}
+
+async function toggleCrashReportsFromPrivacy() {
+  const btn = document.getElementById("btn-crash-reports-opt");
+  const currentlyOn = !btn || btn.dataset.enabled !== "0";
+  return toggleAnonymousCrashReports(!currentlyOn);
+}
+
 async function toggleAnonymousCrashReports(checked) {
   return saveSettingControl(
     "anonymous_crash_reports",
     !!checked,
-    value => {
-      const el = document.getElementById("toggle-anonymous-crash-reports");
-      if (el) el.checked = (value === true);
-    },
-    `Anonymous crash reporting ${checked ? "enabled (thank you!)" : "disabled"}.`
+    value => syncCrashReportsPrivacy(value !== false),
+    `Crash reports ${checked ? "are on" : "are off"}.`
   );
+}
+
+async function openInstalledNotice(doc) {
+  const which = doc === "third-party" ? "third-party" : "license";
+  try {
+    const res = await safeFetchJson("/api/notices/open?doc=" + encodeURIComponent(which));
+    if (!res || res.success !== true) {
+      settingsError((res && res.error) || "Could not open that document.");
+    }
+  } catch (err) {
+    settingsError(err.message || "Could not open that document.");
+  }
 }
 
 async function toggleShowInTaskbarSetting(checked) {
@@ -6668,11 +6692,12 @@ function _afMapNlmState(data) {
   if (data.recovery_state === "restoring") {
     return { key: "checking", label: "Checking connection…" };
   }
-  if (data.recovery_state === "transient_error") {
+  const accountSaved = Boolean(data.account_saved || data.authenticated === true);
+  if (data.recovery_state === "transient_error" && accountSaved) {
     return { key: "attention", label: "Connection delayed" };
   }
-  if (data.recovery_state === "sign_in_required" || data.online_verified === false) {
-    return { key: "attention", label: "Sign-in required" };
+  if ((data.recovery_state === "sign_in_required" || data.online_verified === false || data.expired === true) && accountSaved) {
+    return { key: "attention", label: "Signed out of NotebookLM, sign in again" };
   }
   if (data.online_verified === true) {
     return { key: "connected", label: email ? `Connected · ${email}` : "Connected" };
@@ -8058,25 +8083,6 @@ function finishOnboarding(options) {
   if (overlay) {
     overlay.classList.add("hidden");
     overlay.classList.remove("welcome-hero-mode");
-  }
-
-  // Prompt for anonymous crash reporting consent if never set
-  if (!localStorage.getItem("vf_crash_reporting_prompted")) {
-    safeFetchJson("/api/settings/all").then(async res => {
-      const allSettings = res?.settings || {};
-      if (!Object.prototype.hasOwnProperty.call(allSettings, "anonymous_crash_reports")) {
-        localStorage.setItem("vf_crash_reporting_prompted", "1");
-        const consent = await vfConfirm({
-          title: "Help Improve AI Productivity Flow",
-          badge: "Privacy & Stability",
-          icon: "🛡️",
-          message: "Would you like to send anonymous crash reports via Sentry to help us diagnose issues? Reports NEVER include audio, transcripts, or personal data, and this can be changed anytime in Settings.",
-          confirmText: "Enable Anonymous Reports",
-          cancelText: "No Thanks",
-        });
-        await toggleAnonymousCrashReports(!!consent);
-      }
-    }).catch(() => {});
   }
 
   // Directly navigate user to Audio Flow feature inside the app
@@ -11498,6 +11504,58 @@ async function loadVoiceDownloadableModels() {
   }
   renderVoiceDownloadableModels();
   checkDownloadPolling();
+  refreshFirstRunModelBanner();
+}
+
+const VF_NEMOTRON_MODEL_ID = "nvidia/nemotron-speech-streaming-en-0.6b";
+const VF_S1_MODEL_ID = "superwhisper/s1-mini-q4_k_m";
+
+async function refreshFirstRunModelBanner() {
+  const box = document.getElementById("vf-first-run-models");
+  if (!box) return;
+  if (!vfDownloadableModels.length) {
+    try {
+      const res = await fetch("/api/downloadable-models?all=true");
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.models)) vfDownloadableModels = data.models;
+    } catch (_) {}
+  }
+  const needs = (id) => {
+    const model = (vfDownloadableModels || []).find(item => item.id === id);
+    return !model || (model.status !== "downloaded");
+  };
+  const nemoNeeded = needs(VF_NEMOTRON_MODEL_ID);
+  const s1Needed = needs(VF_S1_MODEL_ID);
+  const nemoBtn = document.getElementById("btn-download-nemotron");
+  const s1Btn = document.getElementById("btn-download-s1");
+  if (nemoBtn) {
+    const model = (vfDownloadableModels || []).find(item => item.id === VF_NEMOTRON_MODEL_ID);
+    nemoBtn.classList.toggle("hidden", !nemoNeeded);
+    nemoBtn.textContent = model && model.status === "downloading"
+      ? `Downloading Nemotron… ${Math.round((model.progress || 0) * 100)}%`
+      : "Download Nemotron speech";
+  }
+  if (s1Btn) {
+    const model = (vfDownloadableModels || []).find(item => item.id === VF_S1_MODEL_ID);
+    s1Btn.classList.toggle("hidden", !s1Needed);
+    s1Btn.textContent = model && model.status === "downloading"
+      ? `Downloading polish model… ${Math.round((model.progress || 0) * 100)}%`
+      : "Download polish model";
+  }
+  const show = nemoNeeded || s1Needed;
+  box.classList.toggle("hidden", !show);
+  box.hidden = !show;
+}
+
+async function startRecommendedModelDownload(modelId) {
+  if (typeof startDownloadModel === "function") await startDownloadModel(modelId);
+  refreshFirstRunModelBanner();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => { refreshFirstRunModelBanner(); });
+} else {
+  refreshFirstRunModelBanner();
 }
 
 let vfDownloadableModelsFilter = "all";

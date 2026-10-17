@@ -20,7 +20,7 @@
 5. **Narova upstream is darwin/linux-declared**: Windows support rests on
    our documented hf.js patches. Upgrading narova requires re-validating
    those patches (recorded in runtime-manifest.json).
-6. **Installer size**: ~444 MB / ~1.5 GB installed. Accepted by the mission
+6. **Installer size**: ~546 MB / ~1.5 GB installed. Accepted by the mission
    (reliability > size). The private python is the largest component.
 7. **Antivirus/SmartScreen**: unsigned installer and unsigned python/node
    binaries may trigger warnings on first run. Code-signing hooks are

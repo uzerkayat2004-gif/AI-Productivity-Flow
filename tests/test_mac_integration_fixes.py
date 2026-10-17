@@ -255,8 +255,8 @@ def test_mac_keeps_whisper_warm_after_a_dictation(monkeypatch):
     assert main_module.MAC_SPEECH_WARM_SECONDS > 0
 
 
-def test_windows_still_releases_whisper_immediately(monkeypatch):
-    assert _release(monkeypatch, "win32") == [("release",)]
+def test_windows_keeps_whisper_warm_after_a_dictation(monkeypatch):
+    assert _release(monkeypatch, "win32") == [("idle", main_module.MAC_SPEECH_WARM_SECONDS)]
 
 
 def test_restore_focus_reactivates_users_app_when_no_app_is_active(monkeypatch):

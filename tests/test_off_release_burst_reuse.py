@@ -121,15 +121,18 @@ def test_forced_cleanup_overrides_nemotron_burst_grace(monkeypatch, fake_speech_
     assert "speech" not in resources._cleanup_requested
 
 
-@pytest.mark.parametrize("model_ref", ["local/whisper-small.en", "deepgram/nova-3"])
-def test_non_nemotron_speech_leases_still_release_immediately(monkeypatch, fake_speech_cache, model_ref):
+@pytest.mark.parametrize("model_ref,immediate", [("local/whisper-small.en", False), ("deepgram/nova-3", True)])
+def test_non_nemotron_speech_leases_still_release_immediately(monkeypatch, fake_speech_cache, model_ref, immediate):
     install_settings(monkeypatch, polishing_enabled=False)
     session = session_for(resources.acquire_model_use("speech"), model_ref)
 
     VoiceFlowApp._release_session_model_resource(session)
 
     assert session.model_resource_lease is None
-    assert resources._cleanup_not_before["speech"] == 0.0
+    if immediate:
+        assert resources._cleanup_not_before.get("speech", 0.0) == 0.0
+    else:
+        assert resources._cleanup_not_before["speech"] > 0
 
 
 def test_polishing_on_keeps_immediate_speech_release_before_polish(monkeypatch, fake_speech_cache):

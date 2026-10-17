@@ -1123,6 +1123,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "github": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow",
             })
             return
+        if path == "/api/notices/open":
+            self._open_installed_notice(urllib.parse.parse_qs(parsed.query).get("doc", ["license"])[0])
+            return
         if path == "/api/updates/check":
             from voice_flow.update_checker import check_for_updates
             qs = urllib.parse.parse_qs(parsed.query)
@@ -1373,7 +1376,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "dictation_trigger_mode": "hybrid",
                 "autostart_enabled": True,
                 "show_in_taskbar": True,
-                "anonymous_crash_reports": False,
+                "anonymous_crash_reports": True,
                 "selected_mic_device": "",
                 "voice_flow_polish_model": "local/deterministic",
                 "voice_flow_polish_speed_mode": "balanced",
@@ -1745,15 +1748,14 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 else:
                     account_saved, email, storage_path, details = _read_notebooklm_storage_state(profile)
                     if not account_saved and not details.get("disconnected"):
-                        saved_email = storage.get_setting("video_flow_notebooklm_email")
-                        switched_from = storage.get_setting("video_flow_notebooklm_switched_from")
-                        is_switched_account = bool(
-                            saved_email and switched_from
-                            and str(saved_email).strip().casefold() == str(switched_from).strip().casefold()
-                        )
-                        if details.get("expired") or (saved_email and not is_switched_account):
+                        # A saved email without cookies is not a session. Treating
+                        # it as saved made fresh installs run keepalive and show
+                        # "Connection delayed" instead of Sign in. An expired
+                        # file that still has cookies is a real signed-out session.
+                        cookie_count = int(details.get("cookies_count") or 0)
+                        if details.get("expired") and (cookie_count > 0 or details.get("master_token_present")):
                             account_saved = True
-                            email = email or str(saved_email).strip()
+                            email = email or None
                     online_verified = None
                     verification_status = "unauthenticated"
                     verification_message = "NotebookLM is not connected — please log in"
@@ -8756,12 +8758,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 self.send_error(404, "Thumbnail unavailable")
                 return
             try:
-                subprocess.run(
-                    [str(ffmpeg), "-y", "-loglevel", "error", "-ss", "0", "-i", str(path),
-                     "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(thumb)],
-                    timeout=25,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
+                from voice_flow.video_thumb import write_preview_thumb
+                if not write_preview_thumb(str(ffmpeg), path, thumb):
+                    self.send_error(404, "Thumbnail unavailable")
+                    return
             except Exception:
                 self.send_error(404, "Thumbnail unavailable")
                 return
@@ -8873,6 +8873,43 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _open_installed_notice(self, doc: str) -> None:
+        """Open the installed LICENSE or third-party notices with the OS viewer."""
+        name = "THIRD_PARTY_NOTICES.txt" if str(doc or "").strip() == "third-party" else "LICENSE"
+        candidates: list[Path] = []
+        try:
+            from voice_flow.runtime_env import install_root
+            root = install_root()
+            if root:
+                candidates.append(Path(root) / name)
+        except Exception:
+            pass
+        here = Path(__file__).resolve()
+        repo = here.parents[3]
+        if name == "LICENSE":
+            candidates.append(repo / "LICENSE")
+        else:
+            candidates.append(repo / "release" / "THIRD_PARTY_NOTICES.txt")
+        # macOS bundle: .../Contents/Resources/src/voice_flow/gui/api_server.py
+        candidates.append(here.parents[4] / name)
+        candidates.append(here.parents[3] / name)
+        target = next((path for path in candidates if path.is_file()), None)
+        if target is None:
+            self.send_json_response({"success": False, "error": f"{name} was not found in this installation."}, 404)
+            return
+        try:
+            import subprocess
+            if sys.platform == "win32":
+                os.startfile(str(target))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except Exception as exc:
+            self.send_json_response({"success": False, "error": str(exc)}, 500)
+            return
+        self.send_json_response({"success": True, "path": str(target)})
 
     def send_json_response(self, data: any, status: int = 200) -> None:
         try:

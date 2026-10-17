@@ -10,7 +10,7 @@ Thank you for your interest in contributing to **AI Productivity Flow**! We welc
 * **Python:** 3.10+ (tested on 3.11, 3.12, 3.13)
 * **Node.js:** 18+ and npm 9+ (for Video Flow rendering components)
 * **Git**
-* **OS:** Windows 10 / 11 x64 or macOS 12+ (Apple Silicon & Intel)
+* **OS:** Windows 10 / 11 x64 or macOS 14 Sonoma or later (Apple Silicon only)
 
 ### 2. Initial Setup
 ```bash
@@ -65,7 +65,7 @@ AI Productivity Flow adheres strictly to [Semantic Versioning (SemVer 2.0.0)](ht
 The single source of truth for the product version is:
 ```python
 # src/voice_flow/_version.py
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 ```
 All build scripts, installer definitions, CI workflows, and runtime endpoints derive from or validate against this file. The CI suite runs `tests/test_version_consistency.py` on every commit and PR.
 

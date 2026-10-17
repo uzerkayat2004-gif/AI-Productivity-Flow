@@ -258,7 +258,7 @@ def test_failed_ai_outcomes_keep_input_and_have_truthful_labels(monkeypatch) -> 
     assert _polish_outcome_label("timeout") == "AI timed out — basic cleanup applied"
     assert _polish_outcome_label("provider_failure") == "AI unavailable — basic cleanup applied"
     assert _polish_outcome_label("disabled") == "Basic cleanup applied"
-    assert _polish_outcome_label("local") == "Cleaned locally"
+    assert _polish_outcome_label("local") == "Basic cleanup only"
 
 
 def test_disabled_polish_still_delivers_basic_cleanup_and_dictionary(monkeypatch) -> None:

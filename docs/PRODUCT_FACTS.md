@@ -1,6 +1,6 @@
 # PRODUCT_FACTS — verify before editing public docs
 
-Concise, checkable facts about AI Productivity Flow (v1.0.0 Public Release). Public documentation must match these; if code changes them, update this file first.
+Concise, checkable facts about AI Productivity Flow (v1.0.3). Public documentation must match these; if code changes them, update this file first.
 
 - **Canonical product name**: AI Productivity Flow.
 - **Feature families**: **Video Flow**, **Audio Flow**, **Voice Flow** (maintain this presentation order).
@@ -8,8 +8,10 @@ Concise, checkable facts about AI Productivity Flow (v1.0.0 Public Release). Pub
 - **Platforms**:
   - Windows 10/11 x64: Single-file installer (`AI-Productivity-Flow-Setup-x64.exe`) with isolated private runtime.
   - macOS 14 Sonoma or later (Apple Silicon only, M1 or newer; not Intel Macs. The release bundle's Python runtime and launcher are arm64): Application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
-- **Status**: v1.0.0 Stable Public Release.
-- **Public Version**: 1.0.0 (canonical source: `src/voice_flow/_version.py`).
+- **Status**: v1.0.3.
+- **Public Version**: 1.0.3 (canonical source: `src/voice_flow/_version.py`).
+- **Download sizes** (v1.0.2 artifacts, the last published build): Windows installer about 546 MB, installed footprint about 1.5 GB, Mac DMG about 271 MB, Mac zip about 287 MB.
+- **Crash reports**: on by default. Opt out under Settings → System → About & Updates → Privacy. Reports exclude audio, transcripts, and personal data.
 - **Speech recognition**:
   - Local Faster-Whisper `base.en`, CPU int8, local; bundled with installer.
   - Downloadable streaming models: NVIDIA Nemotron Speech Streaming English 0.6B and Nemotron 3.5 ASR Streaming 0.6B.

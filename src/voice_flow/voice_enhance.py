@@ -43,6 +43,9 @@ from voice_flow.vad import calibrate_vad_parameters
 
 _TARGET_PEAK = 0.85
 _NEAR_SILENCE = 1e-4
+_QUIET_PEAK = 0.06
+_QUIET_SNR = 6.0
+_LAST_HINT = ""
 _MIN_ENHANCE_LEN = 1600  # 0.1 s @ 16 kHz below which we only normalize
 
 _PROFILES: dict[str, dict] = {
@@ -66,6 +69,14 @@ _LIVE_PROFILES: dict[str, dict[str, float]] = {
 
 def _enhancement_disabled() -> bool:
     return os.environ.get("VOICE_FLOW_AUDIO_ENHANCE", "").strip().lower() in {"0", "false", "no", "off"}
+
+
+def consume_enhance_hint() -> str:
+    """Return and clear the latest mic hint (``too_quiet`` or empty)."""
+    global _LAST_HINT
+    hint = _LAST_HINT
+    _LAST_HINT = ""
+    return hint
 
 
 class LiveSpeechEnhancer:
@@ -451,13 +462,24 @@ def enhance_for_stt(audio: np.ndarray, sr: int = 16000, profile: str = "auto") -
             # Denoiser collapsed residual noise; do not amplify silence.
             return out, resolved
 
+        # A quiet, low-SNR buffer is mostly noise. The old far-mic ceiling
+        # (80x) pushed that noise to ~0.9 and the recognizer invented words.
+        global _LAST_HINT
+        gain_ceiling = float(cfg["gain_ceiling"])
+        too_quiet = stats["peak"] < _QUIET_PEAK and stats["snr"] < _QUIET_SNR
+        if too_quiet:
+            gain_ceiling = min(gain_ceiling, 18.0)
+            _LAST_HINT = "too_quiet"
+        else:
+            _LAST_HINT = ""
+
         # Real-time dynamic Automatic Gain Control (AGC)
         eff_noise_floor = 0.0005 if (stats["snr"] < 1.15 and stats["peak"] >= 0.005) else stats["noise_floor"]
         out = _apply_dynamic_agc(
             out,
             sr=sr,
             target_rms_db=cfg.get("target_rms_db", -15.0),
-            gain_ceiling=cfg["gain_ceiling"],
+            gain_ceiling=gain_ceiling,
             noise_floor=max(eff_noise_floor, 1e-5),
         )
 

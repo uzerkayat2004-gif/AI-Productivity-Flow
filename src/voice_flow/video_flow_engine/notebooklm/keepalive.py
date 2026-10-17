@@ -168,7 +168,9 @@ class NotebookLMKeepaliveService:
                             "profile": target_profile,
                             "authenticated": False,
                         }
-                    if not saved_email and not has_cookies:
+                    # Email left in settings is not a session. A new install, or a
+                    # profile whose cookies are gone, must not call the CLI.
+                    if not has_cookies:
                         self._refresh_state = "idle"
                         return {"ran": False, "reason": "no_saved_session", "profile": target_profile}
             except Exception:

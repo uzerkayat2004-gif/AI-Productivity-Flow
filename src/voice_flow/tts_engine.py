@@ -383,10 +383,13 @@ class TTSEngine:
                         break
                     played_any = True
                     if not _cancelled() and not is_last:
-                        pause_sec = self._get_inter_sentence_pause_sec(pause_class)
-                        deadline = time.perf_counter() + pause_sec
-                        while time.perf_counter() < deadline and not _cancelled():
-                            time.sleep(0.02)
+                        # The next chunk is synthesized on another thread. A
+                        # paragraph pause here is the 1–2 s gap in Read mode.
+                        pause_sec = 0.04 if audio_queue.qsize() else 0.0
+                        if pause_sec:
+                            deadline = time.perf_counter() + pause_sec
+                            while time.perf_counter() < deadline and not _cancelled():
+                                time.sleep(0.02)
                     if is_last or _cancelled():
                         break
                     continue
@@ -428,8 +431,9 @@ class TTSEngine:
                     if self._active_mci_alias == alias:
                         self._active_mci_alias = None
                     if not _cancelled() and not is_last:
-                        # Context-aware pause: human-like breathing rhythm with speed scaling
-                        pause_sec = self._get_inter_sentence_pause_sec(pause_class)
+                        # Next chunk is already synthesizing. Don't insert the
+                        # old paragraph pause once playback of this chunk ends.
+                        pause_sec = 0.04 if audio_queue.qsize() else 0.0
                         deadline = time.perf_counter() + pause_sec
                         while time.perf_counter() < deadline and not _cancelled():
                             if self._is_paused:

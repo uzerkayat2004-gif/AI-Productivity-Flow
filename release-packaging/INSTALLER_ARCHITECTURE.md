@@ -63,7 +63,7 @@ installer).
 `release/build_windows_release.py` → refresh app package into staging →
 preflight (14 required components + hf.js `node --check`) → ISCC with
 injected staging/dist paths → SHA-256. Sizes: staging ≈ 1.5 GB, installer
-≈ 444 MB (LZMA2/max, solid). Largest components: python runtime (~700 MB
+≈ 546 MB (LZMA2/max, solid). Largest components: python runtime (~700 MB
 with ctranslate2/onnx/scipy), hyperframes node_modules (~180 MB incl.
 onnxruntime-node/sharp natives), narova+node_modules (~120 MB), whisper
 model (~145 MB), node (~80 MB), ffmpeg (~170 MB unpacked).

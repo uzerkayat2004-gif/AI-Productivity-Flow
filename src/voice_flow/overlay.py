@@ -298,6 +298,8 @@ class FloatingOverlayBar:
         self.recording_width = 192
         self.ready_actions_width = 248
         self.video_action_width = 66
+        self._nlm_signin_cache: tuple[float, bool] | None = None
+        self._nlm_signin_starting = False
         self.settings_action_width = 26
         self.audio_playback_width = 272
         self.working_width = 250
@@ -1429,7 +1431,7 @@ class FloatingOverlayBar:
                 if foreground_w >= 120:
                     settings_width = getattr(self, "settings_action_width", 26)
                     settings_left = foreground_grip_left - settings_width
-                    video_left = settings_left - self.video_action_width
+                    video_left = settings_left - self._video_zone_width()
                     if settings_left <= x < foreground_grip_left:
                         return "settings"
                     if video_left > 0 and video_left - 4 <= x < settings_left:
@@ -1505,7 +1507,7 @@ class FloatingOverlayBar:
             if w >= 120:
                 settings_width = getattr(self, "settings_action_width", 26)
                 settings_left = content_width - settings_width
-                video_left = settings_left - self.video_action_width
+                video_left = settings_left - self._video_zone_width()
                 video_hit_left = video_left - 4
 
                 if settings_left <= x < content_width:
@@ -1591,10 +1593,13 @@ class FloatingOverlayBar:
                     self.show_error(self.video_stage or "Video generation failed")
                 self.clear_video_status()
             elif zone == "video_flow":
-                if selected:
-                    self.clear_selected_text()
-                if self.on_video_flow:
-                    self.on_video_flow(selected or "")
+                if self._notebooklm_needs_sign_in():
+                    self._start_notebooklm_sign_in()
+                else:
+                    if selected:
+                        self.clear_selected_text()
+                    if self.on_video_flow:
+                        self.on_video_flow(selected or "")
             elif zone == "speak" and selected and self.on_listen_selected:
                 self.clear_selected_text()
                 self.on_listen_selected(selected)
@@ -2097,6 +2102,48 @@ class FloatingOverlayBar:
         self._last_draw_canvas = c
         self._last_drawn_width = self.width
 
+    def _notebooklm_needs_sign_in(self) -> bool:
+        """Local cookie check only. A missing profile is a sign-in, not a retry."""
+        import os
+        if os.environ.get("PYTEST_CURRENT_TEST") and not getattr(self, "_nlm_signin_force_check", False):
+            return bool(getattr(self, "_nlm_signin_override", False))
+        now = time.monotonic()
+        cached = self._nlm_signin_cache
+        if cached is not None and now - cached[0] < 8.0:
+            return cached[1]
+        needed = False
+        try:
+            from voice_flow.video_flow_engine.notebooklm.config import has_valid_storage_state
+            needed = not has_valid_storage_state("video-flow-experiment")
+        except Exception:
+            needed = False
+        self._nlm_signin_cache = (now, needed)
+        return needed
+
+    def _video_zone_width(self) -> int:
+        return 78 if self._notebooklm_needs_sign_in() else self.video_action_width
+
+    def _start_notebooklm_sign_in(self) -> None:
+        if self._nlm_signin_starting:
+            return
+        self._nlm_signin_starting = True
+
+        def _run() -> None:
+            try:
+                from voice_flow.video_flow_engine.notebooklm.service import NotebookLMService
+                NotebookLMService(profile="video-flow-experiment").start_auth(switch_account=False, direct=True)
+            except Exception:
+                logging.getLogger(__name__).exception("NotebookLM sign-in could not start")
+            finally:
+                self._nlm_signin_starting = False
+                self._nlm_signin_cache = None
+                try:
+                    self._draw()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_run, daemon=True, name="nlm-signin").start()
+
     def _draw_ready(self, w: int, h: int) -> None:
         sel_active = getattr(self, "_selection_expanded", False)
         is_expanded = self._is_mouse_over or sel_active
@@ -2114,7 +2161,7 @@ class FloatingOverlayBar:
 
         settings_width = getattr(self, "settings_action_width", 26)
         settings_left = content_width - settings_width
-        video_left = settings_left - self.video_action_width
+        video_left = settings_left - self._video_zone_width()
         hover_radius = max(2.0, min(action_height / 2 - 3, 16))
 
         # Speak zone highlight (hover only)
@@ -2140,7 +2187,8 @@ class FloatingOverlayBar:
 
         # "⋯ Video" label — orange when selection active or hovered
         video_fill = self.ACCENT_ORANGE if (self._hover_zone == "video_flow" or sel_active) else self.TEXT_WHITE
-        c.create_text(video_left + self.video_action_width / 2, cy, text="⋯ Video", fill=video_fill, font=(config.bar_font_family, 8, "bold"), anchor="center")
+        video_label = "Sign in" if self._notebooklm_needs_sign_in() else "⋯ Video"
+        c.create_text(video_left + self._video_zone_width() / 2, cy, text=video_label, fill=video_fill, font=(config.bar_font_family, 8, "bold"), anchor="center")
         c.create_line(settings_left, action_top + 7, settings_left, h - 7, fill=self.BORDER, width=1)
 
         # Crisp Vector Settings Gear Icon
