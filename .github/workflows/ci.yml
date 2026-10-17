@@ -69,7 +69,7 @@ jobs:
         run: node --test tests/test_notebooklm_recovery_ui.cjs
 
       - name: Run NotebookLM login spawn checks
-        run: pytest tests/test_notebooklm_login_spawn.py -v --timeout=60
+        run: pytest tests/test_notebooklm_login_spawn.py tests/test_notebooklm_packaging.py -v --timeout=60
 
   macos-build:
     name: macOS Validation & App Packaging
@@ -129,7 +129,7 @@ jobs:
         run: node --test tests/test_notebooklm_recovery_ui.cjs
 
       - name: Run NotebookLM login spawn checks
-        run: pytest tests/test_notebooklm_login_spawn.py -v --timeout=60
+        run: pytest tests/test_notebooklm_login_spawn.py tests/test_notebooklm_packaging.py -v --timeout=60
 
       - name: Capture privacy state after macOS regression tests
         run: screencapture -x out/mac-native-identity/screen-after-regression-tests.png
@@ -138,6 +138,9 @@ jobs:
         run: |
           python scripts/build_macos_app.py --bundle-runtime --dmg
           screencapture -x out/mac-native-identity/screen-after-bundle-build.png
+
+      - name: Verify bundled NotebookLM login spawn
+        run: python scripts/check_macos_notebooklm_bundle.py "dist/AI Productivity Flow.app"
 
       - name: Verify built macOS native application identity
         timeout-minutes: 3

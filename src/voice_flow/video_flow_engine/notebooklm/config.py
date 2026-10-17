@@ -414,23 +414,34 @@ def has_valid_storage_state(profile: str | None = None) -> bool:
 def _private_runtime_script_candidates(command: str) -> list[Path]:
     """Return private, application-owned console-script candidates.
 
-    This deliberately excludes user home/experiment locations.  A packaged app
-    must use its bundled Python runtime first; development uses the active
-    interpreter's environment. Explicit settings and environment variables are
-    handled by the public resolvers before this helper is consulted.
+    Windows installs console scripts in ``runtime/python/Scripts``. The macOS
+    .app installs them in ``Contents/Resources/runtime/python/bin``, and
+    ``sys.executable`` there is the native launcher in ``Contents/MacOS``, not
+    ``bin/python3``. Both layouts are searched. User home/experiment locations
+    stay out of this helper; explicit settings and environment variables are
+    handled by the public resolvers first.
     """
     suffixes = (".exe", "") if os.name == "nt" else ("", ".exe")
     roots: list[Path] = []
     try:
-        from voice_flow.runtime_env import runtime_root
-        runtime = runtime_root()
-        if runtime is not None:
+        from voice_flow.runtime_env import mac_bundle_runtime_dir, runtime_root
+        for runtime in (runtime_root(), mac_bundle_runtime_dir()):
+            if runtime is None:
+                continue
             roots.append(runtime / "python" / "Scripts")
+            roots.append(runtime / "python" / "bin")
     except Exception:
         pass
 
-    active = Path(sys.executable).resolve().parent
-    roots.extend((active / "Scripts", active))
+    try:
+        executable = Path(sys.executable).resolve()
+    except OSError:
+        executable = Path(sys.executable)
+    # Native macOS launcher: Contents/MacOS/<launcher> -> Resources/runtime/python/bin
+    if executable.parent.name == "MacOS":
+        roots.append(executable.parent.parent / "Resources" / "runtime" / "python" / "bin")
+    active = executable.parent
+    roots.extend((active / "Scripts", active / "bin", active))
     candidates: list[Path] = []
     for root in roots:
         for suffix in suffixes:
@@ -477,6 +488,18 @@ def resolve_notebooklm_cli(explicit_path: Path | str | None = None) -> Path | No
 
     if ISOLATED_CLI_PATH.is_file():
         return ISOLATED_CLI_PATH
+
+    # The macOS launcher prepends the bundled bin directory to PATH. MCP is
+    # discovered that way; the CLI must be too when the script is present.
+    import shutil
+    which_path = shutil.which("notebooklm")
+    if which_path:
+        found = Path(which_path).expanduser()
+        try:
+            if found.is_file():
+                return found.resolve()
+        except OSError:
+            pass
 
     return None
 

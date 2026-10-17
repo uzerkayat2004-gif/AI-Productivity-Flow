@@ -279,6 +279,48 @@ def stage_whisper_model(runtime_dir: Path, cache_dir: Path | None = None, fetch=
     return {"model": "Systran/faster-whisper-base.en", "revision": WHISPER_REVISION, "sha256": hashes}
 
 
+NOTEBOOKLM_PACKAGE = "notebooklm-py[browser,mcp]==0.8.2"
+
+
+def ensure_bundled_notebooklm(python_bin: Path) -> None:
+    """Install notebooklm into the bundled Mac runtime and require its CLI.
+
+    ``notebooklm`` and ``notebooklm-mcp`` are console scripts of the same
+    package. A bundle that ships only the MCP binary cannot sign in. The
+    module must import from this runtime, and ``bin/notebooklm`` must exist so
+    ``python3 -m notebooklm`` can be launched beside it.
+    """
+    script = python_bin.parent / "notebooklm"
+    probe_code = "import notebooklm, pathlib; print(pathlib.Path(notebooklm.__file__).resolve())"
+
+    def probe() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(python_bin), "-c", probe_code],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    result = probe()
+    if result.returncode != 0 or not script.is_file():
+        print(f"Installing {NOTEBOOKLM_PACKAGE} into {python_bin}")
+        subprocess.run([str(python_bin), "-m", "pip", "install", NOTEBOOKLM_PACKAGE], check=True)
+        result = probe()
+    module_text = (result.stdout or "").strip()
+    if result.returncode != 0 or not script.is_file() or not module_text:
+        detail = (result.stderr or result.stdout or "")[-2000:]
+        raise RuntimeError(
+            "Bundled Mac runtime is missing NotebookLM. "
+            f"Expected {script} and a successful import.\n{detail}"
+        )
+    module = Path(module_text)
+    runtime_root = python_bin.resolve().parent.parent
+    if runtime_root not in module.parents:
+        raise RuntimeError(f"notebooklm imported from outside the bundled runtime: {module}")
+    print(f"Bundled NotebookLM CLI: {script}")
+    print(f"Bundled NotebookLM module: {module}")
+
+
 def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
     """Download and bundle standalone Python 3.11 runtime and dependencies into Contents/Resources/runtime."""
     runtime_dir = RESOURCES_DIR / "runtime"
@@ -383,6 +425,7 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
                 "cryptography", "sentry-sdk>=2.0.0", "openai>=1.40.0,<3"
             ]
             subprocess.run([str(python_bin), "-m", "pip", "install", *packages], check=True)
+        ensure_bundled_notebooklm(python_bin)
     else:
         print(f"Host platform is '{sys.platform}'. Skipping pip package installation in Darwin binary on non-Darwin host.")
 

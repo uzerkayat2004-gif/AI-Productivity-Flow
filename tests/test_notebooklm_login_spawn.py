@@ -74,6 +74,7 @@ def test_login_spawn_hides_the_console_without_create_no_window() -> None:
 
 
 def test_browser_fallback_is_chrome_then_edge_then_chromium(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(login_flow.sys, "platform", "win32")
     installed = {"chrome": True, "msedge": True}
     monkeypatch.setattr(login_flow, "_browser_installed", lambda name: installed.get(name, False))
     assert login_flow.resolve_interactive_browser("chrome") == "chrome"
