@@ -904,8 +904,25 @@ function automaticGuidesAllowed(eligible) {
     onboardingFlag("vf_onboarding.v2_seen") === "1";
 }
 
+// Guides closed by navigation (not by the user) -> step to resume at (this session only).
+const _interruptedGuideSteps = {};
+
+function resumeInterruptedGuide(feature, pageId) {
+  const step = _interruptedGuideSteps[feature];
+  if (!step) return false;
+  delete _interruptedGuideSteps[feature];
+  setTimeout(() => {
+    if (currentPageId !== pageId || isFeatureGuideVisible("onboarding-overlay")) return;
+    if (feature === "voice" && typeof startVoiceFlowGuide === "function") startVoiceFlowGuide(step);
+    if (feature === "audio" && typeof startAudioFlowGuide === "function") startAudioFlowGuide({ startStep: step });
+    if (feature === "video" && typeof startVideoFlowGuide === "function") startVideoFlowGuide(step);
+  }, 60);
+  return true;
+}
+
 function scheduleAutomaticGuide(feature, pageId) {
   if (feature === "video" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) return;
+  if (!isOnboardingAccountChanging() && resumeInterruptedGuide(feature, pageId)) return;
   if (isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature)) return;
   // A guide the user has already seen never starts again by itself
   // (grokbot/combined-test); "Replay onboarding" clears these flags.
@@ -1142,9 +1159,17 @@ function switchPage(pageId, options = {}) {
 
   // Cleanly dismiss active guide for other pages when leaving without marking completed
   if (!options.fromGuide && !options.fromWelcomeTour) {
-    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function" && isFeatureGuideVisible("audioflow-guide-overlay")) stopAudioFlowGuide(false);
-    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function" && isFeatureGuideVisible("videoflow-guide-overlay")) stopVideoFlowGuide(false);
-    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function" && isFeatureGuideVisible("voiceflow-guide-overlay")) stopVoiceFlowGuide(false);
+    // v1.0.3: a guide interrupted by navigation (tray, hotkey, deep link) is
+    // remembered at its step and resumes there when its page is opened again.
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function" && isFeatureGuideVisible("audioflow-guide-overlay")) {
+      _interruptedGuideSteps.audio = _currentAfGuideStep; stopAudioFlowGuide(false);
+    }
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function" && isFeatureGuideVisible("videoflow-guide-overlay")) {
+      _interruptedGuideSteps.video = _currentVfGuideStep; stopVideoFlowGuide(false);
+    }
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function" && isFeatureGuideVisible("voiceflow-guide-overlay")) {
+      _interruptedGuideSteps.voice = _currentVoiceFlowGuideStep; stopVoiceFlowGuide(false);
+    }
   }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
@@ -8635,6 +8660,11 @@ function _afGuideIsUsable() {
 }
 
 function _afGuideReleaseIfUnusable() {
+  // v1.0.3: a handler that fires after the guide was closed (e.g. the click
+  // that closed it) must do nothing; before, it re-ran the "unusable" release
+  // and cleared af_guided, so a guide closed with X started again next launch.
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (!overlay || overlay.classList.contains("hidden")) return true;
   if (_afGuideIsUsable()) return false;
   console.warn("[Audio Flow guide] Guide card is not visible (styles missing?); releasing the interaction lock.");
   stopAudioFlowGuide({ unusable: true });
@@ -9145,7 +9175,7 @@ function startAudioFlowGuide(options) {
   }
 
   overlay.classList.remove("hidden");
-  gotoAudioFlowGuideStep(1);
+  gotoAudioFlowGuideStep((options && options.startStep) || 1);
 
   window.addEventListener("resize", _onAfGuideResize);
   // Re-check once the card has laid out; release the lock if it never shows.
@@ -9738,7 +9768,7 @@ function prevVideoFlowGuideStep() {
   gotoVideoFlowGuideStep(Math.max(1, _currentVfGuideStep - 1));
 }
 
-function startVideoFlowGuide() {
+function startVideoFlowGuide(startStep) {
   // No Video Flow guide on Mac until Video Flow ships there.
   if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
     vfShowVideoFlowMacNote();
@@ -9783,7 +9813,7 @@ function startVideoFlowGuide() {
   }
 
   overlay.classList.remove("hidden");
-  gotoVideoFlowGuideStep(1);
+  gotoVideoFlowGuideStep(Number(startStep) || 1);
 
   window.addEventListener("resize", _onVfGuideResize);
 }
@@ -10372,7 +10402,7 @@ function prevVoiceFlowGuideStep() {
   gotoVoiceFlowGuideStep(Math.max(1, _currentVoiceFlowGuideStep - 1));
 }
 
-function startVoiceFlowGuide() {
+function startVoiceFlowGuide(startStep) {
   setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("home", { skipGuideTrigger: true, fromGuide: true });
@@ -10412,7 +10442,7 @@ function startVoiceFlowGuide() {
   }
 
   overlay.classList.remove("hidden");
-  gotoVoiceFlowGuideStep(1);
+  gotoVoiceFlowGuideStep(Number(startStep) || 1);
 
   window.addEventListener("resize", _onVoiceFlowGuideResize);
 }
