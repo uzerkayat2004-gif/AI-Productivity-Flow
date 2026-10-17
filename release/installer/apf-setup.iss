@@ -95,7 +95,6 @@ begin
   { Brand colours: ink #1c140f, paper #f7f4f1, accent #ff6020. }
   WizardForm.Color := $00F1F4F7;
   WizardForm.MainPanel.Color := $00F1F4F7;
-  WizardForm.InnerNotebook.Color := $00FFFFFF;
   WizardForm.Bevel.Visible := False;
   WizardForm.FinishedHeadingLabel.Font.Color := $000F141C;
   WizardForm.FinishedLabel.Font.Color := $00404040;
