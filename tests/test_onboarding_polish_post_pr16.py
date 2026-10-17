@@ -50,20 +50,28 @@ def test_welcome_tour_auto_mode_support() -> None:
 
 
 def test_one_time_guide_triggers_and_voiceflow_redirection() -> None:
-    """Navigation must check one-time flags and redirect Voice Flow features for first-time users."""
+    """Navigation starts each page's guide once (seen flags), Voice Flow pages share one guide.
+
+    Updated for v1.0.3: initNavigation no longer inlines the redirect + flag checks
+    (that expectation already failed on main 337dacb); it delegates to
+    scheduleAutomaticGuide(), which checks the persisted one-time seen flags.
+    """
     app_content = APP_JS.read_text(encoding="utf-8")
     init_nav_idx = app_content.find("function initNavigation()")
-    init_nav_block = app_content[init_nav_idx:init_nav_idx + 1800]
-
-    # Check 5 Voice Flow features redirection
-    assert 'const voiceFlowPages = ["home", "insights", "dictionary", "style", "providers"];' in init_nav_block
-    assert 'isVoiceFlowFeature && !vfVoiceGuided' in init_nav_block
-    assert 'switchPage("home", { userInitiated: true });' in init_nav_block
-    assert 'startVoiceFlowGuide();' in init_nav_block
-
-    # Check one-time guide flags
-    assert 'onboardingFlag("vf_onboarding.vf_guided") === "1"' in init_nav_block
-    assert 'onboardingFlag("vf_onboarding.af_guided") === "1"' in init_nav_block
+    init_nav_block = app_content[init_nav_idx:init_nav_idx + 2400]
+    assert "VOICEFLOW_CHILD_PAGES.includes(pageId)" in init_nav_block
+    assert 'scheduleAutomaticGuide("voice", pageId);' in init_nav_block
+    assert 'scheduleAutomaticGuide("video", pageId);' in init_nav_block
+    assert 'scheduleAutomaticGuide("audio", pageId);' in init_nav_block
+    sched = app_content[app_content.index("function scheduleAutomaticGuide("):][:3000]
+    assert "AUTOMATIC_GUIDE_SEEN_FLAGS[feature]" in sched
+    assert 'onboardingFlag(seenFlag) === "1"' in sched
+    flags = app_content[app_content.index("const AUTOMATIC_GUIDE_SEEN_FLAGS"):][:200]
+    for flag in ("vf_onboarding.vf_voice_guided", "vf_onboarding.af_guided", "vf_onboarding.vf_guided"):
+        assert flag in flags
+    voice_menu = app_content[app_content.index("function toggleVoiceFlowMenu("):][:600]
+    assert 'switchPage("home", { userInitiated: true });' in voice_menu
+    assert 'scheduleAutomaticGuide("voice", "home");' in voice_menu
 
 
 def test_deepgram_rufus_voice_configured() -> None:

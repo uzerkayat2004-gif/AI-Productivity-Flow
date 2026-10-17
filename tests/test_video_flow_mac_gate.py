@@ -167,7 +167,7 @@ def test_ui_carries_the_mac_gate_note() -> None:
     # nav entry, automatic guide, manual guide and feature toggle all gate
     assert 'pageId === "videoflow" && typeof vfVideoFlowGatedOnMac' in app_js
     assert 'if (feature === "video" && typeof vfVideoFlowGatedOnMac' in app_js
-    start_guide = app_js[app_js.index("function startVideoFlowGuide() {"):][:400]
+    start_guide = app_js[app_js.index("function startVideoFlowGuide("):][:400]  # v1.0.3: takes an optional resume step
     assert "vfVideoFlowGatedOnMac()" in start_guide
     generate = vf_js[vf_js.index("async function generateVideoFlow() {"):][:300]
     assert "vfVideoFlowGatedOnMac()" in generate and MAC_NOTE in generate
