@@ -1,8 +1,8 @@
-"""Safe, lightweight update checker for AI Productivity Flow.
+"""Lightweight update checker for AI Productivity Flow.
 
-Queries GitHub Releases for the latest stable (non-prerelease) release.
-Never downloads or executes binaries automatically.
-Never blocks startup or ongoing workflows.
+Queries GitHub Releases for the latest stable (non-prerelease) release and
+describes which file an in-app update would download. It does not download
+or run that file; the settings page does that only after the user asks.
 """
 
 from __future__ import annotations
@@ -56,6 +56,7 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
         published_at: str | None
         checked: bool
         error: str | None
+        update_plan: dict | None
     """
     now = time.time()
     if not force and _cache["data"] is not None and (now - _cache["timestamp"] < DEFAULT_CACHE_TTL):
@@ -70,6 +71,7 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
         "published_at": None,
         "checked": False,
         "error": None,
+        "update_plan": None,
     }
 
     try:
@@ -104,7 +106,17 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
             "published_at": payload.get("published_at"),
             "checked": True,
             "error": None,
+            "update_plan": None,
         }
+        if update_available:
+            try:
+                from voice_flow.app_updater import describe_update
+
+                described = describe_update(payload.get("assets") or [])
+                result["update_plan"] = described.get("update_plan")
+                result["assets"] = described.get("assets") or []
+            except Exception as exc:
+                log.debug("Update plan skipped: %s", exc)
 
         _cache["timestamp"] = now
         _cache["data"] = result

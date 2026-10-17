@@ -4017,6 +4017,13 @@ class VoiceFlowApp:
         except Exception as e:
             log.warning("Could not launch Desktop GUI: %s", e)
 
+        try:
+            from voice_flow.app_updater import confirm_successful_launch
+            if confirm_successful_launch():
+                log.info("App update confirmed; previous copy can be removed.")
+        except Exception:
+            log.debug("Update confirmation skipped", exc_info=True)
+
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
         log.info(" - System-wide floating bar active on your screen")

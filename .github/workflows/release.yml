@@ -45,7 +45,7 @@ jobs:
 
       - name: Run Version Consistency Test
         run: |
-          pytest tests/test_version_consistency.py tests/test_update_checker.py tests/test_v103_launch_fixes.py -vv
+          pytest tests/test_version_consistency.py tests/test_update_checker.py tests/test_app_updater.py tests/test_v103_launch_fixes.py -vv
 
       - name: Run Platform & Core Feature Tests
         run: |
@@ -203,6 +203,10 @@ jobs:
             Write-Host "Windows code signing skipped (WINDOWS_CERT / WINDOWS_CERT_PASSWORD not configured)."
           }
 
+      - name: Build Windows app-only update
+        shell: pwsh
+        run: python release/build_app_update.py --platform win --out dist
+
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -210,6 +214,9 @@ jobs:
           path: |
             dist/AI-Productivity-Flow-Setup-x64.exe
             dist/AI-Productivity-Flow-Setup-x64.exe.sha256
+            dist/AI-Productivity-Flow-app-update-win.zip
+            dist/AI-Productivity-Flow-app-update-win.zip.sha256
+            dist/AI-Productivity-Flow-app-update-win.manifest.json
 
   build-macos:
     name: Build macOS Release Bundle
@@ -379,6 +386,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Build macOS app-only update
+        run: python release/build_app_update.py --platform mac --out dist
+
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -388,6 +398,9 @@ jobs:
             dist/AI-Productivity-Flow-macOS.dmg.sha256
             dist/AI-Productivity-Flow-macOS.zip
             dist/AI-Productivity-Flow-macOS.zip.sha256
+            dist/AI-Productivity-Flow-app-update-mac.zip
+            dist/AI-Productivity-Flow-app-update-mac.zip.sha256
+            dist/AI-Productivity-Flow-app-update-mac.manifest.json
 
   publish-github-release:
     name: Publish Stable GitHub Release
@@ -415,6 +428,12 @@ jobs:
             "AI-Productivity-Flow-macOS.dmg.sha256"
             "AI-Productivity-Flow-macOS.zip"
             "AI-Productivity-Flow-macOS.zip.sha256"
+            "AI-Productivity-Flow-app-update-win.zip"
+            "AI-Productivity-Flow-app-update-win.zip.sha256"
+            "AI-Productivity-Flow-app-update-win.manifest.json"
+            "AI-Productivity-Flow-app-update-mac.zip"
+            "AI-Productivity-Flow-app-update-mac.zip.sha256"
+            "AI-Productivity-Flow-app-update-mac.manifest.json"
           )
           for f in "${required[@]}"; do
             target="release-assets/$f"
@@ -431,6 +450,8 @@ jobs:
           sha256sum -c AI-Productivity-Flow-macOS.zip.sha256
           # Validate macOS dmg sha256
           sha256sum -c AI-Productivity-Flow-macOS.dmg.sha256
+          sha256sum -c AI-Productivity-Flow-app-update-win.zip.sha256
+          sha256sum -c AI-Productivity-Flow-app-update-mac.zip.sha256
           # Validate Windows exe sha256
           expected_win_hash=$(awk '{print $1}' AI-Productivity-Flow-Setup-x64.exe.sha256 | tr '[:upper:]' '[:lower:]')
           actual_win_hash=$(sha256sum AI-Productivity-Flow-Setup-x64.exe | awk '{print $1}' | tr '[:upper:]' '[:lower:]')

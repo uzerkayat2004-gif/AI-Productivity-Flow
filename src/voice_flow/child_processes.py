@@ -8,6 +8,9 @@ to the lifetime of the app process.
   process and never closed, so when the app dies for any reason (crash, Task
   Manager "End task", ``TerminateProcess``) Windows kills the whole job,
   including grandchildren such as Chromium started by node.
+  ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` lets the in-app updater start its helper
+  with ``CREATE_BREAKAWAY_FROM_JOB`` so that helper can finish the install
+  after this process exits. Ordinary children do not request breakaway.
 * On POSIX children are started in their own session (``start_new_session``)
   so the whole tree can be killed with ``killpg``. Surviving a ``kill -9`` of
   the parent needs cooperation from the child side; llama-server gets a small
@@ -92,7 +95,9 @@ def _create_kill_on_close_job(kernel32: Any) -> Any:
     if not job:
         raise OSError(f"CreateJobObjectW failed: {ctypes.get_last_error()}")
     info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    info.BasicLimitInformation.LimitFlags = (
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
+    )
     ok = kernel32.SetInformationJobObject(
         job,
         JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,

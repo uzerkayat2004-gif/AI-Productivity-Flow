@@ -299,6 +299,11 @@ def bundle_runtime_dependencies(target_arch: str | None = None) -> None:
         "supported_architectures": [target_arch],
     }
     manifest["whisper"] = stage_whisper_model(runtime_dir)
+    try:
+        from voice_flow.bundled_runtime import mac_runtime
+        manifest["runtime"] = mac_runtime()
+    except Exception as exc:
+        print(f"Warning: could not record the app-update runtime fingerprint: {exc}")
     (runtime_dir / "build-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     python_dir = runtime_dir / "python"

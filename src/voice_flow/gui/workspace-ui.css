@@ -4198,6 +4198,46 @@ html[data-theme="dark"] #page-audioflow.studio-page #af-summary-model-hero {
   font-size: 13px;
   width: 100%;
 }
+.apf-update-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  background: rgba(234, 88, 12, 0.08);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(234, 88, 12, 0.2);
+}
+.apf-update-copy strong { display: block; }
+.apf-update-size { margin-top: 2px; font-weight: 650; }
+.apf-update-reason { margin-top: 2px; color: var(--text-muted, #6b625c); }
+.apf-update-actions, .apf-update-followup, .apf-update-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.apf-update-notes {
+  background: var(--primary-orange, #ea580c);
+  color: #fff;
+  text-decoration: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.apf-update-bar {
+  flex: 1 1 140px;
+  height: 8px;
+  background: rgba(28, 20, 15, 0.12);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.apf-update-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: #ea580c;
+}
+.apf-update-error { color: var(--danger, #ef4444); }
 #settings-modal.preferences-workspace .modal-body {
   padding: 28px 32px 36px;
 }

@@ -5,7 +5,7 @@
 ; (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://aiproductivityflow.site/"
 #define MyAppExeName "pythonw.exe"
@@ -81,6 +81,9 @@ Filename: "{app}\runtime\vcredist\vc_redist.x64.exe"; Parameters: "/install /qui
 Filename: "{app}\runtime\webview2\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Flags: runhidden; Check: NeedsWebView2
 Filename: "{app}\runtime\node\node.exe"; Parameters: """{app}\runtime\hyperframes\node_modules\hyperframes\bin\hyperframes.mjs"" browser ensure"; Flags: runhidden
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; Description: "Launch AI Productivity Flow"; Flags: nowait postinstall skipifsilent
+; /SILENT and /VERYSILENT skip the Finish checkbox above. Launch anyway so a
+; one-click update opens the app again when the installer is done.
+Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; Flags: nowait; Check: IsSilentSetup
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\runtime"
@@ -118,6 +121,11 @@ end;
 function IsPortableMode: Boolean;
 begin
   Result := ExpandConstant('{param:portable|0}') = '1';
+end;
+
+function IsSilentSetup: Boolean;
+begin
+  Result := WizardSilent;
 end;
 
 function NeedsVcRedist: Boolean;

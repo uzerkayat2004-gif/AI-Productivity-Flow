@@ -49,7 +49,7 @@ def test_crash_reporting_is_on_until_the_user_opts_out():
         conn.commit()
     assert is_crash_reporting_enabled() is True
     assert SENTRY_DSN.startswith("https://")
-    assert VERSION == "1.0.3"
+    assert VERSION == "1.0.4"
     storage.save_setting("anonymous_crash_reports", False)
     assert is_crash_reporting_enabled() is False
     assert init_crash_reporting(force=False) is False
@@ -167,12 +167,14 @@ def test_settings_privacy_row_replaces_the_prominent_sentry_toggle():
     settings = html[start:end]
     assert "toggle-anonymous-crash-reports" not in settings
     assert "btn-crash-reports-opt" in settings
-    assert "Crash reports help us fix bugs" in settings
-    assert "No audio, transcripts or personal data are sent" in settings
+    assert "Crash reports help fix bugs (you can turn this off in Privacy)" in settings
+    assert "No audio, transcripts, or personal data are sent" in settings
+    assert 'data-enabled="1"' in settings
+    assert ">Turn off</button>" in settings
 
 
 def test_packaged_crash_release_matches_version():
     text = (ROOT / "src" / "voice_flow" / "crash_reporting.py").read_text(encoding="utf-8")
     assert "SENTRY_DSN" in text
     assert f"ai-productivity-flow@{{VERSION}}" in text or "ai-productivity-flow@" in text
-    assert VERSION == "1.0.3"
+    assert VERSION == "1.0.4"

@@ -295,17 +295,21 @@ def main() -> None:
 
     sys.path.insert(0, str(REPO / "src"))
     from voice_flow._version import VERSION
+    from voice_flow.bundled_runtime import windows_runtime
 
     freeze = run([python, "-m", "pip", "freeze"]).splitlines()
+    runtime_pins = windows_runtime()
     manifest = {
         "product": "AI Productivity Flow",
         "version": VERSION,
         "build_script": "release/assemble_windows_staging.py + release/build_windows_release.py",
         "built_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "runtime": runtime_pins,
         "python": {"version": PYTHON_VERSION, "source": PYTHON_URL, "packages": freeze},
         "node": {"version": NODE_VERSION, "source": NODE_URL, "node_sha256": sha256_file(node)},
         "hyperframes": {"version": HYPERFRAMES_VERSION, "license": "Apache-2.0"},
-        "narova": {"source": "third_party/narova (vendored, MIT)"},
+        "narova": {"version": runtime_pins["narova"], "source": "third_party/narova (vendored, MIT)"},
+        "local_ai_engine": runtime_pins["local_ai_engine"],
         "code2video": {"source": "third_party/code2video (vendored, MIT)"},
         "ffmpeg": ffmpeg_info,
         "whisper": whisper_info,

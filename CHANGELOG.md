@@ -3,6 +3,17 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## 1.0.4 - 2026-10-17
+
+### Updates
+- Settings → About & Updates downloads the update in the app. **Update now** shows the download size first, then a progress bar with percent and megabytes, plus Cancel and Retry. The file is checked against the release SHA-256 before anything runs.
+- When the bundled runtime is unchanged, the app downloads a small update package instead of the full installer. The new files are staged, swapped in after restart, and restored if the new build does not stay open. The full Windows setup or macOS disk image is used only when Python, Node, Hyperframes, Narova, ffmpeg, the Whisper model, or the local AI engine changed.
+- On Windows, **Restart to install** runs the per-user setup silently and opens the app again. Files in `%USERPROFILE%\.voice_flow`, including the NotebookLM session, are left in place.
+- On macOS, the app replaces itself in place when it can write there, then removes the quarantine flag and reopens. If it cannot write there, it opens the downloaded disk image in Finder and explains what to do.
+
+### Privacy
+- The About line matches the current setting: crash reports are on unless you turn them off under Privacy.
+
 ## 1.0.3 - 2026-10-17
 
 ### Install and first launch
