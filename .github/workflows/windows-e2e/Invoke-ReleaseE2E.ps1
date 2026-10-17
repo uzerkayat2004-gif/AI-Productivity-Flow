@@ -64,7 +64,7 @@ function Add-Json([System.Text.StringBuilder]$Sb, $Value, [int]$Depth) {
     if ($Value -is [System.Collections.IDictionary]) {
         [void]$Sb.Append('{')
         $first = $true
-        foreach ($key in @($Value.Keys)) {
+        foreach ($key in $Value.Keys) {
             if (-not $first) { [void]$Sb.Append(',') }
             $first = $false
             Add-JsonString $Sb ([string]$key)
@@ -77,7 +77,7 @@ function Add-Json([System.Text.StringBuilder]$Sb, $Value, [int]$Depth) {
     if ($Value -is [System.Collections.IEnumerable]) {
         [void]$Sb.Append('[')
         $first = $true
-        foreach ($item in @($Value)) {
+        foreach ($item in $Value) {
             if (-not $first) { [void]$Sb.Append(',') }
             $first = $false
             Add-Json $Sb $item ($Depth - 1)
@@ -92,10 +92,10 @@ function Save-State {
     try {
         $doc = @{
             tag = [string]$Tag
-            steps = @($script:Steps)
+            steps = $script:Steps.ToArray()
             timings = $script:Timings
-            screenshots = @($script:ShotNotes)
-            bugs = @($script:Bugs)
+            screenshots = $script:ShotNotes.ToArray()
+            bugs = $script:Bugs.ToArray()
         }
         $sb = New-Object System.Text.StringBuilder
         Add-Json $sb $doc 8
@@ -149,6 +149,9 @@ public static class ApfNative {
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowText(IntPtr hWnd, string text);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, System.UIntPtr extra);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
@@ -193,6 +196,20 @@ public static class ApfNative {
 
     public static void Retitle(long hwndValue, string title) {
         SetWindowText(new IntPtr(hwndValue), title);
+    }
+
+    public static void ClickScreen(int x, int y) {
+        SetCursorPos(x, y);
+        mouse_event(0x0002, 0, 0, 0, System.UIntPtr.Zero);
+        mouse_event(0x0004, 0, 0, 0, System.UIntPtr.Zero);
+    }
+
+    public static void PressEnter(long hwndValue) {
+        IntPtr hwnd = new IntPtr(hwndValue);
+        ShowWindow(hwnd, 9);
+        SetForegroundWindow(hwnd);
+        keybd_event(0x0D, 0, 0, System.UIntPtr.Zero);
+        keybd_event(0x0D, 0, 2, System.UIntPtr.Zero);
     }
 
     public static string WindowTitle(long hwndValue) {
@@ -424,6 +441,13 @@ function Invoke-UiClick([int]$ProcessId, [string]$ExactName) {
             $invoke.Invoke()
             return $true
         } catch {}
+        try {
+            $rect = $el.Current.BoundingRectangle
+            if ($rect.Width -gt 4 -and $rect.Height -gt 4) {
+                [ApfNative]::ClickScreen([int]($rect.X + ($rect.Width / 2)), [int]($rect.Y + ($rect.Height / 2)))
+                return $true
+            }
+        } catch {}
     }
     return $false
 }
@@ -582,7 +606,7 @@ function Start-InstalledApp {
     $psi.WorkingDirectory = $script:InstallRoot
     $psi.UseShellExecute = $false
     $null = $psi.EnvironmentVariables.Remove("CI")
-    $psi.EnvironmentVariables["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--remote-debugging-port=9222 --remote-allow-origins=*"
+    $psi.EnvironmentVariables["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1:9222"
     return [Diagnostics.Process]::Start($psi)
 }
 
@@ -637,7 +661,8 @@ try {
     $lastBlob = ""
     $lastCensus = ""
     $shotReady = $false
-    $clickedInstall = $false
+    $installAttempts = 0
+    $nextInstallTry = Get-Date
     while ((Get-Date) -lt $wizardDeadline -and -not $wizard.HasExited) {
         $rows = @(Get-WindowRows)
         $censusLines = New-Object System.Collections.Generic.List[string]
@@ -687,9 +712,12 @@ try {
                 Save-WindowShot "01-installer-ready.png" $wizardHwnd ("Unexpected wizard page. title='$($top.title)'") | Out-Null
                 $shotReady = $true
             }
-            if ($page -like "forbidden:*" -and -not $clickedInstall) {
+            if ($page -like "forbidden:*" -and $installAttempts -lt 4 -and (Get-Date) -ge $nextInstallTry) {
+                $installAttempts++
+                $nextInstallTry = (Get-Date).AddSeconds(4)
                 $clickedInstall = Invoke-UiClick ([int]$top.pid) "Install"
-                Log "wizard Install click=$clickedInstall"
+                [ApfNative]::PressEnter([int64]$wizardHwnd)
+                Log "wizard Install attempt=$installAttempts click=$clickedInstall"
             }
             if ($page -eq "installing" -and -not $sawInstalling) {
                 $sawInstalling = $true
@@ -761,6 +789,9 @@ try {
     $script:Timings.install_folder_mb = [math]::Round($bytes / 1MB, 1)
     Add-Step "2-silent-install" $silentOk ("seconds=$($script:Timings.silent_install_seconds) exit=$($silent.ExitCode) folder_mb=$($script:Timings.install_folder_mb)") $(if ($silentOk) { "ok" } else { "app" })
     Stop-ApfProcesses
+    foreach ($proc in @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue)) {
+        try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
     Reset-UserData
 
     $shell = New-Object -ComObject WScript.Shell
@@ -861,6 +892,11 @@ try {
 
     $cdpOk = Connect-Cdp
     if (-not $cdpOk) {
+        $browserLines = New-Object System.Collections.Generic.List[string]
+        foreach ($proc in @(Get-CimInstance Win32_Process | Where-Object { $_.Name -match "msedgewebview2|msedge" })) {
+            $browserLines.Add(("{0} {1}" -f $proc.ProcessId, $proc.CommandLine))
+        }
+        Log ("browser processes: " + [string]::Join(" || ", $browserLines.ToArray()))
         $uiPid = $(if ($script:MainPid) { [int]$script:MainPid } else { [int]$app.Id })
         $uiNames = @(Get-UiNames $uiPid)
         $uiPath = Join-Path $Artifacts "main-window-ui.txt"
