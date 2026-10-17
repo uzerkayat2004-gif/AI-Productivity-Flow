@@ -1180,9 +1180,10 @@ def _browser_installed(browser: str) -> bool:
 def resolve_interactive_browser(preferred: str | None = None) -> str:
     """Prefer system Chrome, then Edge, then Playwright's bundled Chromium.
 
-    The bundled browser is the last resort. It uses the CLI's persistent
-    profile directory, not the user's daily Chrome profile (Chrome 127+
-    app-bound cookies cannot be imported).
+    On macOS the fallback after Chrome is the bundled Chromium. It is the
+    Safari-compatible browser the CLI can drive; Edge is not required there.
+    The profile is the CLI's dedicated directory, not the user's daily Chrome
+    profile (Chrome 127+ app-bound cookies cannot be imported).
     """
     requested = (preferred or "chrome").strip().lower() or "chrome"
     if requested == "chromium":
@@ -1191,7 +1192,7 @@ def resolve_interactive_browser(preferred: str | None = None) -> str:
         return requested
     if _browser_installed("chrome"):
         return "chrome"
-    if _browser_installed("msedge"):
+    if sys.platform != "darwin" and _browser_installed("msedge"):
         return "msedge"
     return "chromium"
 

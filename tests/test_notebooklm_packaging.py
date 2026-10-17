@@ -72,6 +72,71 @@ def test_active_python_environment_is_used_when_no_private_runtime(monkeypatch, 
     assert config.resolve_notebooklm_mcp() == mcp
 
 
+def test_macos_bundle_resolves_bin_notebooklm_from_the_native_launcher(monkeypatch, tmp_path):
+    """The .app launcher is not python3, and scripts live in runtime/python/bin."""
+    contents = tmp_path / "AI Productivity Flow.app" / "Contents"
+    macos = contents / "MacOS"
+    macos.mkdir(parents=True)
+    launcher = macos / "ai-productivity-flow-launcher"
+    launcher.write_text("", encoding="utf-8")
+    bin_dir = contents / "Resources" / "runtime" / "python" / "bin"
+    bin_dir.mkdir(parents=True)
+    cli = bin_dir / "notebooklm"
+    mcp = bin_dir / "notebooklm-mcp"
+    python3 = bin_dir / "python3"
+    cli.write_text("", encoding="utf-8")
+    mcp.write_text("", encoding="utf-8")
+    python3.write_text("", encoding="utf-8")
+    (contents / "Resources" / "runtime" / "build-manifest.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.delenv("NOTEBOOKLM_CLI", raising=False)
+    monkeypatch.delenv("NOTEBOOKLM_MCP", raising=False)
+    monkeypatch.setattr(config.sys, "executable", str(launcher))
+    monkeypatch.setattr("voice_flow.runtime_env.runtime_root", lambda: None)
+    monkeypatch.setattr("voice_flow.runtime_env.mac_bundle_runtime_dir", lambda: None)
+    monkeypatch.setattr("voice_flow.storage.storage", _EmptySettings(), raising=False)
+    monkeypatch.setattr(config, "ISOLATED_CLI_PATH", tmp_path / "personal" / "notebooklm")
+    monkeypatch.setattr(config, "ISOLATED_MCP_PATH", tmp_path / "personal" / "notebooklm-mcp")
+
+    assert config.resolve_notebooklm_cli() == cli
+    assert config.resolve_notebooklm_mcp() == mcp
+
+    from voice_flow.video_flow_engine.notebooklm.login_flow import _cli_argv
+    argv = _cli_argv([str(cli), "--profile", "video-flow-experiment", "login", "--browser", "chrome"])
+    assert argv[:3] == [str(python3), "-m", "notebooklm"]
+    assert "python.exe" not in Path(argv[0]).name
+
+
+def test_cli_on_path_is_found_when_the_bundle_script_dirs_are_empty(monkeypatch, tmp_path):
+    launcher = tmp_path / "MacOS" / "ai-productivity-flow-launcher"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("", encoding="utf-8")
+    cli = tmp_path / "elsewhere" / "notebooklm"
+    cli.parent.mkdir()
+    cli.write_text("", encoding="utf-8")
+
+    monkeypatch.delenv("NOTEBOOKLM_CLI", raising=False)
+    monkeypatch.setattr(config.sys, "executable", str(launcher))
+    monkeypatch.setattr("voice_flow.runtime_env.runtime_root", lambda: None)
+    monkeypatch.setattr("voice_flow.runtime_env.mac_bundle_runtime_dir", lambda: None)
+    monkeypatch.setattr("voice_flow.storage.storage", _EmptySettings(), raising=False)
+    monkeypatch.setattr(config, "ISOLATED_CLI_PATH", tmp_path / "personal" / "notebooklm.exe")
+    monkeypatch.setattr("shutil.which", lambda name: str(cli) if name == "notebooklm" else None)
+
+    assert config.resolve_notebooklm_cli() == cli.resolve()
+
+
+def test_macos_browser_fallback_is_chrome_then_bundled_chromium(monkeypatch):
+    from voice_flow.video_flow_engine.notebooklm import login_flow
+
+    monkeypatch.setattr(login_flow.sys, "platform", "darwin")
+    installed = {"chrome": False, "msedge": True}
+    monkeypatch.setattr(login_flow, "_browser_installed", lambda name: installed.get(name, False))
+    assert login_flow.resolve_interactive_browser("chrome") == "chromium"
+    installed["chrome"] = True
+    assert login_flow.resolve_interactive_browser("chrome") == "chrome"
+
+
 def test_release_preflight_targets_both_notebooklm_console_scripts(tmp_path):
     expected = [
         tmp_path / "python" / "Scripts" / "notebooklm.exe",
