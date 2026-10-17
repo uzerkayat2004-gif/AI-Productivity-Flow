@@ -829,11 +829,44 @@ def _mac_window_already_running() -> bool:
     return True
 
 
+def _native_window_text(user32, hwnd, getter_name: str) -> str:
+    """Read a window title or class. Empty when the handle is not a real window."""
+    try:
+        import ctypes
+        getter = getattr(user32, getter_name)
+        getter.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        getter.restype = ctypes.c_int
+        buf = ctypes.create_unicode_buffer(512)
+        if not getter(hwnd, buf, len(buf)):
+            return ""
+        return buf.value or ""
+    except Exception:
+        return ""
+
+
+def _reject_startup_splash(user32, hwnd) -> bool:
+    """True when this handle is the early splash and must not count as the app."""
+    if not hwnd:
+        return False
+    try:
+        from voice_flow.gui.early_splash import is_startup_splash
+    except Exception:
+        is_startup_splash = None
+    title = _native_window_text(user32, hwnd, "GetWindowTextW")
+    class_name = _native_window_text(user32, hwnd, "GetClassNameW")
+    if is_startup_splash is not None and is_startup_splash(title, class_name):
+        return True
+    return class_name == "APFEarlySplash" or title == "APFEarlySplash"
+
+
 def _focus_existing_window() -> bool:
     """Focus an already-running Desktop App window instead of opening a duplicate.
 
     The engine spawns this launcher on every boot (including watchdog
     auto-recovery); without this guard each restart stacks another window.
+    The startup splash shares neither the app title nor its window class.
+    A title-and-size match is not enough: the splash is 420x210, which used
+    to pass the old 100x50 ghost check and make this launch exit.
     """
     if not sys.platform.startswith("win"):
         return False
@@ -841,6 +874,9 @@ def _focus_existing_window() -> bool:
         import ctypes
         user32 = ctypes.windll.user32
         hwnd = user32.FindWindowW(None, "AI Productivity Flow") or user32.FindWindowW(None, "Voice Flow")
+        if hwnd and _reject_startup_splash(user32, hwnd):
+            _launcher_log(f"ignoring startup splash hwnd={hwnd}")
+            hwnd = None
         if not hwnd:
             return False
 

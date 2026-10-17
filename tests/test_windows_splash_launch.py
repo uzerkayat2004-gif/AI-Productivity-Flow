@@ -124,8 +124,14 @@ def test_splash_stays_responsive_while_the_app_starts():
             wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t),
         ]
         user32.SendMessageTimeoutW.restype = ctypes.c_ssize_t
-        found = user32.FindWindowW(None, "AI Productivity Flow")
-        assert int(found or 0), "splash window title was not found"
+        found = user32.FindWindowW("APFEarlySplash", None)
+        assert int(found or 0), "splash window class was not found"
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(found, title, len(title))
+        assert title.value != "AI Productivity Flow"
+        assert title.value == "APFEarlySplash"
         assert int(user32.IsHungAppWindow(hwnd)) == 0
         result = ctypes.c_size_t()
         replied = user32.SendMessageTimeoutW(hwnd, 0, 0, 0, 0x0002, 2000, ctypes.byref(result))

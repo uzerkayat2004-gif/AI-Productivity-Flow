@@ -13,8 +13,14 @@ import re
 import sys
 import threading
 
-WINDOW_TITLE = "AI Productivity Flow"
-_CLASS_NAME = "APFEarlySplash"
+# Win32 title and class stay distinct from the real desktop window. The
+# launcher used to call FindWindowW("AI Productivity Flow") and treat this
+# 420x210 splash as the app, then exit before the main window existed.
+WINDOW_TITLE = "APFEarlySplash"
+BRAND_TITLE = "AI Productivity Flow"
+SPLASH_CLASS_NAME = "APFEarlySplash"
+APP_WINDOW_TITLES = ("AI Productivity Flow", "Voice Flow")
+_CLASS_NAME = SPLASH_CLASS_NAME
 _LOG_NAME = "launch.log"
 
 # Cream #FFF8F3, accent #FF6A1A, ink #1C140F, muted #5C564F, as COLORREF (BGR).
@@ -42,6 +48,15 @@ _font_body = None
 _brush_cream = None
 _brush_accent = None
 _ready = threading.Event()
+
+
+def is_startup_splash(title: str, class_name: str) -> bool:
+    """True for the early splash, including one a test has not retitled yet.
+
+    Class is the reliable check. The title is checked too so a splash that
+    still uses the app name cannot pass a title-only search.
+    """
+    return (class_name or "") == SPLASH_CLASS_NAME or (title or "") == WINDOW_TITLE
 
 
 def read_display_version() -> str:
@@ -200,7 +215,7 @@ def _paint(hwnd) -> None:
         title = wintypes.RECT(20, 90, max(21, rect.right - 20), 124)
         gdi32.SetTextColor(hdc, _INK)
         previous = gdi32.SelectObject(hdc, _font_title)
-        user32.DrawTextW(hdc, WINDOW_TITLE, -1, ctypes.byref(title), _DT_CENTER_LINE)
+        user32.DrawTextW(hdc, BRAND_TITLE, -1, ctypes.byref(title), _DT_CENTER_LINE)
         version = wintypes.RECT(20, 124, max(21, rect.right - 20), 152)
         gdi32.SelectObject(hdc, _font_body)
         gdi32.SetTextColor(hdc, _MUTED)
