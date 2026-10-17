@@ -420,6 +420,28 @@ def get_cached_setting(key: str, default: Any = None, ttl: float = 5.0) -> Any:
     return val
 
 
+# A stuck hotkey must not record forever. Five minutes is long enough for a
+# paragraph and short enough to release the microphone.
+MAX_RECORDING_SECONDS = 5 * 60
+MIC_ACCESS_OFF_MESSAGE = "Microphone access is off. Open Settings to allow it."
+
+
+def _looks_like_mic_permission_error(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(token in text for token in (
+        "microphone access is off",
+        "not authorized",
+        "permission denied",
+        "access denied",
+        "privacy",
+        "err_no_device",
+    ))
+
+
+def _offer_microphone_settings() -> None:
+    """Best-effort: the overlay text tells the user; this opens the OS pane only from the GUI button."""
+    return
+
 # Polish outcomes that mean a spoken command was NOT carried out.
 _COMMAND_NOT_PERFORMED = frozenset({"local", "model_not_downloaded", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
 
@@ -436,6 +458,7 @@ def _polish_outcome_label(outcome: str) -> str:
         "local_paragraphs": "Paragraphs added locally",
         "local_preserved": "Wording preserved locally",
         "disabled": "Basic cleanup applied",
+        "polishing_off": "Polishing off",
         "timeout": "AI timed out — basic cleanup applied",
         "provider_failure": "AI unavailable — basic cleanup applied",
         "fidelity_reject": "AI output rejected — basic cleanup applied",
@@ -593,16 +616,19 @@ _PASTE_FAILED_MESSAGE = "Could not paste transcript into the original target; re
 def _paste_failure_details() -> tuple[str, str]:
     """(history error message, insertion_status) for the last failed paste.
 
-    On macOS a paste without Accessibility leaves the text on the clipboard;
-    report exactly that instead of a generic failure (or a fake success)."""
-    if sys.platform == "darwin":
-        try:
-            from voice_flow.injector import PASTE_PERMISSION_MESSAGE, last_injection_outcome
+    A paste that never landed leaves the text on the clipboard. Say so
+    ("Copied, press Cmd/Ctrl+V") instead of reporting a successful paste.
+    """
+    try:
+        from voice_flow.injector import PASTE_MANUAL_MESSAGE, PASTE_PERMISSION_MESSAGE, last_injection_outcome
 
-            if last_injection_outcome() == "copied_needs_permission":
-                return PASTE_PERMISSION_MESSAGE, "copied_to_clipboard"
-        except Exception:
-            pass
+        outcome = last_injection_outcome()
+        if sys.platform == "darwin" and outcome == "copied_needs_permission":
+            return PASTE_PERMISSION_MESSAGE, "copied_to_clipboard"
+        if outcome == "copied_not_delivered":
+            return PASTE_MANUAL_MESSAGE, "copied_to_clipboard"
+    except Exception:
+        pass
     return _PASTE_FAILED_MESSAGE, "failed"
 
 
@@ -1390,7 +1416,11 @@ class VoiceFlowApp:
                     discard_buffer()
                 self._end_stream_session(discard=True, owner=session)
                 self._reset_to_idle(session)
-                self._overlay_call("show_error", getattr(self.audio, "last_device_error", None) or "Microphone hardware failed to open")
+                mic_error = getattr(self.audio, "last_device_error", None) or "Microphone hardware failed to open"
+                if getattr(self.audio, "last_device_error_action", None) == "microphone_settings" or _looks_like_mic_permission_error(mic_error):
+                    mic_error = MIC_ACCESS_OFF_MESSAGE
+                    self._offer_microphone_settings()
+                self._overlay_call("show_error", mic_error)
                 return False
 
             with self._state_lock:
@@ -1434,7 +1464,7 @@ class VoiceFlowApp:
             watchdog = getattr(self, "_record_watchdog", None)
             if watchdog:
                 watchdog.cancel()
-            self._record_watchdog = threading.Timer(20 * 60, self._finish_if_current, args=(session,))
+            self._record_watchdog = threading.Timer(MAX_RECORDING_SECONDS, self._stop_recording_at_limit, args=(session,))
             self._record_watchdog.daemon = True
             self._record_watchdog.start()
 
@@ -1502,6 +1532,16 @@ class VoiceFlowApp:
             if session is None or getattr(self, "session", None) is not session or self.state != DictationState.RECORDING:
                 return
         self._on_dictation_finish()
+
+    def _stop_recording_at_limit(self, session) -> None:
+        """Auto-stop a recording that is still open at the safe maximum length."""
+        with self._state_lock:
+            if session is None or getattr(self, "session", None) is not session or self.state != DictationState.RECORDING:
+                return
+            self._recording_limit_hit = session
+        log.warning("[RECORDING] Stopped a recording that reached the %d-second limit.", MAX_RECORDING_SECONDS)
+        self._overlay_call("show_error", "Recording stopped at 5 minutes")
+        self._finish_if_current(session)
 
     @_capture_transition
     def _on_dictation_finish(self) -> bool:
@@ -2132,11 +2172,11 @@ class VoiceFlowApp:
         # after a disabled/failed AI attempt, because a style or command did
         # not actually run; do deliver the safe fallback instead of throwing
         # it away and pasting the raw transcript.
-        if deterministic_format or observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "command_unfulfilled", "disabled"}:
+        if deterministic_format or observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "command_unfulfilled", "disabled", "polishing_off"}:
             overrides = command_overrides if isinstance(command_overrides, dict) else {}
             supported_email_overrides = set(overrides).issubset({"tone", "formality"})
             can_use_local_structure = (
-                observed_outcome["value"] != "disabled"
+                observed_outcome["value"] not in {"disabled", "polishing_off"}
                 and level != "cleanup_none"
                 and effective is not None
                 and task in {"rewrite", "format"}
@@ -2172,7 +2212,7 @@ class VoiceFlowApp:
             # around explicit discourse markers is safe and useful; it never
             # deletes or rewrites a word.  Do not relabel a failed command as
             # successful local formatting.
-            if command is None and observed_outcome["value"] != "disabled":
+            if command is None and observed_outcome["value"] not in {"disabled", "polishing_off"}:
                 paragraph_formatted = _format_safe_paragraphs(polished)
                 if paragraph_formatted != polished:
                     observed_outcome["value"] = "local_paragraphs"
@@ -2694,7 +2734,19 @@ class VoiceFlowApp:
                         return
                     self._delivery_session = session
 
-                outcome_note = None if polish_outcome["value"] == "ai_accepted" else f"Polish fallback: {polish_outcome['value']}"
+                # A completed polish (including S1 / local_model) is not a fallback.
+                # History only says "Polish fallback" when the AI pass did not run.
+                _COMPLETED_POLISH = {
+                    "ai_accepted", "local_model", "local_format", "local_rewrite",
+                    "local_paragraphs", "local_preserved",
+                }
+                if polish_outcome["value"] in _COMPLETED_POLISH:
+                    outcome_note = None
+                elif polish_outcome["value"] == "disabled":
+                    unchanged = " ".join((polished_text or "").split()) == " ".join((raw_transcript or "").split())
+                    outcome_note = "Polishing off" if unchanged else "Basic cleanup applied"
+                else:
+                    outcome_note = f"Polish fallback: {polish_outcome['value']}"
                 self._history_update(record_id, raw_text=raw_transcript, polished_text=polished_text, status="success", error_message=outcome_note, insertion_status="not_attempted", processing_metadata=processing_metadata)
 
                 # Check if Deferred Click-to-Paste mode is enabled
@@ -2791,12 +2843,17 @@ class VoiceFlowApp:
                     except Exception:
                         quiet_mic = False
                     polishing_enabled = _polishing_enabled()
-                    if effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_model", "local_format", "local_rewrite", "local_preserved"}:
+                    capped = getattr(self, "_recording_limit_hit", None) is session
+                    if capped:
+                        self._recording_limit_hit = None
+                    if capped:
+                        self._overlay_call("show_done", "Recording stopped at 5 minutes")
+                    elif effective is not None and effective.requires_ai and polish_outcome["value"] not in {"ai_accepted", "local_model", "local_format", "local_rewrite", "local_preserved"}:
                         # Spec §50: never silently pretend a transformation ran.
                         label = f" — {effective.label}" if effective.label else ""
                         detail = (
                             "Turn on AI polishing to run this command"
-                            if polish_outcome["value"] == "disabled"
+                            if polish_outcome["value"] in {"disabled", "polishing_off"}
                             else _polish_outcome_label(polish_outcome["value"])
                         )
                         self._overlay_call("show_error", f"{detail}{label}")
@@ -2808,9 +2865,12 @@ class VoiceFlowApp:
                         self._overlay_call("show_done", "Mic is very quiet — move closer")
                     else:
                         prefix = _polish_outcome_label(polish_outcome["value"])
+                        if polish_outcome["value"] == "disabled" and " ".join((polished_text or "").split()) == " ".join((raw_transcript or "").split()):
+                            prefix = "Polishing off"
                         self._overlay_call("show_done", prefix)
                 elif failure_insertion == "copied_to_clipboard":
-                    self._overlay_call("show_error", "Copied — press Cmd+V (allow Accessibility to auto-paste)")
+                    shortcut = "Cmd+V" if sys.platform == "darwin" else "Ctrl+V"
+                    self._overlay_call("show_error", f"Copied, press {shortcut}")
                 else:
                     self._overlay_call("show_error", "Paste failed — retrieve text from history")
 

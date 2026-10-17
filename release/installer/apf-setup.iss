@@ -88,7 +88,10 @@ Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_ap
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Flags: nowait runasoriginaluser; Check: IsSilentSetup
 
 [UninstallDelete]
+; Installed files, the bundled runtime, and the shortcut group.
+; Personal files stay unless uninstall asks and the user agrees.
 Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{group}"
 
 [UninstallRun]
@@ -195,6 +198,24 @@ begin
   Result := not RegQueryStringValue(HKLM,
     'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
     'Version', version);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    DataDir := ExpandConstant('{userprofile}\.voice_flow');
+    if DirExists(DataDir) then
+    begin
+      { No is the default, so a silent uninstall keeps personal files. }
+      if MsgBox('Remove my data (dictionary, history, and settings)?' + #13#10 + #13#10 +
+        'Choose No to keep them on this PC.',
+        mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(DataDir, True, True, True);
+    end;
+  end;
 end;
 
 function NeedsWebView2: Boolean;

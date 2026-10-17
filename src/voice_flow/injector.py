@@ -733,9 +733,11 @@ class _SyntheticScope:
                 _synthetic_input_depth -= 1
 
 
-def _send_win32_ctrl_v() -> None:
-    """Send clean Win32 Ctrl+V key combination without modifier key collision."""
+def _send_win32_ctrl_v() -> bool:
+    """Send clean Win32 Ctrl+V. False when the keystroke could not be posted."""
     user32 = ctypes.windll.user32
+    if user32 is None:
+        return False
     # Ensure Windows key is not held down to prevent triggering Win+V (Clipboard History flyout)
     if bool((user32.GetAsyncKeyState(VK_LWIN) & 0x8000) or (user32.GetAsyncKeyState(VK_RWIN) & 0x8000)):
         _suppress_win_start_menu()
@@ -744,16 +746,21 @@ def _send_win32_ctrl_v() -> None:
         _suppress_win_start_menu()
         time.sleep(0.005)
 
-    with _SyntheticScope():
-        scan_ctrl = user32.MapVirtualKeyW(VK_CONTROL, 0) or 0x1D
-        scan_v = user32.MapVirtualKeyW(VK_V, 0) or 0x2F
-        user32.keybd_event(VK_CONTROL, scan_ctrl, 0, VF_SYNTHETIC_EXTRA_INFO)
-        time.sleep(0.012)
-        user32.keybd_event(VK_V, scan_v, 0, VF_SYNTHETIC_EXTRA_INFO)
-        time.sleep(0.012)
-        user32.keybd_event(VK_V, scan_v, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
-        time.sleep(0.012)
-        user32.keybd_event(VK_CONTROL, scan_ctrl, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
+    try:
+        with _SyntheticScope():
+            scan_ctrl = user32.MapVirtualKeyW(VK_CONTROL, 0) or 0x1D
+            scan_v = user32.MapVirtualKeyW(VK_V, 0) or 0x2F
+            user32.keybd_event(VK_CONTROL, scan_ctrl, 0, VF_SYNTHETIC_EXTRA_INFO)
+            time.sleep(0.012)
+            user32.keybd_event(VK_V, scan_v, 0, VF_SYNTHETIC_EXTRA_INFO)
+            time.sleep(0.012)
+            user32.keybd_event(VK_V, scan_v, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
+            time.sleep(0.012)
+            user32.keybd_event(VK_CONTROL, scan_ctrl, KEYEVENTF_KEYUP, VF_SYNTHETIC_EXTRA_INFO)
+    except Exception:
+        log.warning("[INJECTOR] Ctrl+V could not be posted.", exc_info=True)
+        return False
+    return True
 
 
 def _send_win32_shift_insert() -> None:
@@ -835,12 +842,14 @@ def _format_text_for_title(text: str, window_title: str) -> str:
 #   "copied_needs_permission" macOS would drop Cmd+V (no Accessibility); the
 #                             text was left on the clipboard for a manual paste
 #   "copied_internal"         target was our own window; text left on clipboard
+#   "copied_not_delivered"    the paste keystroke was not posted; text left on clipboard
 #   "failed"                  nothing could be done
 _last_injection_outcome = "failed"
 PASTE_PERMISSION_MESSAGE = (
     "Text copied. Press Cmd+V to paste it. To paste automatically, allow AI Productivity Flow in "
     "System Settings > Privacy & Security > Accessibility."
 )
+PASTE_MANUAL_MESSAGE = "Copied, press Ctrl+V." if IS_WINDOWS else "Copied, press Cmd+V."
 
 
 def last_injection_outcome() -> str:
@@ -1082,8 +1091,16 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
 
                 if is_legacy_terminal:
                     _send_win32_shift_insert()
+                    posted = True
                 else:
-                    _send_win32_ctrl_v()
+                    posted = _send_win32_ctrl_v()
+                if not posted:
+                    log.warning(
+                        "[INJECTOR] Paste keystroke was not delivered; text left on the clipboard (%d chars).",
+                        len(formatted_text),
+                    )
+                    _set_injection_outcome("copied_not_delivered")
+                    return False
 
                 if press_enter:
                     time.sleep(0.05)
@@ -1096,7 +1113,10 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
                 _clipboard_restore_token += 1
                 token = _clipboard_restore_token
 
-            restore_delay_ms = getattr(config, "clipboard_restore_delay_ms", 180)
+            # 180 ms restored the clipboard before WhatsApp, browsers, and
+            # Office had read it, so the paste landed empty. Wait 500–800 ms.
+            configured_delay = int(getattr(config, "clipboard_restore_delay_ms", 650) or 650)
+            restore_delay_ms = min(800, max(500, configured_delay))
             is_uwp_or_whatsapp = (
                 "whatsapp" in active_title.lower()
                 or "whatsapp" in active_class.lower()
@@ -1104,7 +1124,7 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
                 or "applicationframewindow" in active_class.lower()
             )
             if is_uwp_or_whatsapp:
-                restore_delay_ms = max(400, restore_delay_ms)
+                restore_delay_ms = max(800, restore_delay_ms)
 
             def _restore_clipboard_async(orig_clip=original_clipboard, expected_token=token, delay_val_ms=restore_delay_ms):
                 delay = delay_val_ms / 1000.0
@@ -1117,6 +1137,7 @@ def inject_text(text: str, target_hwnd: int | None = None, press_enter: bool = F
             threading.Thread(target=_restore_clipboard_async, daemon=True).start()
 
             log.info("[INJECTOR] Text injected successfully into '%s' (%d chars).", active_title, len(formatted_text))
+            _set_injection_outcome("pasted")
             return True
 
         except Exception:

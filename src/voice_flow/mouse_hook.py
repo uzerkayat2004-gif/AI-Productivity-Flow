@@ -373,6 +373,9 @@ class Win32MouseHook:
     # MAC_SLOW_RESTART_SECONDS (a tap refused for lack of permission).
     MAC_FAST_RESTARTS = 5
     MAC_SLOW_RESTART_SECONDS = 30.0
+    # After the fast burst and a handful of slow retries, stop. A tap that
+    # macOS keeps refusing (no permission) must not restart forever.
+    MAC_RESTART_CAP = 12
 
     def _macos_watchdog_tick(self) -> str:
         """One supervision pass over the macOS selection tap.
@@ -384,7 +387,7 @@ class Win32MouseHook:
         2026). Restart a dead listener; re-enable a disabled tap.
 
         Returns what was done: "ok", "reenabled", "restarted", "waiting",
-        "stopped"."""
+        "capped", "stopped"."""
         if self._stop_event.is_set():
             return "stopped"
         listener = self._mac_listener
@@ -404,8 +407,16 @@ class Win32MouseHook:
             return "ok"
         restarts = getattr(self, "_mac_listener_restarts", 0)
         now = time.monotonic()
+        if restarts >= self.MAC_RESTART_CAP:
+            if not getattr(self, "_mac_restart_capped_logged", False):
+                self._mac_restart_capped_logged = True
+                log.error(
+                    "[MOUSE HOOK] Stopped restarting the macOS mouse listener after %d attempts.",
+                    restarts,
+                )
+            return "capped"
         if restarts >= self.MAC_FAST_RESTARTS and now < getattr(self, "_mac_next_restart_at", 0.0):
-            return "waiting"  # e.g. no permission yet: retry slowly, never give up
+            return "waiting"
         self._mac_listener_restarts = restarts + 1
         self._mac_next_restart_at = now + self.MAC_SLOW_RESTART_SECONDS
         if restarts < self.MAC_FAST_RESTARTS or restarts % 10 == 0:

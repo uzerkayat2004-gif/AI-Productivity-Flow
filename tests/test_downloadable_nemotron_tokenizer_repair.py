@@ -1,6 +1,7 @@
 """Offline tests for optional Nemotron tokenizer repair in the download worker."""
 from __future__ import annotations
 
+import hashlib
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -104,6 +105,7 @@ def test_completed_download_survives_optional_repair_result(
         return False
 
     monkeypatch.setattr(downloadable_models, "_maybe_repair_nemotron_tokenizer", repair)
+    spec["sha256"] = hashlib.sha256(original).hexdigest()
 
     # Avoid changing the user's real settings or starting a model warmup thread.
     from voice_flow.storage import storage

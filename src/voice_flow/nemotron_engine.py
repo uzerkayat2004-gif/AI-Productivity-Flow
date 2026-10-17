@@ -107,6 +107,114 @@ TRAILING_SILENCE_SECONDS = 0.5
 # punctuated segments in that whole-recording pass.
 WHOLE_RECORDING_EOU_HISTORY_MS = 2000
 
+# Long clips are split only at real pauses. The quietest 100 ms inside a
+# 2.5–4 s window often lands inside a word; that cut is not used.
+_MAX_SEGMENT_S = 12.0
+_MIN_SEGMENT_S = 2.0
+_PAUSE_FRAME_S = 0.02
+_MIN_PAUSE_S = 0.08
+_SEGMENT_OVERLAP_S = 0.20
+
+
+def _speech_pause_ranges(wav: np.ndarray, sample_rate: int) -> list[tuple[int, int]]:
+    """Sample spans of silence long enough to be a word boundary."""
+    frame = max(1, int(_PAUSE_FRAME_S * sample_rate))
+    if wav.size < frame * 4:
+        return []
+    usable = wav[: len(wav) - (len(wav) % frame)]
+    frames = usable.reshape(-1, frame)
+    rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1))
+    if rms.size == 0:
+        return []
+    speech_level = float(np.percentile(rms, 80))
+    floor = float(np.percentile(rms, 20))
+    # A dip inside a vowel stays above this. Only a real gap qualifies.
+    # The threshold must stay below the speech level: a steady sentence has
+    # almost the same 20th and 80th percentile, and scaling the floor would
+    # mark the whole sentence as silence.
+    threshold = max(0.004, speech_level * 0.15)
+    if floor < speech_level * 0.5:
+        threshold = max(threshold, floor * 2.5)
+    threshold = min(threshold, max(0.004, speech_level * 0.35))
+    silent = rms < threshold
+    min_frames = max(1, int(round(_MIN_PAUSE_S / _PAUSE_FRAME_S)))
+    ranges: list[tuple[int, int]] = []
+    index = 0
+    count = len(silent)
+    while index < count:
+        if not silent[index]:
+            index += 1
+            continue
+        end = index
+        while end < count and silent[end]:
+            end += 1
+        if end - index >= min_frames:
+            ranges.append((index * frame, end * frame))
+        index = end
+    return ranges
+
+
+def _segment_bounds(n_samples: int, sample_rate: int, pauses: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Cover ``wav`` by splitting inside pauses, overlapping each join.
+
+    Continuous speech with no pause is one segment even past ``_MAX_SEGMENT_S``.
+    Cutting a word is worse than a longer decode.
+    """
+    if n_samples <= int(_MAX_SEGMENT_S * sample_rate):
+        return [(0, n_samples)]
+    overlap = int(_SEGMENT_OVERLAP_S * sample_rate)
+    min_seg = int(_MIN_SEGMENT_S * sample_rate)
+    max_seg = int(_MAX_SEGMENT_S * sample_rate)
+    bounds: list[tuple[int, int]] = []
+    start = 0
+    while start < n_samples:
+        if n_samples - start <= max_seg:
+            bounds.append((start, n_samples))
+            break
+        window_lo = start + min_seg
+        window_hi = min(n_samples, start + max_seg)
+        chosen: int | None = None
+        for pause_start, pause_end in pauses:
+            mid = (pause_start + pause_end) // 2
+            if window_lo <= mid <= window_hi:
+                chosen = mid
+        if chosen is None:
+            for pause_start, pause_end in pauses:
+                mid = (pause_start + pause_end) // 2
+                if mid > window_hi:
+                    chosen = mid
+                    break
+        if chosen is None or chosen <= start:
+            bounds.append((start, n_samples))
+            break
+        bounds.append((start, chosen))
+        next_start = max(chosen - overlap, start + 1)
+        if next_start >= chosen:
+            next_start = chosen
+        start = next_start
+    return bounds
+
+
+def _merge_overlap_transcripts(parts: list[str]) -> str:
+    """Join segment transcripts, dropping a word sequence repeated across the overlap."""
+    merged: list[str] = []
+    for part in parts:
+        words = part.split()
+        if not words:
+            continue
+        if not merged:
+            merged = words
+            continue
+        cut = 0
+        limit = min(8, len(merged), len(words))
+        for count in range(limit, 0, -1):
+            if [word.casefold() for word in merged[-count:]] == [word.casefold() for word in words[:count]]:
+                cut = count
+                break
+        merged.extend(words[cut:])
+    return " ".join(merged)
+
+
 _FAILED_MODELS: dict[str, NativeASRWorkerError] = {}
 _FAILED_AT: dict[str, float] = {}
 _RETRY_ACTIONS = deque(maxlen=16)
@@ -798,56 +906,26 @@ class NemotronGGUFEngine:
             with _bounded_lock(self.lock, deadline):
                 self._last_used = time.monotonic()
                 # If audio is short or is a stream chunk, transcribe directly in-process
-                if is_chunk or duration <= 12.0:
+                if is_chunk or duration <= _MAX_SEGMENT_S:
                     segment = wav if tail_pad is None else np.concatenate([wav, tail_pad])
                     result = self._transcribe_segment(segment, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                 else:
-                    # Long whole-buffer audio (> 12.0s): chunk into ~4s segments at silence points
-                    # to avoid FastConformer O(T^2) quadratic self-attention blowup on CPU.
-                    chunk_samples = 4 * self.sample_rate
-                    n_samples = len(wav)
-                    offset = 0
+                    # Longer than the model budget: split only at real pauses.
+                    # A quiet 100 ms inside a word is not a split point. When
+                    # speech never pauses, keep one segment rather than cut it.
+                    pauses = _speech_pause_ranges(wav, self.sample_rate)
+                    bounds = _segment_bounds(len(wav), self.sample_rate, pauses)
                     transcripts: list[str] = []
-
-                    while offset < n_samples:
-                        remaining = n_samples - offset
-                        if remaining <= chunk_samples:
-                            seg = wav[offset:]
-                            offset = n_samples
-                        else:
-                            # Search in [offset + 2.5s, offset + 4.0s] for the quietest window (split point)
-                            search_start = offset + int(2.5 * self.sample_rate)
-                            search_end = min(n_samples, offset + chunk_samples)
-                            if search_end > search_start + 1600:
-                                search_slice = np.abs(wav[search_start:search_end])
-                                w_size = 1600  # 100ms
-                                num_w = len(search_slice) // w_size
-                                if num_w > 0:
-                                    w_energies = [float(np.mean(search_slice[i * w_size:(i + 1) * w_size])) for i in range(num_w)]
-                                    best_w = int(np.argmin(w_energies))
-                                    split_point = search_start + best_w * w_size + (w_size // 2)
-                                else:
-                                    split_point = offset + chunk_samples
-                            else:
-                                split_point = offset + chunk_samples
-                            # Keep a short final remainder in the preceding
-                            # segment. The native decoder rejects segments
-                            # below 200 ms, and silently skipping one after
-                            # earlier text succeeded loses a trailing word.
-                            min_segment_samples = int(0.2 * self.sample_rate)
-                            if 0 < n_samples - split_point < min_segment_samples:
-                                split_point = n_samples
-                            seg = wav[offset:split_point]
-                            offset = split_point
-
-                        if offset >= n_samples and tail_pad is not None:
+                    min_segment_samples = int(0.2 * self.sample_rate)
+                    for index, (start, end) in enumerate(bounds):
+                        seg = wav[start:end]
+                        if index == len(bounds) - 1 and tail_pad is not None:
                             seg = np.concatenate([seg, tail_pad])
-                        if seg.size >= int(0.2 * self.sample_rate):
+                        if seg.size >= min_segment_samples:
                             part_txt = self._transcribe_segment(seg, language=resolved_lang, vocabulary=vocabulary, deadline=deadline)
                             if part_txt:
                                 transcripts.append(part_txt)
-
-                    result = " ".join(transcripts).strip()
+                    result = _merge_overlap_transcripts(transcripts)
         elif not result:
             # Strategy 2: Native CLI execution ONLY if C ABI handle is unavailable
             exe_path = self._find_nemo_speech_executable()

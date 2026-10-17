@@ -1,9 +1,11 @@
 """Tests for Voice Flow Downloadable Models (Nemotron STT GGUF models)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -11,6 +13,21 @@ import pytest
 
 from voice_flow import downloadable_models
 from voice_flow.storage import storage
+
+
+@contextmanager
+def _pin_download_digest(model_id: str, payload: bytes):
+    """Point a registry pin at a fake body so streaming tests still complete."""
+    original = next(item for item in downloadable_models.ALL_DOWNLOADABLE_MODELS_REGISTRY if item["id"] == model_id)
+    saved = original.get("sha256")
+    original["sha256"] = hashlib.sha256(payload).hexdigest()
+    try:
+        yield
+    finally:
+        if saved is None:
+            original.pop("sha256", None)
+        else:
+            original["sha256"] = saved
 
 
 @pytest.fixture
@@ -391,26 +408,27 @@ def test_download_worker_streams_and_completes(temp_models_dir: Path):
     mock_resp.read.side_effect = [data_chunk1, data_chunk2, b""]
     mock_resp.__enter__.return_value = mock_resp
 
-    with patch("urllib.request.urlopen", return_value=mock_resp):
-        ok, msg, st = downloadable_models.start_model_download(m_id)
-        assert ok
+    with _pin_download_digest(m_id, total_data):
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            ok, msg, st = downloadable_models.start_model_download(m_id)
+            assert ok
 
-        target_file = temp_models_dir / spec["filename"]
-        # Wait for download thread to finish
-        for _ in range(50):
-            time.sleep(0.05)
-            curr = downloadable_models.get_model_status(m_id)
-            if curr and curr["status"] == "downloaded":
-                break
+            target_file = temp_models_dir / spec["filename"]
+            # Wait for download thread to finish
+            for _ in range(50):
+                time.sleep(0.05)
+                curr = downloadable_models.get_model_status(m_id)
+                if curr and curr["status"] == "downloaded":
+                    break
 
-        final_st = downloadable_models.get_model_status(m_id)
-        assert final_st["status"] == "downloaded"
-        assert final_st["file_exists"] is True
-        assert final_st["progress"] == 100.0
-        assert final_st["downloaded_bytes"] == len(total_data)
-        assert final_st["remaining_bytes"] == 0
-        assert target_file.exists()
-        assert target_file.read_bytes() == total_data
+            final_st = downloadable_models.get_model_status(m_id)
+            assert final_st["status"] == "downloaded"
+            assert final_st["file_exists"] is True
+            assert final_st["progress"] == 100.0
+            assert final_st["downloaded_bytes"] == len(total_data)
+            assert final_st["remaining_bytes"] == 0
+            assert target_file.exists()
+            assert target_file.read_bytes() == total_data
 
 
 def test_download_error_handling_records_failure(temp_models_dir: Path):
@@ -493,21 +511,22 @@ def test_ssl_fallback_on_ssl_error(temp_models_dir: Path):
     successful_resp.__enter__.return_value = successful_resp
 
     # First call with verified ctx raises SSLError; second call succeeds
-    with patch("urllib.request.urlopen", side_effect=[ssl.SSLError("CERTIFICATE_VERIFY_FAILED"), successful_resp]) as mock_urlopen:
-        ok, msg, st = downloadable_models.start_model_download(m_id)
-        assert ok
+    with _pin_download_digest(m_id, payload):
+        with patch("urllib.request.urlopen", side_effect=[ssl.SSLError("CERTIFICATE_VERIFY_FAILED"), successful_resp]) as mock_urlopen:
+            ok, msg, st = downloadable_models.start_model_download(m_id)
+            assert ok
 
-        for _ in range(50):
-            time.sleep(0.05)
-            curr = downloadable_models.get_model_status(m_id)
-            if curr and curr["status"] == "downloaded":
-                break
+            for _ in range(50):
+                time.sleep(0.05)
+                curr = downloadable_models.get_model_status(m_id)
+                if curr and curr["status"] == "downloaded":
+                    break
 
-        final_st = downloadable_models.get_model_status(m_id)
-        assert final_st["status"] == "downloaded"
-        assert final_st["downloaded_bytes"] == len(payload)
-        assert (temp_models_dir / spec["filename"]).exists()
-        assert mock_urlopen.call_count == 2
+            final_st = downloadable_models.get_model_status(m_id)
+            assert final_st["status"] == "downloaded"
+            assert final_st["downloaded_bytes"] == len(payload)
+            assert (temp_models_dir / spec["filename"]).exists()
+            assert mock_urlopen.call_count == 2
 
 
 def test_html_modal_hierarchy_and_clean_nesting():

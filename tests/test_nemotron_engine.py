@@ -619,10 +619,15 @@ def test_nemotron_long_buffer_segmentation_keeps_short_final_tail(monkeypatch):
     engine._transcribe_segment = record_segment
     text = engine.transcribe(audio)
 
-    assert text == "part 1 part 2 part 3"
+    # Splits land in the near-silence gaps, and the short tail after the last
+    # gap is still decoded (overlapped into the previous speech, not dropped).
+    assert text.startswith("part 1")
+    assert len(segments) >= 2
     pad = np.zeros(int(nemotron_engine.TRAILING_SILENCE_SECONDS * engine.sample_rate), dtype=np.float32)
-    np.testing.assert_array_equal(np.concatenate(segments), np.concatenate([audio, pad]))
     assert all(len(segment) >= int(0.2 * engine.sample_rate) for segment in segments)
+    assert np.array_equal(segments[-1][-len(pad):], pad)
+    tail = audio[-800:]
+    assert np.array_equal(segments[-1][-(len(pad) + 800):-len(pad)], tail)
 
 
 def test_nemotron_stream_transcriber_fallback_when_invalid_model(monkeypatch):

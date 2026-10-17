@@ -852,10 +852,10 @@ class TTSEngine:
             res = self._synthesize_custom(text, provider, model_id)
             if res:
                 return res
-            log.warning("Audio Flow: Custom provider '%s' failed, falling back to Edge TTS", provider)
+            log.warning("Audio Flow: Custom provider '%s' failed. Not calling a cloud voice.", provider)
             return None
         else:
-            log.warning("Audio Flow: Unknown or unconfigured TTS provider '%s', falling back to Edge TTS", provider)
+            log.warning("Audio Flow: Unknown or unconfigured TTS provider '%s'. Not calling a cloud voice.", provider)
             return None
 
     def _get_speed_rate_str(self) -> str:
@@ -1066,8 +1066,8 @@ class TTSEngine:
     def _synthesize_elevenlabs(self, text: str, voice_id: str) -> bytes | None:
         active_keys = self._get_active_keys_for_provider("elevenlabs")
         if not active_keys:
-            log.warning("ElevenLabs TTS: No active API key configured, falling back to Edge TTS")
-            return self._synthesize_edge_tts(text)
+            log.warning("ElevenLabs TTS: No active API key configured, using the offline voice instead of a cloud voice")
+            return self._synthesize_sapi(text)
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         model_family = "eleven_multilingual_v2"
@@ -1112,14 +1112,14 @@ class TTSEngine:
             except Exception as e:
                 log.error("ElevenLabs TTS error: %s", e)
 
-        log.warning("ElevenLabs TTS: all keys failed, falling back to Edge TTS")
-        return self._synthesize_edge_tts(text)
+        log.warning("ElevenLabs TTS: all keys failed, using the offline voice instead of a cloud voice")
+        return self._synthesize_sapi(text)
 
     def _synthesize_deepgram(self, text: str, model_name: str) -> bytes | None:
         active_keys = self._get_active_keys_for_provider("deepgram")
         if not active_keys:
-            log.warning("Deepgram TTS: No active API key configured, falling back to Edge TTS")
-            return self._synthesize_edge_tts(text)
+            log.warning("Deepgram TTS: No active API key configured, using the offline voice instead of a cloud voice")
+            return self._synthesize_sapi(text)
 
         endpoint = "/v2/speak" if model_name.lower().startswith("flux") else "/v1/speak"
         url = f"https://api.deepgram.com{endpoint}?model={model_name}"
@@ -1154,14 +1154,14 @@ class TTSEngine:
             except Exception as e:
                 log.error("Deepgram TTS error: %s", e)
 
-        log.warning("Deepgram TTS: all keys failed, falling back to Edge TTS")
-        return self._synthesize_edge_tts(text)
+        log.warning("Deepgram TTS: all keys failed, using the offline voice instead of a cloud voice")
+        return self._synthesize_sapi(text)
 
     def _synthesize_openai(self, text: str, model_voice_spec: str) -> bytes | None:
         active_keys = self._get_active_keys_for_provider("openai")
         if not active_keys:
-            log.warning("OpenAI TTS: No active API key configured, falling back to Edge TTS")
-            return self._synthesize_edge_tts(text)
+            log.warning("OpenAI TTS: No active API key configured, using the offline voice instead of a cloud voice")
+            return self._synthesize_sapi(text)
 
         spec_parts = model_voice_spec.split(":", 1)
         model = spec_parts[0] if spec_parts[0] else "tts-1"
@@ -1205,15 +1205,15 @@ class TTSEngine:
             except Exception as e:
                 log.error("OpenAI TTS error: %s", e)
 
-        log.warning("OpenAI TTS: all keys failed, falling back to Edge TTS")
-        return self._synthesize_edge_tts(text)
+        log.warning("OpenAI TTS: all keys failed, using the offline voice instead of a cloud voice")
+        return self._synthesize_sapi(text)
 
     def _synthesize_google(self, text: str, model_id: str) -> bytes | None:
         """Synthesize speech using Google Cloud TTS REST API with API key."""
         active_keys = self._get_active_keys_for_provider("google")
         if not active_keys:
-            log.warning("Google Cloud TTS: No active API key configured, falling back to Edge TTS")
-            return self._synthesize_edge_tts(text)
+            log.warning("Google Cloud TTS: No active API key configured, using the offline voice instead of a cloud voice")
+            return self._synthesize_sapi(text)
 
         speed = float(storage.get_setting("audio_flow_speed", 1.0))
         speaking_rate = speed
@@ -1269,14 +1269,14 @@ class TTSEngine:
             except Exception as e:
                 log.error("Google Cloud TTS synthesis error: %s", _sanitize_error_msg(e))
 
-        log.warning("Google Cloud TTS: all keys failed, falling back to Edge TTS")
-        return self._synthesize_edge_tts(text)
+        log.warning("Google Cloud TTS: all keys failed, using the offline voice instead of a cloud voice")
+        return self._synthesize_sapi(text)
 
     def _synthesize_gemini(self, text: str, model_voice_spec: str) -> bytes | None:
         """Synthesize speech using Gemini TTS (generativelanguage.googleapis.com)."""
         active_keys = self._get_active_keys_for_provider("gemini")
         if not active_keys:
-            log.warning("Gemini TTS: No active API key configured, falling back to Edge TTS")
+            log.warning("Gemini TTS: No active API key configured, using the offline voice instead of a cloud voice")
             return None
 
         # model_voice_spec format: "gemini-3.8-flash-tts:Kore" or "gemini-3.8-flash-lite-tts:Puck"
@@ -1359,7 +1359,7 @@ class TTSEngine:
             except Exception as e:
                 log.error("Gemini TTS error: %s", _sanitize_error_msg(e))
 
-        log.warning("Gemini TTS: all keys failed, falling back to Edge TTS")
+        log.warning("Gemini TTS: all keys failed, using the offline voice instead of a cloud voice")
         return None
 
     def _synthesize_fish(self, text: str, voice_id: str) -> bytes | None:

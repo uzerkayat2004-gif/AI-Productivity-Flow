@@ -69,8 +69,8 @@ echo -e "${YELLOW}║${NC}  You may experience permissions prompts, audio input 
 echo -e "${YELLOW}║${NC}  minor hotkey quirks depending on your macOS version and hardware.    ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}                                                                      ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  • Windows 10/11 x64 is the primary, production-verified platform.    ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${NC}  • macOS: Apple Silicon only (M1 or newer).                          ${YELLOW}║${NC}"
-echo -e "${YELLOW}║${NC}    Intel Macs are not supported.                                     ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${NC}  • macOS 14 Sonoma or newer, Apple Silicon only (M1 or newer).      ${YELLOW}║${NC}"
+echo -e "${YELLOW}║${NC}    Intel Macs and older macOS versions are not supported.           ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}                                                                      ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  Please report any macOS bugs or feedback to:                        ${YELLOW}║${NC}"
 echo -e "${YELLOW}║${NC}  ${CYAN}https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/issues${NC}     ${YELLOW}║${NC}"
@@ -93,6 +93,14 @@ echo -e "${GREEN}==>${NC} Detected macOS on ${BOLD}${ARCH}${NC}"
 if [ "$ARCH" != "arm64" ]; then
     echo -e "${RED}[X] Error: AI Productivity Flow on Mac supports Apple Silicon only (M1 or newer). Detected: $ARCH${NC}"
     echo "Intel Macs are not supported."
+    exit 1
+fi
+
+MACOS_VER="$(sw_vers -productVersion 2>/dev/null || echo 0)"
+MACOS_MAJOR="${MACOS_VER%%.*}"
+echo -e "${GREEN}==>${NC} macOS version ${BOLD}${MACOS_VER}${NC}"
+if ! [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] || [ "$MACOS_MAJOR" -lt 14 ]; then
+    echo -e "${RED}[X] Error: AI Productivity Flow on Mac requires macOS 14 Sonoma or newer. Detected: ${MACOS_VER}${NC}"
     exit 1
 fi
 

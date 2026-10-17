@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import socket
 import ssl
 import tempfile
@@ -76,6 +77,7 @@ DOWNLOADABLE_STT_MODELS_REGISTRY: list[dict[str, Any]] = [
         "repo_url": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
         "download_url": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/main/nemotron-speech-streaming-en-0.6b.q8_0.gguf",
         "filename": "nemotron-speech-streaming-en-0.6b.q8_0.gguf",
+        "sha256": "d9a01898d2a611c8764e23a1c2f45e70bbd5a425dc4de93692ac951dd603812d",
         "languages": ["English (en)"],
         "is_multilingual": False,
         "default_language": "en",
@@ -95,6 +97,7 @@ DOWNLOADABLE_STT_MODELS_REGISTRY: list[dict[str, Any]] = [
         "repo_url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
         "download_url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/resolve/main/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf",
         "filename": "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf",
+        "sha256": "3fc991d3badad7277c11030a7519832cddaf2057aafed6d4b25147e953a070b1",
         "languages": [
             "English (en)", "Spanish (es)", "German (de)", "French (fr)", "Italian (it)",
             "Arabic (ar)", "Japanese (ja)", "Korean (ko)", "Portuguese (pt)", "Russian (ru)",
@@ -125,6 +128,7 @@ DOWNLOADABLE_POLISH_MODELS_REGISTRY: list[dict[str, Any]] = [
         "repo_url": "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF",
         "download_url": "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/LFM2.5-350M-QAD-Q4_0.gguf",
         "filename": "LFM2.5-350M-QAD-Q4_0.gguf",
+        "sha256": "3d10b6ab8fc91a919534b9558e266255aca0bbc7f6d015963599aa9e74e05b1d",
         "languages": ["English (en)", "Multilingual"],
         "is_multilingual": True,
         "default_language": "en",
@@ -354,6 +358,17 @@ def start_model_download(model_id: str) -> tuple[bool, str, dict[str, Any] | Non
 
         if target_file.is_file() and target_file.stat().st_size > 0:
             return True, "Model already downloaded", get_model_status(spec["id"])
+
+        needed = int(spec.get("size_bytes") or 0) + 64 * 1024 * 1024
+        try:
+            free = shutil.disk_usage(get_models_dir()).free
+        except OSError as exc:
+            return False, f"Could not check free disk space: {exc}", None
+        if needed > 0 and free < needed:
+            return False, (
+                f"Not enough free disk space to download {spec.get('name') or spec['id']}. "
+                f"Need about {format_mb(needed):.0f} MB and {format_mb(free):.0f} MB is free."
+            ), None
 
         cancel_event = threading.Event()
         start_time = time.time()
@@ -666,14 +681,11 @@ def _download_worker(
                 f"({format_mb(downloaded_bytes)} MB of {format_mb(total_bytes)} MB)"
             )
 
-        # Nemotron's native word boosting requires SentencePiece metadata that
-        # is missing from older converted GGUFs. Do this only for a complete
-        # English Nemotron download, never during model loading or dictation.
-        _maybe_repair_nemotron_tokenizer(part_file, model_id)
-
-        # SHA-256 integrity verification when the registry pins a digest.
+        # Hash the downloaded bytes before tokenizer repair rewrites a
+        # Nemotron file. Every pinned model is checked, including a short
+        # body, so a wrong digest is never saved as a finished download.
         expected_sha256 = str(spec.get("sha256") or "").strip().lower()
-        if expected_sha256:
+        if expected_sha256 and part_file.is_file():
             calculated_sha256 = _sha256_file(part_file)
             if calculated_sha256 != expected_sha256:
                 try:
@@ -683,6 +695,11 @@ def _download_worker(
                 raise IOError(
                     f"SHA-256 verification failed for {model_id}: expected {expected_sha256}, got {calculated_sha256}"
                 )
+
+        # Nemotron's native word boosting requires SentencePiece metadata that
+        # is missing from older converted GGUFs. Do this only for a complete
+        # English Nemotron download, never during model loading or dictation.
+        _maybe_repair_nemotron_tokenizer(part_file, model_id)
 
         # Atomic replacement: replace temporary .part with final destination file
         if target_file.exists():

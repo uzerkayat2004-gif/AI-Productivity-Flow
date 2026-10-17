@@ -37,7 +37,12 @@ def apply_spoken_punctuation(text: str) -> str:
     return _spoken_punctuation(text)
 
 
-_FILLER_RE = re.compile(r"\b(um|uh|er|ah|hmm)\b[ ,]*", re.IGNORECASE)
+# Optional comma on either side is part of the filler, so "so, um, I think"
+# becomes "so I think" instead of "so, I think" or "so,  I think".
+_FILLER_RE = re.compile(
+    r"(?:[ \t]*,[ \t]*)?\b(um|uh|er|ah|hmm)\b(?:[ \t]*,)?[ \t]*",
+    re.IGNORECASE,
+)
 # Internal lower-to-upper transitions (parseJSON, iPhone) and an acronym
 # followed by a capitalized component (HTTPClient) identify case-sensitive
 # tokens. Ordinary Titlecase words and all-uppercase prose do not qualify.
@@ -161,7 +166,7 @@ def _strip_filler(match: "re.Match[str]") -> str:
     word = match.group(1)
     if word.isupper():
         return match.group(0)
-    return ""
+    return " "
 
 
 def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> str:
@@ -197,7 +202,11 @@ def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> s
     parts = _PROTECTED_CLEANUP_SPAN_RE.split(text)
     for index in range(0, len(parts), 2):
         parts[index] = clean_unprotected(parts[index])
-    return "".join(parts).strip()
+    cleaned = "".join(parts)
+    # A filler removed at the start of a line leaves one space. Drop that
+    # space without touching a space that separates a protected span.
+    cleaned = re.sub(r"(?m)^[ \t]+", "", cleaned)
+    return cleaned.strip()
 
 
 def format_dictated_email(text: str) -> str | None:

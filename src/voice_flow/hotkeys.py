@@ -433,6 +433,8 @@ class InputTriggerListener:
         self._hotkey_press_time: float = 0.0
         self._stop_event = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
+        self._watchdog_failures = 0
+        self._watchdog_gave_up = False
 
         # Double-tap Control and Hold Control tracking
         self._last_ctrl_release_time: float = 0.0
@@ -774,11 +776,33 @@ class InputTriggerListener:
                 self._hotkey_trigger, self._trigger_mode, self._middle_click_enabled, self._custom_hotkey_str
             )
 
+    # Restarts of a dead keyboard hook. After this many failures the loop
+    # stops retrying and logs it, instead of restarting forever.
+    WATCHDOG_RESTART_CAP = 8
+
+    def _note_watchdog_failure(self, reason: str) -> bool:
+        """Count a failed restart. False when the cap has been reached."""
+        self._watchdog_failures = getattr(self, "_watchdog_failures", 0) + 1
+        attempt = self._watchdog_failures
+        if attempt >= self.WATCHDOG_RESTART_CAP:
+            if not getattr(self, "_watchdog_gave_up", False):
+                self._watchdog_gave_up = True
+                log.error(
+                    "[INPUT WATCHDOG] Giving up after %d restarts (%s). Hotkeys stay off until the app is restarted.",
+                    attempt, reason,
+                )
+            return False
+        # 3s, 6s, 12s ... capped at 60s, on top of the loop's own sleep.
+        delay = min(60.0, 3.0 * (2 ** (attempt - 1)))
+        log.warning("[INPUT WATCHDOG] Restart %d/%d failed (%s). Waiting %.0fs.", attempt, self.WATCHDOG_RESTART_CAP, reason, delay)
+        self._stop_event.wait(delay)
+        return True
+
     def _watchdog_loop(self) -> None:
-        """Continuously verify that keyboard listener is alive and restart if dropped."""
+        """Verify that the keyboard listener is alive and restart it with a cap."""
         while not self._stop_event.is_set():
             time.sleep(3.0)
-            if self._stop_event.is_set():
+            if self._stop_event.is_set() or getattr(self, "_watchdog_gave_up", False):
                 break
 
             # If native keyboard hook is present, check its health
@@ -788,17 +812,36 @@ class InputTriggerListener:
                     try:
                         self._keyboard_hook.stop()
                         restarted = self._keyboard_hook.start()
-                        if not restarted:
+                        if restarted:
+                            self._watchdog_failures = 0
+                        elif not self._note_watchdog_failure("native hook did not start"):
+                            break
+                        else:
                             log.warning("[INPUT WATCHDOG] Native hook restart failed. Engaging pynput fallback...")
                             if self._key_listener is None or not self._key_listener.is_alive():
                                 self._start_key_listener()
                     except Exception as exc:
                         log.error("[INPUT WATCHDOG] Native hook restart exception: %s", exc)
+                        if not self._note_watchdog_failure(str(exc)):
+                            break
+                else:
+                    self._watchdog_failures = 0
             else:
                 key_dead = self._key_listener is None or not self._key_listener.is_alive()
                 if key_dead and not self._stop_event.is_set():
                     log.warning("[INPUT WATCHDOG] Keyboard listener dropped. Restarting...")
-                    self._start_key_listener()
+                    try:
+                        self._start_key_listener()
+                        alive = self._key_listener is not None and self._key_listener.is_alive()
+                    except Exception as exc:
+                        log.error("[INPUT WATCHDOG] Keyboard listener restart exception: %s", exc)
+                        alive = False
+                    if alive:
+                        self._watchdog_failures = 0
+                    elif not self._note_watchdog_failure("keyboard listener did not start"):
+                        break
+                else:
+                    self._watchdog_failures = 0
 
     def _on_native_key(self, vk: int, is_down: bool, is_up: bool, extra: int) -> bool:
         suppressed = self._handle_native_key(vk, is_down, is_up, extra)
