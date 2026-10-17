@@ -1,72 +1,70 @@
 {
   "step1": [
     {
-      "start": 0.4,
-      "end": 1.89,
-      "text": "Welcome to Video Flow!"
+      "start": 0.45,
+      "end": 2.27,
+      "text": "Welcome to Video Flow."
     },
     {
-      "start": 2.17,
-      "end": 5.09,
-      "text": "Drop in any document or paste notes."
+      "start": 2.27,
+      "end": 5.04,
+      "text": "Drop in a document, or paste your notes."
     },
     {
-      "start": 5.37,
-      "end": 13.34,
-      "text": "Choose from five smart formats\u2014Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic\u2014to generate videos in seconds."
+      "start": 5.04,
+      "end": 15.02,
+      "text": "Then pick a format: Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic, the longest, story-style video."
     }
   ],
   "step2": [
     {
-      "start": 0.4,
-      "end": 2.85,
-      "text": "Step two is choosing your AI engine."
+      "start": 0.45,
+      "end": 2.55,
+      "text": "Step two is your video engine."
     },
     {
-      "start": 3.13,
-      "end": 11.5,
-      "text": "NotebookLM works with just your Google login to generate animated slides, while Gemini and cloud API keys unlock our built-in video generator."
+      "start": 2.55,
+      "end": 9.67,
+      "text": "NotebookLM uses your own Google account. Just sign in: no API keys, nothing to pay."
+    },
+    {
+      "start": 9.67,
+      "end": 15.25,
+      "text": "The built-in App engine is optional, and needs your own API key."
     }
   ],
   "step3": [
     {
-      "start": 0.4,
-      "end": 3.5,
+      "start": 0.45,
+      "end": 2.94,
       "text": "Step three is your Video Library."
     },
     {
-      "start": 3.78,
-      "end": 6.63,
-      "text": "Every video is saved in your local workspace."
+      "start": 2.94,
+      "end": 5.68,
+      "text": "Every video is saved on this computer."
     },
     {
-      "start": 6.91,
-      "end": 13.37,
-      "text": "Filter past projects, preview chapters, and download full HD MP4 files with a single click."
+      "start": 5.68,
+      "end": 12.41,
+      "text": "Filter by status, search past videos, and download the MP4 with one click."
     }
   ],
   "step4": [
     {
-      "start": 0.4,
-      "end": 3.81,
-      "text": "Finally, Video Flow works anywhere across Windows."
+      "start": 0.45,
+      "end": 4.27,
+      "text": "Finally, Video Flow works anywhere in Windows."
     },
     {
-      "start": 4.09,
-      "end": 10.71,
-      "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
-    }
-  ],
-  "step4_mac": [
-    {
-      "start": 0.4,
-      "end": 3.33,
-      "text": "Video Flow is coming to Mac soon, available on Windows now."
+      "start": 4.27,
+      "end": 7.97,
+      "text": "Highlight text on any page, and tap the floating button."
     },
     {
-      "start": 3.61,
-      "end": 11.98,
-      "text": "Until then, create videos from the Windows app."
+      "start": 7.97,
+      "end": 12.31,
+      "text": "Your video is made in the background while you keep working."
     }
   ]
 }

@@ -25,7 +25,7 @@ def test_videoflow_guide_step2_title_and_narration() -> None:
     """Step 2 must be titled 'Choose your video engine' and have concise narration."""
     content = APP_JS.read_text(encoding="utf-8")
     assert 'title: "Choose your video engine"' in content
-    assert "NotebookLM works with just your Google login; add an API key only if you want the built-in engine." in content
+    assert "NotebookLM uses your own Google account: just sign in. No API keys, nothing to pay." in content
 
 
 def test_videoflow_guide_dots_count() -> None:

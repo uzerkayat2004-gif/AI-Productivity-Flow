@@ -30,13 +30,13 @@ def test_audioflow_step1_spotlight_covers_both_modes() -> None:
 
 
 def test_audioflow_step1_audio_properties() -> None:
-    """Audio Flow Step 1 narration audio must exist, be 10-16s, and properly mixed."""
+    """Audio Flow Step 1 narration audio must exist, be 10-18s, and properly mixed (v1.0.3 regen)."""
     audio_path = ASSETS_DIR / "af_guide_step1_mixed.mp3"
     assert audio_path.exists()
     container = av.open(str(audio_path))
     dur = float(container.streams.audio[0].duration * container.streams.audio[0].time_base)
     container.close()
-    assert 10.0 <= dur <= 16.0, f"Duration {dur:.2f}s is not within 10-16s"
+    assert 10.0 <= dur <= 18.0, f"Duration {dur:.2f}s is not within 10-18s"
 
 
 def test_feature_guide_buttons_removed_from_headers() -> None:
@@ -63,20 +63,22 @@ def test_bottom_controls_order_in_welcome_tour() -> None:
 
     # In Scene 1, Skip Tour must appear after Next
     s1_next = html_content.find('id="scene1-next-btn"')
-    s1_skip = html_content.find('class="scene1-skip-badge"')
+    s1_skip = html_content.find('scene1-skip-badge"')
     assert s1_next != -1 and s1_skip != -1
     assert s1_next < s1_skip, "Scene 1: Skip Tour must appear after (right of) Next button"
 
 
 def test_scene1_feature_cards_highlight_sync() -> None:
-    """Scene 1 cards must highlight during the 7.0s - 12.8s narration window."""
+    """Scene 1 cards highlight on the voiceover's own word timings (v1.0.3: generated beats)."""
     content = APP_JS.read_text(encoding="utf-8")
-    assert 'time >= 7.0 && time < 8.8' in content
+    assert 'time >= b1.video && time < b1.audio' in content
     assert 'highlight-orange' in content
-    assert 'time >= 8.8 && time < 10.6' in content
+    assert 'time >= b1.audio && time < b1.voice' in content
     assert 'highlight-blue' in content
-    assert 'time >= 10.6 && time <= 12.8' in content
+    assert 'time >= b1.voice && time <= end1' in content
     assert 'highlight-purple' in content
+    beats = json.loads((ASSETS_DIR / "narration_timelines.json").read_text(encoding="utf-8"))["scene_1"]
+    assert 0 < beats["beats"]["video"] < beats["beats"]["audio"] < beats["beats"]["voice"] < beats["duration"]
 
 
 def test_scene4_voiceflow_video_duration_aligned() -> None:

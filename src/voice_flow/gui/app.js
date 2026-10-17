@@ -895,8 +895,34 @@ const AUTOMATIC_GUIDE_SEEN_FLAGS = {
   video: "vf_onboarding.vf_guided",
 };
 
+// A page's guide may start by itself for a first-run profile, or for any
+// profile enrolled by the welcome tour / Replay Tour (see guides_enrolled).
+function automaticGuidesAllowed(eligible) {
+  // v2_seen: the tour was shown to this profile on its first run (v1.0.2 sets
+  // it too), so profiles upgraded mid-onboarding still get their remaining guides.
+  return eligible === true || onboardingFlag("vf_onboarding.guides_enrolled") === "1" ||
+    onboardingFlag("vf_onboarding.v2_seen") === "1";
+}
+
+// Guides closed by navigation (not by the user) -> step to resume at (this session only).
+const _interruptedGuideSteps = {};
+
+function resumeInterruptedGuide(feature, pageId) {
+  const step = _interruptedGuideSteps[feature];
+  if (!step) return false;
+  delete _interruptedGuideSteps[feature];
+  setTimeout(() => {
+    if (currentPageId !== pageId || isFeatureGuideVisible("onboarding-overlay")) return;
+    if (feature === "voice" && typeof startVoiceFlowGuide === "function") startVoiceFlowGuide(step);
+    if (feature === "audio" && typeof startAudioFlowGuide === "function") startAudioFlowGuide({ startStep: step });
+    if (feature === "video" && typeof startVideoFlowGuide === "function") startVideoFlowGuide(step);
+  }, 60);
+  return true;
+}
+
 function scheduleAutomaticGuide(feature, pageId) {
   if (feature === "video" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) return;
+  if (!isOnboardingAccountChanging() && resumeInterruptedGuide(feature, pageId)) return;
   if (isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature)) return;
   // A guide the user has already seen never starts again by itself
   // (grokbot/combined-test); "Replay onboarding" clears these flags.
@@ -920,13 +946,14 @@ function scheduleAutomaticGuide(feature, pageId) {
       _pendingAutomaticGuide = null;
       return;
     }
-    if (eligible !== true || isOnboardingAccountChanging() || isFeatureGuideVisible("onboarding-overlay")) {
+    if (!automaticGuidesAllowed(eligible) || isOnboardingAccountChanging() || isFeatureGuideVisible("onboarding-overlay")) {
       _pendingAutomaticGuide = null;
       return;
     }
     pending.timer = setTimeout(() => {
       if (!isCurrent()) return;
-      if (_onboardingEligible !== true || isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature) || isFeatureGuideVisible("onboarding-overlay")) {
+      if (!automaticGuidesAllowed(_onboardingEligible) || isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature) || isFeatureGuideVisible("onboarding-overlay") ||
+          (seenFlag && onboardingFlag(seenFlag) === "1")) {
         _pendingAutomaticGuide = null;
         return;
       }
@@ -1132,9 +1159,17 @@ function switchPage(pageId, options = {}) {
 
   // Cleanly dismiss active guide for other pages when leaving without marking completed
   if (!options.fromGuide && !options.fromWelcomeTour) {
-    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function" && isFeatureGuideVisible("audioflow-guide-overlay")) stopAudioFlowGuide(false);
-    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function" && isFeatureGuideVisible("videoflow-guide-overlay")) stopVideoFlowGuide(false);
-    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function" && isFeatureGuideVisible("voiceflow-guide-overlay")) stopVoiceFlowGuide(false);
+    // v1.0.3: a guide interrupted by navigation (tray, hotkey, deep link) is
+    // remembered at its step and resumes there when its page is opened again.
+    if (pageId !== "audioflow" && typeof stopAudioFlowGuide === "function" && isFeatureGuideVisible("audioflow-guide-overlay")) {
+      _interruptedGuideSteps.audio = _currentAfGuideStep; stopAudioFlowGuide(false);
+    }
+    if (pageId !== "videoflow" && typeof stopVideoFlowGuide === "function" && isFeatureGuideVisible("videoflow-guide-overlay")) {
+      _interruptedGuideSteps.video = _currentVfGuideStep; stopVideoFlowGuide(false);
+    }
+    if (pageId !== "home" && typeof stopVoiceFlowGuide === "function" && isFeatureGuideVisible("voiceflow-guide-overlay")) {
+      _interruptedGuideSteps.voice = _currentVoiceFlowGuideStep; stopVoiceFlowGuide(false);
+    }
   }
 
   // Always reset nested sub-views and provider details when switching or refreshing pages
@@ -7094,6 +7129,442 @@ async function toggleVideoFlowFeature(checked) {
 // =========================================================
 // Onboarding: welcome screen + pre-recorded explanatory tour
 // =========================================================
+// BEGIN GENERATED NARRATION TIMELINES (scripts/onboarding/generate_narration.py; do not edit by hand)
+const ONBOARDING_NARRATION_TIMELINES = {
+  "scene_1": {
+    "duration": 16.096,
+    "speechEnd": 15.05,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.31,
+        "text": "Welcome to AI Productivity Flow!"
+      },
+      {
+        "start": 3.31,
+        "end": 8.69,
+        "text": "It's free, open source, and private, so your data stays on your device."
+      },
+      {
+        "start": 8.69,
+        "end": 16.1,
+        "text": "Turn text into video, text into audio, and your voice into text, without switching apps."
+      }
+    ],
+    "beats": {
+      "video": 9.68,
+      "audio": 11.18,
+      "voice": 12.39
+    }
+  },
+  "scene_2": {
+    "duration": 16.76,
+    "speechEnd": 15.71,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 1.84,
+        "text": "Meet Video Flow!"
+      },
+      {
+        "start": 1.84,
+        "end": 8.65,
+        "text": "Paste any text or select an article, and it becomes an animated explainer video with a voiceover."
+      },
+      {
+        "start": 8.65,
+        "end": 16.76,
+        "text": "It uses your own NotebookLM account. Just sign in with Google: no API keys, nothing to pay."
+      }
+    ],
+    "beats": {}
+  },
+  "scene_2_mac": {
+    "duration": 14.156,
+    "speechEnd": 13.11,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 1.85,
+        "text": "Meet Video Flow!"
+      },
+      {
+        "start": 1.85,
+        "end": 8.78,
+        "text": "Paste any text or select an article, and it becomes an animated explainer video with a voiceover."
+      },
+      {
+        "start": 8.78,
+        "end": 14.16,
+        "text": "Video Flow is coming to Mac soon. It's available on Windows now."
+      }
+    ],
+    "beats": {}
+  },
+  "scene_3": {
+    "duration": 16.188,
+    "speechEnd": 15.14,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 1.95,
+        "text": "Meet Audio Flow!"
+      },
+      {
+        "start": 1.95,
+        "end": 5.79,
+        "text": "Highlight text anywhere, and tap the button that pops up."
+      },
+      {
+        "start": 5.79,
+        "end": 11.07,
+        "text": "Read mode reads it aloud with built-in voices, no API key needed."
+      },
+      {
+        "start": 11.07,
+        "end": 16.19,
+        "text": "Summary uses your NotebookLM account. Just sign in with Google."
+      }
+    ],
+    "beats": {}
+  },
+  "scene_4": {
+    "duration": 13.779,
+    "speechEnd": 12.73,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 1.75,
+        "text": "Meet Voice Flow!"
+      },
+      {
+        "start": 1.75,
+        "end": 7.57,
+        "text": "Speak naturally into any app, and your words are typed and polished right where you're working."
+      },
+      {
+        "start": 7.57,
+        "end": 13.78,
+        "text": "It runs locally on built-in models, so there's no API key to set up."
+      }
+    ],
+    "beats": {}
+  },
+  "scene_5": {
+    "duration": 10.966,
+    "speechEnd": 9.92,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.07,
+        "text": "Welcome to our community!"
+      },
+      {
+        "start": 2.07,
+        "end": 6.73,
+        "text": "Star us on GitHub, and share your feedback to help shape what comes next."
+      },
+      {
+        "start": 6.73,
+        "end": 10.97,
+        "text": "Click Get Started to begin. No API keys needed."
+      }
+    ],
+    "beats": {
+      "github": 2.22,
+      "feedback": 4.02,
+      "start": 7.03
+    }
+  },
+  "af_guide_step1": {
+    "duration": 16.669,
+    "speechEnd": 15.62,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.2,
+        "text": "Welcome to Audio Flow."
+      },
+      {
+        "start": 2.2,
+        "end": 8.74,
+        "text": "Read mode reads any text word for word, with built-in voices and no API key."
+      },
+      {
+        "start": 8.74,
+        "end": 16.67,
+        "text": "Summary mode uses NotebookLM to explain it with one narrator, or as a two-host podcast."
+      }
+    ],
+    "beats": {}
+  },
+  "af_guide_step2": {
+    "duration": 14.638,
+    "speechEnd": 13.59,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.54,
+        "text": "Step two is your voices."
+      },
+      {
+        "start": 2.54,
+        "end": 7.32,
+        "text": "Offline voices stay on your device, and Edge voices are online and free."
+      },
+      {
+        "start": 7.32,
+        "end": 14.64,
+        "text": "API keys are optional, only for extra voices like Gemini, and they stay on this computer."
+      }
+    ],
+    "beats": {}
+  },
+  "af_guide_step3": {
+    "duration": 12.945,
+    "speechEnd": 11.9,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.88,
+        "text": "Step three is your Audio History."
+      },
+      {
+        "start": 2.88,
+        "end": 5.73,
+        "text": "Every summary is saved on this computer."
+      },
+      {
+        "start": 5.73,
+        "end": 12.95,
+        "text": "Open the history anytime to search, replay, and download the MP3 with one click."
+      }
+    ],
+    "beats": {}
+  },
+  "af_guide_step4": {
+    "duration": 14.521,
+    "speechEnd": 13.47,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 4.84,
+        "text": "Finally, use Audio Flow anywhere, without switching apps."
+      },
+      {
+        "start": 4.84,
+        "end": 10.55,
+        "text": "Highlight text on any page, tap the floating button, and choose Read or Summary."
+      },
+      {
+        "start": 10.55,
+        "end": 14.52,
+        "text": "A small player shows the progress while you keep working."
+      }
+    ],
+    "beats": {}
+  },
+  "vf_guide_step1": {
+    "duration": 15.016,
+    "speechEnd": 13.97,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.27,
+        "text": "Welcome to Video Flow."
+      },
+      {
+        "start": 2.27,
+        "end": 5.04,
+        "text": "Drop in a document, or paste your notes."
+      },
+      {
+        "start": 5.04,
+        "end": 15.02,
+        "text": "Then pick a format: Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic, the longest, story-style video."
+      }
+    ],
+    "beats": {}
+  },
+  "vf_guide_step2": {
+    "duration": 15.25,
+    "speechEnd": 14.2,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.55,
+        "text": "Step two is your video engine."
+      },
+      {
+        "start": 2.55,
+        "end": 9.67,
+        "text": "NotebookLM uses your own Google account. Just sign in: no API keys, nothing to pay."
+      },
+      {
+        "start": 9.67,
+        "end": 15.25,
+        "text": "The built-in App engine is optional, and needs your own API key."
+      }
+    ],
+    "beats": {}
+  },
+  "vf_guide_step3": {
+    "duration": 12.411,
+    "speechEnd": 11.36,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 2.94,
+        "text": "Step three is your Video Library."
+      },
+      {
+        "start": 2.94,
+        "end": 5.68,
+        "text": "Every video is saved on this computer."
+      },
+      {
+        "start": 5.68,
+        "end": 12.41,
+        "text": "Filter by status, search past videos, and download the MP4 with one click."
+      }
+    ],
+    "beats": {}
+  },
+  "vf_guide_step4": {
+    "duration": 12.307,
+    "speechEnd": 11.26,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 4.27,
+        "text": "Finally, Video Flow works anywhere in Windows."
+      },
+      {
+        "start": 4.27,
+        "end": 7.97,
+        "text": "Highlight text on any page, and tap the floating button."
+      },
+      {
+        "start": 7.97,
+        "end": 12.31,
+        "text": "Your video is made in the background while you keep working."
+      }
+    ],
+    "beats": {}
+  },
+  "voiceflow_guide_step1": {
+    "duration": 12.607,
+    "speechEnd": 11.56,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 1.86,
+        "text": "Welcome to Voice Flow."
+      },
+      {
+        "start": 1.86,
+        "end": 6.65,
+        "text": "Speak naturally, and your words are typed straight into any app."
+      },
+      {
+        "start": 6.65,
+        "end": 12.61,
+        "text": "Your dashboard tracks your history, your speaking speed, and your daily streak."
+      }
+    ],
+    "beats": {}
+  },
+  "voiceflow_guide_step2": {
+    "duration": 14.625,
+    "speechEnd": 13.57,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.16,
+        "text": "Step two is your dictionary and styles."
+      },
+      {
+        "start": 3.16,
+        "end": 8.36,
+        "text": "Add names and jargon so they're always spelled right, with polishing on or off."
+      },
+      {
+        "start": 8.36,
+        "end": 14.62,
+        "text": "Turn polishing on for voice commands, like: Hey Voice Flow, make this an email."
+      }
+    ],
+    "beats": {}
+  },
+  "voiceflow_guide_step3": {
+    "duration": 17.437,
+    "speechEnd": 16.39,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.09,
+        "text": "Step three is your AI models."
+      },
+      {
+        "start": 3.09,
+        "end": 8.5,
+        "text": "Voice Flow runs locally on built-in models, so no API key is needed."
+      },
+      {
+        "start": 8.5,
+        "end": 17.44,
+        "text": "We recommend Nemotron for speech, and S1-mini by Superwhisper for polishing. Cloud keys are optional."
+      }
+    ],
+    "beats": {}
+  },
+  "voiceflow_guide_step4": {
+    "duration": 13.232,
+    "speechEnd": 12.18,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.53,
+        "text": "Finally, dictate anywhere in Windows."
+      },
+      {
+        "start": 3.53,
+        "end": 9.27,
+        "text": "Hold the middle mouse button, or press Control plus Windows, and speak into any app."
+      },
+      {
+        "start": 9.27,
+        "end": 13.23,
+        "text": "Voice Flow types your words right where your cursor is."
+      }
+    ],
+    "beats": {}
+  },
+  "voiceflow_guide_step4_mac": {
+    "duration": 10.992,
+    "speechEnd": 9.94,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.31,
+        "text": "Finally, dictate anywhere on your Mac."
+      },
+      {
+        "start": 3.31,
+        "end": 6.84,
+        "text": "Press Command plus Option, and speak into any app."
+      },
+      {
+        "start": 6.84,
+        "end": 10.99,
+        "text": "Voice Flow types your words right where your cursor is."
+      }
+    ],
+    "beats": {}
+  }
+};
+// END GENERATED NARRATION TIMELINES
+
 const ONBOARDING_NARRATION = [
   "Welcome to AI Productivity Flow! We're thrilled to have you here. AI Productivity Flow is your completely free, 100% open-source personal productivity companion. Designed to work seamlessly across your computer, it gives you superpowers by turning your everyday voice and thoughts into high-speed action, with complete privacy. Whether you want to generate visual explainer videos, listen to instant audio summaries of long articles, or dictate and polish text into any app effortlessly... it's all built right here for you. In this quick tour, we'll walk you through how everything works, starting with our first feature: Video Flow. Let's dive right in!",
   "Welcome to Video Flow, our first core feature. If you have a lengthy article, research paper, or complex notes that you want to understand visually, Video Flow is built for you. Simply paste your text or select an article, and Video Flow transforms it into an animated visual explainer with dynamic motion graphics, slide layouts, and natural audio narration. You can watch the full explainer right here on your screen, switch visual styles, or export your video in seconds. Next up, let's explore our second feature: Audio Flow!",
@@ -7114,47 +7585,26 @@ const ONBOARDING_PAGE_MAP = {
   4: "providers"
 };
 
-const scene1Timeline = [
-  {
-    "start": 0.4,
-    "end": 2.7,
-    "text": "Welcome to AI Productivity Flow!"
-  },
-  {
-    "start": 2.98,
-    "end": 6.73,
-    "text": "Your free open-source companion with complete privacy."
-  },
-  {
-    "start": 7.01,
-    "end": 12.43,
-    "text": "Turn ideas into high-speed action with explainer videos, audio summaries, and voice dictation."
-  }
-];
+const scene1Timeline = ONBOARDING_NARRATION_TIMELINES.scene_1.lines;
 
-const scene2Timeline = [
-  {
-    "start": 0.4,
-    "end": 1.89,
-    "text": "Meet Video Flow!"
-  },
-  {
-    "start": 2.17,
-    "end": 6.05,
-    "text": "Transform articles or notes into animated explainer videos."
-  },
-  {
-    "start": 6.33,
-    "end": 12.86,
-    "text": "With motion graphics, smart layouts, and natural narration, turn any content into a video in seconds."
-  }
-];
+// Scene 2 has a Mac cut: Video Flow is coming to Mac soon, so the voiceover says so.
+function onboardingClipKey(slideIdx) {
+  const key = `scene_${slideIdx + 1}`;
+  const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
+  if (isMac && ONBOARDING_NARRATION_TIMELINES[`${key}_mac`]) return `${key}_mac`;
+  return key;
+}
+function onboardingClipTimeline(slideIdx) {
+  const clip = ONBOARDING_NARRATION_TIMELINES[onboardingClipKey(slideIdx)];
+  return (clip && clip.lines) || [];
+}
+const scene2Timeline = ONBOARDING_NARRATION_TIMELINES.scene_2.lines;
 
 function updateOnboardingScene2Subtitles(time) {
   const subEl = document.getElementById("scene2-subtitle-text");
   if (!subEl) return;
 
-  const currentMatch = scene2Timeline.find(item => time >= item.start && time <= item.end);
+  const currentMatch = onboardingClipTimeline(1).find(item => time >= item.start && time <= item.end);
   if (currentMatch && subEl.textContent !== currentMatch.text) {
     subEl.textContent = currentMatch.text;
     subEl.style.opacity = "0.7";
@@ -7180,23 +7630,7 @@ function updateScene2Video(isPlaying) {
   }
 }
 
-const scene3Timeline = [
-  {
-    "start": 0.4,
-    "end": 2.37,
-    "text": "Meet Audio Flow!"
-  },
-  {
-    "start": 2.61,
-    "end": 6.5,
-    "text": "Highlight text anywhere on your screen to trigger the floating quick-action menu."
-  },
-  {
-    "start": 6.74,
-    "end": 13.12,
-    "text": "Generate instant spoken summaries with waveform playback, or download the MP3 on the go."
-  }
-];
+const scene3Timeline = ONBOARDING_NARRATION_TIMELINES.scene_3.lines;
 
 function updateOnboardingScene3Subtitles(time) {
   const subEl = document.getElementById("scene3-subtitle-text");
@@ -7228,23 +7662,7 @@ function updateScene3Video(isPlaying) {
   }
 }
 
-const scene4Timeline = [
-  {
-    "start": 0.4,
-    "end": 2.06,
-    "text": "Meet Voice Flow!"
-  },
-  {
-    "start": 2.34,
-    "end": 9.34,
-    "text": "Speak naturally into any application and have your words transcribed and polished directly into the active field in real time."
-  },
-  {
-    "start": 9.62,
-    "end": 12.65,
-    "text": "Zero copy-pasting, zero app-switching."
-  }
-];
+const scene4Timeline = ONBOARDING_NARRATION_TIMELINES.scene_4.lines;
 
 function updateOnboardingScene4Subtitles(time) {
   const subEl = document.getElementById("scene4-subtitle-text");
@@ -7261,23 +7679,7 @@ function updateOnboardingScene4Subtitles(time) {
   }
 }
 
-const scene5Timeline = [
-  {
-    "start": 0.4,
-    "end": 1.82,
-    "text": "Welcome to our community!"
-  },
-  {
-    "start": 2.1,
-    "end": 7.18,
-    "text": "Star us on GitHub, share your feedback, and let us shape the future together."
-  },
-  {
-    "start": 7.46,
-    "end": 10.87,
-    "text": "Click Get Started to configure your hotkeys and begin!"
-  }
-];
+const scene5Timeline = ONBOARDING_NARRATION_TIMELINES.scene_5.lines;
 
 function updateOnboardingScene5Subtitles(time) {
   const subEl = document.getElementById("scene5-subtitle-text");
@@ -7302,11 +7704,14 @@ function updateOnboardingScene5Subtitles(time) {
     c2.classList.remove("highlight-active");
     c3.classList.remove("highlight-active");
 
-    if (time >= 2.57 && time < 5.2) {
+    // Beats come from the voiceover's own word timings (generated block above).
+    const b5 = ONBOARDING_NARRATION_TIMELINES.scene_5.beats;
+    const end5 = ONBOARDING_NARRATION_TIMELINES.scene_5.duration;
+    if (time >= b5.github && time < b5.feedback) {
       c1.classList.add("highlight-active");
-    } else if (time >= 5.2 && time < 7.68) {
+    } else if (time >= b5.feedback && time < b5.start) {
       c2.classList.add("highlight-active");
-    } else if (time >= 7.68 && time <= 12.1) {
+    } else if (time >= b5.start && time <= end5) {
       c3.classList.add("highlight-active");
     }
   }
@@ -7338,11 +7743,13 @@ function updateScene1CardVideos(time, isNarrating) {
   // Identify active card based on narrator timestamps
   let activeCard = 0;
   if (isNarrating) {
-    if (time >= 7.0 && time < 8.8) {
+    const b1 = ONBOARDING_NARRATION_TIMELINES.scene_1.beats;
+    const end1 = ONBOARDING_NARRATION_TIMELINES.scene_1.duration;
+    if (time >= b1.video && time < b1.audio) {
       activeCard = 1; // Video Flow
-    } else if (time >= 8.8 && time < 10.6) {
+    } else if (time >= b1.audio && time < b1.voice) {
       activeCard = 2; // Audio Flow
-    } else if (time >= 10.6 && time <= 12.8) {
+    } else if (time >= b1.voice && time <= end1) {
       activeCard = 3; // Voice Flow
     }
   }
@@ -7446,11 +7853,13 @@ function updateOnboardingScene1Subtitles(time, isNarratingOverride) {
     c2.classList.remove("highlight-blue");
     c3.classList.remove("highlight-purple");
 
-    if ((isNarrating && time >= 7.0 && time < 8.8) || _hoveredScene1Card === 1) {
+    const b1 = ONBOARDING_NARRATION_TIMELINES.scene_1.beats;
+    const end1 = ONBOARDING_NARRATION_TIMELINES.scene_1.duration;
+    if ((isNarrating && time >= b1.video && time < b1.audio) || _hoveredScene1Card === 1) {
       c1.classList.add("highlight-orange");
-    } else if ((isNarrating && time >= 8.8 && time < 10.6) || _hoveredScene1Card === 2) {
+    } else if ((isNarrating && time >= b1.audio && time < b1.voice) || _hoveredScene1Card === 2) {
       c2.classList.add("highlight-blue");
-    } else if ((isNarrating && time >= 10.6 && time <= 12.8) || _hoveredScene1Card === 3) {
+    } else if ((isNarrating && time >= b1.voice && time <= end1) || _hoveredScene1Card === 3) {
       c3.classList.add("highlight-purple");
     }
   }
@@ -7549,6 +7958,11 @@ const PERSISTED_ONBOARDING_FLAGS = [
   "vf_onboarding.vf_guided",
   "vf_onboarding.vf_voice_guided",
   "vf_onboarding.firstDictation",
+  // Set once a fresh profile is shown the welcome tour (or on Replay). Feature
+  // guides auto-start per page from this flag plus their own seen flag, so they
+  // still start after the profile stops being "first run" (tour finished, a
+  // summary made, a Google sign-in reloading the account, an app restart).
+  "vf_onboarding.guides_enrolled",
 ];
 
 function hydrateOnboardingFlags() {
@@ -7582,6 +7996,24 @@ function persistOnboardingFlagsSoon() {
   }, 120);
 }
 
+function flushOnboardingFlags() {
+  if (!_onboardingFlagsSaveTimer) return;
+  clearTimeout(_onboardingFlagsSaveTimer);
+  _onboardingFlagsSaveTimer = null;
+  try {
+    fetch("/api/settings/update", {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: ONBOARDING_FLAGS_SETTING_KEY, value: { ..._onboardingFlagMirror } }),
+    }).catch(() => {});
+  } catch (_) {}
+}
+try {
+  window.addEventListener("pagehide", flushOnboardingFlags);
+  window.addEventListener("beforeunload", flushOnboardingFlags);
+} catch (_) {}
+
 function onboardingFlag(key) {
   let value = null;
   try { value = localStorage.getItem(key); } catch { value = null; }
@@ -7613,6 +8045,7 @@ async function maybeShowOnboarding() {
   _onboardingWelcomeShown = true;
   // Preserve this session's first-run eligibility after our own viewed marker write.
   setOnboardingFlag("vf_onboarding.v2_seen", "1");
+  setOnboardingFlag("vf_onboarding.guides_enrolled", "1");
 
   const overlay = document.getElementById("onboarding-overlay");
   if (!overlay) return;
@@ -7655,6 +8088,11 @@ function toggleOnboardingAutoMode() {
   if (_onboardingAutoAdvanceTimer) {
     clearTimeout(_onboardingAutoAdvanceTimer);
     _onboardingAutoAdvanceTimer = null;
+  }
+  // Turning Auto on after this scene's voiceover already finished moves on.
+  if (onboardingAutoMode && onboardingAudioPlayer && onboardingAudioPlayer.ended && !onboardingNarrationPaused &&
+      typeof _scheduleOnboardingAutoAdvance === "function") {
+    _scheduleOnboardingAutoAdvance(onboardingSlide, _currentAudioSlideToken);
   }
   updateOnboardingAutoModeUI();
 }
@@ -7757,18 +8195,7 @@ let _currentUnlockSlide = -1;
 let _currentAudioSlideToken = 0;
 
 function getOnboardingAudioPath(slideIdx) {
-  let rel = `assets/onboarding/slide_${slideIdx}.mp3`;
-  if (slideIdx === 0) {
-    rel = "assets/onboarding/scene_1_mixed.mp3";
-  } else if (slideIdx === 1) {
-    rel = "assets/onboarding/scene_2_mixed.mp3";
-  } else if (slideIdx === 2) {
-    rel = "assets/onboarding/scene_3_mixed.mp3";
-  } else if (slideIdx === 3) {
-    rel = "assets/onboarding/scene_4_mixed.mp3";
-  } else if (slideIdx === 4) {
-    rel = "assets/onboarding/scene_5_mixed.mp3";
-  }
+  const rel = `assets/onboarding/${onboardingClipKey(slideIdx)}_mixed.mp3`;
   try {
     if (window.location && window.location.origin && window.location.origin !== "null") {
       return `${window.location.origin}/${rel}`;
@@ -7879,6 +8306,80 @@ function installOnboardingGestureUnlocker() {
   window.addEventListener("touchstart", unlockAudio, { passive: true });
 }
 
+// Welcome tour narration engine.
+// Rule: a scene never advances before its voiceover has ended. Auto mode
+// advances on the audio 'ended' event plus a short pad. Only when the audio
+// itself fails (media error / unsupported source) does a duration-based clock
+// stand in for it, still driving the captions and beats, and still pausable.
+// A blocked autoplay (no user gesture yet) waits for the first click instead
+// of silently moving on.
+const ONBOARDING_AUTO_ADVANCE_PAD_MS = 700;
+let _onboardingFallbackClock = null;
+
+function _onboardingSceneTimeUpdate(slideIdx, t, playing) {
+  if (onboardingSlide !== slideIdx) return;
+  if (slideIdx === 0) updateOnboardingScene1Subtitles(t, playing);
+  else if (slideIdx === 1) updateOnboardingScene2Subtitles(t);
+  else if (slideIdx === 2) updateOnboardingScene3Subtitles(t);
+  else if (slideIdx === 3) updateOnboardingScene4Subtitles(t);
+  else if (slideIdx === 4) updateOnboardingScene5Subtitles(t);
+}
+
+function _clearOnboardingAutoAdvance() {
+  if (_onboardingAutoAdvanceTimer) {
+    clearTimeout(_onboardingAutoAdvanceTimer);
+    _onboardingAutoAdvanceTimer = null;
+  }
+}
+
+function _scheduleOnboardingAutoAdvance(slideIdx, slideToken) {
+  _clearOnboardingAutoAdvance();
+  if (!onboardingAutoMode || slideIdx < 0 || slideIdx >= 4) return;
+  _onboardingAutoAdvanceTimer = setTimeout(() => {
+    _onboardingAutoAdvanceTimer = null;
+    if (onboardingAutoMode && !onboardingNarrationPaused && slideToken === _currentAudioSlideToken &&
+        onboardingSlide === slideIdx && onboardingSlide < 4) {
+      nextOnboardingSlide();
+    }
+  }, ONBOARDING_AUTO_ADVANCE_PAD_MS);
+}
+
+function _onboardingNarrationFinished(slideIdx, slideToken) {
+  if (slideToken !== _currentAudioSlideToken || onboardingSlide !== slideIdx) return;
+  updateOnboardingNarrationUI(true);
+  if (window.__onboardingNarrationLog) window.__onboardingNarrationLog.push({ slide: slideIdx, ended: performance.now() });
+  _scheduleOnboardingAutoAdvance(slideIdx, slideToken);
+}
+
+function _stopOnboardingFallbackClock() {
+  if (_onboardingFallbackClock) {
+    clearInterval(_onboardingFallbackClock.interval);
+    _onboardingFallbackClock = null;
+  }
+}
+
+// Duration-based stand-in, used only when the narration audio failed.
+function _startOnboardingFallbackClock(slideIdx, slideToken, fromTime) {
+  _stopOnboardingFallbackClock();
+  const clip = ONBOARDING_NARRATION_TIMELINES[onboardingClipKey(slideIdx)];
+  const duration = clip ? clip.duration : 15;
+  const clock = { t: Math.max(0, fromTime || 0), last: performance.now(), slideIdx, slideToken };
+  clock.interval = setInterval(() => {
+    const now = performance.now();
+    const dt = (now - clock.last) / 1000;
+    clock.last = now;
+    if (slideToken !== _currentAudioSlideToken || onboardingSlide !== slideIdx) { _stopOnboardingFallbackClock(); return; }
+    if (onboardingNarrationPaused) return;
+    clock.t += dt;
+    _onboardingSceneTimeUpdate(slideIdx, Math.min(clock.t, duration), true);
+    if (clock.t >= duration) {
+      _stopOnboardingFallbackClock();
+      _onboardingNarrationFinished(slideIdx, slideToken);
+    }
+  }, 100);
+  _onboardingFallbackClock = clock;
+}
+
 function speakOnboardingNarration() {
   stopOnboardingNarration();
   onboardingNarrationPaused = false;
@@ -7889,92 +8390,50 @@ function speakOnboardingNarration() {
   const player = new Audio(audioPath);
   player.preload = "auto";
   onboardingAudioPlayer = player;
-  
-  if (targetSlide === 0) {
-    player.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer === player && onboardingSlide === 0) {
-        updateOnboardingScene1Subtitles(player.currentTime, !player.paused);
-      }
-    });
-  } else if (targetSlide === 1) {
-    player.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer === player && onboardingSlide === 1) {
-        updateOnboardingScene2Subtitles(player.currentTime);
-      }
-    });
-  } else if (targetSlide === 2) {
-    player.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer === player && onboardingSlide === 2) {
-        updateOnboardingScene3Subtitles(player.currentTime);
-      }
-    });
-  } else if (targetSlide === 3) {
-    player.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer === player && onboardingSlide === 3) {
-        updateOnboardingScene4Subtitles(player.currentTime);
-      }
-    });
-  } else if (targetSlide === 4) {
-    player.addEventListener("timeupdate", () => {
-      if (onboardingAudioPlayer === player && onboardingSlide === 4) {
-        updateOnboardingScene5Subtitles(player.currentTime);
-      }
-    });
-  }
+  const isCurrent = () => onboardingAudioPlayer === player && slideToken === _currentAudioSlideToken && onboardingSlide === targetSlide;
 
+  player.addEventListener("timeupdate", () => {
+    if (isCurrent()) _onboardingSceneTimeUpdate(targetSlide, player.currentTime, !player.paused);
+  });
   player.addEventListener("ended", () => {
-    if (onboardingAudioPlayer === player) {
-      updateOnboardingNarrationUI(true);
-      if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
-        if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
-        _onboardingAutoAdvanceTimer = setTimeout(() => {
-          if (onboardingAutoMode && onboardingSlide >= 0 && onboardingSlide < 4) {
-            nextOnboardingSlide();
-          }
-        }, 450);
-      }
-    }
+    if (!isCurrent()) return;
+    _onboardingSceneTimeUpdate(targetSlide, player.duration || player.currentTime, false);
+    _onboardingNarrationFinished(targetSlide, slideToken);
   });
   player.addEventListener("pause", () => {
-    if (onboardingAudioPlayer === player) {
-      updateOnboardingNarrationUI(true);
-    }
+    if (isCurrent()) updateOnboardingNarrationUI(true);
   });
   player.addEventListener("playing", () => {
-    if (onboardingAudioPlayer === player) {
+    if (isCurrent()) {
       onboardingNarrationPaused = false;
       updateOnboardingNarrationUI(false);
     }
   });
-
-  if (onboardingAutoMode && targetSlide >= 0 && targetSlide < 4) {
-    if (_onboardingAutoAdvanceTimer) clearTimeout(_onboardingAutoAdvanceTimer);
-    _onboardingAutoAdvanceTimer = setTimeout(() => {
-      if (onboardingAutoMode && onboardingSlide === targetSlide && onboardingSlide < 4) {
-        nextOnboardingSlide();
-      }
-    }, 16000);
-  }
+  player.addEventListener("error", () => {
+    // The file could not load or decode: fall back to the clip's known duration.
+    if (!isCurrent()) return;
+    console.warn("Onboarding narration failed to load; using its known duration instead.");
+    _startOnboardingFallbackClock(targetSlide, slideToken, 0);
+  });
 
   const playPromise = player.play();
   if (playPromise !== undefined) {
     playPromise.then(() => {
-      if (slideToken !== _currentAudioSlideToken || onboardingSlide !== targetSlide) {
-        try {
-          player.pause();
-          player.currentTime = 0;
-          player.removeAttribute("src");
-          player.src = "";
-          player.load();
-        } catch (e) {}
+      if (!isCurrent()) {
+        try { player.pause(); player.removeAttribute("src"); player.load(); } catch (e) {}
         return;
       }
       updateOnboardingNarrationUI(false);
     }).catch(err => {
-      if (slideToken !== _currentAudioSlideToken || onboardingSlide !== targetSlide) return;
-      console.warn("Could not play embedded onboarding audio (user gesture may be required):", err);
-      updateOnboardingNarrationUI(true);
-      installOnboardingGestureUnlocker();
+      if (!isCurrent()) return;
+      if (err && err.name === "NotAllowedError") {
+        // Autoplay needs a user gesture: wait for it instead of skipping the scene.
+        console.warn("Onboarding narration is waiting for a click (autoplay blocked).");
+        updateOnboardingNarrationUI(true);
+        installOnboardingGestureUnlocker();
+      } else if (!_onboardingFallbackClock && !player.error) {
+        _startOnboardingFallbackClock(targetSlide, slideToken, player.currentTime || 0);
+      }
     });
   }
 }
@@ -7984,19 +8443,18 @@ function stopOnboardingNarration() {
     clearTimeout(_onboardingNarrationTimer);
     _onboardingNarrationTimer = null;
   }
-  if (_onboardingAutoAdvanceTimer) {
-    clearTimeout(_onboardingAutoAdvanceTimer);
-    _onboardingAutoAdvanceTimer = null;
-  }
+  _clearOnboardingAutoAdvance();
+  _stopOnboardingFallbackClock();
+  // Any scene change invalidates callbacks of the old player.
+  _currentAudioSlideToken++;
   if (onboardingAudioPlayer) {
-    try {
-      onboardingAudioPlayer.pause();
-      onboardingAudioPlayer.currentTime = 0;
-      onboardingAudioPlayer.removeAttribute("src");
-      onboardingAudioPlayer.src = "";
-      onboardingAudioPlayer.load();
-    } catch (e) {}
+    const old = onboardingAudioPlayer;
     onboardingAudioPlayer = null;
+    try {
+      old.pause();
+      old.removeAttribute("src");
+      old.load();
+    } catch (e) {}
   }
   _onboardingAudioUnlockerInstalled = false;
   stopScene1CardVideos(true);
@@ -8023,18 +8481,36 @@ function editCorrection(row, item) {
 
 
 function toggleOnboardingNarration() {
-  if (!onboardingAudioPlayer) {
+  const player = onboardingAudioPlayer;
+  if (!player) {
     speakOnboardingNarration();
     return;
   }
-  if (onboardingAudioPlayer.paused) {
-    onboardingAudioPlayer.play().then(() => {
-      onboardingNarrationPaused = false;
-      updateOnboardingNarrationUI(false);
-    }).catch(() => {});
+  if (_onboardingFallbackClock) {
+    // Audio failed for this scene: the button pauses/resumes the stand-in clock.
+    onboardingNarrationPaused = !onboardingNarrationPaused;
+    if (onboardingNarrationPaused) _clearOnboardingAutoAdvance();
+    updateOnboardingNarrationUI(onboardingNarrationPaused);
+    return;
+  }
+  if (player.paused || player.ended) {
+    _clearOnboardingAutoAdvance();
+    onboardingNarrationPaused = false;
+    if (player.ended) { try { player.currentTime = 0; } catch (e) {} }
+    const p = player.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => {
+        if (onboardingAudioPlayer === player) updateOnboardingNarrationUI(false);
+      }).catch(err => {
+        if (onboardingAudioPlayer !== player) return;
+        console.warn("Could not resume onboarding narration:", err);
+        updateOnboardingNarrationUI(true);
+      });
+    }
   } else {
-    onboardingAudioPlayer.pause();
     onboardingNarrationPaused = true;
+    _clearOnboardingAutoAdvance();
+    player.pause();
     updateOnboardingNarrationUI(true);
   }
 }
@@ -8109,62 +8585,24 @@ const AUDIOFLOW_GUIDE_STEPS = [
     step: 1,
     counter: "STEP 1 OF 4 · READ & SUMMARY",
     title: "Read & Summary Modes",
-    desc: "Listen to text word-for-word or create two-voice podcast summaries.",
+    desc: "Read any text aloud with built-in voices (no API key), or get a NotebookLM summary with one narrator or two podcast hosts.",
     targetId: "af-voice-card",
     secondaryTargetId: "af-summary-model-hero",
     spotlightLabel: "Core Modes",
-    nextLabel: "Next: Gemini Setup →",
+    nextLabel: "Next: Voices & Keys →",
     audioSrc: "assets/onboarding/af_guide_step1_mixed.mp3",
-    timeline: [
-      {
-        "start": 0.4,
-        "end": 2.3,
-        "text": "Welcome to Audio Flow."
-      },
-      {
-        "start": 2.58,
-        "end": 8.14,
-        "text": "Use Read mode to hear any text word for word, with dozens of voices and speeds."
-      },
-      {
-        "start": 8.42,
-        "end": 14.47,
-        "text": "Or switch to Summary mode, powered by NotebookLM, for two-voice conversational podcasts."
-      }
-    ]
+    timeline: ONBOARDING_NARRATION_TIMELINES.af_guide_step1.lines
   },
   {
     step: 2,
-    counter: "STEP 2 OF 4 · GEMINI SETUP",
-    title: "Gemini Setup & API Keys",
-    desc: "Connect your Google account for NotebookLM, or add your Gemini API key for custom models.",
-    targetId: "audio-detail-header-bar",
-    secondaryTargetId: "audio-detail-connections-card",
-    spotlightLabel: "Gemini API Key Setup",
+    counter: "STEP 2 OF 4 · VOICES & OPTIONAL KEYS",
+    title: "Built-in Voices & Optional Keys",
+    desc: "Offline voices stay on your device; Edge voices are online and free. API keys are optional, only for extra voices like Gemini.",
+    targetId: "af-providers-panel",
+    spotlightLabel: "Built-in Voices & Optional Keys",
     nextLabel: "Next: History & Downloads →",
     audioSrc: "assets/onboarding/af_guide_step2_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 3.35,
-            "text": "Step two connects your voice engines."
-      },
-      {
-            "start": 3.3,
-            "end": 5.86,
-            "text": "Free Edge voices are built in."
-      },
-      {
-            "start": 5.86,
-            "end": 10.12,
-            "text": "Connect your Google account for NotebookLM or add a Gemini key."
-      },
-      {
-            "start": 10.12,
-            "end": 13.4,
-            "text": "All credentials are encrypted and stored locally."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.af_guide_step2.lines
   },
   {
     step: 3,
@@ -8175,46 +8613,19 @@ const AUDIOFLOW_GUIDE_STEPS = [
     spotlightLabel: "Summary History & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/af_guide_step3_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 3.24,
-            "text": "Step three is your Audio History."
-      },
-      {
-            "start": 3.19,
-            "end": 6.43,
-            "text": "Every summary is saved in your local library."
-      },
-      {
-            "start": 6.43,
-            "end": 14.11,
-            "text": "Toggle the sidebar anytime to search past notes, replay waveforms, and download MP3 files with one click."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.af_guide_step3.lines
   },
   {
     step: 4,
     counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Twitter Shortcut",
-    desc: "Highlight text on screen to trigger the floating quick-action menu and player.",
+    desc: "Highlight text on screen, tap the floating button, and choose Read or Summary.",
     targetId: "af-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Twitter & Screen Shortcut",
     nextLabel: "Finish & Start Listening 🚀",
     audioSrc: "assets/onboarding/af_guide_step4_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 5.26,
-            "text": "Finally, use Audio Flow anywhere on your desktop without switching apps."
-      },
-      {
-            "start": 5.21,
-            "end": 12.25,
-            "text": "Simply highlight text on your screen to trigger the floating quick-action menu and listen in the floating waveform player while you work."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.af_guide_step4.lines
   }
 ];
 
@@ -8255,6 +8666,11 @@ function _afGuideIsUsable() {
 }
 
 function _afGuideReleaseIfUnusable() {
+  // v1.0.3: a handler that fires after the guide was closed (e.g. the click
+  // that closed it) must do nothing; before, it re-ran the "unusable" release
+  // and cleared af_guided, so a guide closed with X started again next launch.
+  const overlay = document.getElementById("audioflow-guide-overlay");
+  if (!overlay || overlay.classList.contains("hidden")) return true;
   if (_afGuideIsUsable()) return false;
   console.warn("[Audio Flow guide] Guide card is not visible (styles missing?); releasing the interaction lock.");
   stopAudioFlowGuide({ unusable: true });
@@ -8414,18 +8830,27 @@ function playAudioFlowGuideNarration(stepIdx) {
 }
 
 function toggleAudioFlowGuideAudio() {
-  if (!_afGuideAudioPlayer) {
+  const player = _afGuideAudioPlayer;
+  if (!player) {
     playAudioFlowGuideNarration(_currentAfGuideStep);
     return;
   }
-  if (_afGuideAudioPlayer.paused) {
-    _afGuideAudioPlayer.play().then(() => {
-      _afGuideNarrationPaused = false;
-      updateAudioFlowGuideAudioUI(false);
-    }).catch(() => {});
+  if (player.paused || player.ended) {
+    _afGuideNarrationPaused = false;
+    if (player.ended) { try { player.currentTime = 0; } catch (e) {} }
+    const p = player.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => { if (_afGuideAudioPlayer === player) updateAudioFlowGuideAudioUI(false); })
+       .catch(err => {
+         if (_afGuideAudioPlayer !== player) return;
+         console.warn("Could not resume guide narration:", err);
+         // A dead element (e.g. src cleared) gets a fresh player for this step.
+         playAudioFlowGuideNarration(_currentAfGuideStep);
+       });
+    }
   } else {
-    _afGuideAudioPlayer.pause();
     _afGuideNarrationPaused = true;
+    player.pause();
     updateAudioFlowGuideAudioUI(true);
   }
 }
@@ -8548,6 +8973,7 @@ async function gotoAudioFlowGuideStep(stepIdx) {
 
   // Cleanup leaving Step 2: restore provider overview and disconnect observer
   if (prevStep === 2 && stepIdx !== 2) {
+    document.body.classList.remove("af-guide-step2-active");
     if (window._afGuideConnCardObserver) {
       window._afGuideConnCardObserver.disconnect();
       window._afGuideConnCardObserver = null;
@@ -8572,14 +8998,16 @@ async function gotoAudioFlowGuideStep(stepIdx) {
     if (vid) vid.pause();
   }
 
-  // Step 2 Action: Open Gemini detail view & observe connections card
+  // Step 2 Action: lift the voice providers (Edge online + offline voices +
+  // optional key providers) to the top so they match the narration (v1.0.3).
   if (stepIdx === 2) {
     document.body.classList.remove("af-guide-step3-active");
-    if (typeof openAudioProviderDetail === "function") {
-      await openAudioProviderDetail("gemini");
+    document.body.classList.add("af-guide-step2-active");
+    if (typeof closeAudioProviderDetail === "function" && typeof currentAudioProvider !== "undefined" && currentAudioProvider) {
+      closeAudioProviderDetail();
     }
     if (window.ResizeObserver && !window._afGuideConnCardObserver) {
-      const connCard = document.getElementById("audio-detail-connections-card");
+      const connCard = document.getElementById("audio-providers-grid-container");
       if (connCard) {
         window._afGuideConnCardObserver = new ResizeObserver(() => {
           if (_currentAfGuideStep === 2) {
@@ -8753,7 +9181,7 @@ function startAudioFlowGuide(options) {
   }
 
   overlay.classList.remove("hidden");
-  gotoAudioFlowGuideStep(1);
+  gotoAudioFlowGuideStep((options && options.startStep) || 1);
 
   window.addEventListener("resize", _onAfGuideResize);
   // Re-check once the card has laid out; release the lock if it never shows.
@@ -8811,6 +9239,7 @@ function stopAudioFlowGuide(markCompleted = false) {
   // Restore CSS state
   document.body.classList.remove("af-guide-active");
   document.body.classList.remove("af-guide-step3-active");
+  document.body.classList.remove("af-guide-step2-active");
 
   const card = document.getElementById("af-guide-card");
   if (card) card.classList.remove("is-step4");
@@ -8848,116 +9277,48 @@ const VIDEOFLOW_GUIDE_STEPS = [
     step: 1,
     counter: "STEP 1 OF 4 · CONTENT & FORMATS",
     title: "Text to Video & Five Formats",
-    desc: "Drop any document or paste notes. Pick from five smart formats to generate explainer videos.",
+    desc: "Drop any document or paste notes. Pick one of five formats, from Brief to Cinematic.",
     targetId: "vf-source-card",
     secondaryTargetId: "vf-presets-row",
     spotlightLabel: "Content & Format Selector",
     nextLabel: "Next: Choose Video Engine →",
     audioSrc: "assets/onboarding/vf_guide_step1_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 2.74,
-            "text": "Welcome to Video Flow!"
-      },
-      {
-            "start": 2.69,
-            "end": 5.68,
-            "text": "Drop in any document or paste notes."
-      },
-      {
-            "start": 5.68,
-            "end": 14.79,
-            "text": "Choose from five smart formats\u2014Auto-Adaptive, Brief, Vertical Short, Explainer, or Cinematic\u2014to generate videos in seconds."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step1.lines
   },
   {
     step: 2,
     counter: "STEP 2 OF 4 · CHOOSE YOUR VIDEO ENGINE",
     title: "Choose your video engine",
-    desc: "NotebookLM works with just your Google login; add an API key only if you want the built-in engine.",
+    desc: "NotebookLM uses your own Google account: just sign in. No API keys, nothing to pay. The built-in App engine is optional and needs an API key.",
     targetId: "vf-engine-cards",
     secondaryTargetId: "vf-nlm-account-card",
     spotlightLabel: "Video Engine & API Providers",
     nextLabel: "Next: Video Library →",
     audioSrc: "assets/onboarding/vf_guide_step2_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 3.3,
-            "text": "Step two is choosing your AI engine."
-      },
-      {
-            "start": 3.25,
-            "end": 12.11,
-            "text": "NotebookLM works with just your Google login to generate animated slides, while Gemini and cloud API keys unlock our built-in video generator."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step2.lines
   },
   {
     step: 3,
     counter: "STEP 3 OF 4 · LIBRARY & DOWNLOADS",
     title: "Video Library & MP4 Downloads",
-    desc: "Browse generated videos, replay chapters, and download ready MP4s with one click.",
+    desc: "Browse your videos, filter by status, and download ready MP4s with one click.",
     targetId: "vf-library-cards",
     spotlightLabel: "Video Library & Downloads",
     nextLabel: "Next: Screen Workflow →",
     audioSrc: "assets/onboarding/vf_guide_step3_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 3.28,
-            "text": "Step three is your Video Library."
-      },
-      {
-            "start": 3.23,
-            "end": 6.61,
-            "text": "Every video is saved in your local workspace."
-      },
-      {
-            "start": 6.61,
-            "end": 13.83,
-            "text": "Filter past projects, preview chapters, and download full HD MP4 files with a single click."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step3.lines
   },
   {
     step: 4,
     counter: "STEP 4 OF 4 · SCREEN WORKFLOW",
     title: "Instant Screen & Shortcut Workflow",
-    desc: "Highlight text anywhere on screen to trigger background video generation.",
+    desc: "Highlight text anywhere on screen and tap the floating button; your video is made in the background.",
     targetId: "vf-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Screen & Windows Shortcut",
-    spotlightLabelMac: "Video Flow · coming to Mac soon",
     nextLabel: "Finish & Start Creating 🚀",
     audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
-    audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 4.47,
-            "text": "Finally, Video Flow works anywhere across Windows."
-      },
-      {
-            "start": 4.42,
-            "end": 11.13,
-            "text": "Highlight text on your screen to trigger the floating shortcut, and your explainer renders smoothly in the background while you work."
-      }
-],
-    timelineMac: [
-      {
-            "start": 0.5,
-            "end": 4.38,
-            "text": "Video Flow is coming to Mac soon, available on Windows now."
-      },
-      {
-            "start": 4.33,
-            "end": 11.04,
-            "text": "Until then, create videos from the Windows app."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step4.lines
   }
 ];
 
@@ -9049,15 +9410,19 @@ function updateVideoFlowGuideAudioUI(paused) {
 function stopVideoFlowGuideAudio() {
   _vfGuideSlideToken++;
   if (_vfGuideAudioPlayer) {
-    _vfGuideAudioPlayer.pause();
+    const old = _vfGuideAudioPlayer;
     _vfGuideAudioPlayer = null;
+    try { old.pause(); old.removeAttribute("src"); old.load(); } catch (e) {}
   }
+  // A pause belongs to the clip that was paused; it never carries over to the
+  // next step, a re-opened guide or another page (v1.0.3 pause/resume fix).
+  _vfGuideNarrationPaused = false;
   updateVideoFlowGuideAudioUI(true);
 }
 
 function playVideoFlowGuideNarration(stepIdx) {
   stopVideoFlowGuideAudio();
-  if (_vfGuideNarrationPaused) return;
+  _vfGuideNarrationPaused = false;
 
   const stepObj = VIDEOFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
   if (!stepObj) return;
@@ -9088,6 +9453,15 @@ function playVideoFlowGuideNarration(stepIdx) {
       updateVideoFlowGuideAudioUI(true);
     }
   });
+  player.addEventListener("pause", () => {
+    if (_vfGuideAudioPlayer === player) updateVideoFlowGuideAudioUI(true);
+  });
+  player.addEventListener("playing", () => {
+    if (_vfGuideAudioPlayer === player) {
+      _vfGuideNarrationPaused = false;
+      updateVideoFlowGuideAudioUI(false);
+    }
+  });
 
   const playPromise = player.play();
   if (playPromise !== undefined) {
@@ -9106,18 +9480,27 @@ function playVideoFlowGuideNarration(stepIdx) {
 }
 
 function toggleVideoFlowGuideAudio() {
-  if (!_vfGuideAudioPlayer) {
+  const player = _vfGuideAudioPlayer;
+  if (!player) {
     playVideoFlowGuideNarration(_currentVfGuideStep);
     return;
   }
-  if (_vfGuideAudioPlayer.paused) {
-    _vfGuideAudioPlayer.play().then(() => {
-      _vfGuideNarrationPaused = false;
-      updateVideoFlowGuideAudioUI(false);
-    }).catch(() => {});
+  if (player.paused || player.ended) {
+    _vfGuideNarrationPaused = false;
+    if (player.ended) { try { player.currentTime = 0; } catch (e) {} }
+    const p = player.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => { if (_vfGuideAudioPlayer === player) updateVideoFlowGuideAudioUI(false); })
+       .catch(err => {
+         if (_vfGuideAudioPlayer !== player) return;
+         console.warn("Could not resume guide narration:", err);
+         // A dead element (e.g. src cleared) gets a fresh player for this step.
+         playVideoFlowGuideNarration(_currentVfGuideStep);
+       });
+    }
   } else {
-    _vfGuideAudioPlayer.pause();
     _vfGuideNarrationPaused = true;
+    player.pause();
     updateVideoFlowGuideAudioUI(true);
   }
 }
@@ -9391,7 +9774,7 @@ function prevVideoFlowGuideStep() {
   gotoVideoFlowGuideStep(Math.max(1, _currentVfGuideStep - 1));
 }
 
-function startVideoFlowGuide() {
+function startVideoFlowGuide(startStep) {
   // No Video Flow guide on Mac until Video Flow ships there.
   if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
     vfShowVideoFlowMacNote();
@@ -9436,7 +9819,7 @@ function startVideoFlowGuide() {
   }
 
   overlay.classList.remove("hidden");
-  gotoVideoFlowGuideStep(1);
+  gotoVideoFlowGuideStep(Number(startStep) || 1);
 
   window.addEventListener("resize", _onVfGuideResize);
 }
@@ -9516,76 +9899,33 @@ const VOICEFLOW_GUIDE_STEPS = [
     spotlightLabel: "Live Dictation & Workspace",
     nextLabel: "Next: Dictionary & Styles →",
     audioSrc: "assets/onboarding/voiceflow_guide_step1_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 2.66,
-            "text": "Welcome to Voice Flow!"
-      },
-      {
-            "start": 2.61,
-            "end": 7.46,
-            "text": "Speak naturally and have your words typed directly into any app in real time."
-      },
-      {
-            "start": 7.46,
-            "end": 13.69,
-            "text": "Your workspace tracks your dictation history, live typing speed in words per minute, and daily streaks."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.voiceflow_guide_step1.lines
   },
   {
     step: 2,
     page: "dictionary",
     counter: "STEP 2 OF 4 · DICTIONARY & STYLES",
     title: "Custom Jargon, Styles & Commands",
-    desc: "Register custom terms that work with polishing on or off. Enable polishing to adapt tones and voice commands.",
+    desc: "Add custom terms that work with polishing on or off. Turn polishing on for styles and voice commands like \u201cHey Voice Flow, make this an email.\u201d",
     targetId: "dict-teach-panel",
     secondaryTargetId: "dictionary-search-input",
     spotlightLabel: "Personal Dictionary & AI Styles",
     nextLabel: "Next: Models & Providers →",
     audioSrc: "assets/onboarding/voiceflow_guide_step2_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 4.75,
-            "text": "Step two combines your personal dictionary and AI styles."
-      },
-      {
-            "start": 4.7,
-            "end": 9.56,
-            "text": "Add custom names and jargon that work whether voice polishing is on or off."
-      },
-      {
-            "start": 9.56,
-            "end": 13.34,
-            "text": "Turn polishing on to tailor tones and voice commands."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.voiceflow_guide_step2.lines
   },
   {
     step: 3,
     page: "providers",
     counter: "STEP 3 OF 4 · AI MODELS & PROVIDERS",
     title: "Offline Models & Cloud API Keys",
-    desc: "We recommend Nemotron for speech recognition and S1-mini by Superwhisper for polishing. Cloud APIs are optional.",
+    desc: "Runs locally on built-in models, no API key needed. We recommend Nemotron for speech and S1-mini by Superwhisper for polishing. Cloud keys are optional.",
     targetId: "exec-policy-model-picker-button",
     secondaryTargetId: "vf-polish-model-picker-button",
     spotlightLabel: "Speech & Polishing Providers",
     nextLabel: "Next: Desktop Shortcut →",
     audioSrc: "assets/onboarding/voiceflow_guide_step3_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 4.18,
-            "text": "Step three puts you in full control of your AI engines."
-      },
-      {
-            "start": 4.13,
-            "end": 13.4,
-            "text": "Run completely offline with Nemotron for speech recognition and S1-mini by Superwhisper for local grammar polishing, or plug in cloud keys anytime."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.voiceflow_guide_step3.lines
   },
   {
     step: 4,
@@ -9593,8 +9933,8 @@ const VOICEFLOW_GUIDE_STEPS = [
     counter: "STEP 4 OF 4 · GLOBAL SHORTCUT",
     title: "Dictate Everywhere Across Windows",
     titleMac: "Dictate Everywhere Across your Mac",
-    desc: "Trigger Voice Flow anywhere across Windows with a global shortcut—instant voice-to-text with zero copy-pasting.",
-    descMac: "Trigger Voice Flow anywhere across your Mac with Command + Option—instant voice-to-text with zero copy-pasting.",
+    desc: "Hold the middle mouse button or press Ctrl + Win to dictate into any app across Windows.",
+    descMac: "Press Command + Option to dictate into any app on your Mac.",
     targetId: "voiceflow-guide-screen-sim",
     isSimulation: true,
     spotlightLabel: "Global Screen Dictation Shortcut",
@@ -9602,40 +9942,8 @@ const VOICEFLOW_GUIDE_STEPS = [
     nextLabel: "Finish & Start Dictating 🎙️",
     audioSrc: "assets/onboarding/voiceflow_guide_step4_mixed.mp3",
     audioSrcMac: "assets/onboarding/voiceflow_guide_step4_mac_mixed.mp3",
-    timeline: [
-      {
-            "start": 0.5,
-            "end": 3.96,
-            "text": "Finally, dictate anywhere across Windows."
-      },
-      {
-            "start": 3.91,
-            "end": 9.11,
-            "text": "Hold your Middle Mouse Click or press Control plus Windows to speak into any application."
-      },
-      {
-            "start": 9.11,
-            "end": 13.69,
-            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
-      }
-],
-    timelineMac: [
-      {
-            "start": 0.5,
-            "end": 3.87,
-            "text": "Finally, dictate anywhere across your Mac."
-      },
-      {
-            "start": 3.82,
-            "end": 7.61,
-            "text": "Press Command plus Option to speak into any application."
-      },
-      {
-            "start": 7.61,
-            "end": 12.18,
-            "text": "Voice Flow types and polishes in real time with zero copy-pasting."
-      }
-]
+    timeline: ONBOARDING_NARRATION_TIMELINES.voiceflow_guide_step4.lines,
+    timelineMac: ONBOARDING_NARRATION_TIMELINES.voiceflow_guide_step4_mac.lines
   }
 ];
 
@@ -9726,15 +10034,19 @@ function updateVoiceFlowGuideAudioUI(paused) {
 function stopVoiceFlowGuideAudio() {
   _voiceflowGuideSlideToken++;
   if (_voiceflowGuideAudioPlayer) {
-    _voiceflowGuideAudioPlayer.pause();
+    const old = _voiceflowGuideAudioPlayer;
     _voiceflowGuideAudioPlayer = null;
+    try { old.pause(); old.removeAttribute("src"); old.load(); } catch (e) {}
   }
+  // A pause belongs to the clip that was paused; it never carries over to the
+  // next step, a re-opened guide or another page (v1.0.3 pause/resume fix).
+  _voiceflowGuideNarrationPaused = false;
   updateVoiceFlowGuideAudioUI(true);
 }
 
 function playVoiceFlowGuideNarration(stepIdx) {
   stopVoiceFlowGuideAudio();
-  if (_voiceflowGuideNarrationPaused) return;
+  _voiceflowGuideNarrationPaused = false;
 
   const stepObj = VOICEFLOW_GUIDE_STEPS.find(s => s.step === stepIdx);
   if (!stepObj) return;
@@ -9765,6 +10077,15 @@ function playVoiceFlowGuideNarration(stepIdx) {
       updateVoiceFlowGuideAudioUI(true);
     }
   });
+  player.addEventListener("pause", () => {
+    if (_voiceflowGuideAudioPlayer === player) updateVoiceFlowGuideAudioUI(true);
+  });
+  player.addEventListener("playing", () => {
+    if (_voiceflowGuideAudioPlayer === player) {
+      _voiceflowGuideNarrationPaused = false;
+      updateVoiceFlowGuideAudioUI(false);
+    }
+  });
 
   const playPromise = player.play();
   if (playPromise !== undefined) {
@@ -9783,18 +10104,27 @@ function playVoiceFlowGuideNarration(stepIdx) {
 }
 
 function toggleVoiceFlowGuideAudio() {
-  if (!_voiceflowGuideAudioPlayer) {
+  const player = _voiceflowGuideAudioPlayer;
+  if (!player) {
     playVoiceFlowGuideNarration(_currentVoiceFlowGuideStep);
     return;
   }
-  if (_voiceflowGuideAudioPlayer.paused) {
-    _voiceflowGuideAudioPlayer.play().then(() => {
-      _voiceflowGuideNarrationPaused = false;
-      updateVoiceFlowGuideAudioUI(false);
-    }).catch(() => {});
+  if (player.paused || player.ended) {
+    _voiceflowGuideNarrationPaused = false;
+    if (player.ended) { try { player.currentTime = 0; } catch (e) {} }
+    const p = player.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => { if (_voiceflowGuideAudioPlayer === player) updateVoiceFlowGuideAudioUI(false); })
+       .catch(err => {
+         if (_voiceflowGuideAudioPlayer !== player) return;
+         console.warn("Could not resume guide narration:", err);
+         // A dead element (e.g. src cleared) gets a fresh player for this step.
+         playVoiceFlowGuideNarration(_currentVoiceFlowGuideStep);
+       });
+    }
   } else {
-    _voiceflowGuideAudioPlayer.pause();
     _voiceflowGuideNarrationPaused = true;
+    player.pause();
     updateVoiceFlowGuideAudioUI(true);
   }
 }
@@ -10078,7 +10408,7 @@ function prevVoiceFlowGuideStep() {
   gotoVoiceFlowGuideStep(Math.max(1, _currentVoiceFlowGuideStep - 1));
 }
 
-function startVoiceFlowGuide() {
+function startVoiceFlowGuide(startStep) {
   setOnboardingFlag("vf_onboarding.vf_voice_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("home", { skipGuideTrigger: true, fromGuide: true });
@@ -10118,7 +10448,7 @@ function startVoiceFlowGuide() {
   }
 
   overlay.classList.remove("hidden");
-  gotoVoiceFlowGuideStep(1);
+  gotoVoiceFlowGuideStep(Number(startStep) || 1);
 
   window.addEventListener("resize", _onVoiceFlowGuideResize);
 }
@@ -10189,12 +10519,18 @@ function stopVoiceFlowGuide(markCompleted = false) {
 
 function replayOnboarding() {
   cancelAutomaticGuide();
+  // v1.0.3: Replay Tour re-arms every page guide for this session too (the
+  // Mac CI walkthrough showed the Voice Flow guide stayed off after a replay
+  // because this session had already used its one automatic attempt).
+  _automaticGuideAttempts.clear();
+  for (const k of Object.keys(_interruptedGuideSteps)) delete _interruptedGuideSteps[k];
   _onboardingWelcomeShown = true;
   setOnboardingFlag("vf_onboarding.done", "");
   setOnboardingFlag("hasViewedOnboarding", "");
   setOnboardingFlag("vf_onboarding.af_guided", "");
   setOnboardingFlag("vf_onboarding.vf_guided", "");
   setOnboardingFlag("vf_onboarding.vf_voice_guided", "");
+  setOnboardingFlag("vf_onboarding.guides_enrolled", "1");
   fetch("/api/settings/update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -13527,13 +13863,15 @@ function vfApplyMacVideoFlowGate() {
   // Welcome tour: the Video Flow card and its demo slide carry the note.
   const tourCard = document.querySelector("#card-feature-1 .s1-card-titles small");
   if (tourCard) tourCard.textContent = VF_MAC_GATE_NOTE;
+  const startDesc = document.getElementById("s5-start-desc");
+  if (startDesc) startDesc.textContent = "Tour complete! Read mode and Voice Flow work right away with built-in voices and local models. Summary just needs a Google sign-in for NotebookLM.";
+  // v1.0.3: the note replaces the subtitle (same one line) instead of adding a
+  // second line, which the demo monitor covered at 1440x900.
   const tourSub = document.querySelector(".s2-sub");
-  if (tourSub && !document.getElementById("vf-mac-gate-tour-note")) {
-    const tourNote = document.createElement("p");
-    tourNote.id = "vf-mac-gate-tour-note";
-    tourNote.className = "vf-mac-gate-tour-note";
-    tourNote.textContent = VF_MAC_GATE_NOTE;
-    tourSub.after(tourNote);
+  if (tourSub && !tourSub.classList.contains("vf-mac-gate-tour-note")) {
+    tourSub.id = "vf-mac-gate-tour-note";
+    tourSub.classList.add("vf-mac-gate-tour-note");
+    tourSub.textContent = "Paste any text or select an article and get an animated explainer video with voiceover. " + VF_MAC_GATE_NOTE + ".";
   }
 }
 window.vfApplyMacVideoFlowGate = vfApplyMacVideoFlowGate;

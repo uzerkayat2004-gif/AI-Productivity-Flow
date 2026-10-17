@@ -167,7 +167,7 @@ def test_ui_carries_the_mac_gate_note() -> None:
     # nav entry, automatic guide, manual guide and feature toggle all gate
     assert 'pageId === "videoflow" && typeof vfVideoFlowGatedOnMac' in app_js
     assert 'if (feature === "video" && typeof vfVideoFlowGatedOnMac' in app_js
-    start_guide = app_js[app_js.index("function startVideoFlowGuide() {"):][:400]
+    start_guide = app_js[app_js.index("function startVideoFlowGuide("):][:400]  # v1.0.3: takes an optional resume step
     assert "vfVideoFlowGatedOnMac()" in start_guide
     generate = vf_js[vf_js.index("async function generateVideoFlow() {"):][:300]
     assert "vfVideoFlowGatedOnMac()" in generate and MAC_NOTE in generate
@@ -178,7 +178,7 @@ def test_vf_guide_timelines_no_longer_claim_mac_support() -> None:
     raw = (GUI / "assets" / "onboarding" / "vf_guide_timelines.json").read_text(encoding="utf-8")
     data = json.loads(raw)
     assert "works anywhere across your Mac" not in raw
-    mac_text = " ".join(cue["text"] for cue in data["step4_mac"])
-    assert "coming to Mac soon, available on Windows now" in mac_text
-    # Windows copy is unchanged.
-    assert data["step4"][0]["text"] == "Finally, Video Flow works anywhere across Windows."
+    # v1.0.3: there is no Video Flow guide on Mac at all, so no Mac cut exists.
+    assert "step4_mac" not in data
+    assert not (GUI / "assets" / "onboarding" / "vf_guide_step4_mac_mixed.mp3").exists()
+    assert data["step4"][0]["text"] == "Finally, Video Flow works anywhere in Windows."

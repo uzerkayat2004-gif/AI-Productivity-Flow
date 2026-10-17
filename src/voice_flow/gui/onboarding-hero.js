@@ -83,7 +83,9 @@
   }
   function needsCaptionClock() {
     const player = audioPlayer();
-    return scene1Visible() && (!player || player.paused || player.ended || player.error || player.readyState < 3);
+    // Only stand in when narration is unavailable. A user pause, a finished
+    // voiceover, or a blocked autoplay must freeze the captions, not loop them.
+    return scene1Visible() && !player; // app.js runs its own clock if the audio errors
   }
   function syncCaptionClock() {
     const player = audioPlayer();
@@ -109,7 +111,9 @@
     captionFrame = null;
     if (!needsCaptionClock()) { syncCaptionClock(); return; }
     const dt = lastTick ? (now - lastTick) / 1000 : 0;
-    clockT = (clockT + dt) % 40.5;
+    const loop = (typeof ONBOARDING_NARRATION_TIMELINES !== "undefined" && ONBOARDING_NARRATION_TIMELINES.scene_1)
+      ? ONBOARDING_NARRATION_TIMELINES.scene_1.duration : 16;
+    clockT = Math.min(clockT + dt, loop);
     lastTick = now;
     if (typeof updateOnboardingScene1Subtitles === "function") updateOnboardingScene1Subtitles(clockT, false);
     captionFrame = requestAnimationFrame(tick);

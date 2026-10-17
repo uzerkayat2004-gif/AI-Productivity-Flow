@@ -20,8 +20,7 @@ AUDIO_FILES = [
     "vf_guide_step1_mixed.mp3",
     "vf_guide_step2_mixed.mp3",
     "vf_guide_step3_mixed.mp3",
-    "vf_guide_step4_mixed.mp3",
-    "vf_guide_step4_mac_mixed.mp3",
+    "vf_guide_step4_mixed.mp3",  # no Mac cut: there is no Video Flow guide on Mac
 
     # Audio Flow (4 steps)
     "af_guide_step1_mixed.mp3",
@@ -35,18 +34,19 @@ AUDIO_FILES = [
     "scene_3_mixed.mp3",
     "scene_4_mixed.mp3",
     "scene_5_mixed.mp3",
+    "scene_2_mac_mixed.mp3",  # Mac cut of scene 2: Video Flow is coming to Mac soon
 ]
 
 
 def test_narration_durations_are_concise() -> None:
-    """Every mixed narration track must be approximately 10-15 seconds."""
+    """Every mixed narration track must stay short: 10-18 s (v1.0.3 adds the no-API-key line)."""
     for filename in AUDIO_FILES:
         audio_path = ASSETS_DIR / filename
         assert audio_path.exists(), f"Audio file {filename} does not exist"
         container = av.open(str(audio_path))
         duration = float(container.streams.audio[0].duration * container.streams.audio[0].time_base)
         container.close()
-        assert 10.0 <= duration <= 16.0, f"{filename} duration {duration:.2f}s is outside 10-16s target"
+        assert 10.0 <= duration <= 18.0, f"{filename} duration {duration:.2f}s is outside 10-18s target"
 
 
 def test_voiceflow_guide_is_four_steps() -> None:
@@ -76,7 +76,7 @@ def test_videoflow_and_audioflow_are_four_steps() -> None:
 def test_timelines_json_validity() -> None:
     """All timelines JSON files must exist and contain updated 4-step entries."""
     vf_data = json.loads((ASSETS_DIR / "vf_guide_timelines.json").read_text(encoding="utf-8"))
-    assert set(vf_data.keys()) == {"step1", "step2", "step3", "step4", "step4_mac"}
+    assert set(vf_data.keys()) == {"step1", "step2", "step3", "step4"}
 
     voice_data = json.loads((ASSETS_DIR / "voiceflow_guide_timelines.json").read_text(encoding="utf-8"))
     assert set(voice_data.keys()) == {"1", "2", "3", "4", "4_mac"}
