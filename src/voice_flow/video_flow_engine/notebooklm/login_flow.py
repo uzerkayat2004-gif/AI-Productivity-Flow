@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 _LOGIN_TIMEOUT_SECONDS = 300
 _ONLINE_CHECK_TIMEOUT_SECONDS = 75
 _ONLINE_CACHE_SECONDS = 120.0
+# The check right after a CLI sign-in starts a cold python.exe, imports the
+# CLI, and makes a network round-trip; 15 s was not always enough on Windows.
+_POST_LOGIN_VERIFY_TIMEOUT_SECONDS = 45.0
+_POST_LOGIN_VERIFY_RETRY_DELAY_SECONDS = 2.0
 _HIDE_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 # Keep the real Popen class. Tests replace subprocess.Popen with a lambda, and
 # isinstance() against that attribute then raises TypeError.
@@ -1059,6 +1063,10 @@ def _login_child_env(interpreter: Path | None = None) -> dict[str, str]:
                 prefix.append(str(extra))
         current = env.get("PATH", "")
         env["PATH"] = os.pathsep.join(prefix + ([current] if current else []))
+    # The CLI prints JSON with ensure_ascii=False. Without this a Windows child
+    # writes to the pipe in the ANSI code page and can fail on non-ASCII text.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     if not env.get("PLAYWRIGHT_BROWSERS_PATH"):
         browsers = _default_playwright_browsers_dir()
         try:
@@ -1585,7 +1593,7 @@ def _watch_login(
                 _set_note("Signed in — finalizing session…")
 
             try:
-                verified = verify_online(profile=profile, force=True, timeout=15.0)
+                verified = _verify_new_session(profile)
                 if verified.get("authenticated"):
                     email = verified.get("email") or email
                 else:
@@ -1744,7 +1752,7 @@ def record_successful_login(email: str, profile: str | None = None) -> None:
     """Record a browser-flow login only after the CLI verifies it online."""
     profile = resolve_notebooklm_profile(profile)
     note_session_refreshed(profile)
-    verification = verify_online(profile=profile, force=True, timeout=15.0)
+    verification = _verify_new_session(profile)
     if not verification.get("authenticated"):
         with _STATE_LOCK:
             _STATE.update(
@@ -2192,15 +2200,89 @@ def get_online_verification_cache(profile: str | None = None) -> dict[str, Any] 
     return None
 
 
+_NO_SESSION_MESSAGE = "NotebookLM is not connected yet. Click Sign in with Google to connect."
+
+
+def _is_missing_session_error(payload: dict[str, Any], details_lower: str) -> bool:
+    """True when the CLI found no saved session file for the profile."""
+    checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+    if checks.get("storage_exists") is False:
+        return True
+    return "storage file not found" in details_lower
+
+
+def _transient_verification_message(details_message: str) -> str:
+    """User-facing text for an inconclusive check, with the CLI's own reason.
+
+    The bare "Could not verify this saved session" gave nobody a way to tell a
+    missing cookie from a Google redirect. URLs are already redacted.
+    """
+    reason = str(details_message or "").strip()
+    if reason.lower().startswith("token fetch failed:"):
+        reason = reason.split(":", 1)[1].strip()
+    reason = reason.splitlines()[0].strip() if reason else ""
+    if len(reason) > 160:
+        reason = reason[:157].rstrip() + "..."
+    return f"Could not verify this saved session: {reason}" if reason else "Could not verify this saved session"
+
+
+def _log_verification(profile: str, *, passive: bool, returncode: int | None, status: str, reason: str) -> None:
+    """Record why a session check did not pass, in the app log and the sign-in log."""
+    clean = re.sub(r"https?://\S+", "<redacted URL>", str(reason or ""))[:600]
+    logger.warning(
+        "NotebookLM auth check did not pass (profile=%s passive=%s rc=%s status=%s): %s",
+        profile, passive, returncode, status, clean,
+    )
+    try:
+        with _login_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [verify] profile={profile} passive={passive} "
+                f"rc={returncode} status={status} reason={clean}\n"
+            )
+    except Exception:
+        pass
+
+
+def _verify_new_session(profile: str) -> dict[str, Any]:
+    """Verify a session the CLI has just written, letting the CLI heal it.
+
+    Non-passive, with a timeout that fits a cold Windows start, and one retry
+    when the first answer is inconclusive. A definite answer (signed in, or
+    signed out) is returned at once.
+    """
+    verified: dict[str, Any] = {}
+    for attempt in range(2):
+        verified = verify_online(
+            profile=profile,
+            force=True,
+            timeout=_POST_LOGIN_VERIFY_TIMEOUT_SECONDS,
+            passive=False,
+        )
+        if verified.get("authenticated") or verified.get("definitive") or verified.get("status") == "stale":
+            return verified
+        if attempt == 0:
+            time.sleep(_POST_LOGIN_VERIFY_RETRY_DELAY_SECONDS)
+    return verified
+
+
 def verify_online(
     *,
     profile: str | None = None,
     timeout: float = _ONLINE_CHECK_TIMEOUT_SECONDS,
     force: bool = False,
+    passive: bool = True,
 ) -> dict[str, Any]:
     """Online Google session verification via ``notebooklm auth check --test``.
 
     Cached briefly so dashboard polling never hammers accounts.google.com.
+
+    ``passive=True`` (the default for background status checks) adds
+    ``--passive``: the CLI only reads the cookies on disk and never rotates or
+    rewrites them. Right after ``notebooklm login`` that is the wrong probe.
+    The CLI saves a fresh sign-in even when it has no usable
+    ``__Secure-1PSIDTS`` yet and expects the next ordinary command to heal it
+    from disk; a passive probe refuses to do that and fails. Post-login checks
+    therefore pass ``passive=False``.
     """
     profile = resolve_notebooklm_profile(profile)
     with _STATE_LOCK:
@@ -2214,7 +2296,10 @@ def verify_online(
     if cli_path is None:
         return {"status": "dependency_missing", "authenticated": False,
                 "message": "NotebookLM CLI not found"}
-    command = [str(cli_path), "--profile", profile, "auth", "check", "--test", "--passive", "--json"]
+    command = [str(cli_path), "--profile", profile, "auth", "check", "--test"]
+    if passive:
+        command.append("--passive")
+    command.append("--json")
     argv = _cli_argv(command)
     interpreter = Path(argv[0]) if len(argv) >= 3 and argv[1] == "-m" else None
     try:
@@ -2230,6 +2315,8 @@ def verify_online(
             creationflags=_HIDE_FLAGS,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
+        _log_verification(profile, passive=passive, returncode=None, status="timeout_or_oserror",
+                          reason=str(exc))
         verified = {"status": "network_error", "classification": "transient_error",
                     "authenticated": None, "definitive": False, "failure_kind": "network",
                     "message": "Could not reach Google to verify this saved session",
@@ -2244,6 +2331,8 @@ def verify_online(
         if not isinstance(payload, dict):
             raise ValueError("CLI returned a non-object payload")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        _log_verification(profile, passive=passive, returncode=getattr(result, "returncode", None),
+                          status="unreadable", reason=f"{exc}; stderr={getattr(result, 'stderr', '') or ''}")
         verified = {"status": "transient_error", "classification": "transient_error",
                     "authenticated": None, "definitive": False, "failure_kind": "cli",
                     "message": "NotebookLM verification returned an unreadable response",
@@ -2272,6 +2361,17 @@ def verify_online(
         "authentication expired", "not authenticated", "unauthenticated", "sign in again",
         "login required", "session expired", "invalid credentials",
     ))
+    # No storage_state.json at all: nothing was ever saved for this profile.
+    # That is "not signed in yet", not a session we failed to verify.
+    no_saved_session = bool(
+        not authenticated and not is_network_error and not is_definite_auth_error
+        and _is_missing_session_error(payload, details_lower)
+    )
+    if no_saved_session:
+        is_definite_auth_error = True
+    if not authenticated:
+        _log_verification(profile, passive=passive, returncode=result.returncode,
+                          status=str(payload.get("status") or ""), reason=details_message)
     token_extraction_failure = bool(
         not authenticated and not is_network_error and not is_definite_auth_error
         and is_token_extraction_error(details_message)
@@ -2339,16 +2439,17 @@ def verify_online(
         except Exception:
             pass
     elif not authenticated and not transient_failure:
+        auth_error_text = _NO_SESSION_MESSAGE if no_saved_session else "Google session is no longer valid — sign in again"
         try:
             from voice_flow.storage import storage
             storage.save_setting("video_flow_notebooklm_authenticated", False)
-            storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+            storage.save_setting("video_flow_notebooklm_auth_error", auth_error_text)
         except Exception:
             pass
         try:
             from voice_flow.gui import api_server
             api_server.storage.save_setting("video_flow_notebooklm_authenticated", False)
-            api_server.storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+            api_server.storage.save_setting("video_flow_notebooklm_auth_error", auth_error_text)
         except Exception:
             pass
 
@@ -2368,15 +2469,17 @@ def verify_online(
         "definitive": bool(authenticated or is_definite_auth_error),
         "failure_kind": None if authenticated else (
             "network" if is_network_error else
-            ("auth" if is_definite_auth_error else
-             ("token_extraction" if token_extraction_failure else "cli"))
+            ("no_session" if no_saved_session else
+             ("auth" if is_definite_auth_error else
+              ("token_extraction" if token_extraction_failure else "cli")))
         ),
         "message": "Google session verified online" if authenticated else (
             "Could not reach Google to verify this saved session" if is_network_error
-            else ("NotebookLM could not read the session token; restoring the saved connection."
-                  if token_extraction_failure else
-                  ("Could not verify this saved session" if transient_failure
-                   else "Google session is no longer valid — sign in again"))
+            else (_NO_SESSION_MESSAGE if no_saved_session else
+                  ("NotebookLM could not read the session token; restoring the saved connection."
+                   if token_extraction_failure else
+                   (_transient_verification_message(details_message) if transient_failure
+                    else "Google session is no longer valid — sign in again")))
         ),
         "email": email,
         "profile": profile,

@@ -22,6 +22,13 @@ SPLASH_CLASS_NAME = "APFEarlySplash"
 APP_WINDOW_TITLES = ("AI Productivity Flow", "Voice Flow")
 _CLASS_NAME = SPLASH_CLASS_NAME
 _LOG_NAME = "launch.log"
+# The splash closes itself after this long even if nobody asks it to. Startup
+# waits up to about a minute for the engine and then 15 s for the window, so a
+# splash still up after two minutes means something failed, and a topmost
+# "Starting..." box over every app is worse than no splash.
+MAX_SPLASH_SECONDS = 120
+_ANIMATION_TIMER_ID = 1
+_DEADLINE_TIMER_ID = 2
 
 # Cream #FFF8F3, accent #FF6A1A, ink #1C140F, muted #5C564F, as COLORREF (BGR).
 _CREAM = 0x00F3F8FF
@@ -59,19 +66,29 @@ def is_startup_splash(title: str, class_name: str) -> bool:
     return (class_name or "") == SPLASH_CLASS_NAME or (title or "") == WINDOW_TITLE
 
 
-def read_display_version() -> str:
-    """Read DISPLAY_VERSION from _version.py without importing the package."""
+def read_app_version() -> str:
+    """Read ``__version__`` from _version.py without importing the package.
+
+    ``_version.py`` is the one source of truth for the build that is running
+    (update checks and the installer read the same value). Returns "" when the
+    file cannot be read, so the splash shows no version rather than a wrong one.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(os.path.dirname(here), "_version.py")
     try:
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        match = re.search(r'^DISPLAY_VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
         if match:
             return match.group(1)
     except Exception:
         pass
-    return "1.0"
+    return ""
+
+
+def version_label() -> str:
+    version = read_app_version()
+    return f"Version {version}" if version else ""
 
 
 def _log(message: str) -> None:
@@ -153,6 +170,12 @@ def _ensure_bindings():
     user32.GetSystemMetrics.restype = ctypes.c_int
     user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
     user32.SetWindowRgn.restype = ctypes.c_int
+    user32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowExW.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsWindow.argtypes = [wintypes.HWND]
+    user32.IsWindow.restype = wintypes.BOOL
 
     gdi32.CreateSolidBrush.argtypes = [wintypes.COLORREF]
     gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
@@ -219,7 +242,9 @@ def _paint(hwnd) -> None:
         version = wintypes.RECT(20, 124, max(21, rect.right - 20), 152)
         gdi32.SelectObject(hdc, _font_body)
         gdi32.SetTextColor(hdc, _MUTED)
-        user32.DrawTextW(hdc, "Version " + read_display_version(), -1, ctypes.byref(version), _DT_CENTER_LINE)
+        label = version_label()
+        if label:
+            user32.DrawTextW(hdc, label, -1, ctypes.byref(version), _DT_CENTER_LINE)
         dots = wintypes.RECT(20, 160, max(21, rect.right - 20), 190)
         gdi32.SetTextColor(hdc, _ACCENT)
         user32.DrawTextW(hdc, "Starting" + ("." * ((_phase % 3) + 1)), -1, ctypes.byref(dots), _DT_CENTER_LINE)
@@ -235,6 +260,10 @@ def _wnd_proc(hwnd, msg, wparam, lparam):
             _paint(hwnd)
             return 0
         if msg == _WM_TIMER:
+            if int(wparam or 0) == _DEADLINE_TIMER_ID:
+                _log(f"splash closed after {MAX_SPLASH_SECONDS}s startup deadline hwnd={int(hwnd or 0)}")
+                _user32.DestroyWindow(hwnd)
+                return 0
             global _phase
             _phase += 1
             _user32.InvalidateRect(hwnd, None, False)
@@ -246,7 +275,8 @@ def _wnd_proc(hwnd, msg, wparam, lparam):
             return 0
         if msg == _WM_DESTROY:
             try:
-                _user32.KillTimer(hwnd, 1)
+                _user32.KillTimer(hwnd, _ANIMATION_TIMER_ID)
+                _user32.KillTimer(hwnd, _DEADLINE_TIMER_ID)
             except Exception:
                 pass
             _user32.PostQuitMessage(0)
@@ -340,7 +370,8 @@ def _create_window():
         user32.SetWindowRgn(hwnd, region, True)
     user32.ShowWindow(hwnd, 5)
     user32.UpdateWindow(hwnd)
-    user32.SetTimer(hwnd, 1, 450, None)
+    user32.SetTimer(hwnd, _ANIMATION_TIMER_ID, 450, None)
+    user32.SetTimer(hwnd, _DEADLINE_TIMER_ID, int(MAX_SPLASH_SECONDS * 1000), None)
     return hwnd
 
 
@@ -372,16 +403,64 @@ def _splash_thread() -> None:
         _ready.set()
 
 
+def _owned_splash_windows() -> list[int]:
+    """Every splash window that belongs to this process.
+
+    The installed launcher loads this file by path (module ``apf_early_splash``)
+    and desktop_launcher imports it again as ``voice_flow.gui.early_splash``.
+    The two copies do not share globals, so if the first splash is slow to
+    appear the second copy can create another one. Closing by class and
+    process closes both, and never touches another program's window.
+    """
+    if not sys.platform.startswith("win"):
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _ensure_bindings()
+    pid = os.getpid()
+    found: list[int] = []
+    hwnd = None
+    for _ in range(64):
+        hwnd = user32.FindWindowExW(None, hwnd, SPLASH_CLASS_NAME, None)
+        if not hwnd:
+            break
+        owner = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if int(owner.value) == pid:
+            found.append(int(hwnd))
+    return found
+
+
+def _is_own_splash(hwnd: int) -> bool:
+    try:
+        return int(hwnd) in _owned_splash_windows()
+    except Exception:
+        return False
+
+
 def close_early_splash(hwnd: int | None = None) -> None:
-    """Ask the splash thread to close. DestroyWindow is not safe across threads."""
+    """Ask the splash thread to close. DestroyWindow is not safe across threads.
+
+    Only splash windows owned by this process are closed. A handle inherited
+    through the environment from another process may by now belong to an
+    unrelated window, so it is never posted to blindly.
+    """
     if not sys.platform.startswith("win"):
         return
-    raw = hwnd if hwnd else os.environ.get("VOICE_FLOW_EARLY_SPLASH_HWND") or _SPLASH_HWND
-    if not raw:
-        return
+    targets: list[int] = []
+    try:
+        targets = _owned_splash_windows()
+    except Exception as exc:
+        _log(f"splash lookup failed: {exc}")
+    if not targets:
+        raw = hwnd if hwnd else os.environ.get("VOICE_FLOW_EARLY_SPLASH_HWND") or _SPLASH_HWND
+        if raw and _SPLASH_HWND and int(raw) == int(_SPLASH_HWND):
+            targets = [int(raw)]
     try:
         user32 = _ensure_bindings()
-        user32.PostMessageW(int(raw), _WM_CLOSE, 0, 0)
+        for target in targets:
+            user32.PostMessageW(int(target), _WM_CLOSE, 0, 0)
     except Exception as exc:
         _log(f"splash close failed: {exc}")
     os.environ.pop("VOICE_FLOW_EARLY_SPLASH_HWND", None)
@@ -400,9 +479,19 @@ def show_early_splash() -> int | None:
     existing = os.environ.get("VOICE_FLOW_EARLY_SPLASH_HWND")
     if existing:
         try:
-            return int(existing)
+            if _is_own_splash(int(existing)):
+                return int(existing)
         except ValueError:
-            return None
+            pass
+        # Inherited from the process that started this one; not our window.
+        os.environ.pop("VOICE_FLOW_EARLY_SPLASH_HWND", None)
+    try:
+        owned = _owned_splash_windows()
+    except Exception:
+        owned = []
+    if owned:
+        os.environ["VOICE_FLOW_EARLY_SPLASH_HWND"] = str(owned[0])
+        return owned[0]
     try:
         _ready.clear()
         threading.Thread(target=_splash_thread, name="apf-early-splash", daemon=True).start()

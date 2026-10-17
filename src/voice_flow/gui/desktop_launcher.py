@@ -612,8 +612,10 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
     # readiness remains a separate concern below so an API-only listener can
     # still serve the desktop UI while the watchdog recovers the engine.
     backend_spawned = False
+    startup_began = time.monotonic()
     if not is_engine_ready(timeout=0.15):
         backend_spawned = bool(ensure_backend_running())
+        _launcher_log(f"engine not ready at launch; supervisor spawned={backend_spawned}")
 
         # When an engine process is starting, wait for its readiness probe so
         # the UI does not attach to a compatible API-only listener just as the
@@ -621,6 +623,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         # after it expires the regular API/browser fallback below still applies.
         backend_starting = backend_spawned or _is_backend_running()
         poll_iterations = 200 if backend_starting else 40
+        ready = False
         for _ in range(poll_iterations):
             ready = (
                 is_engine_ready(timeout=0.1)
@@ -630,6 +633,10 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             if ready:
                 break
             time.sleep(0.05)
+        _launcher_log(
+            f"engine wait finished after {time.monotonic() - startup_began:.1f}s "
+            f"({'ready' if ready else 'not ready'}; waited for {'engine' if backend_starting else 'API'})"
+        )
 
     # If the backend is ready, bring the floating bar forward without changing active work.
     if is_api_server_ready(timeout=0.5):
@@ -715,6 +722,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         splash_watch.start()
 
         def on_shown():
+            _launcher_log(f"main window shown {time.monotonic() - startup_began:.1f}s after launch")
             _close_startup_splash()
             _apply_taskbar_visibility(window, show_in_taskbar)
             if ico_path:
@@ -744,7 +752,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             window.events.shown += on_shown
         except Exception:
             pass
-        _launcher_log("webview window created")
+        _launcher_log(f"webview window created {time.monotonic() - startup_began:.1f}s after launch")
 
         def on_closed():
             if on_quit_callback:
@@ -984,6 +992,13 @@ def _acquire_launcher_mutex() -> bool:
     """Ensure only one desktop launcher process runs at a time."""
     global _LAUNCHER_MUTEX_HANDLE
     inherited = os.environ.get("VOICE_FLOW_LAUNCHER_MUTEX_HANDLE")
+    inherited_pid = os.environ.get("VOICE_FLOW_LAUNCHER_MUTEX_PID")
+    # launch_apf.pyw takes the mutex and then runs this launcher in the same
+    # process. A handle that came from another process (through a child's
+    # environment) is not ours. Older launch_apf.pyw files set no PID.
+    if inherited and inherited_pid and inherited_pid != str(os.getpid()):
+        _launcher_log(f"ignoring launcher mutex handle inherited from pid {inherited_pid}")
+        inherited = None
     if inherited:
         try:
             _LAUNCHER_MUTEX_HANDLE = int(inherited)

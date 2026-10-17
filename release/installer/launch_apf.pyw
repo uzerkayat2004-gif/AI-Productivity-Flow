@@ -145,6 +145,8 @@ def main() -> None:
             _focus_existing(splash)
             return
         os.environ["VOICE_FLOW_LAUNCHER_MUTEX_HANDLE"] = str(int(handle))
+        # The handle is only valid in this process; children must not reuse it.
+        os.environ["VOICE_FLOW_LAUNCHER_MUTEX_PID"] = str(os.getpid())
         if splash is not None:
             try:
                 splash.show_early_splash()
