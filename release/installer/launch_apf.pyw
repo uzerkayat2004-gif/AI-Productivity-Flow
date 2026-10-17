@@ -39,12 +39,30 @@ def _load_early_splash():
     return None
 
 
+def _launch_log(message: str) -> None:
+    try:
+        home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+        folder = os.path.join(home, ".voice_flow", "logs")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "launch.log"), "a", encoding="utf-8") as handle:
+            handle.write(message.rstrip() + "\n")
+    except Exception:
+        pass
+
+
 def _focus_existing() -> bool:
     if not sys.platform.startswith("win"):
         return False
     import ctypes
+    from ctypes import wintypes
 
-    user32 = ctypes.windll.user32
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
     hwnd = user32.FindWindowW(None, WINDOW_TITLE)
     if not hwnd:
         return False
@@ -95,7 +113,10 @@ def main() -> None:
             return
         os.environ["VOICE_FLOW_LAUNCHER_MUTEX_HANDLE"] = str(int(handle))
         if splash is not None:
-            splash.show_early_splash()
+            try:
+                splash.show_early_splash()
+            except Exception as exc:
+                _launch_log(f"splash failed: {exc}")
     _prepare_import_path()
     from voice_flow.gui.desktop_launcher import _run_desktop_launcher
 

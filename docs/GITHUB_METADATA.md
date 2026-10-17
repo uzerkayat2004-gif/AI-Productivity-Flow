@@ -13,7 +13,7 @@ ai-productivity · desktop-app · windows · macos · voice-dictation · speech-
 
 ## Release Identity
 - **Tag**: `v1.0.0`
-- **Title**: `AI Productivity Flow v1.0.0`
+- **Title**: `AI Productivity Flow 1.0` (user-facing `DISPLAY_VERSION`; the git tag stays the internal semver, for example `v1.0.4`)
 - **Pre-release**: false (Stable)
 - **Stable Download Assets**:
   - Windows: `AI-Productivity-Flow-Setup-x64.exe`

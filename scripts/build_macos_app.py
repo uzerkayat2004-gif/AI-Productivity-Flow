@@ -38,9 +38,10 @@ SRC_DIR = REPO_ROOT / "src" / "voice_flow"
 # Canonical version
 try:
     sys.path.insert(0, str(REPO_ROOT / "src"))
-    from voice_flow._version import VERSION
+    from voice_flow._version import DISPLAY_VERSION, VERSION
 except Exception:
     VERSION = "1.0.0"
+    DISPLAY_VERSION = "1.0"
 
 # The oldest macOS every bundled Mach-O binary supports. This value is written
 # to Info.plist (LSMinimumSystemVersion) and the build fails if any bundled
@@ -76,8 +77,8 @@ def create_info_plist() -> None:
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": "com.uzerkayat.aiproductivityflow",
-        "CFBundleVersion": "1",
-        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
+        "CFBundleShortVersionString": DISPLAY_VERSION,
         "CFBundlePackageType": "APPL",
         "CFBundleSignature": "????",
         "CFBundleExecutable": "ai-productivity-flow-launcher",

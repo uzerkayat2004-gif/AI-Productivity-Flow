@@ -14,7 +14,7 @@ from typing import Any
 import urllib.request
 import json
 
-from voice_flow._version import VERSION
+from voice_flow._version import DISPLAY_VERSION, VERSION
 
 log = logging.getLogger("voice_flow.update_checker")
 
@@ -49,6 +49,7 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
 
     Returns a dict with:
         current_version: str
+        display_version: str
         latest_version: str | None
         update_available: bool
         release_name: str | None
@@ -64,6 +65,7 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
 
     fallback_result: dict[str, Any] = {
         "current_version": VERSION,
+        "display_version": DISPLAY_VERSION,
         "latest_version": None,
         "update_available": False,
         "release_name": None,
@@ -99,6 +101,7 @@ def check_for_updates(force: bool = False, timeout: float = CHECK_TIMEOUT_SECOND
 
         result: dict[str, Any] = {
             "current_version": VERSION,
+            "display_version": DISPLAY_VERSION,
             "latest_version": remote_version,
             "update_available": update_available,
             "release_name": payload.get("name") or tag_name,

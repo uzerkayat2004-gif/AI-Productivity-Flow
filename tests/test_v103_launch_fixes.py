@@ -35,9 +35,41 @@ def test_installer_page_flow_is_installing_then_finish():
     run = ISS.split("[Run]", 1)[1].split("[", 1)[0]
     assert "unchecked" not in run
     assert "nowait postinstall skipifsilent" in run
+    assert "runasoriginaluser" in run
+    assert 'WorkingDir: "{app}"' in run
+    assert "ShouldSkipPage" in ISS
+    assert "wpReady" in ISS
+    assert "CurStepChanged" in ISS
+    assert "ssInstall" in ISS
+    assert "{autodesktop}\\{#MyAppName}.lnk" in ISS
+    assert "{userdesktop}\\{#MyAppName}.lnk" in ISS
+    assert "AppVerName={#MyAppName} {#MyAppDisplayVersion}" in ISS
+    messages = ISS.split("[Messages]", 1)[1].split("[", 1)[0]
+    assert "Version 1.0" in messages
+    assert "1.0.4" not in messages
+    assert "InnerNotebook" not in ISS
+    assert "ForeColor" not in ISS
+    splash = (ROOT / "src" / "voice_flow" / "gui" / "early_splash.py").read_text(encoding="utf-8")
+    assert "ctypes.c_ssize_t" in splash
+    assert "ctypes.c_long" not in splash
+    assert "def def_window_proc" in splash
+    assert "GetMessageW" in splash
+    assert "PostMessageW" in splash
+    launcher = (ROOT / "src" / "voice_flow" / "gui" / "desktop_launcher.py").read_text(encoding="utf-8")
+    shown = launcher.split("def on_shown():", 1)[1].split("def on_closed():", 1)[0]
+    assert "_close_startup_splash()" in shown
+    before_window = launcher.split("webview.create_window", 1)[0].split("def launch_desktop_gui", 1)[1]
+    assert "_close_startup_splash()" not in before_window
     installer = ROOT / "release" / "installer"
     assert (installer / "wizard-large.png").is_file()
     assert (installer / "wizard-small.png").is_file()
+    from PIL import Image
+    large = Image.open(installer / "wizard-large.png").convert("RGB")
+    small = Image.open(installer / "wizard-small.png").convert("RGB")
+    assert large.size == (164, 314)
+    assert small.size == (55, 58)
+    red, green, blue = large.resize((1, 1)).getpixel((0, 0))
+    assert red > 220 and green > 200 and blue > 180
     assert "Copyright 2026 Uzer Kayat" in (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert "PyPerperclip" not in (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert "Remotion" not in (ROOT / "LICENSE").read_text(encoding="utf-8")

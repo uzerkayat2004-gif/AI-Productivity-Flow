@@ -37,7 +37,7 @@
   * [x] Windows 10/11 x64 single-file installer (`AI-Productivity-Flow-Setup-x64.exe`) with isolated private runtime.
   * [x] macOS 14 Sonoma or later application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`), Apple Silicon only.
   * [x] Safe, non-intrusive update checker querying GitHub Releases for stable updates.
-  * [x] Canonical product versioning pinned in `src/voice_flow/_version.py` (currently 1.0.3) with CI consistency enforcement.
+  * [x] Canonical product versioning pinned in `src/voice_flow/_version.py` (public Version 1.0, internal build currently 1.0.4) with CI consistency enforcement.
 
 ---
 

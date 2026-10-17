@@ -1113,11 +1113,12 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             })
             return
         if path == "/api/version":
-            from voice_flow._version import VERSION
+            from voice_flow._version import DISPLAY_VERSION, VERSION
             self.send_json_response({
                 "success": True,
                 "name": "AI Productivity Flow",
                 "version": VERSION,
+                "display_version": DISPLAY_VERSION,
                 "license": "Apache-2.0",
                 "website": "https://ai-productivity-flow.vercel.app/",
                 "github": "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow",

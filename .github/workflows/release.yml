@@ -471,7 +471,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ github.ref_name }}"
-          version="${tag#v}"
+          display=$(python -c "import sys; sys.path.insert(0, 'src'); from voice_flow._version import DISPLAY_VERSION; print(DISPLAY_VERSION)")
           prerelease_flag=""
           if [[ "$tag" == *"-"* ]]; then
             prerelease_flag="--prerelease"
@@ -480,13 +480,13 @@ jobs:
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Release $tag already exists; updating assets and notes..."
             gh release upload "$tag" release-assets/* --clobber --repo "${{ github.repository }}"
-            gh release edit "$tag" --draft $prerelease_flag --title "AI Productivity Flow $tag" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
+            gh release edit "$tag" --draft $prerelease_flag --title "AI Productivity Flow $display" --notes-file CHANGELOG.md --repo "${{ github.repository }}"
           else
             gh release create "$tag" \
               release-assets/* \
               --draft \
               $prerelease_flag \
-              --title "AI Productivity Flow $tag" \
+              --title "AI Productivity Flow $display" \
               --notes-file CHANGELOG.md \
               --repo "${{ github.repository }}"
           fi
