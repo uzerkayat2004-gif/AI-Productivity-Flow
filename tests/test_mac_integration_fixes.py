@@ -414,3 +414,31 @@ def test_frontmost_window_owner_skips_window_server_layer0_window(monkeypatch):
     ]
     native = _fake_window_list(monkeypatch, windows)
     assert native.frontmost_window_owner() == {"app": "TextEdit", "title": "af.txt", "pid": 5740}
+
+
+def test_launchservices_front_pid_parses_lsappinfo(monkeypatch):
+    """it8 af2: `lsappinfo info -only pid front` is not valid, so every paste saw
+    'no front app', waited the full timeout and used `open -a`. Ask for the
+    front ASN first, then its pid."""
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        calls.append(cmd)
+        if cmd[1] == "front":
+            return types.SimpleNamespace(returncode=0, stdout="ASN:0x0-0x2a02a:\n")
+        return types.SimpleNamespace(returncode=0, stdout='"pid"=15208\n')
+
+    monkeypatch.setattr(macos_backend_module, "IS_MACOS", True)
+    monkeypatch.setattr(macos_backend_module.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(macos_backend_module.subprocess, "run", fake_run)
+    assert macos_backend_module._launchservices_front_pid() == 15208
+    assert calls[1] == ["/usr/bin/lsappinfo", "info", "-only", "pid", "ASN:0x0-0x2a02a:"]
+
+    monkeypatch.setattr(macos_backend_module.subprocess, "run",
+                        lambda cmd, **_kw: types.SimpleNamespace(returncode=0, stdout="[ NULL ]\n"))
+    assert macos_backend_module._launchservices_front_pid() == 0
+
+    monkeypatch.setattr(macos_backend_module.subprocess, "run",
+                        lambda cmd, **_kw: types.SimpleNamespace(
+                            returncode=0, stdout="ASN:0x0-0x1:\n" if cmd[1] == "front" else "garbage"))
+    assert macos_backend_module._launchservices_front_pid() is None

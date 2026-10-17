@@ -158,16 +158,28 @@ def _run(cmd: list[str], *, text_input: str | None = None, timeout: float = 5.0)
 def _launchservices_front_pid() -> int | None:
     """Front app pid straight from LaunchServices (fresh on any thread).
 
-    0 = no front app, None = could not ask (not macOS / lsappinfo missing)."""
+    0 = no front app, None = could not tell (not macOS / lsappinfo missing or
+    output not understood) -- callers then fall back to AppKit."""
     if not IS_MACOS or not os.path.exists("/usr/bin/lsappinfo"):
         return None
     try:
-        out = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "pid", "front"],
-                             capture_output=True, text=True, timeout=1.0, check=False).stdout
+        front = subprocess.run(["/usr/bin/lsappinfo", "front"], capture_output=True,
+                               text=True, timeout=1.0, check=False)
     except Exception:
         return None
-    m = re.search(r'"pid"\s*=\s*(\d+)', out or "")
-    return int(m.group(1)) if m else 0
+    if front.returncode != 0:
+        return None
+    m = re.search(r"ASN:0x[0-9a-fA-F]+-0x[0-9a-fA-F]+:", front.stdout or "")
+    if not m:
+        # "[ NULL ]" / empty: LaunchServices has no front application.
+        return 0
+    try:
+        info = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "pid", m.group(0)],
+                              capture_output=True, text=True, timeout=1.0, check=False).stdout
+    except Exception:
+        return None
+    pm = re.search(r'"pid"\s*=\s*(\d+)', info or "")
+    return int(pm.group(1)) if pm else None
 
 
 class MacOSBackend:
