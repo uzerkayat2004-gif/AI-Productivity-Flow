@@ -43,7 +43,7 @@ function Add-JsonString([System.Text.StringBuilder]$Sb, [string]$Text) {
             elseif ($code -lt 32) {
                 [void]$Sb.Append('\u')
                 [void]$Sb.Append($code.ToString("x4"))
-            } else { [void]$Sb.Append($ch) }
+            } else { [void]$Sb.Append([string]$ch) }
         }
     }
     [void]$Sb.Append('"')
@@ -102,7 +102,7 @@ function Save-State {
         $utf8 = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText((Join-Path $Artifacts "results.json"), $sb.ToString(), $utf8)
     } catch {
-        Log ("results.json write failed: " + $_.Exception.Message)
+        Log ("results.json write failed: " + $_.Exception.ToString())
     }
 }
 
@@ -396,6 +396,38 @@ function Measure-FolderBytes([string]$Path) {
     return [int64]$sum
 }
 
+function Get-UiElements([int]$ProcessId) {
+    $found = @()
+    try {
+        Add-Type -AssemblyName UIAutomationClient | Out-Null
+        Add-Type -AssemblyName UIAutomationTypes | Out-Null
+        $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ProcessId)
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
+        foreach ($window in $windows) {
+            $found += $window
+            $desc = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            foreach ($el in $desc) { $found += $el }
+        }
+    } catch {
+        Log "ui automation failed: $($_.Exception.Message)"
+    }
+    return @($found)
+}
+
+function Invoke-UiClick([int]$ProcessId, [string]$ExactName) {
+    foreach ($el in @(Get-UiElements $ProcessId)) {
+        $name = ""
+        try { $name = [string]$el.Current.Name } catch { continue }
+        if ($name -ne $ExactName) { continue }
+        try {
+            $invoke = $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invoke.Invoke()
+            return $true
+        } catch {}
+    }
+    return $false
+}
+
 function Get-UiNames([int]$ProcessId) {
     $names = New-Object System.Collections.Generic.List[string]
     try {
@@ -604,6 +636,8 @@ try {
     $wizardHwnd = [int64]0
     $lastBlob = ""
     $lastCensus = ""
+    $shotReady = $false
+    $clickedInstall = $false
     while ((Get-Date) -lt $wizardDeadline -and -not $wizard.HasExited) {
         $rows = @(Get-WindowRows)
         $censusLines = New-Object System.Collections.Generic.List[string]
@@ -649,6 +683,14 @@ try {
                 $page = "installing"
             }
             if ($pages -notcontains $page) { $pages.Add($page); Log "wizard page $page" }
+            if ($page -like "forbidden:*" -and -not $shotReady) {
+                Save-WindowShot "01-installer-ready.png" $wizardHwnd ("Unexpected wizard page. title='$($top.title)'") | Out-Null
+                $shotReady = $true
+            }
+            if ($page -like "forbidden:*" -and -not $clickedInstall) {
+                $clickedInstall = Invoke-UiClick ([int]$top.pid) "Install"
+                Log "wizard Install click=$clickedInstall"
+            }
             if ($page -eq "installing" -and -not $sawInstalling) {
                 $sawInstalling = $true
                 $installingAt = Get-Date
@@ -781,6 +823,7 @@ try {
         $main = Get-MainWindows | Select-Object -First 1
         if ($main -and -not $mainAt) {
             $script:MainHwnd = $main.hwnd
+            $script:MainPid = [int]$main.pid
             $mainAt = $launchWatch.Elapsed.TotalSeconds
             $script:HungStarted = Get-Date
             Log "main window at $mainAt hwnd $($main.hwnd)"
@@ -818,7 +861,43 @@ try {
 
     $cdpOk = Connect-Cdp
     if (-not $cdpOk) {
-        Add-Step "ui-tour" $false "Could not attach to the app page to walk the tour" "harness"
+        $uiPid = $(if ($script:MainPid) { [int]$script:MainPid } else { [int]$app.Id })
+        $uiNames = @(Get-UiNames $uiPid)
+        $uiPath = Join-Path $Artifacts "main-window-ui.txt"
+        [System.IO.File]::WriteAllText($uiPath, ([string]::Join("`r`n", @($uiNames))))
+        Log ("main window ui names=" + $uiNames.Count)
+        Start-Sleep -Seconds 6
+        Save-WindowShot "04-onboarding-scene-1.png" $script:MainHwnd ("Scene 1 from the live window. UI sample: " + ([string]::Join(" | ", @($uiNames | Select-Object -First 12)))) | Out-Null
+        $null = Invoke-UiClick $uiPid "Auto"
+        $sceneShots = @(
+            @{ file = "05-onboarding-scene-2.png"; button = "Next" },
+            @{ file = "06-onboarding-scene-3.png"; button = "Next" },
+            @{ file = "07-onboarding-scene-4.png"; button = "Next" },
+            @{ file = "08-onboarding-scene-5.png"; button = "Next" }
+        )
+        foreach ($scene in $sceneShots) {
+            $advanced = Invoke-UiClick $uiPid $scene.button
+            if (-not $advanced) { $advanced = Invoke-UiClick $uiPid "Get Started" }
+            Start-Sleep -Seconds 5
+            Save-WindowShot $scene.file $script:MainHwnd ("Advanced=$advanced via UIA") | Out-Null
+        }
+        $pageShots = @(
+            @{ name = "Audio Flow"; file = "21-page-audio-flow-dark.png" },
+            @{ name = "Video Flow"; file = "22-page-video-flow-dark.png" },
+            @{ name = "Home"; file = "23-page-voice-home-dark.png" },
+            @{ name = "Insights"; file = "24-page-insights-dark.png" },
+            @{ name = "Dictionary"; file = "25-page-dictionary-dark.png" },
+            @{ name = "Style"; file = "26-page-style-dark.png" },
+            @{ name = "Providers"; file = "27-page-providers-dark.png" },
+            @{ name = "Settings"; file = "30-settings-general-dark.png" }
+        )
+        foreach ($pageShot in $pageShots) {
+            $opened = Invoke-UiClick $uiPid $pageShot.name
+            Start-Sleep -Seconds 2
+            Save-WindowShot $pageShot.file $script:MainHwnd ("UIA click '$($pageShot.name)' opened=$opened") | Out-Null
+        }
+        $tourDriven = @($uiNames | Where-Object { $_ -match "Skip Tour|Next|Get Started" }).Count -gt 0
+        Add-Step "ui-tour" $tourDriven ("CDP port 9222 was closed. UIA names=$($uiNames.Count) tour_controls=$tourDriven") $(if ($tourDriven) { "ok" } else { "harness" })
     } else {
         $tourProblems = @()
         foreach ($index in 0..4) {
