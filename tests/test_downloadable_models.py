@@ -473,8 +473,10 @@ def test_truncated_download_prevents_corrupt_file(temp_models_dir: Path):
         assert "Incomplete download" in fail_st["error"]
         # Destination file must NOT exist on disk!
         assert not (temp_models_dir / spec["filename"]).exists()
-        # Part file must have been cleaned up!
-        assert not (temp_models_dir / f"{spec['filename']}.part").exists()
+        # The partial file is kept so the next attempt can resume.
+        part_file = temp_models_dir / f"{spec['filename']}.part"
+        assert part_file.exists()
+        assert part_file.stat().st_size > 0
 
 
 def test_ssl_fallback_on_ssl_error(temp_models_dir: Path):

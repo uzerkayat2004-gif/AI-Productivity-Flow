@@ -25,6 +25,13 @@ else:
 from voice_flow.config import config
 from voice_flow import nemotron_engine
 from voice_flow import stt_engines
+from voice_flow.stt_guard import (
+    WHISPER_HALLUCINATION_SILENCE_THRESHOLD,
+    WHISPER_RETRY_TEMPERATURES,
+    WHISPER_TEMPERATURES,
+    guard_transcript,
+    prefer_cleaner_transcript,
+)
 from voice_flow.local_model_resources import (
     LOCAL_MODEL_IDLE_SECONDS,
     ModelUseLease,
@@ -66,6 +73,54 @@ def _whisper_hotwords_kwargs(model, terms: list[str]) -> dict:
     except (TypeError, ValueError):
         pass
     return {}
+
+
+def whisper_initial_prompt(explicit: str | None = None) -> str | None:
+    """Build ``initial_prompt`` only from the user's dictionary.
+
+    A canned sentence ("Clear dictation...") and the previous transcript are
+    refused: both pin Whisper onto a hallucination. An empty dictionary
+    yields no prompt at all. Hotwords still carry the same terms when the
+    installed faster-whisper accepts them.
+    """
+    if explicit:
+        return explicit
+    terms = dictionary_bias_terms(limit=12)
+    if not terms:
+        return None
+    return "Names and terms: " + ", ".join(terms) + "."
+
+
+def whisper_decode_kwargs(
+    *,
+    vad_filter: bool,
+    prompt: str | None,
+    temperatures: tuple[float, ...] | None = None,
+    vad_parameters: dict | None = None,
+) -> dict:
+    """Shared anti-hallucination settings for every local Whisper pass.
+
+    ``temperature`` is a fallback list. faster-whisper only retries a segment
+    that fails the compression / log-prob / no-speech gates when more than
+    one temperature is supplied; a lone 0.0 keeps the bad greedy decode.
+    """
+    temps = tuple(temperatures) if temperatures else WHISPER_TEMPERATURES
+    kwargs: dict = {
+        "beam_size": config.beam_size if float(temps[0]) == 0.0 else 1,
+        "temperature": temps,
+        "language": config.language,
+        "initial_prompt": prompt,
+        "condition_on_previous_text": False,
+        "compression_ratio_threshold": 2.4,
+        "log_prob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+        "hallucination_silence_threshold": WHISPER_HALLUCINATION_SILENCE_THRESHOLD,
+        "word_timestamps": True,
+        "vad_filter": vad_filter,
+    }
+    if vad_filter and vad_parameters:
+        kwargs["vad_parameters"] = vad_parameters
+    return kwargs
 
 # Guards the cloud-STT circuit-breaker counters. The stream worker and the
 # dictation pipeline both call into transcribe() concurrently, so the
@@ -676,6 +731,12 @@ class Transcriber:
                     enhance_profile = "auto"
                 self._mic_profile_cache = (enhance_profile, now)
             input_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+            input_rms = float(np.sqrt(np.mean(np.square(audio.astype(np.float64))))) if audio.size else 0.0
+            # The gain stage can lift a 0.07 noise peak to ~0.75. Remember the
+            # original energy so the VAD fallback and the hallucination guard
+            # do not treat that boosted hiss as speech.
+            self._pre_enhance_peak = input_peak
+            self._pre_enhance_rms = input_rms
             audio, enhance_profile = enhance_for_stt(audio, config.sample_rate, profile=enhance_profile)
             if enhance_profile not in ("off", "silence"):
                 out_peak = float(np.max(np.abs(audio))) if audio.size else 0.0
@@ -1080,10 +1141,11 @@ class Transcriber:
         if not acquired:
             log.warning("[STT] Local decode skipped because its deadline elapsed while waiting for the model lock.")
             return ""
-        # Dictionary design (PR #19): saved words never become a Whisper prompt.
-        # A prompt turns stored spellings into acoustic evidence; corrections
-        # happen in finalization instead.
-        prompt_hint = initial_prompt
+        # The only prompt Whisper may see is the user's dictionary (or an
+        # explicit caller prompt). A canned sentence and the previous
+        # transcript both pin the decoder onto a hallucination.
+        prompt_hint = whisper_initial_prompt(initial_prompt)
+        low_energy = self._source_is_low_energy(audio)
 
         try:
             # Hold a local reference for this entire decode.  A concurrent
@@ -1095,31 +1157,12 @@ class Transcriber:
                 return ""
             try:
                 bias_kwargs = _whisper_hotwords_kwargs(model, dictionary_bias_terms(limit=30))
-                segments, _ = model.transcribe(
-                    clean_audio,
-                    **bias_kwargs,
-                    beam_size=config.beam_size,
-                    temperature=config.temperature,
-                    language=config.language,
-                    initial_prompt=prompt_hint,
-                    # Streaming chunks already have their boundaries chosen by
-                    # the recorder's silence split. A second, model-internal
-                    # VAD pass can trim quiet first/last words from those
-                    # boundaries, while a non-empty partial result prevents the
-                    # direct-audio fallback below. Preserve every chunk sample
-                    # for local decoding; keep VAD on the whole-recording path.
+                decode_kwargs = whisper_decode_kwargs(
                     vad_filter=not is_chunk,
-                    # Long-dictation accuracy: carrying hallucinated context
-                    # across windows is what makes mid-text "break" (repeated
-                    # or drifting words) on long recordings, and whispers of
-                    # silence invent text. Per-segment temperatures keep the
-                    # fallback decode stable.
-                    condition_on_previous_text=False,
-                    no_speech_threshold=0.6,
-                    log_prob_threshold=-1.0,
-                    compression_ratio_threshold=2.4,
+                    prompt=prompt_hint,
                     vad_parameters=vad_params,
                 )
+                segments, _ = model.transcribe(clean_audio, **bias_kwargs, **decode_kwargs)
                 segments = list(segments)
                 parts = [s.text.strip() for s in segments if s.text.strip()]
                 result = " ".join(parts).strip()
@@ -1127,22 +1170,21 @@ class Transcriber:
                 log.warning("[VAD] VAD pass encountered error (%s), attempting direct fallback...", e)
                 result = ""
 
-            # Dual-pass fallback if VAD returned empty text or failed. The
-            # audibility gate compares the pre-normalization buffer peak:
-            # normalization can inflate near-silence past the threshold and
-            # trigger a pointless (slow) second decode on silence.
-            if not result and _has_audible_audio(audio) and _deadline_remaining(deadline) > 0.0:
+            # Direct fallback only when the PRE-GAIN signal is clearly speech.
+            # VAD returning empty on a buffer whose raw peak was ~0.07 used to
+            # decode the enhanced hiss and invent a sentence. Boosted audio
+            # always looks audible, so the gate reads the original peak.
+            if (
+                not result
+                and self._pre_enhance_is_clear_speech(audio)
+                and _deadline_remaining(deadline) > 0.0
+            ):
                 log.info("[FALLBACK] Running direct audio pass without VAD filter...")
                 try:
                     fallback_segments, _ = model.transcribe(
                         clean_audio,
                         **_whisper_hotwords_kwargs(model, dictionary_bias_terms(limit=30)),
-                        beam_size=config.beam_size,
-                        temperature=config.temperature,
-                        language=config.language,
-                        initial_prompt=prompt_hint,
-                        vad_filter=False,
-                        condition_on_previous_text=False,
+                        **whisper_decode_kwargs(vad_filter=False, prompt=prompt_hint),
                     )
                     parts = [s.text.strip() for s in fallback_segments if s.text.strip()]
                     result = " ".join(parts).strip()
@@ -1156,6 +1198,30 @@ class Transcriber:
                     model, clean_audio, result, speech_regions, prompt_hint, deadline
                 )
 
+            cleaned, retry = guard_transcript(result, low_energy=low_energy)
+            if retry and cleaned != result and _deadline_remaining(deadline) > 0.4:
+                log.info("[STT] Repetition guard rejected a decode; retrying at the next temperature.")
+                try:
+                    retry_segments, _ = model.transcribe(
+                        clean_audio,
+                        **_whisper_hotwords_kwargs(model, dictionary_bias_terms(limit=30)),
+                        **whisper_decode_kwargs(
+                            vad_filter=not is_chunk,
+                            prompt=prompt_hint,
+                            temperatures=WHISPER_RETRY_TEMPERATURES,
+                            vad_parameters=vad_params,
+                        ),
+                    )
+                    retry_text = " ".join(
+                        segment.text.strip() for segment in retry_segments if getattr(segment, "text", "").strip()
+                    ).strip()
+                    result = prefer_cleaner_transcript(retry_text, cleaned)
+                except Exception as exc:
+                    log.warning("[STT] Temperature retry failed: %s", exc)
+                    result = cleaned
+            else:
+                result = cleaned
+
         finally:
             try:
                 with self._lock:
@@ -1165,6 +1231,31 @@ class Transcriber:
                 notify_models_available("speech")
 
         return result
+
+    def _source_is_low_energy(self, audio: NDArray[np.float32]) -> bool:
+        """True when the microphone buffer, before gain, is too quiet to trust."""
+        peak = getattr(self, "_pre_enhance_peak", None)
+        if isinstance(peak, (int, float)):
+            rms = float(getattr(self, "_pre_enhance_rms", 0.0) or 0.0)
+            return float(peak) < 0.12 or rms < 0.015
+        if audio is None or getattr(audio, "size", 0) == 0:
+            return True
+        measured_peak = float(np.max(np.abs(audio)))
+        measured_rms = float(np.sqrt(np.mean(np.square(audio.astype(np.float64)))))
+        return measured_peak < 0.12 or measured_rms < 0.015
+
+    def _pre_enhance_is_clear_speech(self, audio: NDArray[np.float32]) -> bool:
+        """Whether a VAD miss should get a second, unfiltered decode.
+
+        Direct unit-test calls have no pre-gain snapshot and keep the old
+        audibility gate. The live path remembers the original peak, because
+        enhancement can make noise look like speech.
+        """
+        peak = getattr(self, "_pre_enhance_peak", None)
+        if not isinstance(peak, (int, float)):
+            return _has_audible_audio(audio)
+        rms = float(getattr(self, "_pre_enhance_rms", 0.0) or 0.0)
+        return float(peak) >= 0.12 and rms >= 0.01
 
     @staticmethod
     def _guard_tail_hallucination(
@@ -1195,13 +1286,7 @@ class Transcriber:
         try:
             segments, _ = model.transcribe(
                 audio,
-                beam_size=config.beam_size,
-                temperature=config.temperature,
-                language=config.language,
-                initial_prompt=prompt_hint,
-                vad_filter=False,
-                condition_on_previous_text=False,
-                word_timestamps=True,
+                **whisper_decode_kwargs(vad_filter=False, prompt=prompt_hint, temperatures=(0.0,)),
             )
             spans: list[tuple[str, float, float]] = []
             for seg in segments:

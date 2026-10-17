@@ -376,7 +376,10 @@ def _apply_dynamic_agc(
     frames = trimmed.reshape(n_frames, frame_len)
     frame_rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1)).astype(np.float32)
 
-    gate_thresh = max(1.2 * noise_floor, 0.0004)
+    # Frames have to clear the noise floor before they earn gain. A 1.2x
+    # gate opened on the ordinary wobble of room hiss and the far-mic
+    # profile then lifted a 0.07 peak to ~0.75.
+    gate_thresh = max(1.8 * float(noise_floor), 0.0008)
     hold_frames = int(0.250 / 0.020)  # 250ms gain hold
     hold_counter = 0
     last_speech_gain = 1.0
@@ -484,6 +487,17 @@ def enhance_for_stt(audio: np.ndarray, sr: int = 16000, profile: str = "auto") -
         )
 
         out = _soft_knee_limiter(out, threshold=0.85, ceiling=0.95)
+        # A quiet, noise-like buffer (low SNR, peak well above its RMS) must
+        # not leave an order of magnitude louder. A pure tone has almost the
+        # same peak and RMS, so this does not undo gain on a quiet voice.
+        if stats["snr"] < 6.0 and stats["peak"] < 0.12 and audio.size:
+            rms = float(np.sqrt(np.mean(np.square(audio.astype(np.float64)))))
+            crest = float(stats["peak"]) / max(rms, 1e-9)
+            if crest >= 2.5:
+                cap = max(float(stats["peak"]) * 3.5, float(stats["peak"]))
+                peak_now = float(np.max(np.abs(out))) if out.size else 0.0
+                if peak_now > cap > 0.0:
+                    out = (out * np.float32(cap / peak_now)).astype(np.float32)
         return out.astype(np.float32), resolved
     except Exception:
         log.exception("[ENHANCE] failed; using unenhanced audio")

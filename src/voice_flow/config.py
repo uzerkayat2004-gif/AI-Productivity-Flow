@@ -25,8 +25,8 @@ class Config:
 
     # --- Speed & Accuracy Settings ---
     short_audio_local_max_seconds: float = 8.0  # local whisper first below this; cloud round-trip can't beat local decode on short clips
-    beam_size: int = 1  # 1 = ultra-fast greedy decoding (<0.5s STT)
-    temperature: float = 0.0  # 0.0 = deterministic, zero hallucination
+    beam_size: int = 5  # base.en is fast enough; greedy beam=1 looped on noise
+    temperature: float = 0.0  # sampling fallback lives in the decode call, not here
 
     # --- Noise & Background Voice Filtering ---
     vad_threshold: float = 0.20  # Lower = catches softer speech and natural pauses

@@ -383,25 +383,75 @@ def start_model_download(model_id: str) -> tuple[bool, str, dict[str, Any] | Non
     return True, "Download started", get_model_status(spec["id"])
 
 
+def _http_status(resp: Any) -> int:
+    """Status code from a urllib response, or 200 when a test double has none."""
+    code = getattr(resp, "status", None)
+    if isinstance(code, int):
+        return code
+    getcode = getattr(resp, "getcode", None)
+    if callable(getcode):
+        try:
+            value = getcode()
+        except Exception:
+            value = None
+        if isinstance(value, int):
+            return value
+    return 200
+
+
+def _header_value(headers: Any, name: str) -> str:
+    getter = getattr(headers, "get", None)
+    if not callable(getter):
+        return ""
+    try:
+        value = getter(name)
+    except Exception:
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    hasher = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest().lower()
+
+
 def _handle_download_error(
     model_id: str,
     part_file: Path,
     expected_size: int,
     error_msg: str,
+    *,
+    keep_partial: bool = False,
 ) -> None:
-    """Helper to cleanly record download failure state and delete temporary part file."""
+    """Record a download failure.
+
+    A partial file is kept when the transfer can be resumed. Checksum
+    failures and user cancellation delete it instead.
+    """
+    partial_bytes = 0
     if part_file.exists():
         try:
-            part_file.unlink()
+            partial_bytes = part_file.stat().st_size
         except OSError:
-            pass
+            partial_bytes = 0
+        if not keep_partial or partial_bytes <= 0:
+            try:
+                part_file.unlink()
+            except OSError:
+                pass
+            partial_bytes = 0
     with _STATE_LOCK:
         _ACTIVE_DOWNLOADS[model_id] = {
             "status": "failed",
             "progress": 0.0,
-            "downloaded_bytes": 0,
+            "downloaded_bytes": partial_bytes,
             "total_bytes": expected_size,
-            "remaining_bytes": expected_size,
+            "remaining_bytes": max(0, expected_size - partial_bytes),
             "speed_bps": 0.0,
             "speed_display": "",
             "eta_seconds": 0,
@@ -477,22 +527,29 @@ def _download_worker(
         log.info("[DOWNLOAD] Download for %s was cancelled before starting.", model_id)
         return
 
-    req = urllib.request.Request(
-        download_url,
-        headers={
-            "User-Agent": "VoiceFlow-Desktop/1.0 (Windows NT 10.0; Win64; x64) Mozilla/5.0",
-            "Accept": "*/*",
-        },
-    )
-
-    try:
-        # If a partial file already exists from a previous crash, delete it to ensure clean download
-        if part_file.exists():
+    resume_from = 0
+    if part_file.exists():
+        try:
+            resume_from = part_file.stat().st_size
+        except OSError:
+            resume_from = 0
+        if resume_from <= 0 or (expected_size and resume_from > expected_size):
             try:
                 part_file.unlink()
             except OSError:
                 pass
+            resume_from = 0
 
+    headers = {
+        "User-Agent": "VoiceFlow-Desktop/1.0 (Windows NT 10.0; Win64; x64) Mozilla/5.0",
+        "Accept": "*/*",
+    }
+    if resume_from > 0:
+        headers["Range"] = f"bytes={resume_from}-"
+        log.info("[DOWNLOAD] Resuming %s at byte %d", model_id, resume_from)
+    req = urllib.request.Request(download_url, headers=headers)
+
+    try:
         if cancel_event.is_set():
             return
 
@@ -508,26 +565,46 @@ def _download_worker(
             resp = urllib.request.urlopen(req, timeout=60, context=unverified_ctx)
 
         with resp:
-            content_length = resp.headers.get("Content-Length")
-            total_bytes = (
-                int(content_length)
-                if content_length and content_length.isdigit() and int(content_length) > 0
-                else expected_size
-            )
+            status = _http_status(resp)
+            content_length = _header_value(resp.headers, "Content-Length")
+            content_range = _header_value(resp.headers, "Content-Range")
+            range_total = ""
+            if "/" in content_range:
+                range_total = content_range.rsplit("/", 1)[-1].strip()
+            if resume_from > 0 and status == 206:
+                file_mode = "ab"
+                downloaded_bytes = resume_from
+                if range_total.isdigit() and int(range_total) > 0:
+                    total_bytes = int(range_total)
+                elif content_length.isdigit() and int(content_length) > 0:
+                    total_bytes = resume_from + int(content_length)
+                else:
+                    total_bytes = expected_size
+                log.info("[DOWNLOAD] Server accepted resume for %s (HTTP 206)", model_id)
+            else:
+                if resume_from > 0 and status != 206:
+                    log.info("[DOWNLOAD] Server ignored Range for %s (HTTP %s); restarting", model_id, status)
+                file_mode = "wb"
+                downloaded_bytes = 0
+                total_bytes = (
+                    int(content_length)
+                    if content_length.isdigit() and int(content_length) > 0
+                    else expected_size
+                )
 
             with _STATE_LOCK:
                 if model_id in _ACTIVE_DOWNLOADS:
                     _ACTIVE_DOWNLOADS[model_id]["total_bytes"] = total_bytes
-                    _ACTIVE_DOWNLOADS[model_id]["remaining_bytes"] = total_bytes
+                    _ACTIVE_DOWNLOADS[model_id]["downloaded_bytes"] = downloaded_bytes
+                    _ACTIVE_DOWNLOADS[model_id]["remaining_bytes"] = max(0, total_bytes - downloaded_bytes)
                     _ACTIVE_DOWNLOADS[model_id]["response"] = resp
 
-            downloaded_bytes = 0
             chunk_size = 512 * 1024  # 512 KB
             start_time = time.time()
-            speed_samples: list[tuple[float, int]] = [(start_time, 0)]
+            speed_samples: list[tuple[float, int]] = [(start_time, downloaded_bytes)]
             last_ui_update_time = 0.0
 
-            with open(part_file, "wb") as pf:
+            with open(part_file, file_mode) as pf:
                 while True:
                     if cancel_event.is_set():
                         log.info("[DOWNLOAD] Download for %s was cancelled by user.", model_id)
@@ -594,16 +671,11 @@ def _download_worker(
         # English Nemotron download, never during model loading or dictation.
         _maybe_repair_nemotron_tokenizer(part_file, model_id)
 
-        # Optional SHA-256 integrity verification: only when a spec specifies "sha256"
-        expected_sha256 = spec.get("sha256")
+        # SHA-256 integrity verification when the registry pins a digest.
+        expected_sha256 = str(spec.get("sha256") or "").strip().lower()
         if expected_sha256:
-            import hashlib
-            hasher = hashlib.sha256()
-            with open(part_file, "rb") as pf_check:
-                for chunk in iter(lambda: pf_check.read(1024 * 1024), b""):
-                    hasher.update(chunk)
-            calculated_sha256 = hasher.hexdigest().lower()
-            if calculated_sha256 != str(expected_sha256).strip().lower():
+            calculated_sha256 = _sha256_file(part_file)
+            if calculated_sha256 != expected_sha256:
                 try:
                     part_file.unlink()
                 except OSError:
@@ -711,7 +783,7 @@ def _download_worker(
             return
         err_msg = f"Network connection failed: {exc.reason}"
         log.error("[DOWNLOAD] URLError for %s: %s", model_id, err_msg, exc_info=True)
-        _handle_download_error(model_id, part_file, expected_size, err_msg)
+        _handle_download_error(model_id, part_file, expected_size, err_msg, keep_partial=True)
     except (TimeoutError, socket.timeout) as exc:
         if cancel_event.is_set():
             if part_file.exists():
@@ -724,7 +796,7 @@ def _download_worker(
             return
         err_msg = "Download timed out while receiving data from server"
         log.error("[DOWNLOAD] Timeout for %s: %s", model_id, err_msg, exc_info=True)
-        _handle_download_error(model_id, part_file, expected_size, err_msg)
+        _handle_download_error(model_id, part_file, expected_size, err_msg, keep_partial=True)
     except OSError as exc:
         if cancel_event.is_set():
             if part_file.exists():
@@ -737,7 +809,13 @@ def _download_worker(
             return
         err_msg = f"Disk / filesystem error: {exc}"
         log.error("[DOWNLOAD] OSError for %s: %s", model_id, err_msg, exc_info=True)
-        _handle_download_error(model_id, part_file, expected_size, err_msg)
+        _handle_download_error(
+            model_id,
+            part_file,
+            expected_size,
+            err_msg,
+            keep_partial="Incomplete download" in str(exc),
+        )
     except Exception as exc:
         if cancel_event.is_set():
             if part_file.exists():

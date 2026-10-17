@@ -2282,10 +2282,14 @@ class VoiceFlowApp:
                         self._end_stream_session(discard=True, owner=session)
                         stream_closed = True
 
+                # A chunk failure used to discard the stream before collect,
+                # which threw away every good chunk along with the bad one
+                # (log: "not using 111 streamed chars ... failures=True", then
+                # the full recording decoded as the same sentence ten times).
+                # Harvest first. The whole-buffer decode still runs when the
+                # stream is marked failed, and the cleaner transcript is kept.
                 if use_streaming and not stream_input_incomplete and self._stream_had_failures(self._stream_stt):
-                    self._end_stream_session(discard=True, owner=session)
-                    stream_closed = True
-                    stream_input_incomplete = True
+                    log.info("[STREAM STT] a chunk failed; harvesting the rest before the full-recording decode.")
 
                 if use_streaming and not stream_input_incomplete:
                     # A full-frame WebSocket session is one coherent provider
@@ -2392,12 +2396,32 @@ class VoiceFlowApp:
                         if raw_transcript.strip():
                             break
                         if session_salvage:
-                            raw_transcript = session_salvage
-                            log.warning("[STREAM STT] full recording was empty; keeping the streamed text.")
+                            from voice_flow.stt_guard import prefer_cleaner_transcript
+
+                            chosen = prefer_cleaner_transcript(session_salvage, raw_transcript)
+                            if chosen:
+                                if chosen != (raw_transcript or "").strip():
+                                    log.warning(
+                                        "[STREAM STT] keeping %d streamed chars; the full-recording decode was empty or repetitive.",
+                                        len(session_salvage),
+                                    )
+                                raw_transcript = chosen
                             break
                         failure = RuntimeError("No text was transcribed")
                     except Exception as exc:
                         failure = exc
+                if session_salvage and raw_transcript.strip():
+                    from voice_flow.stt_guard import prefer_cleaner_transcript
+
+                    chosen = prefer_cleaner_transcript(session_salvage, raw_transcript)
+                    if chosen != raw_transcript.strip():
+                        log.warning(
+                            "[STREAM STT] preferring %d streamed chars over a repetitive full-recording decode.",
+                            len(session_salvage),
+                        )
+                        raw_transcript = chosen
+                        if raw_transcript.strip():
+                            failure = None
                 stt_elapsed = time.perf_counter() - stt_started
                 # Streaming harvest and complete-buffer fallback are finished.
                 # End speech-model demand before any local polish inference.

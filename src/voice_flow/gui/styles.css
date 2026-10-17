@@ -1609,15 +1609,9 @@ body.feature-video-off #page-videoflow > *:not(.feature-disabled-banner) {
 }
 
 .feature-disabled-banner {
-  background: #fff7ed;
-  border: 1px solid #ffd4b8;
-  color: #9a3412;
   font-size: 13px;
-  font-weight: 700;
-  padding: 12px 18px;
-  border-radius: var(--radius-md);
+  font-weight: 650;
   margin-bottom: 16px;
-  box-shadow: var(--shadow-sm);
 }
 
 /* --- Audio Flow summary model selector (dropdown layout) --- */
