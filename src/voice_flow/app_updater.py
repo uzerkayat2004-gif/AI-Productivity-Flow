@@ -30,7 +30,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from voice_flow._version import VERSION
-from voice_flow.bundled_runtime import RUNTIME_FIELDS, runtime_for_platform
+from voice_flow.bundled_runtime import (
+    APP_MANAGED_FIELDS,
+    CORE_RUNTIME_FIELDS,
+    RUNTIME_FIELDS,
+    runtime_for_platform,
+)
 
 log = logging.getLogger("voice_flow.app_updater")
 
@@ -312,9 +317,24 @@ def _loose_runtime_fields(data: dict[str, Any]) -> dict[str, str]:
 
 
 def runtimes_match(installed: dict[str, str] | None, remote: dict[str, str] | None) -> bool:
+    """True when the app zip can run on the installed runtime.
+
+    Only the core fields count (1.0.8+). App-managed pieces such as Node are
+    fetched by the app itself when a feature needs a newer one, so a
+    difference there no longer forces the full installer.
+    """
     if not installed or not remote:
         return False
-    return all(installed.get(key) and installed.get(key) == remote.get(key) for key in RUNTIME_FIELDS)
+    return all(installed.get(key) and installed.get(key) == remote.get(key) for key in CORE_RUNTIME_FIELDS)
+
+
+def changed_runtime_fields(installed: dict[str, str] | None, remote: dict[str, str] | None) -> dict[str, list[str]]:
+    """Which fields differ, split into core (full installer) and app-managed."""
+    if not installed or not remote:
+        return {"core": list(CORE_RUNTIME_FIELDS), "app_managed": []}
+    core = [k for k in CORE_RUNTIME_FIELDS if not installed.get(k) or installed.get(k) != remote.get(k)]
+    managed = [k for k in APP_MANAGED_FIELDS if installed.get(k) != remote.get(k)]
+    return {"core": core, "app_managed": managed}
 
 
 def select_update_plan(
@@ -386,6 +406,10 @@ def select_update_plan(
         "fallback_url": download_url if "/releases/download/" in download_url else "",
         "full_fallback_url": full_url if "/releases/download/" in full_url else "",
         "runtime_changed": kind != "app",
+        # Data for the update UI (wording is the front end's): which runtime
+        # fields differ, split into core ones and app-managed ones the app
+        # fetches itself.
+        "runtime_changes": changed_runtime_fields(installed_runtime, remote_runtime),
         "reason": reason,
         "install_label": install_label,
     }

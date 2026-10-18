@@ -10,7 +10,7 @@ Concise, checkable facts about AI Productivity Flow (Version 1.0). Public docume
   - macOS 14 Sonoma or later (Apple Silicon only, M1 or newer; not Intel Macs. The release bundle's Python runtime and launcher are arm64): Application bundle (`AI Productivity Flow.app` / `AI-Productivity-Flow-macOS.zip`).
 - **Status**: Version 1.0.
 - **Public version**: 1.0 (`DISPLAY_VERSION` in `src/voice_flow/_version.py`). This is the only version shown in the app, installer, splash, and release title.
-- **Internal build**: 1.0.7 (`VERSION` in the same file). Update checks, Sentry releases, git tags, and the installer `AppVersion` use this build number. It changes every release; the public version stays 1.0 for this launch.
+- **Internal build**: 1.0.8 (`VERSION` in the same file). Update checks, Sentry releases, git tags, and the installer `AppVersion` use this build number. It changes every release; the public version stays 1.0 for this launch.
 - **Download sizes** (v1.0.2 artifacts, the last published build): Windows installer about 546 MB, installed footprint about 1.5 GB, Mac DMG about 271 MB, Mac zip about 287 MB.
 - **Crash reports**: on by default. Opt out under Settings → System → About & Updates → Privacy. Reports exclude audio, transcripts, and personal data.
 - **Speech recognition**:

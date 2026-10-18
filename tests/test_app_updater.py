@@ -504,9 +504,11 @@ def test_about_page_offers_update_now_instead_of_the_github_download():
     assert "/api/updates/progress" in script
     assert "/api/updates/fallback" in script
     assert "Version 1.0" in html
-    assert "build 1.0.7" in html
-    assert "Version 1.0.7" not in html
-    assert "Crash reports help fix bugs (you can turn this off in Privacy)" in html
+    assert "build 1.0.8" in html
+    assert "Version 1.0.8" not in html
+    assert "No audio or text is ever sent." in html
+    assert "Full installer" not in script
+    assert "runtime change" not in html
 
 
 def test_restore_package_puts_the_backup_back(tmp_path):

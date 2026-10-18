@@ -46,7 +46,7 @@ def test_installer_page_flow_is_installing_then_finish():
     assert "AppVerName={#MyAppName} {#MyAppDisplayVersion}" in ISS
     messages = ISS.split("[Messages]", 1)[1].split("[", 1)[0]
     assert "Version 1.0" in messages
-    assert "1.0.7" not in messages
+    assert "1.0.8" not in messages
     assert "InnerNotebook" not in ISS
     assert "ForeColor" not in ISS
     splash = (ROOT / "src" / "voice_flow" / "gui" / "early_splash.py").read_text(encoding="utf-8")
@@ -86,7 +86,7 @@ def test_crash_reporting_is_on_until_the_user_opts_out():
         conn.commit()
     assert is_crash_reporting_enabled() is True
     assert SENTRY_DSN.startswith("https://")
-    assert VERSION == "1.0.7"
+    assert VERSION == "1.0.8"
     storage.save_setting("anonymous_crash_reports", False)
     assert is_crash_reporting_enabled() is False
     assert init_crash_reporting(force=False) is False
@@ -204,14 +204,16 @@ def test_settings_privacy_row_replaces_the_prominent_sentry_toggle():
     settings = html[start:end]
     assert "toggle-anonymous-crash-reports" not in settings
     assert "btn-crash-reports-opt" in settings
-    assert "Crash reports help fix bugs (you can turn this off in Privacy)" in settings
-    assert "No audio, transcripts, or personal data are sent" in settings
+    assert "Send crash reports" in settings
+    assert "No audio or text is ever sent." in settings
     assert 'data-enabled="1"' in settings
-    assert ">Turn off</button>" in settings
+    # A real on/off toggle, not an ambiguous "Turn on" / "Turn off" button.
+    assert 'id="btn-crash-reports-opt" onchange="toggleCrashReportsFromPrivacy()" type="checkbox"' in settings
+    assert "Turn on</button>" not in settings
 
 
 def test_packaged_crash_release_matches_version():
     text = (ROOT / "src" / "voice_flow" / "crash_reporting.py").read_text(encoding="utf-8")
     assert "SENTRY_DSN" in text
     assert f"ai-productivity-flow@{{VERSION}}" in text or "ai-productivity-flow@" in text
-    assert VERSION == "1.0.7"
+    assert VERSION == "1.0.8"

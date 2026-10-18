@@ -291,7 +291,18 @@ def ensure_render_browser(log=None, *, background: bool = False) -> bool:
     """
     if render_browser_cache() is not None or browser_executable() is not None:
         return True
-    node = node_executable()
+    # HyperFrames needs Node 22. From 1.0.8 the Windows installer bundles
+    # Node 20 (so v1.0.6 installs keep getting the small app update) and the
+    # app downloads Node 22 into the user data folder; get it first.
+    from voice_flow import node_component
+
+    try:
+        node_component.ensure_managed_node(background=background)
+    except node_component.NodeComponentError as exc:
+        if log:
+            log(f"render browser provisioning skipped: {exc}")
+        return False
+    node = node_component.video_node_executable()
     runtime = runtime_root()
     if node is None or runtime is None:
         return False
@@ -325,10 +336,10 @@ def ensure_render_browser(log=None, *, background: bool = False) -> bool:
 
 
 def schedule_render_browser_prefetch(delay_seconds: float | None = None) -> bool:
-    """Prepare the Video Flow render browser later, in the background.
+    """Prepare Video Flow's Node 22 and render browser later, in the background.
 
-    Only for the installed Windows app, once per process, and only when the
-    browser is missing. Returns True when a prefetch was scheduled.
+    Only for the installed Windows app, once per process, and only when one
+    of them is missing. Returns True when a prefetch was scheduled.
     """
     global _RENDER_BROWSER_PREFETCH_SCHEDULED
     if sys.platform != "win32" or not is_installed():
@@ -337,11 +348,23 @@ def schedule_render_browser_prefetch(delay_seconds: float | None = None) -> bool
         return False
     if _RENDER_BROWSER_PREFETCH_SCHEDULED:
         return False
-    if render_browser_cache() is not None or browser_executable() is not None:
+    from voice_flow import node_component
+
+    need_node = node_component.needs_managed_node() and node_component.managed_node_executable() is None
+    need_browser = render_browser_cache() is None and browser_executable() is None
+    if not need_node and not need_browser:
         return False
     _RENDER_BROWSER_PREFETCH_SCHEDULED = True
     delay = RENDER_BROWSER_PREFETCH_DELAY_SECONDS if delay_seconds is None else float(delay_seconds)
-    timer = threading.Timer(delay, lambda: ensure_render_browser(background=True))
+
+    def _prefetch() -> None:
+        # Node 22 first (HyperFrames needs it for `browser ensure`), both idle.
+        if need_node and not node_component.prefetch_managed_node():
+            return
+        if need_browser:
+            ensure_render_browser(background=True)
+
+    timer = threading.Timer(delay, _prefetch)
     timer.daemon = True
     timer.name = "apf-render-browser-prefetch"
     timer.start()

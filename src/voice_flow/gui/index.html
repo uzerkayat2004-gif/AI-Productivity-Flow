@@ -40,7 +40,7 @@
   <link rel="stylesheet" href="usability.css?v=20260912-dialog-10">
   <link rel="stylesheet" href="studio.css?v=20261006-dictionary-auto">
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
-  <link rel="stylesheet" href="workspace-ui.css?v=20261017-notice">
+  <link rel="stylesheet" href="workspace-ui.css?v=20261018-settings">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
   <link rel="stylesheet" href="onboarding-hero.css?v=20261017-onboarding-v103">
 
@@ -3254,12 +3254,12 @@
 <div class="settings-tab-head">
 <div>
 <h3 style="font-size: 16px; font-weight: 800; margin: 0;">General</h3>
-<p class="settings-tab-sub">Choose how you dictate and work with text.</p>
+<p class="settings-tab-sub">How you talk, paste, and see Flow.</p>
 </div>
 </div>
 <section class="preference-section"><h4 class="preference-section-title">Voice input</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Dictation Shortcut <span aria-label="About Dictation Shortcut" class="info-tip" data-tip="Hotkey or trigger button that starts dictation in any app." tabindex="0">i</span></div>
+<div class="setting-title">Dictation shortcut <span aria-label="About Dictation shortcut" class="info-tip" data-tip="The keys that start dictation in any app." tabindex="0">i</span></div>
 </div>
 <div class="vf-row-control">
 <select class="action-select" id="setting-hotkey-trigger-select" onchange="onHotkeyTriggerSelectChange(this.value)">
@@ -3277,7 +3277,7 @@
 </div>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Dictation Mode <span aria-label="About Dictation Mode" class="info-tip" data-tip="Switch between hold-to-talk, tap-to-toggle, or smart hybrid triggers." tabindex="0">i</span></div>
+<div class="setting-title">Dictation mode <span aria-label="About Dictation mode" class="info-tip" data-tip="Hold to talk, tap to start and stop, or both." tabindex="0">i</span></div>
 </div>
 <div class="vf-row-control">
 <span class="kbd-pill" id="dictation-mode-badge">Smart Hybrid</span>
@@ -3285,32 +3285,31 @@
 </div>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Click-to-Paste <span aria-label="About Click-to-Paste" class="info-tip" data-tip="Hold transcribed text on clipboard after dictating, then Right-Click in any target box to paste." tabindex="0">i</span></div>
+<div class="setting-title">Click to paste <span aria-label="About Click to paste" class="info-tip" data-tip="Right-click any text box to paste what you said." tabindex="0">i</span></div>
 </div>
 <label class="toggle-switch">
 <input id="toggle-click-to-paste" onchange="toggleClickToPasteSetting(this.checked)" type="checkbox"/>
 <span class="toggle-slider"></span>
 </label>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">Hardware &amp; floating controls</h4><div class="settings-group-card"><div class="setting-row">
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">Microphone &amp; floating bar</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Microphone <span aria-label="About Microphone" class="info-tip" data-tip="Choose the hardware microphone Voice Flow listens on." tabindex="0">i</span></div>
+<div class="setting-title">Microphone <span aria-label="About Microphone" class="info-tip" data-tip="The microphone Flow listens to." tabindex="0">i</span></div>
 </div>
 <div class="vf-row-control">
 <span class="kbd-pill vf-mic-badge" id="current-mic-badge" title="Default">Default</span>
-<button class="action-btn" onclick="openMicrophoneDialog()">Select Microphone</button>
+<button class="action-btn" onclick="openMicrophoneDialog()">Choose</button>
 </div>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Floating Bar <span aria-label="About Floating Bar" class="info-tip" data-tip="Bring the floating pill bar to front or reset to its default dock position." tabindex="0">i</span></div>
+<div class="setting-title">Floating bar <span aria-label="About Floating bar" class="info-tip" data-tip="Show the floating bar, or move it back to its spot." tabindex="0">i</span></div>
 </div>
 <div class="vf-row-control">
-<button class="action-btn" onclick="showFloatingOverlay()">Show Bar</button>
-<button class="action-btn" onclick="resetFloatingOverlayPosition()">Reset Position</button>
+<button class="action-btn" onclick="showFloatingOverlay()">Show</button>
+<button class="action-btn" onclick="resetFloatingOverlayPosition()">Reset</button>
 </div>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">On-Screen Appearance</h4><div class="settings-group-card"><div class="setting-row">
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">Appearance</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Dark Mode <span aria-label="About Dark Mode" class="info-tip" data-tip="Use dark theme for on-screen popups, summaries, and dialogs." tabindex="0">i</span></div>
-<div class="setting-desc" style="font-size: 11px; color: var(--text-muted, #888); margin-top: 2px;">Applies to popups, summaries, and overlays</div>
+<div class="setting-title">Dark mode <span aria-label="About Dark mode" class="info-tip" data-tip="Dark look for popups, summaries, and overlays." tabindex="0">i</span></div>
 </div>
 <div class="vf-row-control" style="display: inline-flex; align-items: center; gap: 12px;">
 <span id="on-screen-ui-theme-label" class="kbd-pill" style="font-weight: 600; min-width: 90px; text-align: center; font-size: 12px;">Light Mode</span>
@@ -3326,12 +3325,12 @@
 <div class="settings-tab-head">
 <div>
 <h3 style="font-size: 16px; font-weight: 800; margin: 0;">System</h3>
-<p class="settings-tab-sub">Manage startup, maintenance, and app information.</p>
+<p class="settings-tab-sub">Startup, updates, and privacy.</p>
 </div>
 </div>
-<section class="preference-section"><h4 class="preference-section-title">Startup &amp; visibility</h4><div class="settings-group-card"><div class="setting-row">
+<section class="preference-section"><h4 class="preference-section-title">Startup</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Auto-Startup <span aria-label="About Auto-Startup" class="info-tip" id="autostart-tip-span" data-tip="Launches Voice Flow silently on system boot." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
+<div class="setting-title">Open at startup <span aria-label="About Open at startup" class="info-tip" id="autostart-tip-span" data-tip="Open Flow quietly when your computer starts." tabindex="0">i</span> <span class="status-badge" id="autostart-status-badge">Checking...</span></div>
 </div>
 <label class="toggle-switch">
 <input id="toggle-autostart" onchange="toggleAutoStartSetting(this.checked)" type="checkbox"/>
@@ -3339,7 +3338,7 @@
 </label>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title" id="show-in-taskbar-title">Show in Taskbar <span aria-label="About Show in Taskbar" class="info-tip" id="show-in-taskbar-tip" data-tip="Shows Voice Flow in the system dock / taskbar while the window is open. Turn off to keep it tray-only." tabindex="0">i</span></div>
+<div class="setting-title" id="show-in-taskbar-title">Show in taskbar <span aria-label="About Show in taskbar" class="info-tip" id="show-in-taskbar-tip" data-tip="Turn off to keep Flow in the tray only." tabindex="0">i</span></div>
 </div>
 <label class="toggle-switch">
 <input checked="" id="toggle-show-in-taskbar" onchange="toggleShowInTaskbarSetting(this.checked)" type="checkbox"/>
@@ -3347,21 +3346,20 @@
 </label>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Deep Restart <span aria-label="About Deep Restart" class="info-tip" data-tip="Flushes runtime buffers and restarts the engine cleanly, preserving the floating bar position." tabindex="0">i</span></div>
+<div class="setting-title">Restart Flow <span aria-label="About Restart Flow" class="info-tip" data-tip="Fixes most glitches. Your floating bar stays where it is." tabindex="0">i</span></div>
 </div>
-<button class="action-btn" onclick="triggerDeepAppRestart()">Restart Engine</button>
+<button class="action-btn" onclick="triggerDeepAppRestart()">Restart</button>
 </div><div class="setting-row">
 <div class="setting-info">
-<div class="setting-title">Audio Cache <span aria-label="About Audio Cache" class="info-tip" data-tip="Remove abandoned temporary audio files. Dictation history and retained recovery recordings stay available." tabindex="0">i</span></div>
+<div class="setting-title">Temporary audio <span aria-label="About Temporary audio" class="info-tip" data-tip="Deletes leftover audio files. Your history stays." tabindex="0">i</span></div>
 </div>
-<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear Cache</button>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">About &amp; Updates</h4><div class="settings-group-card about-card"><div class="setting-row about-identity-row">
+<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear</button>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">About &amp; updates</h4><div class="settings-group-card about-card"><div class="setting-row about-identity-row">
 <div class="setting-info">
 <div class="setting-title about-title">
 <strong>AI Productivity Flow</strong>
 <span class="status-badge about-version-badge">Version 1.0</span>
-<span class="about-build-id">build 1.0.7</span>
-<span class="status-badge">Apache-2.0</span>
+<span class="about-build-id">build 1.0.8</span>
 </div>
 <div class="about-links">
 <a href="https://ai-productivity-flow.vercel.app/" target="_blank">Website</a>
@@ -3373,24 +3371,31 @@
 <div class="vf-row-control">
 <button class="action-btn" id="btn-check-updates" onclick="checkForAppUpdates(true)">Check for updates</button>
 </div>
-</div><div class="setting-row privacy-row" id="privacy-crash-row">
-<div class="setting-info">
-<div class="setting-title">Privacy</div>
-<div class="setting-desc" id="crash-reports-privacy-copy">Crash reports help fix bugs (you can turn this off in Privacy). No audio, transcripts, or personal data are sent. The default Read voice (Microsoft Edge) is online (free): text you read aloud is sent to Microsoft. Switch to an offline voice in Audio Flow with one click.</div>
-</div>
-<div class="vf-row-control">
-<button class="action-btn" id="btn-crash-reports-opt" type="button" onclick="toggleCrashReportsFromPrivacy()" data-enabled="1">Turn off</button>
-</div>
 </div><div id="update-status-row" class="setting-row" style="display:none;">
 <div id="update-status-message" class="update-status-message"></div>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">App information &amp; help</h4><div class="settings-group-card"><div class="setting-row">
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">Privacy</h4><div class="settings-group-card"><div class="setting-row privacy-row" id="privacy-crash-row">
 <div class="setting-info">
-<div class="setting-title">Runtime <span aria-label="About Runtime" class="info-tip" id="runtime-tip-span" data-tip="Local API server with local speech-to-text." tabindex="0">i</span></div>
+<div class="setting-title">Send crash reports</div>
+<div class="setting-desc" id="crash-reports-privacy-copy">Helps fix bugs. No audio or text is ever sent.</div>
 </div>
-<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Local STT</span><span aria-hidden="true">·</span><span id="runtime-os-badge">Win x64</span></div>
+<label class="toggle-switch" title="Send crash reports">
+<input aria-label="Send crash reports" checked="" data-enabled="1" id="btn-crash-reports-opt" onchange="toggleCrashReportsFromPrivacy()" type="checkbox"/>
+<span class="toggle-slider"></span>
+</label>
+</div><div class="setting-row privacy-row" id="privacy-read-voice-row">
+<div class="setting-info">
+<div class="setting-title">Read aloud voice</div>
+<div class="setting-desc">Default voice is online. Text goes to Microsoft.</div>
+</div>
+<span class="privacy-note">Offline voices in Audio Flow</span>
+</div></div></section><section class="preference-section"><h4 class="preference-section-title">Help</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Runs on <span aria-label="About Runs on" class="info-tip" id="runtime-tip-span" data-tip="Flow runs on this computer. Speech stays offline." tabindex="0">i</span></div>
+</div>
+<div class="runtime-line"><code>127.0.0.1:8991</code><span aria-hidden="true">·</span><span>Offline speech</span><span aria-hidden="true">·</span><span id="runtime-os-badge">Win x64</span></div>
 </div><div class="setting-row" style="border-bottom: none;">
 <div class="setting-info">
-<div class="setting-title">Onboarding <span aria-label="About Onboarding" class="info-tip" data-tip="Replays the voice-narrated welcome tour and product introduction." tabindex="0">i</span></div>
+<div class="setting-title">Welcome tour <span aria-label="About Welcome tour" class="info-tip" data-tip="Watch the short intro tour again." tabindex="0">i</span></div>
 </div>
 <button class="action-btn" onclick="replayOnboarding()">Replay Tour</button>
 </div></div></section>
@@ -3400,7 +3405,7 @@
 <div class="settings-tab-head">
 <div>
 <h3 style="font-size: 16px; font-weight: 800; margin: 0;">Account</h3>
-<p class="settings-tab-sub">Manage your Google profile and saved accounts.</p>
+<p class="settings-tab-sub">Your Google account.</p>
 </div>
 </div>
 <div class="settings-group-card account-card-wrapper">
@@ -3432,7 +3437,7 @@
 <div class="account-sub-section" id="account-switch-section" style="display: none;">
 <div class="account-section-title">
 <span>Switch Account</span>
-<span class="account-section-desc">1-click switch to another Google account on this PC</span>
+<span class="account-section-desc">Other accounts on this computer</span>
 </div>
 <div class="account-items-list" id="account-saved-list">
 <!-- Dynamically populated by app.js -->
@@ -3449,8 +3454,8 @@
 <path d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" fill="#EA4335"></path>
 </svg>
 </div>
-<h4 class="account-signed-out-title">Sign in to Voice Flow</h4>
-<p class="account-signed-out-desc">Connect with your Google account in one click.</p>
+<h4 class="account-signed-out-title">Sign in</h4>
+<p class="account-signed-out-desc">Use your Google account.</p>
 <button class="account-google-btn" id="btn-google-signin" onclick="handleGoogleAccountSignIn()" type="button">
 <svg height="20" viewbox="0 0 24 24" width="20">
 <path d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" fill="#4285F4"></path>
@@ -3465,7 +3470,7 @@
 <div class="account-sub-section" id="account-signed-out-switch-section" style="display: none; width: 100%; margin-top: 20px;">
 <div class="account-section-title" style="text-align: left;">
 <span>Saved Accounts</span>
-<span class="account-section-desc">Switch directly to a previously connected account</span>
+<span class="account-section-desc">Accounts you used before</span>
 </div>
 <div class="account-items-list" id="account-signed-out-saved-list">
 <!-- Dynamically populated by app.js -->
