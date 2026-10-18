@@ -1230,7 +1230,7 @@ function vfRenderLegacyHistory() {
     const engineVersion = isNlm ? "Google NotebookLM (HD)" : (video.engine_version || "Visual V2.1");
     const error = failed && video.error ? ` title="${vfEscape(video.error)}"` : "";
     const fallbackNotice = (complete && video.fallback_reason)
-      ? `<div class="vf-error-notice" style="font-size:11px;color:#b45309;margin-top:6px;" title="${vfEscape(video.fallback_error || '')}">⚠ ${video.fallback_requested_engine === "notebooklm" ? "NotebookLM login expired" : "Requested engine unavailable"} — rendered with the local engine instead. ${video.fallback_requested_engine === "notebooklm" ? `<a href="#" onclick="startNotebookLMAuth(); return false;" style="color:#b45309;font-weight:600;">Sign in</a> to use NotebookLM.` : ""}</div>`
+      ? `<div class="vf-error-notice" style="font-size:11px;color:#b45309;margin-top:6px;" title="${vfEscape(video.fallback_error || '')}">⚠ ${video.fallback_reason === "notebooklm_generation_failed" ? "NotebookLM couldn't make this video" : (video.fallback_requested_engine === "notebooklm" ? "NotebookLM login expired" : "Requested engine unavailable")} — rendered with the local engine instead. ${video.fallback_requested_engine === "notebooklm" ? `<a href="#" onclick="startNotebookLMAuth(); return false;" style="color:#b45309;font-weight:600;">Sign in</a> to use NotebookLM.` : ""}</div>`
       : "";
     return `
       <article class="vf-video-card ${isNlm ? 'vf-card-nlm' : ''} ${authFailed ? 'vf-card-auth-error' : ''}" data-video-id="${vfEscape(video.id)}">
@@ -1487,7 +1487,7 @@ function vfLibraryCardHtml(video) {
     detailRows.push(`<div class="flow-card-detail-row flow-card-detail-error"><span>Error</span><span>${vfEscape(cleanErrorMessage(video.error))}</span></div>`);
   }
   const fallbackNotice = (complete && video.fallback_reason)
-    ? `<p class="vf-error-notice flow-card-fallback" title="${vfEscape(video.fallback_error || "")}">⚠ ${video.fallback_requested_engine === "notebooklm" ? "NotebookLM login expired" : "Requested engine unavailable"} — rendered with the local engine instead, so this is app engine output (not NotebookLM). ${video.fallback_requested_engine === "notebooklm" ? `<a href="#" onclick="startNotebookLMAuth(); return false;">Sign in</a> to use NotebookLM next time.` : ""}</p>`
+    ? `<p class="vf-error-notice flow-card-fallback" title="${vfEscape(video.fallback_error || "")}">⚠ ${video.fallback_reason === "notebooklm_generation_failed" ? "NotebookLM couldn't make this video" : (video.fallback_requested_engine === "notebooklm" ? "NotebookLM login expired" : "Requested engine unavailable")} — rendered with the local engine instead, so this is app engine output (not NotebookLM). ${video.fallback_requested_engine === "notebooklm" && video.fallback_reason !== "notebooklm_generation_failed" ? `<a href="#" onclick="startNotebookLMAuth(); return false;">Sign in</a> to use NotebookLM next time.` : ""}</p>`
     : "";
 
   let thumbInner;

@@ -1015,6 +1015,20 @@ class VideoFlowService:
     def get(self, job_id: str) -> JobV3 | None:
         return self.store.get(job_id)
 
+    def _report_failure(self, job_id: str, error_code: str, engine: Any = None) -> None:
+        """Privacy-safe Sentry event for a failed video (code + last stage only)."""
+        try:
+            from voice_flow.crash_reporting import report_flow_failure
+
+            current = self.store.get(job_id)
+            # Progress percent marks where it broke (10 auth, 30 source,
+            # 50 generate, 65 cloud, 85 download) without sending any text.
+            stage = f"progress-{int(getattr(current, 'progress', 0) or 0)}" if current is not None else ""
+            meta = (getattr(current, "meta", None) or {}) if current is not None else {}
+            report_flow_failure("video", error_code, stage, str(engine or meta.get("video_engine") or ""))
+        except Exception:
+            pass
+
     def list(self, limit: int | None = None) -> list[JobV3]:
         return self.store.list(limit)
 
@@ -1202,6 +1216,8 @@ class VideoFlowService:
             )
             terminal_state = "cancelled" if is_cancelled else "failed"
             terminal_msg = "Cancelled" if is_cancelled else "Generation failed"
+            if not is_cancelled:
+                self._report_failure(job_id, str(err_code), request.get("video_engine"))
             if is_cancelled:
                 meta_updates["error_code"] = "cancelled"
                 meta_updates["error_message"] = "Cancelled"
@@ -1302,6 +1318,8 @@ class VideoFlowService:
 
         terminal = "cancelled" if state == "cancelled" else "failed"
         err_code = str(result.get("error_code") or "generation_failed")
+        if terminal == "failed":
+            self._report_failure(job_id, err_code, result.get("provider") or result.get("fallback_requested_engine"))
         err_msg = str(
             result.get("error_message")
             or result.get("message")
