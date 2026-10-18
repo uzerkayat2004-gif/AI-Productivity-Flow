@@ -230,7 +230,11 @@ def test_new_user_gets_a_fresh_login_and_ends_connected(env, monkeypatch, layout
     assert "[env] platform=" in log and "reason=new_user" in log
     # The CLI was launched through the bundled interpreter, never the shim.
     spawn_lines = [line for line in log.splitlines() if line.startswith("[spawn]")]
-    assert spawn_lines and all(" -m notebooklm " in line for line in spawn_lines)
+    # Browser logins run through the first-sign-in guard; everything else is
+    # ``python -m notebooklm``. Never the console-script shim.
+    assert spawn_lines and all(
+        (" -m notebooklm " in line or "first_login_shim.py " in line) for line in spawn_lines
+    )
 
 
 def test_new_user_status_check_is_quiet(env, monkeypatch):
