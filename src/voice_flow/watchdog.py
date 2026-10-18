@@ -543,6 +543,13 @@ class WatchdogSupervisor:
         try:
             env = get_pythonw_env()
             spawn_kwargs = get_silent_windows_spawn_kwargs()
+            # Start the engine below normal priority so its heavy cold start
+            # (imports, Defender scans of new files) cannot make the PC lag.
+            # The engine raises itself back to normal once it is ready.
+            from voice_flow.startup_priority import engine_startup_creationflags
+            extra_flags = engine_startup_creationflags()
+            if extra_flags:
+                spawn_kwargs["creationflags"] = spawn_kwargs.get("creationflags", 0) | extra_flags
 
             self.child_process = subprocess.Popen(
                 [pythonw, "-m", "voice_flow.main"],

@@ -131,7 +131,14 @@ def test_splash_stays_responsive_while_the_app_starts():
         title = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(found, title, len(title))
         assert title.value != "AI Productivity Flow"
-        assert title.value == "APFEarlySplash"
+        assert title.value == "AI Productivity Flow (starting)"
+        # A normal window since v1.0.7: not topmost, has a taskbar button.
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        ex_style = int(user32.GetWindowLongPtrW(found, -20))  # GWL_EXSTYLE
+        assert not ex_style & 0x00000008  # WS_EX_TOPMOST
+        assert not ex_style & 0x00000080  # WS_EX_TOOLWINDOW
+        assert ex_style & 0x00040000  # WS_EX_APPWINDOW
         assert int(user32.IsHungAppWindow(hwnd)) == 0
         result = ctypes.c_size_t()
         replied = user32.SendMessageTimeoutW(hwnd, 0, 0, 0, 0x0002, 2000, ctypes.byref(result))

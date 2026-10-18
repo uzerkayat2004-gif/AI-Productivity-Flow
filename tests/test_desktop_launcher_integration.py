@@ -55,6 +55,8 @@ def test_desktop_launcher_gui_launch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_desktop_launcher_does_not_bind_fallback_api_while_engine_is_cold(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Blocking path; the warming window's equivalent is in test_startup_performance.py.
+    monkeypatch.setenv("VOICE_FLOW_EARLY_WINDOW", "0")
     from voice_flow.storage import storage
 
     targets: list[object] = []

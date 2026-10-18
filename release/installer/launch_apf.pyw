@@ -14,7 +14,7 @@ import time
 MUTEX_NAME = "Local\\VoiceFlowDesktopLauncherMutex_v1"
 APP_WINDOW_TITLES = ("AI Productivity Flow", "Voice Flow")
 SPLASH_CLASS_NAME = "APFEarlySplash"
-SPLASH_WINDOW_TITLE = "APFEarlySplash"
+SPLASH_WINDOW_TITLES = ("AI Productivity Flow (starting)", "APFEarlySplash")
 
 
 def _install_root() -> str:
@@ -74,7 +74,7 @@ def _is_splash(hwnd, user32, splash) -> bool:
             return bool(splash.is_startup_splash(title, class_name))
         except Exception:
             pass
-    return class_name == SPLASH_CLASS_NAME or title == SPLASH_WINDOW_TITLE
+    return class_name == SPLASH_CLASS_NAME or title in SPLASH_WINDOW_TITLES
 
 
 def _focus_existing(splash=None) -> bool:
@@ -153,9 +153,12 @@ def main() -> None:
             except Exception as exc:
                 _launch_log(f"splash failed: {exc}")
     _prepare_import_path()
-    from voice_flow.gui.desktop_launcher import _run_desktop_launcher
+    from voice_flow.gui import desktop_launcher
 
-    _run_desktop_launcher()
+    log_phase = getattr(desktop_launcher, "_log_launch_phase", None)
+    if log_phase is not None:
+        log_phase("launcher imports finished")
+    desktop_launcher._run_desktop_launcher()
 
 
 if __name__ == "__main__":

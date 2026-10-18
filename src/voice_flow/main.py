@@ -121,6 +121,14 @@ except Exception:
     pass
 _AUDIO_FLOW_JOBS_INIT_LOCK = threading.Lock()
 
+try:
+    from voice_flow.startup_priority import process_age_seconds as _process_age_seconds
+    _age = _process_age_seconds()
+    if _age is not None:
+        log.info("[STARTUP] Engine modules imported %.1fs after process start.", _age)
+except Exception:
+    pass
+
 
 class DictationState(str, Enum):
     IDLE = "idle"
@@ -4061,6 +4069,10 @@ class VoiceFlowApp:
         except Exception as exc:
             log.debug("NotebookLM keepalive startup trigger: %s", exc)
 
+        # Back to normal priority before any window process is spawned: a
+        # Windows child started now would inherit below-normal for good.
+        self._restore_startup_priority()
+
         # Launch Desktop UI Window silently in a dedicated process if not already open
         try:
             args = getattr(self, "args", None)
@@ -4071,19 +4083,23 @@ class VoiceFlowApp:
                     self.open_desktop_window()
             elif not headless and not no_gui:
                 window_open = False
+                # A launcher that holds the mutex owns the window (it may still
+                # be on its "warming up" page). Check that first: focusing the
+                # window from here would pull it in front of whatever the user
+                # switched to while the engine was starting.
                 try:
-                    from voice_flow.gui.desktop_launcher import _focus_existing_window
-                    window_open = _focus_existing_window()
+                    from voice_flow.gui.desktop_launcher import _launcher_mutex_held
+                    if _launcher_mutex_held():
+                        window_open = True
                 except Exception:
-                    window_open = False
+                    pass
 
                 if not window_open:
                     try:
-                        from voice_flow.gui.desktop_launcher import _launcher_mutex_held
-                        if _launcher_mutex_held():
-                            window_open = True
+                        from voice_flow.gui.desktop_launcher import _focus_existing_window
+                        window_open = _focus_existing_window()
                     except Exception:
-                        pass
+                        window_open = False
                 if not window_open:
                     from voice_flow.watchdog import get_pythonw_executable, get_pythonw_env, get_silent_windows_spawn_kwargs
                     pythonw_exe = get_pythonw_executable()
@@ -4108,6 +4124,8 @@ class VoiceFlowApp:
         except Exception:
             log.debug("Update confirmation skipped", exc_info=True)
 
+        self._finish_startup()
+
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
         log.info(" - System-wide floating bar active on your screen")
@@ -4127,6 +4145,31 @@ class VoiceFlowApp:
             except Exception as e:
                 log.error("Overlay main loop error: %s", e)
                 time.sleep(1.0)
+
+    def _restore_startup_priority(self) -> None:
+        """The watchdog starts the engine below normal; the heavy part is done."""
+        try:
+            from voice_flow import startup_priority
+            if startup_priority.restore_normal_priority():
+                log.info("[STARTUP] Engine priority restored to normal after startup.")
+        except Exception:
+            log.debug("Startup priority restore skipped", exc_info=True)
+
+    def _finish_startup(self) -> None:
+        """End of the cold start: timing log and deferred one-time work."""
+        try:
+            from voice_flow import startup_priority
+            age = startup_priority.process_age_seconds()
+            if age is not None:
+                log.info("[STARTUP] Engine ready %.1fs after process start.", age)
+        except Exception:
+            pass
+        try:
+            from voice_flow import runtime_env
+            if runtime_env.schedule_render_browser_prefetch():
+                log.info("[STARTUP] Video Flow render browser will be prepared in the background later.")
+        except Exception:
+            log.debug("Render browser prefetch not scheduled", exc_info=True)
 
     # ------------------------------------------------------------------
     # macOS lifecycle: window process, real Quit, menu bar item.

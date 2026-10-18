@@ -58,8 +58,13 @@ def test_installer_page_flow_is_installing_then_finish():
     launcher = (ROOT / "src" / "voice_flow" / "gui" / "desktop_launcher.py").read_text(encoding="utf-8")
     shown = launcher.split("def on_shown():", 1)[1].split("def on_closed():", 1)[0]
     assert "_close_startup_splash()" in shown
-    before_window = launcher.split("webview.create_window", 1)[0].split("def launch_desktop_gui", 1)[1]
+    # The splash is only closed by on_shown or a failure, never before a window
+    # is created: neither on the warm path nor on the warming-window path.
+    launch = launcher.split("def launch_desktop_gui", 1)[1]
+    before_window = launch.split("webview.create_window", 1)[0]
     assert "_close_startup_splash()" not in before_window
+    warming = launcher.split("def _launch_warming_window", 1)[1]
+    assert "_close_startup_splash()" not in warming.split("webview.create_window", 1)[0]
     installer = ROOT / "release" / "installer"
     assert (installer / "wizard-large.png").is_file()
     assert (installer / "wizard-small.png").is_file()

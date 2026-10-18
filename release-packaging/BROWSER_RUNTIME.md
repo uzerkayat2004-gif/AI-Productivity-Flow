@@ -13,16 +13,20 @@ terms, so the installer does not carry the browser binary.
 
 ## How a user still gets zero-action setup
 
-1. **At install time** the installer runs, hidden:
+1. **In the background after the first launch** the installed Windows app
+   runs, hidden and at idle priority, 10 minutes after the engine is ready:
    `runtime\node\node.exe runtime\hyperframes\node_modules\hyperframes\bin\hyperframes.mjs browser ensure`
    — HyperFrames' own official provisioning command — which downloads the
    pinned build from Google's Chrome for Testing endpoints into the
-   user-writable cache. No user interaction; internet required (allowed).
-2. **Fallback:** if the install-time provisioning fails (e.g. offline), the
-   engine calls `runtime_env.ensure_render_browser()` once before the first
-   browser render (narova_runner, installed mode only) — same official
-   command. Failure to provision surfaces as the existing render-failed
-   error path.
+   user-writable cache (`runtime_env.schedule_render_browser_prefetch`).
+   No user interaction; internet required (allowed). Up to v1.0.6 the
+   installer ran this itself, right before the app's first launch, and the
+   download competed with the app for CPU, disk and network.
+2. **On demand:** if the browser is still missing (offline, or a render in the
+   first 10 minutes), the engine calls `runtime_env.ensure_render_browser()`
+   once before the first browser render (narova_runner, installed mode only)
+   — same official command, guarded by a lock so it never downloads twice.
+   Failure to provision surfaces as the existing render-failed error path.
 3. HyperFrames also honors `HYPERFRAMES_BROWSER_PATH` for manual overrides
    (documented for support cases; not used by default).
 

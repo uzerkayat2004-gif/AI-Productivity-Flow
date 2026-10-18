@@ -39,11 +39,11 @@ Shortcuts (Start Menu; Desktop optional task) target
    x64 runtime registry key is absent.
 2. `MicrosoftEdgeWebview2Setup.exe /silent /install` — only when no WebView2
    Evergreen runtime is registered (HKLM/HKCU EdgeUpdate probes).
-3. `node.exe …\hyperframes.mjs browser ensure` — provisions the pinned
-   chrome-headless-shell into the user cache (official Google endpoints;
-   the binary is not redistributed). Non-fatal; the app retries before the
-   first render if needed.
-4. Optional user-checkbox launch of the app (skipped in silent installs).
+3. Optional user-checkbox launch of the app (skipped in silent installs).
+
+The render browser (`hyperframes browser ensure`) is no longer a post-install
+step: the app prepares it in the background at idle priority after its first
+start, or before the first Video Flow render (see BROWSER_RUNTIME.md).
 
 ## Uninstall
 
