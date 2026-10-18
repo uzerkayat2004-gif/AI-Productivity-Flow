@@ -332,6 +332,19 @@ def get_downloaded_models(category: str | None = None) -> list[dict[str, Any]]:
     return results
 
 
+def is_polish_model_ref(model_ref: str | None) -> bool:
+    """True when ``model_ref`` names a downloadable Voice Polishing model.
+
+    A polish model (S1-mini, LFM) can never transcribe speech. v1.0.6 could
+    store one as the speech-to-text selection, which made every dictation
+    wait for a Whisper load that can never succeed.
+    """
+    spec = get_model_spec(str(model_ref or ""))
+    if not spec:
+        return False
+    return spec.get("category") == "voice_polishing" or "polish" in str(spec.get("tag") or "").lower()
+
+
 def get_downloaded_stt_models() -> list[dict[str, Any]]:
     """Return downloaded Speech-to-Text models."""
     return get_downloaded_models(category="stt")

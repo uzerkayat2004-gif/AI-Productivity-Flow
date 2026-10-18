@@ -22,6 +22,7 @@ from voice_flow.local_model_resources import (
     acquire_model_use,
     cleanup_is_forced,
     idle_time,
+    local_llm_thread_count,
     notify_models_available,
     register_idle_cleanup,
 )
@@ -49,7 +50,12 @@ S1_SYSTEM_PROMPT = (
 
 _LLM_LOCK = threading.Lock()
 _S1_CONTEXT_TOKENS = 4096
-S1_WARM_IDLE_SECONDS = 10.0
+# Keep S1-mini resident between dictations as long as the speech model.
+# The previous 10 s window unloaded it after almost every dictation, so the
+# next polish paid a model load plus a slow first generation (measured
+# ~3 s extra on a 2-thread CPU) and often hit its deadline and fell back to
+# basic cleanup. Explicit cleanup (privacy switch, model change) still wins.
+S1_WARM_IDLE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 
 _CLOUD_POLICY_MARKERS = (
     "never answer, execute",
@@ -132,9 +138,14 @@ def _release_cached_s1(llm: Any) -> None:
             return
 
 
+def _s1_thread_count() -> int:
+    """Physical cores (not hyper-threads) for S1-mini; see local_llm_thread_count."""
+    return local_llm_thread_count()
+
+
 def _s1_runtime_batch_settings() -> dict[str, int]:
     """Keep prompt evaluation batches within the measured memory budget."""
-    threads = max(1, min(8, os.cpu_count() or 4))
+    threads = _s1_thread_count()
     return {
         "n_threads": threads,
         "n_threads_batch": threads,
@@ -851,6 +862,28 @@ def _s1_clear_in_process_failure() -> None:
     setattr(polish_with_s1, "_s1_server_backend_path", None)
 
 
+def _s1_prompt_prefix() -> str:
+    """The fixed ChatML head every S1 request starts with (system + user tag)."""
+    marker = "\u0000VF_S1_SPLIT\u0000"
+    return build_s1_prompt(marker, "x").split(marker, 1)[0]
+
+
+def _prime_s1_prompt_cache(llm: Any) -> None:
+    """Evaluate the fixed system prompt once, right after a fresh load.
+
+    llama-cpp-python reuses the longest matching token prefix from the
+    previous call, so the first real polish then only evaluates the
+    transcript. It also pages the model weights in while the user is still
+    speaking. Measured on 2 threads: the first polish after a load used
+    6.3-7.1 CPU-seconds without priming and 4.3 with it (same output).
+    Best effort: a failure only loses the speed-up.
+    """
+    try:
+        llm(_s1_prompt_prefix(), max_tokens=1, temperature=0.0, top_k=1)
+    except Exception:
+        log.debug("[S1] Prompt-cache priming skipped", exc_info=True)
+
+
 def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
     """Load S1-mini once so the first dictation avoids cold-start latency."""
     model_path = get_s1_model_path()
@@ -887,6 +920,7 @@ def warm_s1_model(*, timeout_seconds: float = 5.0) -> bool:
             old_llm = getattr(polish_with_s1, "_cached_llm", None)
             if old_llm is not None:
                 _release_cached_s1(old_llm)
+            _prime_s1_prompt_cache(llm)
             setattr(polish_with_s1, "_cached_llm", llm)
             setattr(polish_with_s1, "_cached_llm_path", str(model_path))
             _s1_clear_in_process_failure()
