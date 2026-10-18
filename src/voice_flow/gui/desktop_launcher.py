@@ -781,12 +781,12 @@ def _start_webview_loop(ico_path, func=None) -> None:
     """Start pywebview. private_mode=False keeps the WebView profile
     (localStorage: onboarding flags, theme) across launches; pywebview
     defaults to a throwaway private profile."""
-    kwargs = {"private_mode": False, "http_server": False}
+    kwargs = {}
     if ico_path:
         kwargs["icon"] = ico_path
     if func is not None:
         kwargs["func"] = func
-    webview.start(**kwargs)
+    webview.start(private_mode=False, http_server=False, **kwargs)
 
 
 def _wire_window(window, *, ico_path, show_in_taskbar: bool, startup_began: float,
