@@ -1,0 +1,127 @@
+name: Video Flow Windows diagnostic
+
+on:
+  push:
+    branches:
+      - cursor/video-flow-windows-diag-0997
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-installer:
+    name: Installer ${{ matrix.tag }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [v1.0.9, v1.0.11]
+    steps:
+      - name: Checkout diagnostic harness
+        uses: actions/checkout@v4
+
+      - name: Record build identity
+        shell: powershell
+        run: |
+          "branch=${{ github.ref }}" | Set-Content build-identity.txt
+          "sha=${{ github.sha }}" | Add-Content build-identity.txt
+          "installer=${{ matrix.tag }}" | Add-Content build-identity.txt
+          "main_note=workflow branch is based on origin/main at push time" | Add-Content build-identity.txt
+
+      - name: Install published Windows build
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ matrix.tag }}"
+          if ($tag -notmatch '^v1\.0\.(9|1[01])$') { throw "Refusing tag $tag" }
+          $work = Join-Path $env:RUNNER_TEMP "apf-installer"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $installer = Join-Path $work "AI-Productivity-Flow-Setup-x64.exe"
+          $checksum = Join-Path $work "AI-Productivity-Flow-Setup-x64.exe.sha256"
+          $base = "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/download/$tag"
+          $curl = Join-Path $env:SystemRoot "System32\curl.exe"
+          & $curl -L --retry 5 --retry-delay 2 --fail -o $checksum "$base/AI-Productivity-Flow-Setup-x64.exe.sha256"
+          if ($LASTEXITCODE -ne 0) { throw "checksum download failed" }
+          & $curl -L --retry 5 --retry-delay 2 --fail -o $installer "$base/AI-Productivity-Flow-Setup-x64.exe"
+          if ($LASTEXITCODE -ne 0) { throw "installer download failed" }
+          $expected = (Get-Content $checksum -Raw).Trim().Split()[0].ToLower()
+          $actual = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "sha256 mismatch expected=$expected actual=$actual" }
+          Write-Host "sha256 $actual bytes=$((Get-Item $installer).Length)"
+          $silentLog = Join-Path $work "install.log"
+          $proc = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/LOG=" + $silentLog) -PassThru -Wait
+          Write-Host "installer exit $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) { throw "installer exit $($proc.ExitCode)" }
+          Copy-Item $silentLog "install.log" -Force
+          $root = Join-Path $env:LOCALAPPDATA "Programs\AI Productivity Flow"
+          if (-not (Test-Path (Join-Path $root "launch_apf.pyw"))) { throw "install root missing: $root" }
+          $root | Set-Content install-root.txt
+
+      - name: Launch app and render through the API
+        shell: powershell
+        run: |
+          $root = (Get-Content install-root.txt -Raw).Trim()
+          & .\.github\workflows\vf-win-diag\Invoke-VideoFlowDiag.ps1 -InstallRoot $root -Artifacts (Join-Path (Get-Location) "e2e-artifacts") -Label "${{ matrix.tag }}"
+          exit $LASTEXITCODE
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-flow-diag-${{ matrix.tag }}
+          path: |
+            e2e-artifacts
+            build-identity.txt
+            install.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  main-staging:
+    name: Build current main and render
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python for the staging scripts
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Assemble the Windows runtime from this commit
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python release/assemble_windows_staging.py
+          python -c "import subprocess, sys; sys.path.insert(0, 'release'); import build_windows_release as b; b.ensure_notebooklm_runtime(b.STAGING); b.refresh_app_package(b.STAGING); py = b.STAGING / 'runtime' / 'python' / 'python.exe'; out = subprocess.check_output([str(py), '-c', 'import voice_flow.runtime_env as r; assert r.is_installed(); print(r.install_root())'], text=True); print(out)"
+          $staging = Join-Path $env:USERPROFILE "apf-release-build\staging"
+          Copy-Item "release\installer\launch_apf.pyw" (Join-Path $staging "launch_apf.pyw") -Force
+          $bootstrapper = Join-Path $staging "runtime\webview2\MicrosoftEdgeWebview2Setup.exe"
+          if (Test-Path $bootstrapper) {
+            $setup = Start-Process -FilePath $bootstrapper -ArgumentList "/silent","/install" -PassThru -Wait
+            Write-Host "webview2 exit $($setup.ExitCode)"
+          }
+          $staging | Set-Content install-root.txt
+          "sha=${{ github.sha }}" | Set-Content build-identity.txt
+          "mode=staging-from-branch" | Add-Content build-identity.txt
+
+      - name: Launch staged app and render through the API
+        shell: powershell
+        run: |
+          $root = (Get-Content install-root.txt -Raw).Trim()
+          & .\.github\workflows\vf-win-diag\Invoke-VideoFlowDiag.ps1 -InstallRoot $root -Artifacts (Join-Path (Get-Location) "e2e-artifacts") -Label "main-staging"
+          exit $LASTEXITCODE
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-flow-diag-main-staging
+          path: |
+            e2e-artifacts
+            build-identity.txt
+          if-no-files-found: warn
+          retention-days: 14
