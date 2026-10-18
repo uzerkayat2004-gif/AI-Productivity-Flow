@@ -726,6 +726,12 @@ async function startNotebookLMAuth(switchAccount = false) {
         } catch (_) {}
 
         const login = stateData && stateData.login ? stateData.login : null;
+        // Show what the sign-in is doing now: "finalizing", or that an old
+        // Google session was set aside and a fresh sign-in window is opening.
+        if (login && login.running === true && login.note && login.note !== "Waiting for Google sign-in…") {
+          const progressDesc = document.getElementById("vf-nlm-account-desc");
+          if (progressDesc) progressDesc.textContent = login.note;
+        }
         // When switchAccount is true, report error immediately if running === false and success === false
         if (switchAccount && login && login.running === false && login.success === false) {
           clearNlmAuthPollTimer();
