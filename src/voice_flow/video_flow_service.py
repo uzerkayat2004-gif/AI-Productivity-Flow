@@ -1310,7 +1310,7 @@ class VideoFlowService:
 
         meta_updates = {
             "error_code": err_code,
-            "error_message": err_msg,
+            "error_message": _redact(err_msg),
             **({"provenance": result.get("provenance")} if result.get("provenance") is not None else {}),
         }
         timings = result.get("timings")

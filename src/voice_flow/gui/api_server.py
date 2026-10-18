@@ -9354,7 +9354,13 @@ def _shim_video(job) -> dict:
         "view_url": f"/api/video-flow/videos/file?id={job.job_id}",
         "download_url": f"/api/video-flow/videos/file?id={job.job_id}&download=1" + f"&title={urllib.parse.quote(cleaned_display_title)}",
         "export_status": "exported" if playable else "not_requested",
-        "error": "Video file is unavailable. Please generate the video again." if missing_output else (meta.get("error_code", "") if public_status == "failed" else ""),
+        # The card shows the real reason (error_message); the bare code
+        # ("generation_failed") told the user nothing. Code stays separate.
+        "error": "Video file is unavailable. Please generate the video again." if missing_output else (
+            (str(meta.get("error_message") or "").strip() or str(meta.get("error_code") or ""))
+            if public_status == "failed" else ""
+        ),
+        "error_code": (meta.get("error_code") or "") if public_status == "failed" else "",
     }
 
 

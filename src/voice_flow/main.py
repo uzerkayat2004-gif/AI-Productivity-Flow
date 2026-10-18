@@ -4246,7 +4246,7 @@ class VoiceFlowApp:
         except Exception:
             pass
         try:
-            # Automatic updates: first check ~2 min after launch, then every 6 h.
+            # Automatic updates: first check ~30 s after launch, then hourly.
             if not os.environ.get("PYTEST_CURRENT_TEST"):
                 from voice_flow.app_updater import schedule_auto_updates
                 schedule_auto_updates()

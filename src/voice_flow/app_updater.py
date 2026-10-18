@@ -55,8 +55,12 @@ WINDOWS_INSTALLER_FLAGS = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSE
 DOWNLOAD_TIMEOUT_SECONDS = 30.0
 # Automatic updates: first check a while after launch (startup stays fast),
 # then every few hours. Failed checks (offline, rate limited) retry later.
-AUTO_CHECK_FIRST_DELAY_SECONDS = 120.0
-AUTO_CHECK_INTERVAL_SECONDS = 6 * 60 * 60.0
+AUTO_CHECK_FIRST_DELAY_SECONDS = 30.0
+AUTO_CHECK_INTERVAL_SECONDS = 60 * 60.0
+# After a small update is downloaded and verified, the app restarts by
+# itself (once dictation and Audio/Video jobs are finished). This short pause
+# lets the in-app "Restarting to update" badge show first.
+AUTO_RESTART_GRACE_SECONDS = 4.0
 AUTO_RETRY_SECONDS = 30 * 60.0
 AUTO_IDLE_POLL_SECONDS = 2.0
 # Background downloads pause a little after each chunk so they never hog the line.
@@ -1320,6 +1324,8 @@ class UpdateManager:
                 self.message = "Download verified."
             if background:
                 log.info("[autoupdate] Update %s downloaded and verified; ready to restart.", plan.get("version") or "")
+            if plan.get("kind") == "app" and auto_update_enabled() and _auto_restart_allowed():
+                self._schedule_auto_restart()
         except UpdateCancelled:
             with self._lock:
                 self.state = "cancelled"
@@ -1338,6 +1344,26 @@ class UpdateManager:
                 self.error = _network_message(exc)
 
     # -- restart -----------------------------------------------------------
+    def _schedule_auto_restart(self) -> None:
+        """Restart into the verified update by itself, once the app is idle."""
+        with self._lock:
+            if self.state != "ready":
+                return
+            self.message = "Restarting to finish the update…"
+
+        def _go() -> None:
+            if AUTO_RESTART_GRACE_SECONDS:
+                time.sleep(AUTO_RESTART_GRACE_SECONDS)
+            with self._lock:
+                if self.state != "ready" or self.deferred:
+                    return
+            try:
+                self.request_restart()
+            except Exception as exc:
+                log.warning("[autoupdate] Automatic restart did not start: %s", exc)
+
+        threading.Thread(target=_go, name="AppUpdateAutoRestart", daemon=True).start()
+
     def _current_busy_reason(self) -> str | None:
         check = self.busy_check
         if check is None:
@@ -1650,6 +1676,13 @@ def _clear_apply_on_launch(state: Path | None) -> None:
             (folder / APPLY_ON_LAUNCH_NAME).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _auto_restart_allowed() -> bool:
+    """Unit tests must never restart the test runner; they opt in explicitly."""
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("APF_TEST_AUTO_RESTART"):
+        return False
+    return True
 
 
 def _lower_current_thread_priority() -> None:

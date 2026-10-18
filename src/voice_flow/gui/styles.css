@@ -5155,3 +5155,23 @@ html[data-theme="light"] .heatmap-cell.level-4 {
   border-color: rgba(16, 185, 129, 0.7) !important;
 }
 
+
+/* v1.0.11: global "updating" badge, top right on every page */
+.apf-update-badge {
+  position: fixed; top: 14px; right: 18px; z-index: 9999;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 999px;
+  background: var(--surface, #fff8ec); color: var(--text, #2b2118);
+  border: 1px solid var(--border-color, rgba(0,0,0,0.12));
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  font-size: 12.5px; font-weight: 600; line-height: 1;
+  pointer-events: none;
+}
+.apf-update-badge[hidden] { display: none; }
+.apf-update-badge-dot { width: 8px; height: 8px; border-radius: 50%; background: #c8792a; animation: apfUpdPulse 1.2s ease-in-out infinite; }
+.apf-update-badge.is-restarting .apf-update-badge-dot { background: #3c8a4a; }
+.apf-update-badge-bar { width: 70px; height: 4px; border-radius: 4px; background: rgba(0,0,0,0.1); overflow: hidden; }
+.apf-update-badge-bar[hidden] { display: none; }
+.apf-update-badge-bar > span { display: block; height: 100%; width: 0; background: #c8792a; transition: width .3s ease; }
+@keyframes apfUpdPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .apf-update-badge-dot { animation: none; } }
