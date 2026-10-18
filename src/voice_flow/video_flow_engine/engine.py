@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import json
 import logging
 from pathlib import Path
@@ -379,6 +381,14 @@ class VideoFlowEngine:
 
         output_path = project_dir / "video.mp4"
         format_name = self._resolve_auto_format(kwargs)
+        # Cinematic (Veo) videos need a Google AI Ultra plan. On Free/Pro,
+        # NotebookLM rejects the request and the job died with a bare
+        # "generation_failed". Auto-Adaptive must never pick it: only a user
+        # who explicitly chose Cinematic gets it.
+        explicit_cinematic = str(kwargs.get("requested_format") or "").strip().lower() == "cinematic"
+        if format_name == "cinematic" and not explicit_cinematic:
+            logger.info("Auto-Adaptive resolved to cinematic; using explainer (cinematic needs AI Ultra)")
+            format_name = "explainer"
         style_name = str(kwargs.get("style") or "auto").strip().lower()
         if style_name not in VIDEO_STYLES:
             style_name = "auto"
@@ -492,7 +502,25 @@ class VideoFlowEngine:
         )
 
         try:
-            artifact = provider.generate(request)
+            try:
+                artifact = provider.generate(request)
+            except Exception as first_exc:
+                first_code = str(getattr(first_exc, "code", "") or "")
+                first_msg = str(first_exc).lower()
+                retry_as_explainer = (
+                    request.format == "cinematic"
+                    and not self.process_manager.is_cancelled(video_id)
+                    and first_code not in {"cancelled", "auth_expired", "AUTH", "auth_unavailable", "RATE_LIMITED", "rate_limited"}
+                    and not any(k in first_msg for k in ("expired", "re-authenticate", "not authenticated", "rate limit", "cancelled"))
+                )
+                if not retry_as_explainer:
+                    raise
+                # Cinematic needs Google AI Ultra; on other plans NotebookLM
+                # rejects it. Make the video anyway as a full Explainer.
+                logger.warning("Cinematic generation failed (%s); retrying as explainer", first_exc)
+                report(50, "Cinematic needs Google AI Ultra, making an Explainer video instead", "video_start")
+                request = dataclasses.replace(request, format="explainer", style=style_name)
+                artifact = provider.generate(request)
         except Exception as exc:
             if (
                 self.process_manager.is_cancelled(video_id)
