@@ -204,10 +204,12 @@ def test_settings_privacy_row_replaces_the_prominent_sentry_toggle():
     settings = html[start:end]
     assert "toggle-anonymous-crash-reports" not in settings
     assert "btn-crash-reports-opt" in settings
-    assert "Crash reports help fix bugs (you can turn this off in Privacy)" in settings
-    assert "No audio, transcripts, or personal data are sent" in settings
+    assert "Send crash reports" in settings
+    assert "No audio or text is ever sent." in settings
     assert 'data-enabled="1"' in settings
-    assert ">Turn off</button>" in settings
+    # A real on/off toggle, not an ambiguous "Turn on" / "Turn off" button.
+    assert 'id="btn-crash-reports-opt" onchange="toggleCrashReportsFromPrivacy()" type="checkbox"' in settings
+    assert "Turn on</button>" not in settings
 
 
 def test_packaged_crash_release_matches_version():

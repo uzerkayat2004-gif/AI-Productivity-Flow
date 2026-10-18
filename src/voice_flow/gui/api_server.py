@@ -1126,10 +1126,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                 "os_name": "macOS" if is_mac else "Windows",
                 "arch": arch,
                 "hotkey_default": "Cmd + Option" if is_mac else "Ctrl + Win",
-                "taskbar_label": "Show in Dock" if is_mac else "Show in Taskbar",
-                "taskbar_tip": "Shows Voice Flow in the macOS Dock while running." if is_mac else "Shows Voice Flow in the Windows taskbar while the window is open. Turn off to keep it tray-only.",
-                "autostart_tip": "Starts AI Productivity Flow automatically when you sign in.",
-                "runtime_tip": f"Local API server with local speech-to-text on {'macOS' if is_mac else 'Windows 10/11 x64'}.",
+                "taskbar_label": "Show in Dock" if is_mac else "Show in taskbar",
+                "taskbar_tip": "Show Flow in the Dock while it runs." if is_mac else "Turn off to keep Flow in the tray only.",
+                "autostart_tip": "Open Flow quietly when you sign in.",
+                "runtime_tip": "Flow runs on this computer. Speech stays offline.",
                 "runtime_badge": f"macOS ({arch})" if is_mac else "Win x64",
             })
             return

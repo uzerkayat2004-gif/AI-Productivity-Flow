@@ -4165,6 +4165,7 @@ html[data-theme="dark"] #page-audioflow.studio-page #af-summary-model-hero {
   font-weight: 700;
 }
 #settings-modal.preferences-workspace .about-build-id {
+  white-space: nowrap;
   color: #8a8178;
   font-size: 11px;
   font-weight: 500;
@@ -4196,55 +4197,95 @@ html[data-theme="dark"] #page-audioflow.studio-page #af-summary-model-hero {
   line-height: 1.45;
   max-width: 46ch;
 }
-#settings-modal.preferences-workspace #update-status-row {
+#settings-modal.preferences-workspace #update-status-row,
+#settings-modal.preferences-workspace #set-tab-system #update-status-row {
+  display: block !important;
   grid-template-columns: 1fr !important;
   min-height: 0 !important;
-  padding-top: 0 !important;
+  padding-top: 14px !important;
+  padding-bottom: 16px !important;
 }
-#settings-modal.preferences-workspace .update-status-message {
-  font-size: 13px;
-  width: 100%;
+#settings-modal.preferences-workspace #update-status-row > .update-status-message {
+  grid-column: 1 / -1;
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  font-size: 13.5px;
+  line-height: 1.45;
 }
+/* Update card: full width, title -> size -> one primary action. */
 .apf-update-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
   width: 100%;
-  background: rgba(234, 88, 12, 0.08);
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(234, 88, 12, 0.2);
+  box-sizing: border-box;
+  background: rgba(234, 88, 12, 0.07);
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(234, 88, 12, 0.22);
 }
-.apf-update-copy strong { display: block; }
-.apf-update-size { margin-top: 2px; font-weight: 650; }
-.apf-update-reason { margin-top: 2px; color: var(--text-muted, #6b625c); }
-.apf-update-actions, .apf-update-followup, .apf-update-progress {
+.apf-update-copy { min-width: 0; }
+.apf-update-title { display: block; font-size: 15px; font-weight: 700; line-height: 1.35; }
+.apf-update-size { margin-top: 3px; color: var(--polish-muted, #6b625c); font-size: 13px; font-weight: 500; }
+.apf-update-note { margin-top: 3px; color: var(--polish-muted, #6b625c); font-size: 13px; }
+.apf-update-actions, .apf-update-followup {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 14px;
 }
+.apf-update-actions[hidden], .apf-update-followup[hidden], .apf-update-progress[hidden] { display: none !important; }
+#settings-modal.preferences-workspace .apf-update-card .action-btn.apf-update-primary {
+  background: #ea580c !important;
+  border-color: #ea580c !important;
+  color: #fff !important;
+  min-width: 132px;
+}
+#settings-modal.preferences-workspace .apf-update-card .action-btn.apf-update-primary:hover { background: #c2410c !important; }
 .apf-update-notes {
-  background: var(--primary-orange, #ea580c);
-  color: #fff;
+  color: #c2410c;
+  font-size: 13px;
+  font-weight: 650;
   text-decoration: none;
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: 4px;
+}
+.apf-update-notes:hover { text-decoration: underline; }
+html[data-theme="dark"] .apf-update-notes { color: #fb923c; }
+.apf-update-progress { display: flex; flex-direction: column; gap: 8px; }
+.apf-update-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+#settings-modal.preferences-workspace .apf-update-card .apf-update-cancel {
+  flex: 0 0 auto;
+  width: auto !important;
+  min-width: 96px;
 }
 .apf-update-bar {
-  flex: 1 1 140px;
+  width: 100%;
   height: 8px;
   background: rgba(28, 20, 15, 0.12);
   border-radius: 99px;
   overflow: hidden;
 }
+html[data-theme="dark"] .apf-update-bar { background: rgba(255, 255, 255, 0.12); }
 .apf-update-bar-fill {
   height: 100%;
   width: 0%;
   background: #ea580c;
+  transition: width .3s ease;
 }
 .apf-update-error { color: var(--danger, #ef4444); }
+#settings-modal.preferences-workspace .privacy-note {
+  justify-self: end !important;
+  color: var(--polish-muted, #6b625c);
+  font-size: 13px;
+  text-align: right;
+}
 #settings-modal.preferences-workspace .modal-body {
   padding: 28px 32px 36px;
 }
