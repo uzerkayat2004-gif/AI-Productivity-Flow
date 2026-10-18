@@ -5,7 +5,7 @@
 ; (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.0.10"
 #define MyAppDisplayVersion "1.0"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://aiproductivityflow.site/"
