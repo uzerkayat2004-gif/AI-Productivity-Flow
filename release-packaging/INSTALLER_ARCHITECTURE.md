@@ -15,7 +15,7 @@ hand-rolls more logic. Inno is the smallest reliable path to exactly one exe.
 %LOCALAPPDATA%\Programs\AI Productivity Flow\
     runtime\
         python\           CPython 3.12.10 + 62 packages + voice_flow + narova_tts
-        node\             node.exe (20.18.1)
+        node\             node.exe (22.23.3)
         hyperframes\      node_modules (hyperframes 0.7.96 + deps, win64 natives)
         ffmpeg\           ffmpeg.exe / ffprobe.exe + GPL license text
         narova\           vendored Narova tool (MIT) incl. tool\node_modules

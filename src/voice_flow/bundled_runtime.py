@@ -24,7 +24,7 @@ RUNTIME_FIELDS = (
 
 # Keep these aligned with release/assemble_windows_staging.py.
 WINDOWS_PYTHON = "3.12.10"
-WINDOWS_NODE = "20.18.1"
+WINDOWS_NODE = "22.23.3"
 WINDOWS_HYPERFRAMES = "0.7.96"
 WINDOWS_FFMPEG = "7.1.1"
 WINDOWS_WHISPER = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"

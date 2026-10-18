@@ -203,6 +203,10 @@ class StorageEngine:
         if db_path is None:
             db_path = resolve_active_db_path()
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        if not custom_db:
+            from voice_flow.paths import harden_private_dir
+
+            harden_private_dir(data_dir())
         self.db_path = str(db_path)
         self._lexicon_revision = 0
         self._lexicon_lock = threading.RLock()

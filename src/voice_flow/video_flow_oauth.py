@@ -122,6 +122,11 @@ def launch_system_browser(url: str) -> bool:
     """Reliably launch the system default browser across Windows, macOS, and Linux."""
     if not url:
         return False
+    # Only ever hand a web URL to the OS. The device-code verification URL
+    # comes from a remote server, and the Windows fallbacks below would
+    # otherwise open any scheme or local path it named.
+    if urllib.parse.urlparse(str(url)).scheme.lower() not in ("http", "https"):
+        return False
     import webbrowser
     import subprocess
     try:
@@ -136,7 +141,9 @@ def launch_system_browser(url: str) -> bool:
         except Exception:
             pass
         try:
-            subprocess.Popen(["cmd.exe", "/c", "start", "", url], shell=False)
+            # Not `cmd /c start`: cmd.exe re-parses the line, so an OAuth URL's
+            # `&` would end the command and run the rest as new commands.
+            subprocess.Popen(["rundll32.exe", "url.dll,FileProtocolHandler", url], shell=False)
             return True
         except Exception:
             pass

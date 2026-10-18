@@ -6,7 +6,7 @@ time (assemble_staging.py) and ships inside the installer. It records:
 
 - product + build script
 - Python: 3.12.10 + the full `pip freeze` (62 pinned packages)
-- Node: 20.18.1 + node.exe SHA-256
+- Node: 22.23.3 + node.exe SHA-256
 - HyperFrames: 0.7.96 (Apache-2.0)
 - FFmpeg/FFprobe: binary SHA-256s, exact `ffmpeg -version` line and
   configuration string (GPL build identification)
