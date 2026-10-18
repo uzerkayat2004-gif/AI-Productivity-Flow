@@ -5,7 +5,7 @@
 ; (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.6"
+#define MyAppVersion "1.0.7"
 #define MyAppDisplayVersion "1.0"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://aiproductivityflow.site/"
@@ -34,6 +34,9 @@ DisableProgramGroupPage=yes
 DisableReadyPage=yes
 ; Without this, DisableProgramGroupPage stores the shortcut in Programs\(Default).
 DefaultGroupName={#MyAppName}
+; An upgrade would otherwise reuse the group saved by the older installer,
+; which is "(Default)" for builds that had no DefaultGroupName.
+UsePreviousGroup=no
 DisableWelcomePage=yes
 DisableFinishedPage=no
 PrivilegesRequired=lowest
@@ -77,7 +80,9 @@ PageFlow=APF_WIZARD_PAGES:installing,finished
 
 [Files]
 ; runtime\* is the whole private runtime. That includes runtime\code2video.
-Source: "{#STAGING_ROOT}\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
+; pip and the C headers stay in staging for later build steps but are never
+; used by the installed app; leaving them out saves ~1,070 files for Defender.
+Source: "{#STAGING_ROOT}\runtime\*"; DestDir: "{app}\runtime"; Excludes: "\python\Lib\site-packages\pip,\python\Lib\site-packages\pip\*,\python\Lib\site-packages\pip-*.dist-info,\python\Lib\site-packages\pip-*.dist-info\*,\python\include,\python\include\*"; Flags: recursesubdirs ignoreversion
 Source: "{#STAGING_ROOT}\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#STAGING_ROOT}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LaunchScriptPath}"; DestDir: "{app}"; Flags: ignoreversion
@@ -89,7 +94,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeNa
 [Run]
 Filename: "{app}\runtime\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden; Check: NeedsVcRedist
 Filename: "{app}\runtime\webview2\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Flags: runhidden; Check: NeedsWebView2
-Filename: "{app}\runtime\node\node.exe"; Parameters: """{app}\runtime\hyperframes\node_modules\hyperframes\bin\hyperframes.mjs"" browser ensure"; Flags: runhidden nowait
+; No render-browser download here any more. `hyperframes browser ensure` used
+; to start (nowait) right before the app's first launch and competed with it
+; for CPU, disk and network. The app now prepares it in the background at
+; idle priority after it is up (runtime_env.schedule_render_browser_prefetch),
+; or on demand before the first Video Flow render.
 Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; Description: "Launch AI Productivity Flow"; Flags: shellexec nowait postinstall skipifsilent runasoriginaluser
 ; /SILENT and /VERYSILENT skip the Finish checkbox above. Launch anyway so a
 ; one-click update opens the app again when the installer is done.

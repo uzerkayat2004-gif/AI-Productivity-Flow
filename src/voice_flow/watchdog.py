@@ -240,6 +240,13 @@ def get_pythonw_executable() -> str:
     return "pythonw.exe"
 
 
+_LAUNCHER_PRIVATE_ENV = (
+    "VOICE_FLOW_LAUNCHER_MUTEX_HANDLE",
+    "VOICE_FLOW_LAUNCHER_MUTEX_PID",
+    "VOICE_FLOW_EARLY_SPLASH_HWND",
+)
+
+
 def get_pythonw_env(extra_env: dict | None = None) -> dict:
     """Prepare environment dictionary with venv context and PYTHONPATH."""
     src_dir = str(get_src_dir())
@@ -247,6 +254,11 @@ def get_pythonw_env(extra_env: dict | None = None) -> dict:
     venv_dir = project_root / ".venv"
 
     env = os.environ.copy()
+    # These describe the desktop launcher process itself (its mutex handle and
+    # its splash window). A handle number means nothing in another process, and
+    # a child that inherited them believed it already owned the launcher mutex.
+    for _name in _LAUNCHER_PRIVATE_ENV:
+        env.pop(_name, None)
     if extra_env:
         env.update(extra_env)
 
@@ -531,6 +543,13 @@ class WatchdogSupervisor:
         try:
             env = get_pythonw_env()
             spawn_kwargs = get_silent_windows_spawn_kwargs()
+            # Start the engine below normal priority so its heavy cold start
+            # (imports, Defender scans of new files) cannot make the PC lag.
+            # The engine raises itself back to normal once it is ready.
+            from voice_flow.startup_priority import engine_startup_creationflags
+            extra_flags = engine_startup_creationflags()
+            if extra_flags:
+                spawn_kwargs["creationflags"] = spawn_kwargs.get("creationflags", 0) | extra_flags
 
             self.child_process = subprocess.Popen(
                 [pythonw, "-m", "voice_flow.main"],

@@ -313,18 +313,30 @@ def test_start_login_already_running_no_deadlock(monkeypatch):
     holding the (formerly non-reentrant) _STATE_LOCK and deadlocked forever."""
     from voice_flow.video_flow_engine.notebooklm import login_flow
 
+    import threading
+
     monkeypatch.delenv("VOICE_FLOW_LOGIN_DISABLE", raising=False)
     monkeypatch.setattr(login_flow, "resolve_notebooklm_cli", lambda: Path("C:/fake/notebooklm.exe"))
+    spawned = []
+    monkeypatch.setattr(login_flow, "_watch_login", lambda *a, **k: spawned.append(a))
+    outcome: dict = {}
     with login_flow._STATE_LOCK:
         login_flow._STATE.update(running=True)
     try:
-        result = login_flow.start_login()
+        worker = threading.Thread(target=lambda: outcome.update(login_flow.start_login()), daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "start_login deadlocked on the already-running branch"
     finally:
         with login_flow._STATE_LOCK:
             login_flow._STATE.update(running=False)
-    assert result["launched"] is False
-    assert result["already_running"] is True
-    assert result["state"]["running"] is True
+    # The open sign-in keeps its window: a second click joins it (the UI keeps
+    # waiting on it, and its "Show sign-in window" button raises the window)
+    # instead of starting a second browser or failing with a 400.
+    assert outcome["already_running"] is True
+    assert outcome["launched"] is True
+    assert outcome["state"]["running"] is True
+    assert spawned == []
 
 
 def test_start_login_respects_disable_gate(monkeypatch):

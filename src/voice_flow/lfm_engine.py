@@ -20,6 +20,7 @@ from voice_flow.local_model_resources import (
     acquire_model_use,
     cleanup_is_forced,
     idle_time,
+    local_llm_thread_count,
     notify_models_available,
     register_idle_cleanup,
 )
@@ -80,7 +81,8 @@ def _release_idle_lfm(now: float) -> bool:
 _TEMPLATE_PATCHED = False
 _LFM_CONTEXT_TOKENS = 2048
 _LFM_OUTPUT_CAP_TOKENS = 1024
-LFM_WARM_IDLE_SECONDS = 10.0
+# Same warm window as S1-mini and the speech model (was 10 s: a reload per dictation).
+LFM_WARM_IDLE_SECONDS = LOCAL_MODEL_IDLE_SECONDS
 
 
 _ANALYSIS_MARKERS = (
@@ -384,7 +386,7 @@ def warm_lfm_model(*, timeout_seconds: float = 5.0) -> bool:
 
         llm = Llama(
             model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
-            n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
+            n_threads=local_llm_thread_count(), n_batch=512, verbose=False,
         )
         old_llm = getattr(polish_with_lfm, "_cached_llm", None)
         if old_llm is not None:
@@ -474,7 +476,7 @@ def _polish_with_lfm_impl(
             if llm is None or cached_path != str(model_path):
                 replacement = Llama(
                     model_path=str(model_path), n_ctx=_LFM_CONTEXT_TOKENS,
-                    n_threads=max(1, min(8, os.cpu_count() or 4)), n_batch=512, verbose=False,
+                    n_threads=local_llm_thread_count(), n_batch=512, verbose=False,
                 )
                 if llm is not None:
                     _release_cached_lfm(llm)

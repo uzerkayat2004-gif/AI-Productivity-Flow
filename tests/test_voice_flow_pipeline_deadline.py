@@ -631,6 +631,9 @@ def test_stream_harvest_reserves_time_for_complete_recording_recovery(monkeypatc
     app = _app(session)
     stream = _PendingStream()
     app._stream_stt = stream
+    # Cloud-style stream: on-device Whisper now waits for its last chunk instead
+    # (covered in tests/test_voiceflow_speed_v107.py).
+    app._local_chunk_stream = lambda _session: False
     whole_buffer_calls: list[float | None] = []
 
     def transcribe(_audio, **kwargs):

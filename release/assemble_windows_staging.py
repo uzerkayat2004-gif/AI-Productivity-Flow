@@ -10,7 +10,7 @@ build machine used to keep in ``~/apf-release-build/staging``:
             python/        CPython 3.12.10 (python-build-standalone, incl. Tk + pip)
                            + requirements.txt + narova_tts (+ voice_flow, added later
                            by build_windows_release.refresh_app_package)
-            node/          Node.js 20.18.1 (official win-x64 zip)
+            node/          Node.js 22.23.3 (official win-x64 zip)
             hyperframes/   hyperframes@0.7.96 node_modules (installed with the bundled npm)
             narova/tool/   vendored Narova CLI + its node_modules
             ffmpeg/        ffmpeg.exe / ffprobe.exe (gyan.dev essentials 7.1.1) + licenses
@@ -49,14 +49,22 @@ PYTHON_URL = (
     "https://github.com/astral-sh/python-build-standalone/releases/download/20250409/"
     "cpython-3.12.10+20250409-x86_64-pc-windows-msvc-install_only.tar.gz"
 )
-NODE_VERSION = "20.18.1"
+# From the release's SHA256SUMS asset.
+PYTHON_SHA256 = "5ac66ae49a2104efeba985c1dc1cb40987757ee81cc6c7f218d10b801f3276ed"
+NODE_VERSION = "22.23.3"
 NODE_URL = f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-x64.zip"
+# HyperFrames 0.7.96 refuses to start on Node < 22 ("HyperFrames requires
+# Node.js >= 22"), which made the installer's `browser ensure` step exit 1.
+# From https://nodejs.org/dist/v22.23.3/SHASUMS256.txt
+NODE_SHA256 = "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71"
 HYPERFRAMES_VERSION = "0.7.96"
 FFMPEG_VERSION = "7.1.1"
 FFMPEG_URL = (
     f"https://github.com/GyanD/codexffmpeg/releases/download/{FFMPEG_VERSION}/"
     f"ffmpeg-{FFMPEG_VERSION}-essentials_build.zip"
 )
+# The release publishes no checksum; recorded from the asset on 2026-10-18.
+FFMPEG_SHA256 = "04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4"
 WHISPER_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
 WHISPER_BASE = f"https://huggingface.co/Systran/faster-whisper-base.en/resolve/{WHISPER_REVISION}/"
 # SHA-256 values recorded in release-packaging/WHISPER_BUNDLE.md.
@@ -87,11 +95,24 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download(url: str, name: str) -> Path:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download(url: str, name: str, sha256: str | None = None) -> Path:
+    """Download into the cache. With ``sha256``, a cached or fresh file that
+    does not match is rejected, so a tampered mirror or cache cannot ship."""
     CACHE.mkdir(parents=True, exist_ok=True)
     target = CACHE / name
     if target.is_file() and target.stat().st_size > 0:
-        return target
+        if not sha256 or _sha256(target) == sha256:
+            return target
+        log(f"cached {name} does not match its pinned SHA-256; downloading again")
+        target.unlink()
     tmp = target.with_suffix(target.suffix + ".part")
     for attempt in range(1, 4):
         try:
@@ -99,6 +120,9 @@ def download(url: str, name: str) -> Path:
             request = urllib.request.Request(url, headers={"User-Agent": "apf-release-build"})
             with urllib.request.urlopen(request, timeout=300) as response, tmp.open("wb") as out:
                 shutil.copyfileobj(response, out, 1024 * 1024)
+            if sha256 and _sha256(tmp) != sha256:
+                tmp.unlink(missing_ok=True)
+                sys.exit(f"CHECKSUM MISMATCH: {url}")
             tmp.replace(target)
             return target
         except Exception as exc:  # network hiccup: retry, then fail loudly
@@ -120,7 +144,7 @@ def run(command: list[str], cwd: Path | None = None, env: dict | None = None) ->
 
 
 def stage_python() -> Path:
-    archive = download(PYTHON_URL, "python-install_only.tar.gz")
+    archive = download(PYTHON_URL, "python-install_only.tar.gz", PYTHON_SHA256)
     target = RUNTIME / "python"
     if target.exists():
         shutil.rmtree(target)
@@ -156,7 +180,7 @@ def stage_python() -> Path:
 
 
 def stage_node() -> Path:
-    archive = download(NODE_URL, f"node-v{NODE_VERSION}-win-x64.zip")
+    archive = download(NODE_URL, f"node-v{NODE_VERSION}-win-x64.zip", NODE_SHA256)
     target = RUNTIME / "node"
     if target.exists():
         shutil.rmtree(target)
@@ -215,7 +239,7 @@ def stage_narova(node: Path) -> None:
 
 
 def stage_ffmpeg() -> dict:
-    archive = download(FFMPEG_URL, f"ffmpeg-{FFMPEG_VERSION}-essentials_build.zip")
+    archive = download(FFMPEG_URL, f"ffmpeg-{FFMPEG_VERSION}-essentials_build.zip", FFMPEG_SHA256)
     target = RUNTIME / "ffmpeg"
     if target.exists():
         shutil.rmtree(target)
@@ -313,7 +337,7 @@ def main() -> None:
         "code2video": {"source": "third_party/code2video (vendored, MIT)"},
         "ffmpeg": ffmpeg_info,
         "whisper": whisper_info,
-        "render_browser": "provisioned at install time by `hyperframes browser ensure` (not redistributed)",
+        "render_browser": "provisioned per user by `hyperframes browser ensure` in the background after first launch, or before the first render (not redistributed)",
         **installer_info,
     }
     (RUNTIME / "runtime-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

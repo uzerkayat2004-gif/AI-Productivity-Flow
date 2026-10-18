@@ -57,6 +57,9 @@ def test_cold_watchdog_does_not_spawn_duplicate(monkeypatch, tmp_path: Path) -> 
 
 
 def test_launcher_waits_for_engine_before_opening_gui_on_api_only_listener(monkeypatch) -> None:
+    # The blocking wait (warming window turned off). The warming window is
+    # covered by tests/test_startup_performance.py.
+    monkeypatch.setenv("VOICE_FLOW_EARLY_WINDOW", "0")
     from voice_flow.storage import storage
 
     monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda _enable: None)
@@ -94,6 +97,9 @@ def test_launcher_waits_for_engine_before_opening_gui_on_api_only_listener(monke
 
 
 def test_launcher_opens_gui_after_bounded_engine_startup_timeout(monkeypatch) -> None:
+    # The blocking wait (warming window turned off). The warming window is
+    # covered by tests/test_startup_performance.py.
+    monkeypatch.setenv("VOICE_FLOW_EARLY_WINDOW", "0")
     from voice_flow.storage import storage
 
     monkeypatch.setattr(desktop_launcher, "set_windows_auto_startup", lambda _enable: None)

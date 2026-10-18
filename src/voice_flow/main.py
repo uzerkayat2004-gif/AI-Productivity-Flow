@@ -83,8 +83,9 @@ def _voice_flow_log_dir():
     None when the folder cannot be created; callers then skip file logging.
     """
     try:
-        from voice_flow.paths import data_dir as _data_dir
+        from voice_flow.paths import data_dir as _data_dir, harden_private_data_dirs
 
+        harden_private_data_dirs()
         _dir = _data_dir() / "logs"
         _dir.mkdir(parents=True, exist_ok=True)
         return _dir
@@ -120,6 +121,14 @@ try:
 except Exception:
     pass
 _AUDIO_FLOW_JOBS_INIT_LOCK = threading.Lock()
+
+try:
+    from voice_flow.startup_priority import process_age_seconds as _process_age_seconds
+    _age = _process_age_seconds()
+    if _age is not None:
+        log.info("[STARTUP] Engine modules imported %.1fs after process start.", _age)
+except Exception:
+    pass
 
 
 class DictationState(str, Enum):
@@ -168,6 +177,11 @@ CLOUD_INTERACTIVE_TARGET_SECONDS = 2.0
 # Streaming is an optimization. Always preserve a fixed slice of the shared
 # budget for one complete-recording recovery attempt before injection.
 WHOLE_BUFFER_RECOVERY_RESERVE_SECONDS = 1.0
+# On-device Whisper streams: when exactly one chunk is still decoding at the
+# end of the harvest, wait for it (it holds the model lock the full-recording
+# decode would need anyway) until this much of the complete-recording budget
+# is left for the whole-buffer fallback.
+LOCAL_STREAM_FALLBACK_RESERVE_SECONDS = 1.0
 
 
 def _complete_recording_budget_seconds(duration: float) -> float:
@@ -1040,6 +1054,23 @@ class VoiceFlowApp:
         if callable(release):
             release()
         raise RuntimeError("Dictation session cannot own its speech-model demand")
+
+    def _local_chunk_stream(self, session: Any) -> bool:
+        """True when this session's stream decodes recorder chunks on-device.
+
+        Cloud chunk streams and live-frame streams (Nemotron, Flux, Nova) keep
+        their own harvest rules.
+        """
+        try:
+            if bool(getattr(getattr(self, "_stream_stt", None), "live_frames", False)):
+                return False
+            model_ref = getattr(session, "stt_model_ref", None) or (
+                session.get("stt_model_ref") if isinstance(session, dict) else None
+            )
+            ref = str(model_ref or "local/faster-whisper-base.en").strip().lower()
+            return ref.startswith("local/") and "nemotron" not in ref
+        except Exception:
+            return False
 
     @staticmethod
     def _keep_local_whisper_warm(model_ref: object) -> bool:
@@ -2382,6 +2413,42 @@ class VoiceFlowApp:
                             except Exception:
                                 still_pending = 1
                             stream_had_failures = self._stream_had_failures(self._stream_stt)
+
+                        if (
+                            still_pending == 1
+                            and not stream_had_failures
+                            and self._local_chunk_stream(session)
+                        ):
+                            # On-device Whisper: one chunk is still decoding.
+                            # Throwing the stream away here never saves time:
+                            # the full-recording decode needs the same model
+                            # lock (it waits for this chunk anyway) and then
+                            # decodes every second of audio again. Measured
+                            # on a 2-thread CPU: 5.8 s and 16.4 s release-to-
+                            # text when discarded vs ~1-4 s when waited for.
+                            # Wait for that one chunk, keeping a slice of the
+                            # complete-recording budget for the fallback.
+                            local_wait_until = complete_recording_deadline - LOCAL_STREAM_FALLBACK_RESERVE_SECONDS
+                            remaining_local = local_wait_until - time.monotonic()
+                            if remaining_local > 0.0:
+                                try:
+                                    set_deadline = getattr(self._stream_stt, "set_deadline", None)
+                                    if callable(set_deadline):
+                                        set_deadline(local_wait_until)
+                                    late_part = _call_with_optional_deadline(
+                                        self._stream_stt.collect,
+                                        deadline=local_wait_until,
+                                        timeout=remaining_local,
+                                    )
+                                    if late_part:
+                                        part = f"{part} {late_part}".strip() if part else str(late_part).strip()
+                                except Exception:
+                                    log.debug("[STREAM STT] local late-chunk wait failed", exc_info=True)
+                                try:
+                                    still_pending = self._stream_stt.pending_count()
+                                except Exception:
+                                    still_pending = 1
+                                stream_had_failures = self._stream_had_failures(self._stream_stt)
 
                         if part and still_pending <= 0 and not stream_had_failures:
                             raw_transcript = str(part).strip()
@@ -4061,6 +4128,10 @@ class VoiceFlowApp:
         except Exception as exc:
             log.debug("NotebookLM keepalive startup trigger: %s", exc)
 
+        # Back to normal priority before any window process is spawned: a
+        # Windows child started now would inherit below-normal for good.
+        self._restore_startup_priority()
+
         # Launch Desktop UI Window silently in a dedicated process if not already open
         try:
             args = getattr(self, "args", None)
@@ -4071,19 +4142,23 @@ class VoiceFlowApp:
                     self.open_desktop_window()
             elif not headless and not no_gui:
                 window_open = False
+                # A launcher that holds the mutex owns the window (it may still
+                # be on its "warming up" page). Check that first: focusing the
+                # window from here would pull it in front of whatever the user
+                # switched to while the engine was starting.
                 try:
-                    from voice_flow.gui.desktop_launcher import _focus_existing_window
-                    window_open = _focus_existing_window()
+                    from voice_flow.gui.desktop_launcher import _launcher_mutex_held
+                    if _launcher_mutex_held():
+                        window_open = True
                 except Exception:
-                    window_open = False
+                    pass
 
                 if not window_open:
                     try:
-                        from voice_flow.gui.desktop_launcher import _launcher_mutex_held
-                        if _launcher_mutex_held():
-                            window_open = True
+                        from voice_flow.gui.desktop_launcher import _focus_existing_window
+                        window_open = _focus_existing_window()
                     except Exception:
-                        pass
+                        window_open = False
                 if not window_open:
                     from voice_flow.watchdog import get_pythonw_executable, get_pythonw_env, get_silent_windows_spawn_kwargs
                     pythonw_exe = get_pythonw_executable()
@@ -4108,6 +4183,8 @@ class VoiceFlowApp:
         except Exception:
             log.debug("Update confirmation skipped", exc_info=True)
 
+        self._finish_startup()
+
         log.info("==========================================================")
         log.info(" VOICE FLOW READY! ")
         log.info(" - System-wide floating bar active on your screen")
@@ -4127,6 +4204,31 @@ class VoiceFlowApp:
             except Exception as e:
                 log.error("Overlay main loop error: %s", e)
                 time.sleep(1.0)
+
+    def _restore_startup_priority(self) -> None:
+        """The watchdog starts the engine below normal; the heavy part is done."""
+        try:
+            from voice_flow import startup_priority
+            if startup_priority.restore_normal_priority():
+                log.info("[STARTUP] Engine priority restored to normal after startup.")
+        except Exception:
+            log.debug("Startup priority restore skipped", exc_info=True)
+
+    def _finish_startup(self) -> None:
+        """End of the cold start: timing log and deferred one-time work."""
+        try:
+            from voice_flow import startup_priority
+            age = startup_priority.process_age_seconds()
+            if age is not None:
+                log.info("[STARTUP] Engine ready %.1fs after process start.", age)
+        except Exception:
+            pass
+        try:
+            from voice_flow import runtime_env
+            if runtime_env.schedule_render_browser_prefetch():
+                log.info("[STARTUP] Video Flow render browser will be prepared in the background later.")
+        except Exception:
+            log.debug("Render browser prefetch not scheduled", exc_info=True)
 
     # ------------------------------------------------------------------
     # macOS lifecycle: window process, real Quit, menu bar item.

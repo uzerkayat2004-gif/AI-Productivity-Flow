@@ -1,7 +1,7 @@
 > 🗄️ Release-packaging audit report (2026-08-22 mission). Current installer reference: [../release/](../release/). Open items live in CLEAN_MACHINE_TEST.md and RELEASE_CHECKLIST.md.
 # NODE_RUNTIME — private Node.js + HyperFrames without npx
 
-- **Node.js 20.18.1 x64** (official win-x64 zip; `node.exe` SHA-256 in
+- **Node.js 22.23.3 x64** (official win-x64 zip; `node.exe` SHA-256 in
   runtime-manifest.json). Installed at `runtime/node/node.exe`; never added
   to PATH, never system-installed.
 - **HyperFrames 0.7.96 (Apache-2.0)** — the pinned version narova's hf.js

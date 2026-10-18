@@ -24,7 +24,7 @@ runtime-manifest.json. Nothing was renamed to hide origin.
 | three.js (narova vendor) | r185 | MIT | shipped via narova |
 | gsap (narova vendor) | 3.14.2 | GreenSock standard license | notice kept verbatim; desktop-bundling not explicitly addressed by Webflow — flagged in KNOWN_LIMITATIONS |
 | hyperframes | 0.7.96 | Apache-2.0 | node_modules shipped (replaces npx) |
-| Node.js | 20.18.1 | MIT (+ bundled deps) | official zip |
+| Node.js | 22.23.3 | MIT (+ bundled deps) | official zip |
 | FFmpeg/FFprobe | gyan release-essentials | GPL-3.0 (libx264) | GPL text + source offer; build identified in manifest |
 | Python | 3.12.10 | PSF | official installer |
 | 62 pip packages | pinned (manifest) | MIT/BSD/Apache | incl. LGPLv3 trio below |

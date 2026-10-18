@@ -18,7 +18,11 @@ DESKTOP = (ROOT / "src" / "voice_flow" / "gui" / "desktop_launcher.py").read_tex
 
 
 def test_splash_title_and_class_are_not_the_app_window() -> None:
-    assert WINDOW_TITLE == SPLASH_CLASS_NAME == "APFEarlySplash"
+    # Since v1.0.7 the splash has a taskbar button, so its title is readable;
+    # the class stays "APFEarlySplash" and FindWindowW's exact title match
+    # can never confuse "AI Productivity Flow (starting)" with the app.
+    assert SPLASH_CLASS_NAME == "APFEarlySplash"
+    assert WINDOW_TITLE == "AI Productivity Flow (starting)"
     assert BRAND_TITLE == "AI Productivity Flow"
     assert WINDOW_TITLE not in APP_WINDOW_TITLES
     assert is_startup_splash("AI Productivity Flow", "APFEarlySplash")

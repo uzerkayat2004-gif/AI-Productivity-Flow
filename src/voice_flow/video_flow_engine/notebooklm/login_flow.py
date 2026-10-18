@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 _LOGIN_TIMEOUT_SECONDS = 300
 _ONLINE_CHECK_TIMEOUT_SECONDS = 75
 _ONLINE_CACHE_SECONDS = 120.0
+# The check right after a CLI sign-in starts a cold python.exe, imports the
+# CLI, and makes a network round-trip; 15 s was not always enough on Windows.
+_POST_LOGIN_VERIFY_TIMEOUT_SECONDS = 45.0
+_POST_LOGIN_VERIFY_RETRY_DELAY_SECONDS = 2.0
 _HIDE_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 # Keep the real Popen class. Tests replace subprocess.Popen with a lambda, and
 # isinstance() against that attribute then raises TypeError.
@@ -86,6 +90,25 @@ _ACTIVE_LOGIN_PROCESS: subprocess.Popen | None = None
 _ACTIVE_LOGIN_PROFILE: str | None = None
 _LOGIN_CANCEL = threading.Event()
 _RICH_TAG = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9 _#.=:,+-]*\]")
+# The last CLI run's detail is kept per thread. A background refresh that
+# finishes while an interactive login is running must not overwrite the login's
+# exit code, cancel flag or output (it used to share one function attribute).
+_LOGIN_DETAIL_LOCAL = threading.local()
+# Non-interactive CLI runs (auth refresh) that are still in flight, by pid.
+# A sign-in stops them first: a refresh that finishes after the new sign-in
+# would rewrite storage_state.json with the old, broken session.
+_BACKGROUND_CLI_LOCK = threading.Lock()
+_BACKGROUND_CLI_PROCESSES: dict[int, tuple[str | None, Any]] = {}
+# Profiles whose last sign-in ended without a usable session. The next click
+# starts from a clean browser profile instead of reusing the same state.
+_FRESH_NEXT: dict[str, str] = {}
+# Old sessions moved aside by a fresh sign-in; keep only the newest few.
+_STALE_SESSION_KEEP = 2
+_STALE_SESSION_DIRNAME = "stale-sessions"
+_MAC_QUARANTINE_DONE = False
+# Where Playwright's "chrome"/"msedge" channels look on macOS, and the xattr tool.
+_MAC_APPLICATIONS_DIR = Path("/Applications")
+_MAC_XATTR = Path("/usr/bin/xattr")
 
 
 def _cache_online_verification(profile: str, result: dict[str, Any], checked_at: float | None = None) -> None:
@@ -480,6 +503,21 @@ def _profile_browser_dir(profile: str) -> Path:
     return get_profile_dir(profile) / "browser_profile"
 
 
+def _is_sign_in_browser_process_name(name: str) -> bool:
+    """True for the Chrome, Edge or Chromium processes the CLI can launch.
+
+    Windows names end in ``.exe``. macOS names are "Google Chrome",
+    "Google Chrome Helper (Renderer)", "Chromium", "Microsoft Edge"; Linux uses
+    "chrome"/"chromium". The old Windows-only list meant a sign-in browser left
+    over on a Mac was never found, so the next sign-in hit Chrome's profile lock.
+    The exact ``--user-data-dir`` match is still what selects a process.
+    """
+    lowered = (name or "").casefold()
+    if lowered in ("chrome.exe", "msedge.exe", "chromium.exe"):
+        return True
+    return any(part in lowered for part in ("chrome", "chromium", "msedge", "microsoft edge"))
+
+
 def _matches_profile_user_data_dir(cmdline_norm: str, marker_norm: str, profile_name: str) -> bool:
     """True only for an exact ``--user-data-dir`` argument for this profile."""
     del profile_name  # Kept in the signature for existing callers.
@@ -508,8 +546,7 @@ def _profile_browser_pids(profile: str) -> set[int]:
 
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
-                name = (proc.info.get("name") or "").casefold()
-                if name not in ("chrome.exe", "msedge.exe", "chromium.exe"):
+                if not _is_sign_in_browser_process_name(proc.info.get("name") or ""):
                     continue
                 cmdline = proc.info.get("cmdline") or []
                 if isinstance(cmdline, str):
@@ -636,10 +673,57 @@ def bring_login_window_forward(profile: str | None = None) -> bool:
     if not isinstance(profile, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", profile) or profile in {".", ".."}:
         return False
     owned_pids = _profile_browser_pids(profile)
+    if sys.platform == "darwin":
+        return _activate_mac_pids(owned_pids)
     for hwnd, pid, _title, _class_name in _visible_top_level_windows():
         if pid in owned_pids:
             return _bring_hwnd_forward(hwnd)
     return False
+
+
+def _activate_mac_pids(pids: set[int]) -> bool:
+    """Bring the sign-in Chrome to the front on macOS.
+
+    Only the main browser process is a running application; helper processes
+    return None and are skipped. Uses AppKit, which needs no Automation
+    permission (osascript and System Events would prompt the user).
+    """
+    if sys.platform != "darwin" or not pids:
+        return False
+    try:
+        from AppKit import NSRunningApplication  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    for pid in sorted(pids):
+        try:
+            app = NSRunningApplication.runningApplicationWithProcessIdentifier_(int(pid))
+            if app is None:
+                continue
+            # NSApplicationActivateIgnoringOtherApps == 1 << 1
+            if app.activateWithOptions_(1 << 1):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _handoff_login_window_mac(profile: str, stop_event: threading.Event | None) -> None:
+    """macOS: activate the sign-in browser once when it appears (20 s window)."""
+    deadline = time.monotonic() + _LOGIN_BROWSER_HANDOFF_SECONDS
+    while time.monotonic() < deadline:
+        if stop_event is not None and stop_event.is_set():
+            return
+        pids = _profile_browser_pids(profile)
+        if pids:
+            # Give Chrome a moment to create its first window before activating.
+            time.sleep(0.5)
+            _activate_mac_pids(_profile_browser_pids(profile) or pids)
+            return
+        if stop_event is not None:
+            if stop_event.wait(_LOGIN_WINDOW_POLL_SECONDS):
+                return
+        else:
+            time.sleep(_LOGIN_WINDOW_POLL_SECONDS)
 
 
 def _is_windows_security_prompt(title: str, class_name: str) -> bool:
@@ -719,12 +803,40 @@ def _start_login_foreground_handoff(
             return
     except (ValueError, IndexError):
         return
+    if sys.platform == "darwin":
+        threading.Thread(
+            target=_handoff_login_window_mac,
+            args=(profile, stop_event),
+            name="notebooklm-login-window-handoff",
+            daemon=True,
+        ).start()
+        return
     threading.Thread(
         target=_handoff_login_windows,
         args=(profile, cli_pid, initial_hwnds, stop_event, credential_watch_seconds),
         name="notebooklm-login-window-handoff",
         daemon=True,
     ).start()
+
+
+def _remove_browser_lock_files(browser_dir: Path) -> None:
+    """Delete Chrome's profile lock files, including dangling symlinks.
+
+    On macOS and Linux ``SingletonLock`` is a symlink to "<host>-<pid>" that
+    normally dangles. ``Path.exists()`` follows the link and returns False, so
+    the old check never removed it. When the Mac's host name had changed since
+    the lock was written, Chrome refused the profile ("in use on another
+    computer") and the sign-in window never opened.
+    """
+    for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"):
+        lock_p = browser_dir / lock_name
+        try:
+            if os.path.lexists(lock_p):
+                lock_p.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
 
 def _terminate_stale_login_processes(profile: str, log_path: Path | str | None = None) -> int:
@@ -745,8 +857,7 @@ def _terminate_stale_login_processes(profile: str, log_path: Path | str | None =
             try:
                 if proc.info["pid"] == my_pid:
                     continue
-                name = (proc.info.get("name") or "").casefold()
-                if name in ("chrome.exe", "msedge.exe", "chromium.exe"):
+                if _is_sign_in_browser_process_name(proc.info.get("name") or ""):
                     cmdline = proc.info.get("cmdline") or []
                     if isinstance(cmdline, str):
                         cmdline = [cmdline]
@@ -761,11 +872,7 @@ def _terminate_stale_login_processes(profile: str, log_path: Path | str | None =
 
     # Clean up lock files from browser profile
     try:
-        b_dir = _profile_browser_dir(profile)
-        for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"):
-            lock_p = b_dir / lock_name
-            if lock_p.exists():
-                lock_p.unlink(missing_ok=True)
+        _remove_browser_lock_files(_profile_browser_dir(profile))
     except Exception:
         pass
 
@@ -928,13 +1035,7 @@ def _prepare_browser_profile(profile: str, switch_account: bool = False) -> None
         pass
 
     # 2. Clean up stale lock files if no browser process is running
-    for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"):
-        lock_p = browser_dir / lock_name
-        if lock_p.exists():
-            try:
-                lock_p.unlink(missing_ok=True)
-            except Exception:
-                pass
+    _remove_browser_lock_files(browser_dir)
 
     # 3. Ensure Local State disables welcome page & profile picker on startup
     local_state_path = browser_dir / "Local State"
@@ -984,6 +1085,177 @@ def _prepare_browser_profile(profile: str, switch_account: bool = False) -> None
         prefs.setdefault("profile", {})["exit_type"] = "Normal"
         prefs.setdefault("signin", {})["allowed"] = True
         default_prefs_path.write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _saved_session_kind(profile: str) -> str:
+    """Classify what a sign-in click starts from, without running the CLI.
+
+    ``"none"``: no storage_state.json with cookies and no master token. A new
+    user, or a profile left behind by an attempt that never saved a session.
+    ``"broken"``: a saved session that the last check called definitely signed
+    out (Google said so, or the keepalive reached ``sign_in_required``).
+    ``"saved"``: a saved session whose state is fine or unknown.
+    """
+    try:
+        from .config import get_storage_state_path, has_nonempty_cookies
+        storage = get_storage_state_path(profile)
+        has_cookies = bool(storage.is_file() and has_nonempty_cookies(storage))
+    except Exception:
+        has_cookies = False
+    if not has_cookies and not master_token_present(profile):
+        return "none"
+    with _STATE_LOCK:
+        cached = dict((_ONLINE_CACHE.get(profile) or {}).get("result") or {})
+    if cached.get("authenticated") is False and cached.get("definitive") is True \
+            and cached.get("failure_kind") == "auth":
+        return "broken"
+    try:
+        from .keepalive import get_session_refresh_state
+        if str((get_session_refresh_state(profile) or {}).get("state") or "") == "sign_in_required":
+            return "broken"
+    except Exception:
+        pass
+    return "saved"
+
+
+def _backup_stale_session(profile: str, log_path: Path | str | None = None, *, reason: str) -> Path | None:
+    """Move an old session aside so the next sign-in starts clean.
+
+    Moves storage_state.json (plus its backup and safe copy) and the CLI's
+    browser_profile into ``<profile>/stale-sessions/<time>/``. Nothing is
+    deleted except backups older than the newest few. The master token is
+    left alone. Returns the backup folder, or None when there was nothing to move.
+    """
+    try:
+        from .config import is_pytest_real_home_path
+    except Exception:  # pragma: no cover - config always importable
+        def is_pytest_real_home_path(_p):  # type: ignore[misc]
+            return False
+    profile_dir = get_profile_dir(profile)
+    if is_pytest_real_home_path(profile_dir):
+        logger.warning("fresh sign-in: pytest isolation - not moving real-home profile %s", profile_dir)
+        return None
+    stale_root = profile_dir / _STALE_SESSION_DIRNAME
+    target = stale_root / time.strftime("%Y%m%d-%H%M%S")
+    suffix = 1
+    while target.exists():
+        suffix += 1
+        target = stale_root / f"{time.strftime('%Y%m%d-%H%M%S')}-{suffix}"
+    moved: list[str] = []
+    candidates = [
+        profile_dir / "storage_state.json",
+        profile_dir / "storage_state.backup.json",
+        profile_dir / "storage_state.safe_copy.json",
+        _profile_browser_dir(profile),
+    ]
+    for source in candidates:
+        try:
+            if not os.path.lexists(source):
+                continue
+            target.mkdir(parents=True, exist_ok=True)
+            try:
+                os.replace(source, target / source.name)
+            except OSError:
+                # Windows refuses to rename a folder a process still holds open.
+                if source.is_dir():
+                    shutil.copytree(source, target / source.name, dirs_exist_ok=True,
+                                    ignore=shutil.ignore_patterns("Singleton*", "lockfile", "*.lock"))
+                    shutil.rmtree(source, ignore_errors=True)
+                else:
+                    shutil.copy2(source, target / source.name)
+                    source.unlink(missing_ok=True)
+            moved.append(source.name)
+        except Exception as exc:
+            logger.warning("fresh sign-in: could not move %s aside: %s", source, exc)
+    try:
+        if stale_root.is_dir():
+            old = sorted((d for d in stale_root.iterdir() if d.is_dir()), key=lambda d: d.name)
+            for extra in old[:-_STALE_SESSION_KEEP]:
+                shutil.rmtree(extra, ignore_errors=True)
+    except Exception:
+        pass
+    with _STATE_LOCK:
+        _ONLINE_CACHE.pop(profile, None)
+    try:
+        from .keepalive import reset_session_refresh_state
+        reset_session_refresh_state(profile)
+    except Exception:
+        pass
+    if log_path is not None:
+        try:
+            with Path(log_path).open("a", encoding="utf-8") as handle:
+                handle.write(
+                    f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [fresh] reason={reason} "
+                    f"moved={','.join(moved) or 'nothing'} to={target if moved else '-'}\n"
+                )
+        except Exception:
+            pass
+    logger.info("NotebookLM fresh sign-in (%s): moved %s aside", reason, moved or "nothing")
+    return target if moved else None
+
+
+def _mac_clear_runtime_quarantine(cli_path: Path | None, log_path: Path | str | None = None) -> None:
+    """Remove macOS quarantine from the bundled runtime the CLI runs on.
+
+    The app runs Python in-process (the native launcher dlopens libpython),
+    so ``runtime/python/bin/python3`` and Playwright's ``node`` driver are first
+    exec'd by sign-in. Files copied out of a downloaded zip or dmg keep
+    ``com.apple.quarantine``, and Gatekeeper can refuse to run them. Best
+    effort, once per app run; failures are logged and ignored.
+    """
+    global _MAC_QUARANTINE_DONE
+    if sys.platform != "darwin" or _MAC_QUARANTINE_DONE or cli_path is None:
+        return
+    _MAC_QUARANTINE_DONE = True
+    xattr = _MAC_XATTR
+    if not xattr.is_file():
+        return
+    runtime = cli_path.parent.parent if cli_path.parent.name == "bin" else None
+    if runtime is None or not runtime.is_dir():
+        return
+    try:
+        probe = subprocess.run(
+            [str(xattr), "-p", "com.apple.quarantine", str(cli_path)],
+            capture_output=True, text=True, timeout=5,
+        )
+        interpreter = cli_path.parent / "python3"
+        if probe.returncode != 0 and interpreter.is_file():
+            probe = subprocess.run(
+                [str(xattr), "-p", "com.apple.quarantine", str(interpreter)],
+                capture_output=True, text=True, timeout=5,
+            )
+        if probe.returncode != 0:
+            line = "[mac] runtime has no quarantine flag"
+        else:
+            result = subprocess.run(
+                [str(xattr), "-dr", "com.apple.quarantine", str(runtime)],
+                capture_output=True, text=True, timeout=60,
+            )
+            line = f"[mac] cleared quarantine on {runtime}: rc={result.returncode} {(result.stderr or '').strip()[:200]}"
+    except Exception as exc:
+        line = f"[mac] quarantine check failed: {exc}"
+    if log_path is not None:
+        try:
+            with Path(log_path).open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except Exception:
+            pass
+
+
+def _log_login_environment(log_path: Path | str, *, profile: str, cli_path: Path | None, browser: str,
+                           fresh_login: bool, fresh_reason: str | None) -> None:
+    """One line per sign-in that says which CLI, browser and profile were used."""
+    try:
+        argv = _cli_argv([str(cli_path)]) if cli_path is not None else []
+        with Path(log_path).open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] [env] platform={sys.platform} profile={profile} "
+                f"browser={browser} fresh={fresh_login} reason={fresh_reason or '-'} "
+                f"cli={cli_path} interpreter={argv[0] if len(argv) >= 3 else '-'} "
+                f"browser_profile={_profile_browser_dir(profile)}\n"
+            )
     except Exception:
         pass
 
@@ -1059,6 +1331,10 @@ def _login_child_env(interpreter: Path | None = None) -> dict[str, str]:
                 prefix.append(str(extra))
         current = env.get("PATH", "")
         env["PATH"] = os.pathsep.join(prefix + ([current] if current else []))
+    # The CLI prints JSON with ensure_ascii=False. Without this a Windows child
+    # writes to the pipe in the ANSI code page and can fail on non-ASCII text.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     if not env.get("PLAYWRIGHT_BROWSERS_PATH"):
         browsers = _default_playwright_browsers_dir()
         try:
@@ -1164,13 +1440,17 @@ def _browser_installed(browser: str) -> bool:
             except OSError:
                 continue
     if sys.platform == "darwin":
-        for base in (Path("/Applications"), Path.home() / "Applications"):
-            for app_name in app_names:
-                try:
-                    if (base / app_name).exists():
-                        return True
-                except OSError:
-                    continue
+        # Playwright's "chrome"/"msedge" channels launch exactly
+        # /Applications/<App>.app on macOS. A copy in ~/Applications is not
+        # found by Playwright, so counting it sent the CLI to a browser it then
+        # failed to start ("Chromium distribution 'chrome' is not found").
+        for app_name in app_names:
+            try:
+                if (_MAC_APPLICATIONS_DIR / app_name).exists():
+                    return True
+            except OSError:
+                continue
+        return False
     for name in which_names:
         if shutil.which(name):
             return True
@@ -1337,13 +1617,78 @@ def _redact_command_for_log(command: list[str]) -> str:
     return " ".join(redacted)
 
 
-def _remember_login_detail(*, exit_code: int | None, window_opened: bool | None, cancelled: bool, elapsed: float) -> None:
-    _run_login_once.last_detail = {
+def _remember_login_detail(
+    *, exit_code: int | None, window_opened: bool | None, cancelled: bool, elapsed: float, output: str = "",
+) -> None:
+    detail = {
         "exit_code": exit_code,
         "window_opened": window_opened,
         "cancelled": cancelled,
         "elapsed": elapsed,
+        "output": _clean_cli_output(output[-8000:]) if output else "",
+        # The CLI found a live Google session in its browser profile and
+        # captured it without showing the sign-in page.
+        "reused_browser_session": "already logged in" in (output or "").casefold(),
+        # The CLI saved the capture without a usable __Secure-1PSIDTS.
+        "psidts_unhealed": "no usable __secure-1psidts" in (output or "").casefold(),
     }
+    _run_login_once.last_detail = detail
+    _LOGIN_DETAIL_LOCAL.detail = detail
+
+
+def _reset_login_detail() -> None:
+    _LOGIN_DETAIL_LOCAL.detail = None
+    try:
+        _run_login_once.last_detail = {}
+    except Exception:
+        pass
+
+
+def _current_login_detail() -> dict[str, Any]:
+    """Detail of the CLI run this thread just made.
+
+    The thread-local copy wins; tests that replace ``_run_login_once`` set the
+    function attribute instead, which stays the fallback.
+    """
+    detail = getattr(_LOGIN_DETAIL_LOCAL, "detail", None)
+    if isinstance(detail, dict):
+        return detail
+    detail = getattr(_run_login_once, "last_detail", None)
+    return detail if isinstance(detail, dict) else {}
+
+
+def _command_profile(command: list[str]) -> str | None:
+    try:
+        return str(command[command.index("--profile") + 1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _stop_background_cli(profile: str, log_path: Path | str | None = None) -> int:
+    """Stop in-flight non-interactive CLI runs (auth refresh) for this profile.
+
+    A sign-in clicked while the keepalive refresh is running used to race it:
+    ``auth refresh --allow-headless`` can open the same browser profile
+    headless, and when it finished after the sign-in it rewrote
+    storage_state.json with the old session.
+    """
+    with _BACKGROUND_CLI_LOCK:
+        targets = [proc for (prof, proc) in _BACKGROUND_CLI_PROCESSES.values() if prof in (None, profile)]
+    stopped = 0
+    for proc in targets:
+        try:
+            if proc.poll() is None:
+                _kill_process_tree(proc)
+                stopped += 1
+        except Exception:
+            continue
+    if stopped and log_path is not None:
+        try:
+            with Path(log_path).open("a", encoding="utf-8") as handle:
+                handle.write(f"[stopped {stopped} background session refresh(es) before sign-in]\n")
+        except Exception:
+            pass
+    return stopped
 
 
 def _run_login_once(
@@ -1392,6 +1737,11 @@ def _run_login_once(
                 process = spawn_notebooklm_process(command)
                 if interactive:
                     _ACTIVE_LOGIN_PROCESS = process
+                else:
+                    pid = getattr(process, "pid", None)
+                    if isinstance(pid, int):
+                        with _BACKGROUND_CLI_LOCK:
+                            _BACKGROUND_CLI_PROCESSES[pid] = (_command_profile(command), process)
                 if getattr(process, "stdout", None) is not None:
                     reader = threading.Thread(
                         target=_drain_stream,
@@ -1444,6 +1794,11 @@ def _run_login_once(
                 handoff_stop_event.set()
             if _ACTIVE_LOGIN_PROCESS is process:
                 _ACTIVE_LOGIN_PROCESS = None
+            if process is not None and not interactive:
+                with _BACKGROUND_CLI_LOCK:
+                    pid = getattr(process, "pid", None)
+                    if isinstance(pid, int) and _BACKGROUND_CLI_PROCESSES.get(pid, (None, None))[1] is process:
+                        _BACKGROUND_CLI_PROCESSES.pop(pid, None)
         for reader in readers:
             reader.join(timeout=2)
         output = "".join(stdout_chunks)
@@ -1469,7 +1824,8 @@ def _run_login_once(
             log_handle.write("\n")
         log_handle.write(f"[exit code {code} after {elapsed:.2f}s]\n")
         log_handle.flush()
-    _remember_login_detail(exit_code=code, window_opened=window_opened, cancelled=cancelled, elapsed=elapsed)
+    _remember_login_detail(exit_code=code, window_opened=window_opened, cancelled=cancelled,
+                           elapsed=elapsed, output=combined)
     return code, error
 
 
@@ -1482,6 +1838,7 @@ def _watch_login(
     log_path: Path,
     switch_account: bool = False,
     fresh_login: bool = False,
+    fresh_reason: str | None = None,
 ) -> None:
     """Run the sign-in chain in the background.
 
@@ -1514,7 +1871,14 @@ def _watch_login(
         with _STATE_LOCK:
             _STATE["browser"] = browser
         _set_note("Waiting for Google sign-in…")
+        # Anything a background check or refresh started before this click is
+        # now stale: fence its result and stop its CLI process.
+        note_session_refreshed(profile)
+        _stop_background_cli(profile, log_path)
         _terminate_stale_login_processes(profile, log_path)
+        _mac_clear_runtime_quarantine(cli_path, log_path)
+        if fresh_login and not switch_account:
+            _backup_stale_session(profile, log_path, reason=fresh_reason or "requested")
         if switch_account:
             time.sleep(0.3)
             try:
@@ -1525,77 +1889,116 @@ def _watch_login(
             except Exception:
                 pass
         _prepare_browser_profile(profile, switch_account=switch_account)
+        _log_login_environment(log_path, profile=profile, cli_path=cli_path, browser=browser,
+                               fresh_login=bool(fresh_login or switch_account), fresh_reason=fresh_reason)
 
         # In a pytest test run where _run_login_once is not explicitly mocked, avoid launching real GUI browsers
         if os.environ.get("PYTEST_CURRENT_TEST") and getattr(_run_login_once, "__name__", "") in ("_run_login_once", ""):
             return
 
-        _run_login_once.last_detail = {}
-        if mode == "master-token" and account_email:
-            force = bool(switch_account or (_storage_email() and account_email != _storage_email()))
-            code, err = _run_login_once(
-                _login_command(
-                    cli_path, profile, mode="master-token",
-                    account_email=account_email, browser=browser,
-                    browser_timeout=browser_timeout, force=force,
-                    switch_account=switch_account,
-                    fresh_login=fresh_login,
-                ),
-                log_path,
-                browser_timeout,
-            )
-        else:
-            code, err = _run_login_once(
+        def _run_cli_login(fresh: bool) -> tuple[int, str]:
+            _reset_login_detail()
+            if mode == "master-token" and account_email:
+                force = bool(switch_account or (_storage_email() and account_email != _storage_email()))
+                return _run_login_once(
+                    _login_command(
+                        cli_path, profile, mode="master-token",
+                        account_email=account_email, browser=browser,
+                        browser_timeout=browser_timeout, force=force,
+                        switch_account=switch_account,
+                        fresh_login=fresh,
+                    ),
+                    log_path,
+                    browser_timeout,
+                )
+            return _run_login_once(
                 _login_command(
                     cli_path, profile, mode="browser",
                     account_email=None, browser=browser,
                     browser_timeout=browser_timeout,
                     switch_account=switch_account,
-                    fresh_login=fresh_login,
+                    fresh_login=fresh,
                 ),
                 log_path,
                 browser_timeout,
             )
-        success = code == 0
-        if success:
-            # Any passive verification that began before the browser login
-            # completed must not be allowed to publish an expired verdict.
-            note_session_refreshed(profile)
-            durable = master_token_present(profile)
-            email = None
-            try:
-                from .config import get_storage_state_path
-                st_p = get_storage_state_path(profile)
-                if st_p.is_file():
-                    st_data = json.loads(st_p.read_text(encoding="utf-8"))
-                    if isinstance(st_data, dict):
-                        email = (
-                            (st_data.get("notebooklm") or {}).get("account", {}).get("email")
-                            or (st_data.get("account") or {}).get("email")
-                        )
-            except Exception:
-                pass
 
-            if not email:
-                email = _storage_email()
+        attempt_fresh = bool(fresh_login)
+        retried_fresh = False
+        while True:
+            code, err = _run_cli_login(attempt_fresh)
+            detail = _current_login_detail()
+            success = code == 0
+            verified: dict[str, Any] = {}
+            if success:
+                # Any passive verification that began before the browser login
+                # completed must not be allowed to publish an expired verdict.
+                note_session_refreshed(profile)
+                durable = master_token_present(profile)
+                email = None
+                try:
+                    from .config import get_storage_state_path
+                    st_p = get_storage_state_path(profile)
+                    if st_p.is_file():
+                        st_data = json.loads(st_p.read_text(encoding="utf-8"))
+                        if isinstance(st_data, dict):
+                            email = (
+                                (st_data.get("notebooklm") or {}).get("account", {}).get("email")
+                                or (st_data.get("account") or {}).get("email")
+                            )
+                except Exception:
+                    pass
 
-            if email and not _is_placeholder(email):
-                _set_note(f"Signed in as {email} — finalizing session…")
-            else:
-                _set_note("Signed in — finalizing session…")
+                if not email:
+                    email = _storage_email()
 
-            try:
-                verified = verify_online(profile=profile, force=True, timeout=15.0)
-                if verified.get("authenticated"):
-                    email = verified.get("email") or email
+                if email and not _is_placeholder(email):
+                    _set_note(f"Signed in as {email} — finalizing session…")
                 else:
-                    success = False
-                    err = str(verified.get("message") or "Google could not verify the new session online")
-            except Exception as exc:
-                success = False
-                logger.warning("Post-sign-in verification failed", exc_info=True)
-                err = "Google could not verify the new session online. Check your connection and try again."
+                    _set_note("Signed in — finalizing session…")
 
+                try:
+                    verified = _verify_new_session(profile)
+                    if verified.get("authenticated"):
+                        email = verified.get("email") or email
+                    else:
+                        success = False
+                        err = _post_login_failure_message(verified)
+                except Exception:
+                    success = False
+                    logger.warning("Post-sign-in verification failed", exc_info=True)
+                    err = "Google could not verify the new session online. Check your connection and try again."
+
+            # The CLI reused a Google session it found in its own browser
+            # profile (no sign-in page was shown) and that session does not
+            # work. Repeating the same click would capture it again, so move it
+            # aside once and open a clean Google sign-in right away.
+            if (
+                not success and code == 0 and not retried_fresh and not attempt_fresh
+                and not switch_account and not detail.get("cancelled") and not _LOGIN_CANCEL.is_set()
+                and verified.get("failure_kind") != "network"
+                and (detail.get("reused_browser_session") or verified.get("failure_kind") == "no_session")
+            ):
+                retried_fresh = True
+                attempt_fresh = True
+                logger.info("NotebookLM: reused browser session failed verification; starting a fresh sign-in")
+                _set_note("Your old Google session could not be used. Opening a fresh Google sign-in…")
+                _terminate_stale_login_processes(profile, log_path)
+                _backup_stale_session(profile, log_path, reason="reused_session_failed")
+                _prepare_browser_profile(profile)
+                continue
+            break
+
+        if success:
+            with _STATE_LOCK:
+                _FRESH_NEXT.pop(profile, None)
+        elif not detail.get("cancelled") and not switch_account:
+            # A sign-in that ended without a usable session: the next click
+            # starts from a clean browser profile (the old one is backed up).
+            with _STATE_LOCK:
+                _FRESH_NEXT[profile] = "previous_attempt_failed"
+
+        if success:
             switched_from = None
             if switch_account:
                 try:
@@ -1683,9 +2086,7 @@ def _watch_login(
             except Exception:
                 pass
 
-        detail = getattr(_run_login_once, "last_detail", None)
-        if not isinstance(detail, dict):
-            detail = {}
+        detail = _current_login_detail()
         note = None
         if detail.get("cancelled"):
             note = "Sign-in cancelled."
@@ -1744,14 +2145,14 @@ def record_successful_login(email: str, profile: str | None = None) -> None:
     """Record a browser-flow login only after the CLI verifies it online."""
     profile = resolve_notebooklm_profile(profile)
     note_session_refreshed(profile)
-    verification = verify_online(profile=profile, force=True, timeout=15.0)
+    verification = _verify_new_session(profile)
     if not verification.get("authenticated"):
         with _STATE_LOCK:
             _STATE.update(
                 running=False,
                 finished_at=time.time(),
                 success=False,
-                error=str(verification.get("message") or "Google could not verify the new session online"),
+                error=_post_login_failure_message(verification),
                 note="Sign-in finished in the browser, but NotebookLM could not verify it. Please try again.",
             )
         return
@@ -2058,6 +2459,22 @@ def start_login(
                     account_email = _storage_email()
             account_email = (account_email or "").strip() or None
         run_mode = "master-token" if (mode in ("master-token", "durable") and account_email) else "browser"
+        fresh_reason: str | None = "requested" if fresh_login else None
+        with _STATE_LOCK:
+            already_running = bool(_STATE.get("running"))
+        if not switch_account and not fresh_login and not already_running:
+            # A new user, a broken old session, or a click after a failed
+            # attempt starts from a clean browser profile. Reusing one that a
+            # previous attempt left behind is how the CLI kept capturing the
+            # same unusable session. A healthy saved session is reused, so a
+            # reconnect stays one click.
+            with _STATE_LOCK:
+                fresh_next = _FRESH_NEXT.get(profile)
+            kind = _saved_session_kind(profile)
+            if kind in ("none", "broken"):
+                fresh_login, fresh_reason = True, ("new_user" if kind == "none" else "broken_session")
+            elif fresh_next:
+                fresh_login, fresh_reason = True, fresh_next
         with _STATE_LOCK:
             if _STATE.get("running"):
                 # A second click, including Switch account, must not start another
@@ -2091,6 +2508,7 @@ def start_login(
         thread = threading.Thread(
             target=_watch_login,
             args=(profile, run_mode, account_email, browser, int(browser_timeout), log_path, switch_account, fresh_login),
+            kwargs={"fresh_reason": fresh_reason},
             name="notebooklm-login",
             daemon=True,
         )
@@ -2106,6 +2524,8 @@ def start_login(
             "mode": run_mode,
             "profile": profile,
             "message": msg,
+            "fresh_login": bool(fresh_login),
+            "fresh_reason": fresh_reason,
             "state": get_login_state(),
         }
 
@@ -2192,15 +2612,112 @@ def get_online_verification_cache(profile: str | None = None) -> dict[str, Any] 
     return None
 
 
+_NO_SESSION_MESSAGE = "NotebookLM is not connected yet. Click Sign in with Google to connect."
+
+
+def _is_missing_session_error(payload: dict[str, Any], details_lower: str) -> bool:
+    """True when the CLI found no saved session file for the profile."""
+    checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+    if checks.get("storage_exists") is False:
+        return True
+    return "storage file not found" in details_lower
+
+
+def _transient_verification_message(details_message: str) -> str:
+    """User-facing text for an inconclusive check, with the CLI's own reason.
+
+    The bare "Could not verify this saved session" gave nobody a way to tell a
+    missing cookie from a Google redirect. URLs are already redacted.
+    """
+    reason = str(details_message or "").strip()
+    if reason.lower().startswith("token fetch failed:"):
+        reason = reason.split(":", 1)[1].strip()
+    reason = reason.splitlines()[0].strip() if reason else ""
+    if len(reason) > 160:
+        reason = reason[:157].rstrip() + "..."
+    return f"Could not verify this saved session: {reason}" if reason else "Could not verify this saved session"
+
+
+def _log_verification(profile: str, *, passive: bool, returncode: int | None, status: str, reason: str) -> None:
+    """Record why a session check did not pass, in the app log and the sign-in log."""
+    clean = re.sub(r"https?://\S+", "<redacted URL>", str(reason or ""))[:600]
+    logger.warning(
+        "NotebookLM auth check did not pass (profile=%s passive=%s rc=%s status=%s): %s",
+        profile, passive, returncode, status, clean,
+    )
+    try:
+        with _login_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [verify] profile={profile} passive={passive} "
+                f"rc={returncode} status={status} reason={clean}\n"
+            )
+    except Exception:
+        pass
+
+
+def _post_login_failure_message(verified: dict[str, Any]) -> str:
+    """Toast text when Google sign-in finished but the new session failed its check.
+
+    Never "this saved session": right after a sign-in there is no old session
+    in play, and a new user must not be told one could not be verified.
+    """
+    kind = verified.get("failure_kind")
+    if kind == "network":
+        return "Signed in, but Google could not be reached to confirm it. Check your connection and click Sign in again."
+    if kind == "no_session":
+        return "Google sign-in finished, but no NotebookLM session was saved. Click Sign in with Google to try again."
+    if kind == "auth":
+        return "Google did not accept the new sign-in. Click Sign in with Google to sign in again."
+    reason = str(verified.get("details_message") or "").strip()
+    if reason.lower().startswith("token fetch failed:"):
+        reason = reason.split(":", 1)[1].strip()
+    reason = reason.splitlines()[0].strip() if reason else ""
+    if len(reason) > 160:
+        reason = reason[:157].rstrip() + "..."
+    base = "Signed in, but NotebookLM could not confirm the new session"
+    return f"{base}: {reason}" if reason else f"{base}. Click Sign in with Google to try again."
+
+
+def _verify_new_session(profile: str) -> dict[str, Any]:
+    """Verify a session the CLI has just written, letting the CLI heal it.
+
+    Non-passive, with a timeout that fits a cold Windows start, and one retry
+    when the first answer is inconclusive. A definite answer (signed in, or
+    signed out) is returned at once.
+    """
+    verified: dict[str, Any] = {}
+    for attempt in range(2):
+        verified = verify_online(
+            profile=profile,
+            force=True,
+            timeout=_POST_LOGIN_VERIFY_TIMEOUT_SECONDS,
+            passive=False,
+        )
+        if verified.get("authenticated") or verified.get("definitive") or verified.get("status") == "stale":
+            return verified
+        if attempt == 0:
+            time.sleep(_POST_LOGIN_VERIFY_RETRY_DELAY_SECONDS)
+    return verified
+
+
 def verify_online(
     *,
     profile: str | None = None,
     timeout: float = _ONLINE_CHECK_TIMEOUT_SECONDS,
     force: bool = False,
+    passive: bool = True,
 ) -> dict[str, Any]:
     """Online Google session verification via ``notebooklm auth check --test``.
 
     Cached briefly so dashboard polling never hammers accounts.google.com.
+
+    ``passive=True`` (the default for background status checks) adds
+    ``--passive``: the CLI only reads the cookies on disk and never rotates or
+    rewrites them. Right after ``notebooklm login`` that is the wrong probe.
+    The CLI saves a fresh sign-in even when it has no usable
+    ``__Secure-1PSIDTS`` yet and expects the next ordinary command to heal it
+    from disk; a passive probe refuses to do that and fails. Post-login checks
+    therefore pass ``passive=False``.
     """
     profile = resolve_notebooklm_profile(profile)
     with _STATE_LOCK:
@@ -2214,7 +2731,10 @@ def verify_online(
     if cli_path is None:
         return {"status": "dependency_missing", "authenticated": False,
                 "message": "NotebookLM CLI not found"}
-    command = [str(cli_path), "--profile", profile, "auth", "check", "--test", "--passive", "--json"]
+    command = [str(cli_path), "--profile", profile, "auth", "check", "--test"]
+    if passive:
+        command.append("--passive")
+    command.append("--json")
     argv = _cli_argv(command)
     interpreter = Path(argv[0]) if len(argv) >= 3 and argv[1] == "-m" else None
     try:
@@ -2230,6 +2750,8 @@ def verify_online(
             creationflags=_HIDE_FLAGS,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
+        _log_verification(profile, passive=passive, returncode=None, status="timeout_or_oserror",
+                          reason=str(exc))
         verified = {"status": "network_error", "classification": "transient_error",
                     "authenticated": None, "definitive": False, "failure_kind": "network",
                     "message": "Could not reach Google to verify this saved session",
@@ -2244,6 +2766,8 @@ def verify_online(
         if not isinstance(payload, dict):
             raise ValueError("CLI returned a non-object payload")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        _log_verification(profile, passive=passive, returncode=getattr(result, "returncode", None),
+                          status="unreadable", reason=f"{exc}; stderr={getattr(result, 'stderr', '') or ''}")
         verified = {"status": "transient_error", "classification": "transient_error",
                     "authenticated": None, "definitive": False, "failure_kind": "cli",
                     "message": "NotebookLM verification returned an unreadable response",
@@ -2272,6 +2796,17 @@ def verify_online(
         "authentication expired", "not authenticated", "unauthenticated", "sign in again",
         "login required", "session expired", "invalid credentials",
     ))
+    # No storage_state.json at all: nothing was ever saved for this profile.
+    # That is "not signed in yet", not a session we failed to verify.
+    no_saved_session = bool(
+        not authenticated and not is_network_error and not is_definite_auth_error
+        and _is_missing_session_error(payload, details_lower)
+    )
+    if no_saved_session:
+        is_definite_auth_error = True
+    if not authenticated:
+        _log_verification(profile, passive=passive, returncode=result.returncode,
+                          status=str(payload.get("status") or ""), reason=details_message)
     token_extraction_failure = bool(
         not authenticated and not is_network_error and not is_definite_auth_error
         and is_token_extraction_error(details_message)
@@ -2339,16 +2874,17 @@ def verify_online(
         except Exception:
             pass
     elif not authenticated and not transient_failure:
+        auth_error_text = _NO_SESSION_MESSAGE if no_saved_session else "Google session is no longer valid — sign in again"
         try:
             from voice_flow.storage import storage
             storage.save_setting("video_flow_notebooklm_authenticated", False)
-            storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+            storage.save_setting("video_flow_notebooklm_auth_error", auth_error_text)
         except Exception:
             pass
         try:
             from voice_flow.gui import api_server
             api_server.storage.save_setting("video_flow_notebooklm_authenticated", False)
-            api_server.storage.save_setting("video_flow_notebooklm_auth_error", "Google session is no longer valid — sign in again")
+            api_server.storage.save_setting("video_flow_notebooklm_auth_error", auth_error_text)
         except Exception:
             pass
 
@@ -2368,15 +2904,17 @@ def verify_online(
         "definitive": bool(authenticated or is_definite_auth_error),
         "failure_kind": None if authenticated else (
             "network" if is_network_error else
-            ("auth" if is_definite_auth_error else
-             ("token_extraction" if token_extraction_failure else "cli"))
+            ("no_session" if no_saved_session else
+             ("auth" if is_definite_auth_error else
+              ("token_extraction" if token_extraction_failure else "cli")))
         ),
         "message": "Google session verified online" if authenticated else (
             "Could not reach Google to verify this saved session" if is_network_error
-            else ("NotebookLM could not read the session token; restoring the saved connection."
-                  if token_extraction_failure else
-                  ("Could not verify this saved session" if transient_failure
-                   else "Google session is no longer valid — sign in again"))
+            else (_NO_SESSION_MESSAGE if no_saved_session else
+                  ("NotebookLM could not read the session token; restoring the saved connection."
+                   if token_extraction_failure else
+                   (_transient_verification_message(details_message) if transient_failure
+                    else "Google session is no longer valid — sign in again")))
         ),
         "email": email,
         "profile": profile,

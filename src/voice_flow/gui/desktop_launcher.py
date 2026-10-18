@@ -131,6 +131,22 @@ def _launcher_log(message: str) -> None:
         pass
 
 
+def _process_age_seconds() -> float | None:
+    """Seconds since this process started (pythonw.exe launch), or None."""
+    try:
+        import psutil
+        return max(0.0, time.time() - psutil.Process(os.getpid()).create_time())
+    except Exception:
+        return None
+
+
+def _log_launch_phase(phase: str) -> None:
+    """Timing line for gui_launcher.log: how long after the click each phase ran."""
+    age = _process_age_seconds()
+    _launcher_log(f"[timing] {phase} at {age:.1f}s after process start" if age is not None
+                  else f"[timing] {phase}")
+
+
 if _WEBVIEW_IMPORT_FAILED and sys.platform == "darwin":
     _launcher_log(
         "pywebview import failed; ensure pyobjc-core, pyobjc-framework-Cocoa, "
@@ -138,16 +154,40 @@ if _WEBVIEW_IMPORT_FAILED and sys.platform == "darwin":
     )
 
 
+# Same value as voice_flow.gui.api_server.PORT (a test keeps them equal).
+# The launcher does NOT import api_server at startup any more: that module
+# pulls in scipy.signal, sounddevice/PortAudio, the Video Flow service and
+# more (about 1.3 s of imports on a fast machine, many seconds on a cold
+# low-end PC while Defender scans each new DLL). The engine process already
+# loads all of that; the launcher only needs it for the rare in-process API
+# fallback, so it is imported on demand there.
+PORT = 8991
+_API_IMPORT_ERROR = None
+
+
+def start_api_server(*args, **kwargs):
+    """In-process API fallback. Imports the API stack only when it is used."""
+    global _API_IMPORT_ERROR
+    try:
+        from voice_flow.gui.api_server import start_api_server as _start_api_server
+    except Exception as exc:  # broken/partial install must never die silently
+        _API_IMPORT_ERROR = exc
+        try:
+            import traceback
+            (_data_dir() / "gui_crash.log").write_text(
+                "desktop_launcher import failure:\n" + traceback.format_exc(), encoding="utf-8"
+            )
+        except Exception:
+            pass
+        _launcher_log(f"api_server import failed: {exc}")
+        return None
+    return _start_api_server(*args, **kwargs)
+
+
 try:
-    from voice_flow.gui.api_server import start_api_server, PORT
     from voice_flow.runtime_guard import runtime_is_compatible, runtime_is_engine_ready
-    _API_IMPORT_ERROR = None
 except Exception as _import_exc:  # broken/partial install must never die silently
     import urllib.request as _urlreq
-
-    start_api_server = None
-    PORT = 8991
-    _API_IMPORT_ERROR = _import_exc
 
     def runtime_is_compatible(*, host: str = "127.0.0.1", port: int = PORT, timeout: float = 1.0) -> bool:
         try:
@@ -163,15 +203,7 @@ except Exception as _import_exc:  # broken/partial install must never die silent
     def runtime_is_engine_ready(*, host: str = "127.0.0.1", port: int = PORT, timeout: float = 1.0) -> bool:
         return False
 
-    try:
-        from voice_flow.paths import data_dir
-        import traceback
-        (data_dir() / "gui_crash.log").write_text(
-            "desktop_launcher import failure:\n" + traceback.format_exc(), encoding="utf-8"
-        )
-    except Exception:
-        pass
-    _launcher_log(f"api_server import failed: {_import_exc}")
+    _launcher_log(f"runtime_guard import failed: {_import_exc}")
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -355,6 +387,11 @@ def ensure_backend_running() -> bool:
         print(f"[GUI WARNING] Could not start Voice Flow watchdog: {exc}")
         # Direct fallback to voice_flow.main
         try:
+            from voice_flow.startup_priority import engine_startup_creationflags
+            extra_flags = engine_startup_creationflags()
+            if extra_flags:
+                spawn_kwargs = dict(spawn_kwargs)
+                spawn_kwargs["creationflags"] = spawn_kwargs.get("creationflags", 0) | extra_flags
             subprocess.Popen(
                 [pythonw, "-m", "voice_flow.main"],
                 cwd=src_dir,
@@ -598,6 +635,255 @@ def _defer_autostart_registration() -> None:
         _launcher_log(f"Auto-startup initialization warning: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Cold start: open the window at once with a "warming up" page.
+# ---------------------------------------------------------------------------
+# Up to 1.0.6 the launcher blocked for up to 200 polls (about 30 s on Windows)
+# waiting for the engine before it created any window, behind a topmost splash.
+# On a slow first launch that read as a frozen app. The window now opens
+# straight away on a small local page, and a background thread swaps in the
+# real UI once the engine answers. The UI still never attaches to an API-only
+# listener while a real engine is starting.
+
+# How long the warming window waits for the dictation engine before it accepts
+# a compatible API-only listener. It keeps polling after this either way.
+WARMING_ENGINE_WAIT_SECONDS = 120.0
+WARMING_POLL_SECONDS = 0.25
+WARMING_PROGRESS_LOG_SECONDS = 30.0
+
+WARMING_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>AI Productivity Flow</title>
+<style>
+html,body{margin:0;height:100%;background:#0b0c16;color:#fff8f3;
+font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:0 32px}
+h1{font-size:24px;font-weight:600;margin:0}
+.bar{width:220px;height:4px;border-radius:2px;background:#24263a;overflow:hidden}
+.bar i{display:block;width:40%;height:100%;background:#ff6a1a;border-radius:2px;animation:slide 1.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+p{margin:0;color:#b9b3ad;font-size:14px;max-width:460px;line-height:1.5}
+small{color:#7d7872;font-size:12px}
+</style></head>
+<body><div class="wrap" id="apf-warming" data-apf-warming="1">
+<h1>AI Productivity Flow</h1>
+<div class="bar"><i></i></div>
+<p id="msg">Warming up&hellip;</p>
+<small id="elapsed"></small>
+</div>
+<script>
+(function(){var t0=Date.now(),m=document.getElementById('msg'),e=document.getElementById('elapsed');
+function tick(){var s=Math.round((Date.now()-t0)/1000);
+if(s>=150){m.textContent='Still starting. If nothing changes in a few minutes, close this window and open the app again.';}
+else if(s>=45){m.textContent='Still warming up. The first start after installing or updating takes longer while Windows checks the new files.';}
+else if(s>=12){m.textContent='Loading the speech engine in the background. You can keep using your PC.';}
+e.textContent=s>=3?(s+' s'):'';}
+tick();setInterval(tick,1000);})();
+</script></body></html>"""
+
+
+def _early_window_enabled() -> bool:
+    """Open the window before the engine is ready (default on)."""
+    return os.environ.get("VOICE_FLOW_EARLY_WINDOW", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _wait_for_backend_in_background(backend_spawned: bool, startup_began: float, *,
+                                    engine_wait_seconds: float = WARMING_ENGINE_WAIT_SECONDS,
+                                    poll_seconds: float = WARMING_POLL_SECONDS,
+                                    max_seconds: float | None = None,
+                                    is_window_open=lambda: True) -> bool:
+    """Wait for a usable backend off the UI thread. True when the UI can load.
+
+    Prefers a live dictation engine. After ``engine_wait_seconds`` a compatible
+    API (for example an older API-only listener) is accepted too, and when no
+    engine is starting at all the in-process API fallback is started, as the
+    blocking path always did. ``max_seconds`` bounds the wait for tests; the
+    window itself keeps waiting for as long as it is open.
+    """
+    began = time.monotonic()
+    next_progress = began + WARMING_PROGRESS_LOG_SECONDS
+    fallback_started = False
+    while is_window_open():
+        if is_engine_ready(timeout=0.25):
+            _launcher_log(f"engine ready {time.monotonic() - startup_began:.1f}s after launch (window was warming up)")
+            return True
+        now = time.monotonic()
+        if now - began >= engine_wait_seconds:
+            if is_api_server_ready(timeout=0.5):
+                _launcher_log(f"engine still not ready after {now - began:.0f}s; using the compatible API")
+                return True
+            if not fallback_started and not (backend_spawned or _is_backend_running()):
+                fallback_started = True
+                _launcher_log("no engine is starting; starting the in-process API fallback")
+                threading.Thread(target=start_api_server, daemon=True, name="VoiceFlowApiServer").start()
+        if now >= next_progress:
+            next_progress = now + WARMING_PROGRESS_LOG_SECONDS
+            _launcher_log(f"still waiting for the engine ({now - startup_began:.0f}s after launch)")
+        if max_seconds is not None and now - began >= max_seconds:
+            return False
+        time.sleep(poll_seconds)
+    return False
+
+
+def _launch_warming_window(*, url: str, ico_path, show_in_taskbar: bool, backend_spawned: bool,
+                           startup_began: float, on_quit_callback=None,
+                           fallback_keep_alive: bool = True) -> None:
+    """Show the window now; load the app once the engine is ready."""
+    create_kwargs = dict(_WINDOW_KWARGS)
+    create_kwargs["html"] = WARMING_HTML
+    try:
+        window = webview.create_window(**create_kwargs)
+    except Exception as exc:
+        _launcher_log(f"warming window could not be created ({exc}); waiting for the engine instead")
+        _close_startup_splash()
+        if _wait_for_backend_in_background(backend_spawned, startup_began, max_seconds=WARMING_ENGINE_WAIT_SECONDS + 30):
+            _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+        return
+    _launcher_log(f"warming window created {time.monotonic() - startup_began:.1f}s after launch")
+    state = {"closed": False}
+    _wire_window(window, ico_path=ico_path, show_in_taskbar=show_in_taskbar,
+                 startup_began=startup_began, on_quit_callback=on_quit_callback,
+                 refresh_session_on_shown=False, state=state)
+
+    def _attach_when_ready() -> None:
+        ready = _wait_for_backend_in_background(
+            backend_spawned, startup_began, is_window_open=lambda: not state["closed"])
+        if not ready:
+            return
+        try:
+            window.load_url(url)
+            _launcher_log(f"app UI loaded {time.monotonic() - startup_began:.1f}s after launch")
+        except Exception as exc:
+            _launcher_log(f"could not load the app UI into the window: {exc}")
+            return
+        threading.Thread(target=_poke_overlay_show, daemon=True).start()
+        threading.Thread(target=_poke_keepalive_refresh, daemon=True).start()
+
+    try:
+        _start_webview_loop(ico_path, func=_attach_when_ready)
+    except Exception as exc:
+        print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
+        _close_startup_splash()
+        if _wait_for_backend_in_background(backend_spawned, startup_began, max_seconds=WARMING_ENGINE_WAIT_SECONDS + 30):
+            _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+
+
+_WINDOW_KWARGS = {
+    "title": "AI Productivity Flow",
+    "width": 1160,
+    "height": 760,
+    "resizable": True,
+    "min_size": (900, 600),
+    "background_color": "#0b0c16",
+}
+
+
+def _start_webview_loop(ico_path, func=None) -> None:
+    """Start pywebview. private_mode=False keeps the WebView profile
+    (localStorage: onboarding flags, theme) across launches; pywebview
+    defaults to a throwaway private profile."""
+    kwargs = {}
+    if ico_path:
+        kwargs["icon"] = ico_path
+    if func is not None:
+        kwargs["func"] = func
+    webview.start(private_mode=False, http_server=False, **kwargs)
+
+
+def _wire_window(window, *, ico_path, show_in_taskbar: bool, startup_began: float,
+                 on_quit_callback=None, refresh_session_on_shown: bool = True,
+                 state: dict | None = None) -> None:
+    """Shown/closed handlers shared by the cold (warming) and warm paths."""
+    # If the native window never reports shown, don't leave the splash up.
+    splash_watch = threading.Timer(15.0, _close_startup_splash)
+    splash_watch.daemon = True
+    splash_watch.start()
+
+    def on_shown():
+        _launcher_log(f"main window shown {time.monotonic() - startup_began:.1f}s after launch")
+        _close_startup_splash()
+        _apply_taskbar_visibility(window, show_in_taskbar)
+        if ico_path:
+            _apply_window_icon(ico_path, window=window)
+
+        if refresh_session_on_shown:
+            # Silently touch/refresh NotebookLM session on window open
+            threading.Thread(target=_poke_keepalive_refresh, daemon=True).start()
+
+        # Safety net: WebView2 occasionally births the window minimized at
+        # (-32000, -32000) where it is unreachable. Restore it into view.
+        def _ensure_visible():
+            try:
+                window.restore()
+                window.show()
+                if ico_path:
+                    _apply_window_icon(ico_path, window=window)
+            except Exception:
+                pass
+        try:
+            timer = threading.Timer(3.0, _ensure_visible)
+            timer.daemon = True
+            timer.start()
+        except Exception:
+            pass
+
+    try:
+        window.events.shown += on_shown
+    except Exception:
+        pass
+
+    def on_closed():
+        if state is not None:
+            state["closed"] = True
+        if on_quit_callback:
+            try:
+                on_quit_callback()
+            except Exception:
+                pass
+        _launcher_log("webview window closed by user - exiting launcher process")
+        try:
+            global _LAUNCHER_MUTEX_HANDLE
+            if _LAUNCHER_MUTEX_HANDLE:
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(_LAUNCHER_MUTEX_HANDLE)
+                _LAUNCHER_MUTEX_HANDLE = None
+        except Exception:
+            pass
+        os._exit(0)
+
+    try:
+        window.events.closed += on_closed
+    except Exception:
+        pass
+
+    if sys.platform == "darwin":
+        _install_mac_window_lifecycle(window)
+
+
+def _read_show_in_taskbar() -> bool:
+    try:
+        from voice_flow.storage import storage
+        return bool(storage.get_setting("show_in_taskbar", True))
+    except Exception:
+        return True
+
+
+def _app_icon_path():
+    ico_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "icon.ico"))
+    return ico_path if os.path.exists(ico_path) else None
+
+
+def _set_windows_app_id() -> None:
+    # Set Windows AppUserModelID so taskbar groups properly and uses our icon.
+    # The early splash sets the same id, so both share one taskbar button.
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            myappid = 'antigravity.voiceflow.desktop.1.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
+
 def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) -> None:
     """Launch API server, system auto-startup configuration, and native desktop window."""
     configure_macos_app("desktop")
@@ -612,15 +898,32 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
     # readiness remains a separate concern below so an API-only listener can
     # still serve the desktop UI while the watchdog recovers the engine.
     backend_spawned = False
+    startup_began = time.monotonic()
+    _log_launch_phase("launcher ready to open a window")
+    url = f"http://127.0.0.1:{PORT}/index.html"
     if not is_engine_ready(timeout=0.15):
         backend_spawned = bool(ensure_backend_running())
+        backend_starting = backend_spawned or _is_backend_running()
+        _launcher_log(f"engine not ready at launch; supervisor spawned={backend_spawned}")
+
+        # Cold start with a real engine on its way: show the window now and
+        # load the UI when the engine answers (see _launch_warming_window).
+        if backend_starting and webview is not None and _early_window_enabled():
+            print("[GUI] Opening Voice Flow Desktop App window; the engine is still starting...")
+            _set_windows_app_id()
+            _launch_warming_window(
+                url=url, ico_path=_app_icon_path(), show_in_taskbar=_read_show_in_taskbar(),
+                backend_spawned=backend_spawned, startup_began=startup_began,
+                on_quit_callback=on_quit_callback, fallback_keep_alive=fallback_keep_alive,
+            )
+            return
 
         # When an engine process is starting, wait for its readiness probe so
         # the UI does not attach to a compatible API-only listener just as the
         # watchdog reclaims its port. Keep the existing bounded startup window;
         # after it expires the regular API/browser fallback below still applies.
-        backend_starting = backend_spawned or _is_backend_running()
         poll_iterations = 200 if backend_starting else 40
+        ready = False
         for _ in range(poll_iterations):
             ready = (
                 is_engine_ready(timeout=0.1)
@@ -630,6 +933,10 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             if ready:
                 break
             time.sleep(0.05)
+        _launcher_log(
+            f"engine wait finished after {time.monotonic() - startup_began:.1f}s "
+            f"({'ready' if ready else 'not ready'}; waited for {'engine' if backend_starting else 'API'})"
+        )
 
     # If the backend is ready, bring the floating bar forward without changing active work.
     if is_api_server_ready(timeout=0.5):
@@ -652,7 +959,7 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
         # nothing: show the UI in the browser rather than failing silently.
         if _is_backend_running() or backend_spawned:
             _launcher_log("backend probe failed but a Voice Flow engine is running - browser fallback")
-            _fallback_to_browser(f"http://127.0.0.1:{PORT}/index.html", on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+            _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
             return
         if start_api_server is not None:
             try:
@@ -665,42 +972,17 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
             except Exception:
                 pass
         if not is_api_server_ready(timeout=0.2):
-            _fallback_to_browser(f"http://127.0.0.1:{PORT}/index.html", on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
+            _fallback_to_browser(url, on_quit_callback=on_quit_callback, keep_alive=fallback_keep_alive)
             return
 
-    try:
-        from voice_flow.storage import storage
-        show_in_taskbar = bool(storage.get_setting("show_in_taskbar", True))
-    except Exception:
-        show_in_taskbar = True
-
-    url = f"http://127.0.0.1:{PORT}/index.html"
+    show_in_taskbar = _read_show_in_taskbar()
     print(f"[GUI] Opening Voice Flow Desktop App window at {url}...")
-
-    # Icon path
-    ico_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "icon.ico"))
-    if not os.path.exists(ico_path):
-        ico_path = None
+    ico_path = _app_icon_path()
 
     # Create native desktop window matching desktop application layout
-    create_kwargs = {
-        "title": "AI Productivity Flow",
-        "url": url,
-        "width": 1160,
-        "height": 760,
-        "resizable": True,
-        "min_size": (900, 600),
-        "background_color": "#0b0c16",
-    }
-
-    # Set Windows AppUserModelID so taskbar groups properly and uses our icon
-    if sys.platform.startswith("win"):
-        try:
-            import ctypes
-            myappid = 'antigravity.voiceflow.desktop.1.0'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        except Exception:
-            pass
+    create_kwargs = dict(_WINDOW_KWARGS)
+    create_kwargs["url"] = url
+    _set_windows_app_id()
 
     if webview is None:
         _launcher_log("Native window backend unavailable; using the system browser.")
@@ -709,74 +991,10 @@ def launch_desktop_gui(on_quit_callback=None, fallback_keep_alive: bool = True) 
 
     try:
         window = webview.create_window(**create_kwargs)
-        # If the native window never reports shown, don't leave the splash up.
-        splash_watch = threading.Timer(15.0, _close_startup_splash)
-        splash_watch.daemon = True
-        splash_watch.start()
-
-        def on_shown():
-            _close_startup_splash()
-            _apply_taskbar_visibility(window, show_in_taskbar)
-            if ico_path:
-                _apply_window_icon(ico_path, window=window)
-
-            # Silently touch/refresh NotebookLM session on window open
-            threading.Thread(target=_poke_keepalive_refresh, daemon=True).start()
-
-            # Safety net: WebView2 occasionally births the window minimized at
-            # (-32000, -32000) where it is unreachable. Restore it into view.
-            def _ensure_visible():
-                try:
-                    window.restore()
-                    window.show()
-                    if ico_path:
-                        _apply_window_icon(ico_path, window=window)
-                except Exception:
-                    pass
-            try:
-                timer = threading.Timer(3.0, _ensure_visible)
-                timer.daemon = True
-                timer.start()
-            except Exception:
-                pass
-
-        try:
-            window.events.shown += on_shown
-        except Exception:
-            pass
-        _launcher_log("webview window created")
-
-        def on_closed():
-            if on_quit_callback:
-                try:
-                    on_quit_callback()
-                except Exception:
-                    pass
-            _launcher_log("webview window closed by user - exiting launcher process")
-            try:
-                global _LAUNCHER_MUTEX_HANDLE
-                if _LAUNCHER_MUTEX_HANDLE:
-                    ctypes.windll.kernel32.CloseHandle(_LAUNCHER_MUTEX_HANDLE)
-                    _LAUNCHER_MUTEX_HANDLE = None
-            except Exception:
-                pass
-            os._exit(0)
-
-        try:
-            window.events.closed += on_closed
-        except Exception:
-            pass
-
-        if sys.platform == "darwin":
-            _install_mac_window_lifecycle(window)
-
-        # Start pywebview loop with custom icon. private_mode=False keeps the
-        # WebView profile (localStorage: onboarding flags, theme) across
-        # launches; pywebview defaults to a throwaway private profile.
-        if ico_path:
-            webview.start(icon=ico_path, private_mode=False, http_server=False)
-        else:
-            webview.start(private_mode=False, http_server=False)
+        _wire_window(window, ico_path=ico_path, show_in_taskbar=show_in_taskbar,
+                     startup_began=startup_began, on_quit_callback=on_quit_callback)
+        _launcher_log(f"webview window created {time.monotonic() - startup_began:.1f}s after launch")
+        _start_webview_loop(ico_path)
     except Exception as exc:
         print(f"[GUI WARNING] pywebview failed to initialize native window: {exc}. Falling back to default web browser.")
         _close_startup_splash()
@@ -856,7 +1074,7 @@ def _reject_startup_splash(user32, hwnd) -> bool:
     class_name = _native_window_text(user32, hwnd, "GetClassNameW")
     if is_startup_splash is not None and is_startup_splash(title, class_name):
         return True
-    return class_name == "APFEarlySplash" or title == "APFEarlySplash"
+    return class_name == "APFEarlySplash" or title in ("APFEarlySplash", "AI Productivity Flow (starting)")
 
 
 def _focus_existing_window() -> bool:
@@ -984,6 +1202,13 @@ def _acquire_launcher_mutex() -> bool:
     """Ensure only one desktop launcher process runs at a time."""
     global _LAUNCHER_MUTEX_HANDLE
     inherited = os.environ.get("VOICE_FLOW_LAUNCHER_MUTEX_HANDLE")
+    inherited_pid = os.environ.get("VOICE_FLOW_LAUNCHER_MUTEX_PID")
+    # launch_apf.pyw takes the mutex and then runs this launcher in the same
+    # process. A handle that came from another process (through a child's
+    # environment) is not ours. Older launch_apf.pyw files set no PID.
+    if inherited and inherited_pid and inherited_pid != str(os.getpid()):
+        _launcher_log(f"ignoring launcher mutex handle inherited from pid {inherited_pid}")
+        inherited = None
     if inherited:
         try:
             _LAUNCHER_MUTEX_HANDLE = int(inherited)
@@ -1095,6 +1320,7 @@ def _run_desktop_launcher() -> None:
 
 if __name__ == "__main__":
     _launcher_log(f"desktop_launcher starting (pid={os.getpid()}, argv={sys.argv[1:]})")
+    _log_launch_phase("launcher imports finished")
     try:
         _run_desktop_launcher()
     except SystemExit:
