@@ -83,8 +83,9 @@ def _voice_flow_log_dir():
     None when the folder cannot be created; callers then skip file logging.
     """
     try:
-        from voice_flow.paths import data_dir as _data_dir
+        from voice_flow.paths import data_dir as _data_dir, harden_private_data_dirs
 
+        harden_private_data_dirs()
         _dir = _data_dir() / "logs"
         _dir.mkdir(parents=True, exist_ok=True)
         return _dir

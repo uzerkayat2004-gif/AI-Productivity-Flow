@@ -730,6 +730,18 @@
       return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
     };
 
+    // History text (title/snippet) is the user's selected source text, so it
+    // can contain markup. Escape it for HTML, and pass handler arguments as
+    // HTML-escaped JSON string literals so a quote cannot break out.
+    function afHistEscape(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function afHistArg(value) {
+      return afHistEscape(JSON.stringify(String(value == null ? '' : value)));
+    }
+
     function safeMediaFilename(title, defaultName = 'Audio Summary', ext = '.mp3') {
       let cleaned = String(title || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().replace(/^[. ]+|[. ]+$/g, '');
       if (!cleaned) cleaned = defaultName;
@@ -938,24 +950,24 @@
         } catch (_) {
           dateStr = item.created_at || '';
         }
-        const snippetSafe = (item.text_snippet || 'Audio summary').replace(/"/g, '&quot;');
+        const snippetSafe = afHistEscape(item.text_snippet || 'Audio summary');
         const itemTitle = item.title || item.text_snippet || 'Audio summary';
-        const titleSafe = itemTitle.replace(/"/g, '&quot;');
+        const titleSafe = afHistEscape(itemTitle);
         const cleanItemFile = safeMediaFilename(itemTitle, 'Audio Summary', '.mp3');
         const dlUrl = `${apiBase}/api/audio-flow/summary/media?id=${encodeURIComponent(item.id)}&download=1&format=mp3&title=${encodeURIComponent(itemTitle)}`;
         return `
-          <div class="af-card" data-id="${item.id}">
+          <div class="af-card" data-id="${afHistEscape(item.id)}">
             <div class="af-card-header">
               <span class="af-mode-chip">${dFmt}</span>
-              <span class="af-card-time">${dateStr}</span>
+              <span class="af-card-time">${afHistEscape(dateStr)}</span>
             </div>
             <div class="af-card-snippet" title="${titleSafe}">${snippetSafe}</div>
             <div class="af-card-actions">
               <span style="font-size:10px;color:var(--ink-muted);font-weight:700;">${item.duration_sec ? fmt(item.duration_sec) : ''}</span>
               <div class="af-card-actions-left">
-                <button class="af-btn-action play-btn" onclick="playFromHistory('${item.id}', '${item.depth}', '${snippetSafe}', '${titleSafe.replace(/'/g, "\\'")}')">▶ Play</button>
-                <a class="af-btn-action" href="${dlUrl}" download="${cleanItemFile}" title="Download '${titleSafe}' as MP3">↓ MP3</a>
-                <button class="af-btn-action danger" onclick="deleteHistoryItem('${item.id}')" title="Delete">⌫</button>
+                <button class="af-btn-action play-btn" onclick="playFromHistory(${afHistArg(item.id)}, ${afHistArg(item.depth)}, ${afHistArg(item.text_snippet || 'Audio summary')}, ${afHistArg(itemTitle)})">▶ Play</button>
+                <a class="af-btn-action" href="${afHistEscape(dlUrl)}" download="${afHistEscape(cleanItemFile)}" title="Download '${titleSafe}' as MP3">↓ MP3</a>
+                <button class="af-btn-action danger" onclick="deleteHistoryItem(${afHistArg(item.id)})" title="Delete">⌫</button>
               </div>
             </div>
           </div>

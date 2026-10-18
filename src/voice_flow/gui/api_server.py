@@ -862,6 +862,24 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         except (TypeError, ValueError):
             return
 
+    def _is_cross_site_api_get(self, path: str) -> bool:
+        """True for a GET to /api/ that a browser marks as sent by another site.
+
+        The Host check stops DNS rebinding but not a plain cross-site request:
+        any web page can make the browser GET http://127.0.0.1:8991/api/...
+        (an <img> or no-cors fetch). It cannot read the reply, but several GET
+        routes act, e.g. /api/audio-summary/test runs a summary on the user's
+        paid provider keys. Browsers send Sec-Fetch-Site on every request; the
+        app's own pages send "same-origin". OAuth redirects land on
+        /callback and /auth/google/callback, outside /api/, so they still work.
+        """
+        if not path.startswith("/api/") or "callback" in path:
+            return False
+        headers = getattr(self, "headers", None)
+        if headers is None:
+            return False
+        return (headers.get("Sec-Fetch-Site") or "").strip().lower() == "cross-site"
+
     def _host_is_allowed(self) -> bool:
         """DNS-rebinding guard: loopback Host only (port optional).
 
@@ -1065,6 +1083,9 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if self._is_cross_site_api_get(path):
+            self.send_json_response({"success": False, "error": "Cross-site requests are not allowed"}, 403)
+            return
 
         # Google sign-in (Video Flow authentication section). Must run before
         # the generic ?code= sniffer below: its callback also lands with
@@ -1522,7 +1543,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
         elif path in ("/api/video-flow/v3/video", "/api/video-flow/v3/export/download"):

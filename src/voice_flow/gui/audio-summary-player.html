@@ -927,6 +927,18 @@
       }
     }
 
+    // History text (title/snippet) is the user's selected source text, so it
+    // can contain markup. Escape it for HTML, and pass handler arguments as
+    // HTML-escaped JSON string literals so a quote cannot break out.
+    function afHistEscape(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function afHistArg(value) {
+      return afHistEscape(JSON.stringify(String(value == null ? '' : value)));
+    }
+
     function safeMediaFilename(rawTitle, defaultName = 'Audio_Summary', ext = '.mp3') {
       let name = (rawTitle || '').trim();
       if (!name) name = defaultName;
@@ -1265,31 +1277,31 @@
         } catch (_) {
           dateStr = item.created_at || '';
         }
-        const snippetSafe = (item.text_snippet || 'Audio summary').replace(/"/g, '&quot;');
+        const snippetSafe = afHistEscape(item.text_snippet || 'Audio summary');
         const itemTitle = item.title || item.text_snippet || 'Audio summary';
-        const titleSafe = itemTitle.replace(/"/g, '&quot;');
+        const titleSafe = afHistEscape(itemTitle);
         const isFailed = item.status === 'failed' || item.status === 'cancelled';
         const isActionable = !isFailed && (item.audio_path || item.status === 'ready');
 
         const actionHtml = isActionable ? `
           <div class="af-card-actions-left">
-            <button class="af-btn-action play-btn" onclick="playHistoryItem('${item.id}', '${titleSafe}', '${item.depth || 'balanced'}')">▶ Play</button>
-            <button class="af-btn-action" onclick="downloadSummaryAudio('${item.id}', '${titleSafe}', this)">⬇ MP3</button>
+            <button class="af-btn-action play-btn" onclick="playHistoryItem(${afHistArg(item.id)}, ${afHistArg(itemTitle)}, ${afHistArg(item.depth || 'balanced')})">▶ Play</button>
+            <button class="af-btn-action" onclick="downloadSummaryAudio(${afHistArg(item.id)}, ${afHistArg(itemTitle)}, this)">⬇ MP3</button>
           </div>` : `
           <div class="af-card-actions-left">
             <span class="af-failed-label" style="font-size:11px;color:#ef4444;font-weight:600;">⚠ ${item.status === 'cancelled' ? 'Cancelled' : 'Failed'}</span>
           </div>`;
 
         return `
-          <div class="af-card" data-id="${item.id}">
+          <div class="af-card" data-id="${afHistEscape(item.id)}">
             <div class="af-card-header">
               <span class="af-mode-chip">${dFmt}</span>
-              <span class="af-card-time">${dateStr}</span>
+              <span class="af-card-time">${afHistEscape(dateStr)}</span>
             </div>
             <div class="af-card-snippet" title="${titleSafe}">${snippetSafe}</div>
             <div class="af-card-actions">
               ${actionHtml}
-              <button class="af-btn-action danger" onclick="deleteHistoryItem('${item.id}')">✕</button>
+              <button class="af-btn-action danger" onclick="deleteHistoryItem(${afHistArg(item.id)})">✕</button>
             </div>
           </div>`;
       }).join('');

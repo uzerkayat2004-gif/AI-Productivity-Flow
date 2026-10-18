@@ -34,6 +34,9 @@ DisableProgramGroupPage=yes
 DisableReadyPage=yes
 ; Without this, DisableProgramGroupPage stores the shortcut in Programs\(Default).
 DefaultGroupName={#MyAppName}
+; An upgrade would otherwise reuse the group saved by the older installer,
+; which is "(Default)" for builds that had no DefaultGroupName.
+UsePreviousGroup=no
 DisableWelcomePage=yes
 DisableFinishedPage=no
 PrivilegesRequired=lowest
