@@ -177,6 +177,11 @@ CLOUD_INTERACTIVE_TARGET_SECONDS = 2.0
 # Streaming is an optimization. Always preserve a fixed slice of the shared
 # budget for one complete-recording recovery attempt before injection.
 WHOLE_BUFFER_RECOVERY_RESERVE_SECONDS = 1.0
+# On-device Whisper streams: when exactly one chunk is still decoding at the
+# end of the harvest, wait for it (it holds the model lock the full-recording
+# decode would need anyway) until this much of the complete-recording budget
+# is left for the whole-buffer fallback.
+LOCAL_STREAM_FALLBACK_RESERVE_SECONDS = 1.0
 
 
 def _complete_recording_budget_seconds(duration: float) -> float:
@@ -1049,6 +1054,23 @@ class VoiceFlowApp:
         if callable(release):
             release()
         raise RuntimeError("Dictation session cannot own its speech-model demand")
+
+    def _local_chunk_stream(self, session: Any) -> bool:
+        """True when this session's stream decodes recorder chunks on-device.
+
+        Cloud chunk streams and live-frame streams (Nemotron, Flux, Nova) keep
+        their own harvest rules.
+        """
+        try:
+            if bool(getattr(getattr(self, "_stream_stt", None), "live_frames", False)):
+                return False
+            model_ref = getattr(session, "stt_model_ref", None) or (
+                session.get("stt_model_ref") if isinstance(session, dict) else None
+            )
+            ref = str(model_ref or "local/faster-whisper-base.en").strip().lower()
+            return ref.startswith("local/") and "nemotron" not in ref
+        except Exception:
+            return False
 
     @staticmethod
     def _keep_local_whisper_warm(model_ref: object) -> bool:
@@ -2391,6 +2413,42 @@ class VoiceFlowApp:
                             except Exception:
                                 still_pending = 1
                             stream_had_failures = self._stream_had_failures(self._stream_stt)
+
+                        if (
+                            still_pending == 1
+                            and not stream_had_failures
+                            and self._local_chunk_stream(session)
+                        ):
+                            # On-device Whisper: one chunk is still decoding.
+                            # Throwing the stream away here never saves time:
+                            # the full-recording decode needs the same model
+                            # lock (it waits for this chunk anyway) and then
+                            # decodes every second of audio again. Measured
+                            # on a 2-thread CPU: 5.8 s and 16.4 s release-to-
+                            # text when discarded vs ~1-4 s when waited for.
+                            # Wait for that one chunk, keeping a slice of the
+                            # complete-recording budget for the fallback.
+                            local_wait_until = complete_recording_deadline - LOCAL_STREAM_FALLBACK_RESERVE_SECONDS
+                            remaining_local = local_wait_until - time.monotonic()
+                            if remaining_local > 0.0:
+                                try:
+                                    set_deadline = getattr(self._stream_stt, "set_deadline", None)
+                                    if callable(set_deadline):
+                                        set_deadline(local_wait_until)
+                                    late_part = _call_with_optional_deadline(
+                                        self._stream_stt.collect,
+                                        deadline=local_wait_until,
+                                        timeout=remaining_local,
+                                    )
+                                    if late_part:
+                                        part = f"{part} {late_part}".strip() if part else str(late_part).strip()
+                                except Exception:
+                                    log.debug("[STREAM STT] local late-chunk wait failed", exc_info=True)
+                                try:
+                                    still_pending = self._stream_stt.pending_count()
+                                except Exception:
+                                    still_pending = 1
+                                stream_had_failures = self._stream_had_failures(self._stream_stt)
 
                         if part and still_pending <= 0 and not stream_had_failures:
                             raw_transcript = str(part).strip()

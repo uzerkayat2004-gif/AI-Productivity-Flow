@@ -417,11 +417,20 @@ class Transcriber:
         try:
             from voice_flow.storage import storage
             active_stt = str(storage.get_setting("voice_flow_stt_model", "local/faster-whisper-base.en") or "").strip()
+            from voice_flow import downloadable_models
+            if downloadable_models.is_polish_model_ref(active_stt):
+                # Repair a v1.0.6 bad state: a polish model (S1-mini / LFM)
+                # was saved as the speech model, so Whisper never loaded and
+                # every dictation waited 15 s for nothing.
+                log.warning("[MODEL] Speech model was set to polish model '%s'; restoring Whisper.", active_stt)
+                active_stt = "local/faster-whisper-base.en"
+                storage.save_setting("voice_flow_stt_model", active_stt)
             # If active_stt is default faster-whisper but user has downloaded a local Nemotron model,
             # auto-promote the downloaded Nemotron model so the app immediately uses it!
+            # Only speech models qualify: a downloaded polish model must never
+            # become the speech-to-text engine.
             if not active_stt or active_stt == "local/faster-whisper-base.en":
-                from voice_flow import downloadable_models
-                downloaded = downloadable_models.get_downloaded_models()
+                downloaded = downloadable_models.get_downloaded_stt_models()
                 if downloaded:
                     active_stt = downloaded[0]["full_id"]
                     storage.save_setting("voice_flow_stt_model", active_stt)
@@ -510,11 +519,19 @@ class Transcriber:
                 selected = ""
         if selected.casefold().startswith("faster-whisper-"):
             selected = selected[len("faster-whisper-"):]
+        if selected:
+            try:
+                from voice_flow import downloadable_models
+                if downloadable_models.is_polish_model_ref(selected):
+                    # A polish model cannot transcribe; use the speech default.
+                    selected = ""
+            except Exception:
+                pass
         if not selected:
             # Check for downloaded Nemotron/local model first, else fallback to config.model_size
             try:
                 from voice_flow import downloadable_models
-                downloaded = downloadable_models.get_downloaded_models()
+                downloaded = downloadable_models.get_downloaded_stt_models()
                 if downloaded:
                     dm_full = downloaded[0].get("full_id", "")
                     p, s, m = dm_full.partition("/")

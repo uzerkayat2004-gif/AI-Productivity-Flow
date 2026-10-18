@@ -946,7 +946,7 @@ class VF1Engine:
             "n_predict": self.config.max_new_tokens,
             "temperature": self.config.temperature,
             "repeat_penalty": self.config.repetition_penalty,
-            "stop": ["<​|im_end|>", "<​|endoftext|>"],
+            "stop": ["<|im_end|>", "<|endoftext|>"],
             "stream": False,
         }
         data = json.dumps(payload).encode("utf-8")
@@ -994,7 +994,8 @@ class VF1Engine:
 
                 with self._lock:
                     if self._loaded_model is None:
-                        threads = max(1, min(8, os.cpu_count() or 4))
+                        from voice_flow.local_model_resources import local_llm_thread_count
+                        threads = local_llm_thread_count()
                         gpu_layers = -1 if sys.platform == "darwin" else 0
                         self._loaded_model = Llama(
                             model_path=str(model_path),
@@ -1218,7 +1219,8 @@ class LlamaServerManager:
 
             chosen_port = int(port) if port else _free_loopback_port(host)
             alias = _ALIAS_PREFIX + secrets.token_hex(8)
-            threads = max(1, min(8, os.cpu_count() or 4))
+            from voice_flow.local_model_resources import local_llm_thread_count
+            threads = local_llm_thread_count()
             cmd = [
                 str(binary),
                 "-m", str(model_path),

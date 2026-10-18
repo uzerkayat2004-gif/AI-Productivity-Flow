@@ -24,6 +24,29 @@ log = logging.getLogger(__name__)
 _idle_clock = time.monotonic
 
 
+def local_llm_thread_count() -> int:
+    """Physical CPU cores for an on-device llama.cpp polish model, capped at 8.
+
+    ``os.cpu_count()`` counts hyper-threads. Giving llama.cpp every logical
+    CPU (8 on a 4-core/8-thread laptop) oversubscribes the cores it shares
+    with Whisper and usually makes token generation slower, not faster;
+    llama.cpp and llama-cpp-python both default to the physical-core count.
+    """
+    import os
+
+    physical = None
+    try:
+        import psutil  # type: ignore
+
+        physical = psutil.cpu_count(logical=False)
+    except Exception:
+        physical = None
+    if not physical:
+        logical = os.cpu_count() or 4
+        physical = max(1, logical // 2) if logical > 4 else logical
+    return max(1, min(8, int(physical)))
+
+
 def idle_time() -> float:
     """Use the resource clock independently of an inference deadline clock."""
     return _idle_clock()
@@ -43,13 +66,16 @@ class ModelUseLease:
     def release_after_idle(self, seconds: float, max_seconds: float | None = None) -> None:
         """Keep a model warm briefly; explicit cleanup still wins.
 
-        By default speech may stay resident up to ``LOCAL_MODEL_IDLE_SECONDS``
-        (two minutes) and other models up to 30 seconds. ``max_seconds`` lets a
+        By default every local model family (speech and polish) may stay
+        resident up to ``LOCAL_MODEL_IDLE_SECONDS`` (two minutes). A 30-second
+        polish ceiling made S1-mini / LFM reload for nearly every dictation:
+        people rarely dictate twice within half a minute, and a cold S1 load
+        plus its first generation cost several seconds. ``max_seconds`` lets a
         caller that has checked memory pressure (e.g. cloud polish, so no local
         LLM competes for RAM) choose its own ceiling.
         """
         if max_seconds is None:
-            ceiling = LOCAL_MODEL_IDLE_SECONDS if self.kind == "speech" else 30.0
+            ceiling = LOCAL_MODEL_IDLE_SECONDS
         else:
             ceiling = max(0.0, float(max_seconds))
         self._release(max(0.0, min(ceiling, float(seconds))))
