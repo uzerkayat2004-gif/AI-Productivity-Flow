@@ -313,7 +313,7 @@ def main() -> None:
         "code2video": {"source": "third_party/code2video (vendored, MIT)"},
         "ffmpeg": ffmpeg_info,
         "whisper": whisper_info,
-        "render_browser": "provisioned at install time by `hyperframes browser ensure` (not redistributed)",
+        "render_browser": "provisioned per user by `hyperframes browser ensure` in the background after first launch, or before the first render (not redistributed)",
         **installer_info,
     }
     (RUNTIME / "runtime-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

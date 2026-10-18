@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 _MANIFEST_NAME = "runtime-manifest.json"
@@ -270,9 +271,24 @@ def render_browser_cache() -> Path | None:
     return None
 
 
-def ensure_render_browser(log=None) -> bool:
+# One provisioning run at a time: the background prefetch and a render that
+# needs the browser must not download it twice.
+_RENDER_BROWSER_LOCK = threading.Lock()
+_RENDER_BROWSER_PREFETCH_SCHEDULED = False
+# The installer used to run `hyperframes browser ensure` (a ~150 MB Chrome
+# download plus thousands of files for Defender to scan) in parallel with the
+# first launch of the app. It is now done in the background this long after
+# the engine is ready, at idle priority, or on demand by the first render.
+RENDER_BROWSER_PREFETCH_DELAY_SECONDS = 600.0
+
+
+def ensure_render_browser(log=None, *, background: bool = False) -> bool:
     """Provision the pinned render browser if missing (HyperFrames' official
-    command; downloads from Google's Chrome for Testing endpoints)."""
+    command; downloads from Google's Chrome for Testing endpoints).
+
+    ``background=True`` runs the download at idle (Windows) or nice +10
+    (POSIX) priority. Either way no console window opens.
+    """
     if render_browser_cache() is not None or browser_executable() is not None:
         return True
     node = node_executable()
@@ -284,16 +300,52 @@ def ensure_render_browser(log=None) -> bool:
         return False
     import subprocess
 
-    try:
-        subprocess.run(
-            [str(node), str(cli), "browser", "ensure"],
-            capture_output=True, text=True, timeout=900,
-        )
-    except Exception as exc:
-        if log:
-            log(f"render browser provisioning failed: {exc}")
-        return False
+    with _RENDER_BROWSER_LOCK:
+        if render_browser_cache() is not None:
+            return True
+        kwargs: dict = {"capture_output": True, "text": True, "timeout": 900}
+        if sys.platform == "win32":
+            from voice_flow.startup_priority import IDLE_PRIORITY_CLASS
+
+            flags = 0x08000000  # CREATE_NO_WINDOW: node.exe is a console app
+            if background:
+                flags |= IDLE_PRIORITY_CLASS
+            kwargs["creationflags"] = flags
+        elif background:
+            from voice_flow.startup_priority import background_preexec
+
+            kwargs["preexec_fn"] = background_preexec()
+        try:
+            subprocess.run([str(node), str(cli), "browser", "ensure"], **kwargs)
+        except Exception as exc:
+            if log:
+                log(f"render browser provisioning failed: {exc}")
+            return False
     return render_browser_cache() is not None
+
+
+def schedule_render_browser_prefetch(delay_seconds: float | None = None) -> bool:
+    """Prepare the Video Flow render browser later, in the background.
+
+    Only for the installed Windows app, once per process, and only when the
+    browser is missing. Returns True when a prefetch was scheduled.
+    """
+    global _RENDER_BROWSER_PREFETCH_SCHEDULED
+    if sys.platform != "win32" or not is_installed():
+        return False
+    if os.environ.get("VOICE_FLOW_RENDER_BROWSER_PREFETCH", "1").strip().lower() in ("0", "off", "false", "no"):
+        return False
+    if _RENDER_BROWSER_PREFETCH_SCHEDULED:
+        return False
+    if render_browser_cache() is not None or browser_executable() is not None:
+        return False
+    _RENDER_BROWSER_PREFETCH_SCHEDULED = True
+    delay = RENDER_BROWSER_PREFETCH_DELAY_SECONDS if delay_seconds is None else float(delay_seconds)
+    timer = threading.Timer(delay, lambda: ensure_render_browser(background=True))
+    timer.daemon = True
+    timer.name = "apf-render-browser-prefetch"
+    timer.start()
+    return True
 
 
 def preflight_problems() -> list[str]:

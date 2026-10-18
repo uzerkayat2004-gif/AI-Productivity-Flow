@@ -16,17 +16,38 @@ import threading
 # Win32 title and class stay distinct from the real desktop window. The
 # launcher used to call FindWindowW("AI Productivity Flow") and treat this
 # 420x210 splash as the app, then exit before the main window existed.
-WINDOW_TITLE = "APFEarlySplash"
+# FindWindowW matches the whole title, so "AI Productivity Flow (starting)"
+# never matches the app title, and it reads well on the taskbar and Alt+Tab.
+WINDOW_TITLE = "AI Productivity Flow (starting)"
+# Title used by builds up to 1.0.6. Still recognised so a newer launcher never
+# mistakes an older splash for the app window.
+LEGACY_WINDOW_TITLE = "APFEarlySplash"
+# Same AppUserModelID as the main window (desktop_launcher), so the splash and
+# the app share one taskbar button and the app icon.
+APP_USER_MODEL_ID = "antigravity.voiceflow.desktop.1.0"
 BRAND_TITLE = "AI Productivity Flow"
 SPLASH_CLASS_NAME = "APFEarlySplash"
 APP_WINDOW_TITLES = ("AI Productivity Flow", "Voice Flow")
 _CLASS_NAME = SPLASH_CLASS_NAME
 _LOG_NAME = "launch.log"
-# The splash closes itself after this long even if nobody asks it to. Startup
-# waits up to about a minute for the engine and then 15 s for the window, so a
-# splash still up after two minutes means something failed, and a topmost
-# "Starting..." box over every app is worse than no splash.
+# The splash closes itself after this long even if nobody asks it to. The main
+# window normally replaces it within seconds, so a splash still up after two
+# minutes means something failed.
 MAX_SPLASH_SECONDS = 120
+# Window styles. The splash is an ordinary app window: it is NOT topmost, it
+# has a taskbar button (WS_EX_APPWINDOW) and it can be minimised, so other
+# windows can cover it while the app starts. Up to 1.0.6 it used
+# WS_EX_TOPMOST | WS_EX_TOOLWINDOW: always on top of every app, no taskbar
+# button, impossible to send to the background.
+WS_EX_APPWINDOW = 0x00040000
+WS_EX_TOPMOST = 0x00000008
+WS_EX_TOOLWINDOW = 0x00000080
+WS_POPUP = 0x80000000
+WS_VISIBLE = 0x10000000
+WS_SYSMENU = 0x00080000
+WS_MINIMIZEBOX = 0x00020000
+SPLASH_EX_STYLE = WS_EX_APPWINDOW
+SPLASH_STYLE = WS_POPUP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX
 _ANIMATION_TIMER_ID = 1
 _DEADLINE_TIMER_ID = 2
 
@@ -63,7 +84,7 @@ def is_startup_splash(title: str, class_name: str) -> bool:
     Class is the reliable check. The title is checked too so a splash that
     still uses the app name cannot pass a title-only search.
     """
-    return (class_name or "") == SPLASH_CLASS_NAME or (title or "") == WINDOW_TITLE
+    return (class_name or "") == SPLASH_CLASS_NAME or (title or "") in (WINDOW_TITLE, LEGACY_WINDOW_TITLE)
 
 
 def read_app_version() -> str:
@@ -294,6 +315,16 @@ def _wnd_proc(hwnd, msg, wparam, lparam):
 _PAINTSTRUCT = None
 
 
+def _set_app_user_model_id() -> None:
+    """Group the splash with the main window on the taskbar. Never raises."""
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except Exception:
+        pass
+
+
 def _create_window():
     import ctypes
     from ctypes import wintypes
@@ -354,11 +385,12 @@ def _create_window():
     screen_h = user32.GetSystemMetrics(1) or 800
     x = max(0, (screen_w - width) // 2)
     y = max(0, (screen_h - height) // 2)
+    _set_app_user_model_id()
     hwnd = user32.CreateWindowExW(
-        0x00000008 | 0x00000080,  # WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+        SPLASH_EX_STYLE,  # normal window with a taskbar button, never topmost
         _CLASS_NAME,
         WINDOW_TITLE,
-        0x80000000 | 0x10000000,  # WS_POPUP | WS_VISIBLE
+        SPLASH_STYLE,  # borderless, but minimisable from the taskbar
         x, y, width, height,
         None, None, instance, None,
     )
@@ -467,7 +499,7 @@ def close_early_splash(hwnd: int | None = None) -> None:
 
 
 def show_early_splash() -> int | None:
-    """Show a topmost branded window on its own message thread.
+    """Show a branded, non-topmost window on its own message thread.
 
     Returns None when this is not an interactive Windows launch, or when the
     window cannot be created. Failures are logged and never raised: startup

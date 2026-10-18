@@ -110,4 +110,11 @@ def test_launch_apf_marks_its_mutex_with_its_pid():
 def test_launcher_logs_where_startup_time_goes():
     gui = LAUNCHER_SRC.split("def launch_desktop_gui", 1)[1].split("\ndef _install_mac_window_lifecycle", 1)[0]
     assert "engine wait finished after" in gui
-    assert re.search(r"main window shown .* after launch", gui)
+    # The shown handler moved into _wire_window, shared by both window paths.
+    wire = LAUNCHER_SRC.split("def _wire_window", 1)[1].split("\ndef ", 1)[0]
+    assert re.search(r"main window shown .* after launch", wire)
+    assert "_wire_window(" in gui
+    # Cold start (warming window) logs when the window and the app UI appear.
+    assert "warming window created" in LAUNCHER_SRC
+    assert "app UI loaded" in LAUNCHER_SRC
+    assert "[timing]" in LAUNCHER_SRC

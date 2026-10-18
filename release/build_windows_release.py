@@ -152,6 +152,97 @@ def refresh_app_package(staging: Path) -> None:
         sys.exit("voice_flow import check failed in staging:\n" + check.stderr[-1500:])
 
 
+# --- Install-size and first-launch work --------------------------------------
+# The v1.0.4 installer wrote 33,157 files (1.7 GB). Windows Defender scans each
+# new file, so on a modest laptop the file count, not the byte count, decides
+# how long "Installing..." takes. These files are never used at runtime.
+_PRUNE_DIR_NAMES = {"tests", "test", "SelfTest"}  # inside third-party packages only
+_PRUNE_SUFFIXES = (".pyi", ".map", ".d.ts", ".d.mts", ".d.cts")
+_KEEP_DOC_PREFIXES = ("license", "licence", "notice", "copying", "authors", "patents", "third")
+# Packages whose tests folders are real runtime modules. None known today;
+# listed here so a future exception is one line.
+_PRUNE_KEEP_PACKAGES: set[str] = set()
+
+
+def _site_packages(staging: Path) -> Path:
+    return staging / "runtime" / "python" / "Lib" / "site-packages"
+
+
+def prune_staging_for_install(staging: Path) -> dict:
+    """Delete files the app never loads: package test suites, type stubs,
+    source maps, TypeScript declarations and non-license Markdown in the Node
+    trees. Licenses and notices are always kept. Safe to run more than once.
+    pip and the C headers are left in staging (later build steps may need
+    them) and are excluded from the installer by apf-setup.iss instead.
+    """
+    removed = {"test_dirs": 0, "files": 0}
+    runtime = staging / "runtime"
+    site = _site_packages(staging)
+    if site.is_dir():
+        for package in sorted(p for p in site.iterdir() if p.is_dir()):
+            if package.name in _PRUNE_KEEP_PACKAGES or package.name == "voice_flow":
+                continue
+            for folder in sorted(package.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if folder.is_dir() and folder.name in _PRUNE_DIR_NAMES and folder.exists():
+                    removed["files"] += sum(1 for f in folder.rglob("*") if f.is_file())
+                    shutil.rmtree(folder, ignore_errors=True)
+                    removed["test_dirs"] += 1
+    for path in list(runtime.rglob("*")) if runtime.is_dir() else []:
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        drop = name.endswith(_PRUNE_SUFFIXES)
+        if not drop and name.endswith((".md", ".markdown")) and "node_modules" in path.parts:
+            drop = not name.startswith(_KEEP_DOC_PREFIXES)
+        if drop:
+            try:
+                path.unlink()
+                removed["files"] += 1
+            except OSError:
+                pass
+    print(f"Pruned staging: {removed['test_dirs']} test folders, {removed['files']} files removed")
+    return removed
+
+
+def compileall_commands(python: Path, staging: Path) -> list[list[str]]:
+    """compileall runs that ship bytecode with the installer.
+
+    Up to 1.0.6 the app package was copied without .pyc files, so the first
+    launch compiled ~150 voice_flow modules (and parts of the stdlib) in two
+    processes at once, each new .pyc being written and scanned. The macOS
+    build already precompiles (scripts/build_macos_app.py).
+    - stdlib + third party: default timestamp mode; Inno Setup keeps file
+      times, and up-to-date .pyc files from pip are skipped.
+    - voice_flow and narova_tts: checked-hash, so the .pyc stays valid when
+      an app-only update or a zip changes file times, and is never used
+      for a source file whose content changed.
+    """
+    lib = staging / "runtime" / "python" / "Lib"
+    site = _site_packages(staging)
+    commands = [[str(python), "-m", "compileall", "-q", "-j", "0", str(lib)]]
+    own = [str(site / name) for name in ("voice_flow", "narova_tts") if (site / name).is_dir()]
+    if own:
+        commands.append([str(python), "-m", "compileall", "-q", "-f", "-j", "0",
+                         "--invalidation-mode", "checked-hash", *own])
+    return commands
+
+
+def precompile_runtime_bytecode(staging: Path) -> None:
+    python = staging / "runtime" / "python" / "python.exe"
+    if not python.is_file():
+        sys.exit(f"BYTECODE PRECOMPILE FAILED — staging private Python is missing: {python}")
+    for command in compileall_commands(python, staging):
+        result = subprocess.run(command, capture_output=True, text=True)
+        # A few third-party fixtures are intentionally invalid Python; compileall
+        # then exits 1 but still compiles everything else.
+        print(f"compileall exit {result.returncode}: {' '.join(command[3:6])}...")
+    site = _site_packages(staging)
+    compiled = list((site / "voice_flow").rglob("*.cpython-312.pyc"))
+    if len(compiled) < 50:
+        sys.exit(f"BYTECODE PRECOMPILE FAILED — only {len(compiled)} voice_flow .pyc files")
+    print(f"Precompiled bytecode ({len(compiled)} voice_flow modules)")
+
+
 def preflight(staging: Path) -> None:
     runtime = staging / "runtime"
     required = [
@@ -221,6 +312,8 @@ def main() -> None:
     refresh_code2video_vendor(STAGING)
     ensure_notebooklm_runtime(STAGING)
     ensure_openai_runtime(STAGING)
+    prune_staging_for_install(STAGING)
+    precompile_runtime_bytecode(STAGING)
     preflight(STAGING)
     installer = build_installer()
     size_mb = installer.stat().st_size / (1024 * 1024)

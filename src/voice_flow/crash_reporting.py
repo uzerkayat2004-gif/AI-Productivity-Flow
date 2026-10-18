@@ -245,6 +245,15 @@ def init_crash_reporting(force: bool = False) -> bool:
             before_breadcrumb=_drop_breadcrumb,
             attach_stacktrace=True,
             integrations=integrations,
+            # Sentry's auto-enabling integrations import every supported
+            # library that is installed (openai, huggingface_hub, httpx,
+            # anthropic, ...) just to hook it. In this app that pulled in about
+            # 970 extra modules in every process (launcher, engine) before the
+            # first window: 1.5-3 s on a fast machine, far more on a cold
+            # low-end PC while Defender scans each new file. Crash reports
+            # only need the default integrations (excepthook, threading,
+            # logging, dedupe), which stay on.
+            auto_enabling_integrations=False,
             before_send=before_send_scrubber,
         )
         _CRASH_REPORTING_INITIALIZED = True
