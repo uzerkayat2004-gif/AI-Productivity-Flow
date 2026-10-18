@@ -4096,6 +4096,16 @@ class VoiceFlowApp:
                 log.debug("GUI state file watcher error: %s", e)
 
     def run(self) -> None:
+        # The user chose "Later" on an automatic update: install it now, before
+        # dictation starts, with the same helper as Restart to update.
+        try:
+            from voice_flow.app_updater import apply_deferred_update_on_launch
+            if apply_deferred_update_on_launch():
+                log.info("[autoupdate] Restarting into the new version.")
+                time.sleep(10.0)
+                return
+        except Exception:
+            log.debug("Deferred update check skipped", exc_info=True)
         log.info("Starting input trigger hooks...")
         # Sync this engine to the active account database (and consolidate any
         # legacy fragmentation) before accepting dictations.
@@ -4223,6 +4233,13 @@ class VoiceFlowApp:
                 log.info("[STARTUP] Engine ready %.1fs after process start.", age)
         except Exception:
             pass
+        try:
+            # Automatic updates: first check ~2 min after launch, then every 6 h.
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                from voice_flow.app_updater import schedule_auto_updates
+                schedule_auto_updates()
+        except Exception:
+            log.debug("Automatic update checks not scheduled", exc_info=True)
         try:
             from voice_flow import runtime_env
             if runtime_env.schedule_render_browser_prefetch():

@@ -40,7 +40,7 @@
   <link rel="stylesheet" href="usability.css?v=20260912-dialog-10">
   <link rel="stylesheet" href="studio.css?v=20261006-dictionary-auto">
   <link rel="stylesheet" href="studio-polish.css?v=20260913-icons-all">
-  <link rel="stylesheet" href="workspace-ui.css?v=20261018-settings">
+  <link rel="stylesheet" href="workspace-ui.css?v=20261018-autoupdate">
   <link rel="stylesheet" href="splash.css?v=20260913-cinematic-studio">
   <link rel="stylesheet" href="onboarding-hero.css?v=20261017-onboarding-v103">
 
@@ -3344,22 +3344,12 @@
 <input checked="" id="toggle-show-in-taskbar" onchange="toggleShowInTaskbarSetting(this.checked)" type="checkbox"/>
 <span class="toggle-slider"></span>
 </label>
-</div></div></section><section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Restart Flow <span aria-label="About Restart Flow" class="info-tip" data-tip="Fixes most glitches. Your floating bar stays where it is." tabindex="0">i</span></div>
-</div>
-<button class="action-btn" onclick="triggerDeepAppRestart()">Restart</button>
-</div><div class="setting-row">
-<div class="setting-info">
-<div class="setting-title">Temporary audio <span aria-label="About Temporary audio" class="info-tip" data-tip="Deletes leftover audio files. Your history stays." tabindex="0">i</span></div>
-</div>
-<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear</button>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">About &amp; updates</h4><div class="settings-group-card about-card"><div class="setting-row about-identity-row">
 <div class="setting-info">
 <div class="setting-title about-title">
 <strong>AI Productivity Flow</strong>
 <span class="status-badge about-version-badge">Version 1.0</span>
-<span class="about-build-id">build 1.0.8</span>
+<span class="about-build-id">build 1.0.9</span>
 </div>
 <div class="about-links">
 <a href="https://ai-productivity-flow.vercel.app/" target="_blank">Website</a>
@@ -3371,6 +3361,15 @@
 <div class="vf-row-control">
 <button class="action-btn" id="btn-check-updates" onclick="checkForAppUpdates(true)">Check for updates</button>
 </div>
+</div><div class="setting-row" id="auto-update-row">
+<div class="setting-info">
+<div class="setting-title">Automatic updates</div>
+<div class="setting-desc">Downloads updates in the background.</div>
+</div>
+<label class="toggle-switch" title="Automatic updates">
+<input aria-label="Automatic updates" checked="" id="toggle-auto-updates" onchange="toggleAutoUpdates(this.checked)" type="checkbox"/>
+<span class="toggle-slider"></span>
+</label>
 </div><div id="update-status-row" class="setting-row" style="display:none;">
 <div id="update-status-message" class="update-status-message"></div>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">Privacy</h4><div class="settings-group-card"><div class="setting-row privacy-row" id="privacy-crash-row">
@@ -3388,6 +3387,19 @@
 <div class="setting-desc">Default voice is online. Text goes to Microsoft.</div>
 </div>
 <span class="privacy-note">Offline voices in Audio Flow</span>
+</div></div></section><details class="settings-advanced" id="settings-advanced">
+<summary class="settings-advanced-summary"><span>Advanced</span><span class="settings-advanced-hint">Restart, cache, tour</span></summary>
+<div class="settings-advanced-body">
+<section class="preference-section"><h4 class="preference-section-title">Maintenance</h4><div class="settings-group-card"><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Restart Flow <span aria-label="About Restart Flow" class="info-tip" data-tip="Fixes most glitches. Your floating bar stays where it is." tabindex="0">i</span></div>
+</div>
+<button class="action-btn" onclick="triggerDeepAppRestart()">Restart</button>
+</div><div class="setting-row">
+<div class="setting-info">
+<div class="setting-title">Temporary audio <span aria-label="About Temporary audio" class="info-tip" data-tip="Deletes leftover audio files. Your history stays." tabindex="0">i</span></div>
+</div>
+<button class="action-btn" onclick="clearAudioRecordingsCache()">Clear</button>
 </div></div></section><section class="preference-section"><h4 class="preference-section-title">Help</h4><div class="settings-group-card"><div class="setting-row">
 <div class="setting-info">
 <div class="setting-title">Runs on <span aria-label="About Runs on" class="info-tip" id="runtime-tip-span" data-tip="Flow runs on this computer. Speech stays offline." tabindex="0">i</span></div>
@@ -3399,6 +3411,8 @@
 </div>
 <button class="action-btn" onclick="replayOnboarding()">Replay Tour</button>
 </div></div></section>
+</div>
+</details>
 </div>
 <!-- TAB: ACCOUNT -->
 <div id="set-tab-account" style="display: none;">
@@ -4280,10 +4294,21 @@
     </div>
   </div>
 
+  <div id="apf-update-toast" class="apf-update-toast" role="status" aria-live="polite" hidden>
+    <div class="apf-update-toast-copy">
+      <strong class="apf-update-toast-title">Update ready</strong>
+      <span class="apf-update-toast-text" id="apf-update-toast-text">Restart to get the new version.</span>
+    </div>
+    <div class="apf-update-toast-actions">
+      <button type="button" class="apf-update-toast-later" id="btn-update-toast-later">Later</button>
+      <button type="button" class="apf-update-toast-restart" id="btn-update-toast-restart">Restart to update</button>
+    </div>
+  </div>
+
   <div id="vf-toast" class="vf-toast" role="status" aria-live="polite"></div>
 
   <script src="provider-logos.js?v=20260913-icons-all"></script>
-  <script src="app.js?v=20261017-notice"></script>
+  <script src="app.js?v=20261018-autoupdate"></script>
   <script src="video-flow.js?v=20261006_nlm_recovery"></script>
   <script src="splash.js?v=20260913-cinematic-studio"></script>
   <script src="onboarding-hero.js?v=20261017-onboarding-v103"></script>

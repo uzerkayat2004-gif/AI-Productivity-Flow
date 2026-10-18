@@ -4435,3 +4435,75 @@ html[data-theme="light"] .apf-notice-bell,
 .vf-treatment-card h3 { margin: 0 0 6px; font-size: 18px; }
 .vf-treatment-card p { margin: 0 0 16px; color: #5c534e; }
 .vf-treatment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* v1.0.9: rarely used System rows live under a collapsed "Advanced". */
+.settings-advanced {
+  margin-top: 6px;
+  border-top: 1px solid rgba(28, 20, 15, 0.10);
+  padding-top: 4px;
+}
+html[data-theme="dark"] .settings-advanced { border-top-color: rgba(255, 255, 255, 0.10); }
+.settings-advanced-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 2px;
+  font-size: 14px;
+  font-weight: 700;
+  user-select: none;
+}
+.settings-advanced-summary::-webkit-details-marker { display: none; }
+.settings-advanced-summary::before {
+  content: "›";
+  display: inline-block;
+  width: 12px;
+  font-size: 16px;
+  transition: transform .15s ease;
+}
+.settings-advanced[open] > .settings-advanced-summary::before { transform: rotate(90deg); }
+.settings-advanced-hint { color: var(--polish-muted, #6b625c); font-size: 12.5px; font-weight: 500; }
+.settings-advanced-body { padding-top: 4px; }
+
+/* Automatic updates: quiet background line in Settings. */
+.apf-update-bg { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--polish-muted, #6b625c); }
+.apf-update-bg .apf-update-bar { height: 4px; }
+
+/* "Update ready" notice in the main window. */
+.apf-update-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: 460px;
+  padding: 14px 16px 14px 18px;
+  border-radius: 14px;
+  background: #1c1410;
+  color: #fff;
+  border: 1px solid rgba(234, 88, 12, 0.45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  font-size: 13.5px;
+}
+.apf-update-toast[hidden] { display: none !important; }
+.apf-update-toast-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.apf-update-toast-title { font-size: 14.5px; font-weight: 700; }
+.apf-update-toast-text { color: rgba(255, 255, 255, 0.72); }
+.apf-update-toast-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.apf-update-toast-actions button {
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.apf-update-toast-later { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.25) !important; }
+.apf-update-toast-later:hover { background: rgba(255, 255, 255, 0.08); }
+.apf-update-toast-restart { background: #ea580c; color: #fff; }
+.apf-update-toast-restart:hover { background: #c2410c; }
+.apf-update-toast-restart:disabled { opacity: .7; cursor: default; }

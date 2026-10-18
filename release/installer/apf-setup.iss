@@ -5,11 +5,14 @@
 ; (#define STAGING_ROOT / DIST_ROOT).
 
 #define MyAppName "AI Productivity Flow"
-#define MyAppVersion "1.0.8"
+#define MyAppVersion "1.0.9"
 #define MyAppDisplayVersion "1.0"
 #define MyAppPublisher "Uzer Kayat"
 #define MyAppURL "https://aiproductivityflow.site/"
 #define MyAppExeName "pythonw.exe"
+; Same id the app sets at runtime (desktop_launcher / early_splash), so the
+; taskbar ties the running window to these shortcuts and shows the logo.
+#define MyAppUserModelID "antigravity.voiceflow.desktop.1.0"
 
 #ifndef REPO_ROOT
   #define REPO_ROOT "..\.."
@@ -88,8 +91,8 @@ Source: "{#STAGING_ROOT}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LaunchScriptPath}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\runtime\python\Lib\site-packages\voice_flow\gui\assets\icon.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\runtime\python\Lib\site-packages\voice_flow\gui\assets\icon.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\runtime\python\Lib\site-packages\voice_flow\gui\assets\icon.ico"; AppUserModelID: "{#MyAppUserModelID}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\runtime\python\{#MyAppExeName}"; Parameters: """{app}\launch_apf.pyw"""; WorkingDir: "{app}"; IconFilename: "{app}\runtime\python\Lib\site-packages\voice_flow\gui\assets\icon.ico"; AppUserModelID: "{#MyAppUserModelID}"
 
 [Run]
 Filename: "{app}\runtime\vcredist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: runhidden; Check: NeedsVcRedist

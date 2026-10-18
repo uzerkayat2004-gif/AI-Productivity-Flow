@@ -163,7 +163,8 @@ def test_v108_manifest_keeps_every_field_for_old_updaters_and_lists_node22():
     from voice_flow import bundled_runtime
 
     manifest = _v108_manifest("win")
-    assert manifest["version"] == "1.0.8"
+    from voice_flow._version import VERSION
+    assert manifest["version"] == VERSION
     assert set(manifest["runtime"]) == set(bundled_runtime.RUNTIME_FIELDS)
     assert manifest["runtime"]["node"] == "20.18.1"
     node = manifest["app_managed"]["node"]

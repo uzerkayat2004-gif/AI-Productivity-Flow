@@ -9,13 +9,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def test_canonical_version_match():
     # 1. Canonical _version.py
     from voice_flow._version import DISPLAY_VERSION, VERSION
-    assert VERSION == "1.0.8", f"Canonical VERSION in _version.py is {VERSION}, expected 1.0.8"
+    assert VERSION == "1.0.9", f"Canonical VERSION in _version.py is {VERSION}, expected 1.0.9"
     assert DISPLAY_VERSION == "1.0", f"DISPLAY_VERSION is {DISPLAY_VERSION}, expected 1.0"
     assert DISPLAY_VERSION != VERSION
 
     # 2. Package __version__
     import voice_flow
-    assert voice_flow.__version__ == "1.0.8", f"__version__ in __init__.py is {voice_flow.__version__}, expected 1.0.8"
+    assert voice_flow.__version__ == "1.0.9", f"__version__ in __init__.py is {voice_flow.__version__}, expected 1.0.9"
 
     # 3. pyproject.toml
     pyproject_path = REPO_ROOT / "pyproject.toml"
@@ -53,7 +53,7 @@ def test_canonical_version_match():
     html = (REPO_ROOT / "src" / "voice_flow" / "gui" / "index.html").read_text(encoding="utf-8")
     assert f"Version {DISPLAY_VERSION}" in html
     assert f"build {VERSION}" in html
-    assert "Version 1.0.8" not in html
+    assert "Version 1.0.9" not in html
     script = (REPO_ROOT / "src" / "voice_flow" / "gui" / "app.js").read_text(encoding="utf-8")
     assert "display_version" in script
     assert "Version ${data.current_version}" not in script
@@ -68,4 +68,4 @@ def test_canonical_version_match():
     assert "v1.0.3" not in readme
     facts = (REPO_ROOT / "docs" / "PRODUCT_FACTS.md").read_text(encoding="utf-8")
     assert "Public version**: 1.0" in facts
-    assert "Internal build**: 1.0.8" in facts
+    assert "Internal build**: 1.0.9" in facts
