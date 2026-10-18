@@ -3288,7 +3288,8 @@ function syncCrashReportsPrivacy(on) {
   const enabled = on !== false;
   if (!btn.dataset) btn.dataset = {};
   btn.dataset.enabled = enabled ? "1" : "0";
-  btn.textContent = enabled ? "Turn off" : "Turn on";
+  if (btn.type === "checkbox") btn.checked = enabled;
+  else btn.textContent = enabled ? "Turn off" : "Turn on";
 }
 
 async function toggleCrashReportsFromPrivacy() {
@@ -14263,35 +14264,62 @@ function updateDisplayVersion(data) {
   return shown;
 }
 
+function updateMegabytes(bytes) {
+  const mb = Number(bytes || 0) / (1024 * 1024);
+  if (!isFinite(mb) || mb <= 0) return "0";
+  return mb >= 10 ? String(Math.round(mb)) : mb.toFixed(1);
+}
+
+function updateProgressText(data) {
+  if (!data) return "";
+  if (data.state === "verifying") return "Checking the download…";
+  if (data.state !== "downloading") return "";
+  const got = Number(data.downloaded_bytes || 0);
+  const total = Number(data.total_bytes || 0);
+  if (total > 0) return `Downloading… ${updateMegabytes(got)} of ${updateMegabytes(total)} MB`;
+  if (got > 0) return `Downloading… ${updateMegabytes(got)} MB`;
+  return data.label || "Downloading…";
+}
+
+function setUpdateBusy(busy) {
+  const actions = document.getElementById("apf-update-actions");
+  const progress = document.getElementById("apf-update-progress");
+  if (actions) actions.hidden = !!busy;
+  if (progress) progress.hidden = !busy;
+}
+
 function renderUpdateCard(data) {
   const row = document.getElementById("update-status-row");
   const msg = document.getElementById("update-status-message");
   if (!row || !msg) return;
   const plan = data.update_plan || {};
-  const versionText = `An update for AI Productivity Flow ${updateDisplayVersion(data)} is available`;
-  const sizeText = plan.size_label ? escapeUpdateText(plan.size_label) : "";
-  const kindText = plan.kind === "app" ? "App update" : "Full installer";
-  const sizeLine = sizeText ? `${kindText} · ${sizeText}` : kindText;
+  const latest = data.latest_display_version || "";
+  const titleText = latest ? `Update available: ${latest}` : "Update available";
+  const size = plan.size_label && plan.size_label !== "unknown size" ? String(plan.size_label) : "";
+  const sizeLine = size ? `Download size: ${escapeUpdateText(size)}` : "A new version of AI Productivity Flow is ready.";
+  const note = plan.kind === "none" && plan.reason ? `<div class="apf-update-note">${escapeUpdateText(plan.reason)}</div>` : "";
   const releaseUrl = data.release_url || "";
   const notes = releaseUrl
-    ? `<a href="${escapeUpdateText(releaseUrl)}" target="_blank" class="action-btn apf-update-notes">View what's new</a>`
+    ? `<a href="${escapeUpdateText(releaseUrl)}" target="_blank" class="apf-update-notes">What's new</a>`
     : "";
   row.style.display = "flex";
   msg.innerHTML = `
     <div class="apf-update-card">
       <div class="apf-update-copy">
-        <strong>${escapeUpdateText(versionText)}</strong>
+        <strong class="apf-update-title">${escapeUpdateText(titleText)}</strong>
         <div class="apf-update-size">${sizeLine}</div>
-        <div class="apf-update-reason">${escapeUpdateText(plan.reason || "")}</div>
+        ${note}
       </div>
-      <div class="apf-update-actions">
+      <div class="apf-update-actions" id="apf-update-actions">
+        <button type="button" class="action-btn apf-update-primary" id="btn-update-now">Update now</button>
         ${notes}
-        <button type="button" class="btn-secondary" id="btn-update-now">Update now</button>
       </div>
       <div class="apf-update-progress" id="apf-update-progress" hidden>
+        <div class="apf-update-progress-head">
+          <span id="apf-update-progress-label">Downloading…</span>
+          <button type="button" class="btn-secondary apf-update-cancel" id="btn-update-cancel">Cancel</button>
+        </div>
         <div class="apf-update-bar" aria-hidden="true"><div class="apf-update-bar-fill" id="apf-update-bar-fill"></div></div>
-        <span id="apf-update-progress-label"></span>
-        <button type="button" class="btn-secondary" id="btn-update-cancel">Cancel</button>
       </div>
       <div class="apf-update-followup" id="apf-update-followup" hidden></div>
     </div>
@@ -14312,6 +14340,7 @@ async function startInAppUpdate() {
   const start = document.getElementById("btn-update-now");
   if (start) start.disabled = true;
   if (progress) progress.hidden = false;
+  setUpdateBusy(true);
   showUpdateFollowup("");
   try {
     const data = await safeFetchJson("/api/updates/download", { method: "POST" });
@@ -14343,7 +14372,7 @@ async function pollUpdateProgress() {
   const percent = Number(data.progress || 0);
   if (fill) fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   if (label) {
-    label.textContent = data.label || (data.state === "verifying" ? "Checking the download…" : "");
+    label.textContent = updateProgressText(data);
   }
   const cancel = document.getElementById("btn-update-cancel");
   if (cancel && !cancel.dataset.bound) {
@@ -14352,6 +14381,7 @@ async function pollUpdateProgress() {
   }
   if (data.state === "downloading" || data.state === "verifying") {
     if (progress) progress.hidden = false;
+    setUpdateBusy(true);
     return;
   }
   stopUpdateProgress();
@@ -14389,6 +14419,7 @@ function showUpdateFailure(message, fallbackUrl) {
   if (fallback) fallback.addEventListener("click", () => openUpdateFallback(fallback));
   const start = document.getElementById("btn-update-now");
   if (start) start.disabled = false;
+  setUpdateBusy(false);
 }
 
 async function openUpdateFallback(button) {
@@ -14443,7 +14474,7 @@ async function checkForAppUpdates(manual = false) {
   if (manual) {
     if (btn) btn.textContent = "Checking...";
     if (row) row.style.display = "flex";
-    if (msg) msg.innerHTML = '<span style="color:var(--text-muted,#888);">Checking for updates from GitHub...</span>';
+    if (msg) msg.innerHTML = '<span style="color:var(--text-muted,#888);">Checking for updates…</span>';
   }
 
   try {
@@ -14466,15 +14497,14 @@ async function checkForAppUpdates(manual = false) {
     if (data.update_available) {
       renderUpdateCard(data);
       const plan = data.update_plan || {};
-      const versionText = `An update for AI Productivity Flow ${updateDisplayVersion(data)} is available`;
-      const sizeNote = plan.size_label ? ` (${plan.size_label})` : "";
+      const sizeNote = plan.size_label && plan.size_label !== "unknown size" ? ` (${plan.size_label})` : "";
       if (!manual && typeof vfToast === "function") {
-        vfToast(`${versionText}${sizeNote}. Check System settings to update.`);
+        vfToast(`Update available${sizeNote}. Open Settings > System to install.`);
       }
     } else {
       if (manual && row && msg) {
         row.style.display = "flex";
-        msg.innerHTML = `<span style="color:var(--success,#22c55e);">✓ You are running the latest version (Version ${updateDisplayVersion(data)}).</span>`;
+        msg.innerHTML = `<span style="color:var(--success,#22c55e);">✓ You're up to date (Version ${updateDisplayVersion(data)}).</span>`;
       }
     }
   } catch (err) {
