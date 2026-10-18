@@ -750,6 +750,8 @@ async function startNotebookLMAuth(switchAccount = false) {
           if (loginBtn) loginBtn.disabled = false;
           if (disconnectBtn) disconnectBtn.disabled = false;
           await checkNotebookLMAuth(false);
+          // Never a dead end: the same button reopens a fresh Google sign-in.
+          if (loginLabel && !vfNlmAuthInProgress) loginLabel.textContent = "Try again";
           vfToast(notebookLMSignInFailureMessage(login, "Sign-in did not finish. Choose your Google account in the browser window, then try again."), true);
           return;
         }

@@ -1305,6 +1305,62 @@ def _cli_argv(command: list[str]) -> list[str]:
     return [str(interpreter), "-m", "notebooklm", *command[1:]]
 
 
+_FIRST_LOGIN_SHIM = Path(__file__).with_name("first_login_shim.py")
+
+
+def _with_first_login_guard(argv: list[str]) -> list[str]:
+    """Run a browser ``login`` through :mod:`first_login_shim` when possible.
+
+    notebooklm-py 0.8.2 treats the signed-out NotebookLM landing page (HTTP
+    200 on notebook.google.com) as "Already logged in" and saves a session
+    with no ``SID``. The shim backports the 0.8.5 fix: steer to Google
+    sign-in and wait for ``SID``. Only the plain browser login is wrapped;
+    ``--master-token`` / ``--browser-cookies`` and every other command keep
+    ``python -m notebooklm``. ``VOICE_FLOW_NBLM_LOGIN_GUARD=0`` turns it off.
+    """
+    if os.environ.get("VOICE_FLOW_NBLM_LOGIN_GUARD", "1").strip().lower() in ("0", "false", "no", "off"):
+        return list(argv)
+    if len(argv) < 4 or argv[1] != "-m" or argv[2] != "notebooklm":
+        return list(argv)
+    rest = list(argv[3:])
+    if "login" not in rest or any(flag in rest for flag in ("--master-token", "--browser-cookies")):
+        return list(argv)
+    try:
+        if not _FIRST_LOGIN_SHIM.is_file():
+            return list(argv)
+    except OSError:
+        return list(argv)
+    return [argv[0], str(_FIRST_LOGIN_SHIM), *rest]
+
+
+def _session_cookie_names(profile: str) -> list[str]:
+    """Names (never values) of the Google auth cookies in the saved session."""
+    wanted = ("SID", "__Secure-1PSID", "__Secure-1PSIDTS", "__Secure-3PSID", "__Secure-3PSIDTS",
+              "HSID", "SSID", "APISID", "SAPISID", "OSID", "__Secure-OSID", "LSID")
+    try:
+        from .config import get_storage_state_path
+        st = get_storage_state_path(profile)
+        data = json.loads(st.read_text(encoding="utf-8")) if st.is_file() else {}
+        cookies = data.get("cookies") if isinstance(data, dict) else None
+        present = {
+            str(c.get("name")) for c in (cookies or [])
+            if isinstance(c, dict) and c.get("name") and c.get("value")
+        }
+    except Exception:
+        return []
+    return [name for name in wanted if name in present]
+
+
+def _log_login_line(message: str) -> None:
+    """Append one ``[nblm-login]`` line to the sign-in log and the app log."""
+    logger.info("[nblm-login] %s", message)
+    try:
+        with _login_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [nblm-login] {message}\n")
+    except Exception:
+        pass
+
+
 def _default_playwright_browsers_dir() -> Path | None:
     if os.name == "nt":
         local = os.environ.get("LOCALAPPDATA", "")
@@ -1403,6 +1459,7 @@ def spawn_notebooklm_process(
     argv = _cli_argv(list(command))
     if interactive is None:
         interactive = "login" in command
+    argv = _with_first_login_guard(argv)
     interpreter: Path | None = None
     if len(argv) >= 3 and argv[1] == "-m" and argv[2] == "notebooklm":
         candidate = Path(argv[0])
@@ -1957,13 +2014,23 @@ def _watch_login(
                 else:
                     _set_note("Signed in — finalizing session…")
 
+                _log_login_line(
+                    f"CLI login finished; saved auth cookies: {_session_cookie_names(profile) or 'none'}"
+                )
                 try:
                     verified = _verify_new_session(profile)
                     if verified.get("authenticated"):
                         email = verified.get("email") or email
+                        _log_login_line(
+                            f"session verified; auth cookies: {_session_cookie_names(profile) or 'none'}"
+                        )
                     else:
                         success = False
                         err = _post_login_failure_message(verified)
+                        _log_login_line(
+                            f"session check failed (kind={verified.get('failure_kind')}); "
+                            f"auth cookies: {_session_cookie_names(profile) or 'none'}"
+                        )
                 except Exception:
                     success = False
                     logger.warning("Post-sign-in verification failed", exc_info=True)
@@ -2655,6 +2722,13 @@ def _log_verification(profile: str, *, passive: bool, returncode: int | None, st
         pass
 
 
+_MISSING_SID_RE = re.compile(r"missing required cookies[^:]*:[^\n]*\bSID\b", re.IGNORECASE)
+_SIGN_IN_NOT_FINISHED_MESSAGE = (
+    "Google sign-in didn't finish in the NotebookLM window, so nothing was connected. "
+    "Click Try again and sign in to Google in the window that opens."
+)
+
+
 def _post_login_failure_message(verified: dict[str, Any]) -> str:
     """Toast text when Google sign-in finished but the new session failed its check.
 
@@ -2672,6 +2746,10 @@ def _post_login_failure_message(verified: dict[str, Any]) -> str:
     if reason.lower().startswith("token fetch failed:"):
         reason = reason.split(":", 1)[1].strip()
     reason = reason.splitlines()[0].strip() if reason else ""
+    if _MISSING_SID_RE.search(reason):
+        # The window closed before Google finished signing in (no SID cookie
+        # was saved). Nothing is wrong with the account: just sign in again.
+        return _SIGN_IN_NOT_FINISHED_MESSAGE
     if len(reason) > 160:
         reason = reason[:157].rstrip() + "..."
     base = "Signed in, but NotebookLM could not confirm the new session"
