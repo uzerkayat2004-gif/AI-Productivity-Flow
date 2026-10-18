@@ -14495,10 +14495,13 @@ async function checkForAppUpdates(manual = false) {
     }
 
     if (data.update_available) {
+      if (typeof showStagedUpdateIfAny === "function" && showStagedUpdateIfAny()) return;
       renderUpdateCard(data);
       const plan = data.update_plan || {};
       const sizeNote = plan.size_label && plan.size_label !== "unknown size" ? ` (${plan.size_label})` : "";
-      if (!manual && typeof vfToast === "function") {
+      // Automatic updates fetch the small update themselves and then show "Update ready".
+      const autoHandles = plan.kind === "app" && typeof _autoUpdatesEnabled !== "undefined" && _autoUpdatesEnabled;
+      if (!manual && !autoHandles && typeof vfToast === "function") {
         vfToast(`Update available${sizeNote}. Open Settings > System to install.`);
       }
     } else {
@@ -14525,4 +14528,209 @@ try {
       checkForAppUpdates(false);
     }
   }, 10000);
+} catch (_) {}
+
+
+// ---------------------------------------------------------------------------
+// Automatic updates (v1.0.9): the engine checks GitHub in the background and
+// downloads the small update itself. The window only shows progress in
+// Settings and an "Update ready" notice once the file is verified.
+// ---------------------------------------------------------------------------
+let _autoUpdatesEnabled = true;
+let _autoUpdateTimer = null;
+let _autoUpdateToastDismissed = false;
+let _lastAutoUpdateStatus = null;
+
+async function loadAutoUpdateSetting() {
+  try {
+    const res = await fetch("/api/updates/auto");
+    const data = await res.json();
+    if (data && typeof data.enabled === "boolean") _autoUpdatesEnabled = data.enabled;
+  } catch (_) {}
+  const toggle = document.getElementById("toggle-auto-updates");
+  if (toggle) toggle.checked = !!_autoUpdatesEnabled;
+  return _autoUpdatesEnabled;
+}
+
+async function toggleAutoUpdates(enabled) {
+  const toggle = document.getElementById("toggle-auto-updates");
+  try {
+    const data = await safeFetchJson("/api/updates/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !!enabled }),
+    });
+    if (!data || data.success === false) throw new Error((data && data.error) || "Could not save.");
+    _autoUpdatesEnabled = !!data.enabled;
+    if (typeof vfToast === "function") {
+      vfToast(_autoUpdatesEnabled ? "Automatic updates on." : "Automatic updates off.");
+    }
+  } catch (err) {
+    if (toggle) toggle.checked = !enabled;
+    if (typeof vfToast === "function") vfToast("Could not change automatic updates.", true);
+  }
+}
+
+function hideUpdateToast() {
+  const toast = document.getElementById("apf-update-toast");
+  if (toast) toast.hidden = true;
+}
+
+function showUpdateToast(data) {
+  const toast = document.getElementById("apf-update-toast");
+  if (!toast) return;
+  const text = document.getElementById("apf-update-toast-text");
+  const restart = document.getElementById("btn-update-toast-restart");
+  const later = document.getElementById("btn-update-toast-later");
+  const state = data && data.state;
+  if (text) {
+    if (state === "waiting") text.textContent = "Restarts when you're done.";
+    else if (state === "installing") text.textContent = "Restarting…";
+    else text.textContent = "Restart to get the new version.";
+  }
+  if (restart) {
+    restart.disabled = state === "waiting" || state === "installing";
+    if (!restart.dataset.bound) {
+      restart.dataset.bound = "1";
+      restart.addEventListener("click", restartToUpdate);
+    }
+  }
+  if (later) {
+    later.hidden = state === "installing";
+    if (!later.dataset.bound) {
+      later.dataset.bound = "1";
+      later.addEventListener("click", updateLater);
+    }
+  }
+  toast.hidden = false;
+}
+
+function renderReadyUpdateCard(data) {
+  const row = document.getElementById("update-status-row");
+  const msg = document.getElementById("update-status-message");
+  if (!row || !msg) return;
+  const state = data && data.state;
+  let line = "Restart to get the new version.";
+  if (data && data.deferred) line = "Installs next time you open Flow.";
+  if (state === "waiting") line = "Restarts when you're done.";
+  if (state === "installing") line = "Restarting…";
+  const busy = state === "waiting" || state === "installing";
+  row.style.display = "flex";
+  msg.innerHTML = `
+    <div class="apf-update-card" id="apf-update-ready-card">
+      <div class="apf-update-copy">
+        <strong class="apf-update-title">Update ready</strong>
+        <div class="apf-update-size" id="apf-update-ready-line">${escapeUpdateText(line)}</div>
+      </div>
+      <div class="apf-update-actions">
+        <button type="button" class="action-btn apf-update-primary" id="btn-update-restart" ${busy ? "disabled" : ""}>Restart to update</button>
+        ${data && data.deferred || busy ? "" : '<button type="button" class="btn-secondary" id="btn-update-later">Later</button>'}
+      </div>
+    </div>
+  `;
+  const restart = document.getElementById("btn-update-restart");
+  if (restart) restart.addEventListener("click", restartToUpdate);
+  const later = document.getElementById("btn-update-later");
+  if (later) later.addEventListener("click", updateLater);
+}
+
+function renderBackgroundDownloadLine(data) {
+  const row = document.getElementById("update-status-row");
+  const msg = document.getElementById("update-status-message");
+  if (!row || !msg) return;
+  // Leave the manual card alone while the user is watching its own progress.
+  if (document.getElementById("apf-update-card-manual-progress")) return;
+  const percent = Math.max(0, Math.min(100, Number(data.progress || 0)));
+  const text = updateProgressText(data).replace("Downloading…", "Downloading update…");
+  row.style.display = "flex";
+  msg.innerHTML = `
+    <div class="apf-update-bg" id="apf-update-bg">
+      <span id="apf-update-bg-label">${escapeUpdateText(text)}</span>
+      <div class="apf-update-bar" aria-hidden="true"><div class="apf-update-bar-fill" style="width:${percent}%"></div></div>
+    </div>
+  `;
+}
+
+function handleAutoUpdateStatus(data) {
+  if (!data || data.origin !== "auto") return;
+  const state = data.state;
+  if (state === "downloading" || state === "verifying") {
+    renderBackgroundDownloadLine(data);
+    return;
+  }
+  if (state === "ready" || state === "waiting" || state === "installing") {
+    renderReadyUpdateCard(data);
+    if (!data.deferred && !_autoUpdateToastDismissed) showUpdateToast(data);
+    else if (state === "waiting" || state === "installing") showUpdateToast(data);
+    return;
+  }
+  hideUpdateToast();
+  const bg = document.getElementById("apf-update-bg");
+  if (bg) {
+    const row = document.getElementById("update-status-row");
+    if (row) row.style.display = "none";
+    bg.remove();
+  }
+}
+
+async function pollAutoUpdate() {
+  try {
+    const res = await fetch("/api/updates/progress");
+    const data = await res.json();
+    _lastAutoUpdateStatus = data;
+    handleAutoUpdateStatus(data);
+    const state = data && data.state;
+    // Poll faster while something is moving so the bar looks alive.
+    const fast = data && data.origin === "auto" && ["downloading", "verifying", "waiting", "installing"].includes(state);
+    scheduleAutoUpdatePoll(fast ? 1500 : 60000);
+  } catch (_) {
+    scheduleAutoUpdatePoll(60000);
+  }
+}
+
+function scheduleAutoUpdatePoll(ms) {
+  if (_autoUpdateTimer) clearTimeout(_autoUpdateTimer);
+  _autoUpdateTimer = setTimeout(pollAutoUpdate, ms);
+}
+
+function showStagedUpdateIfAny() {
+  // A verified update is already waiting: show "Update ready", not "Update now".
+  const data = typeof _lastAutoUpdateStatus !== "undefined" ? _lastAutoUpdateStatus : null;
+  if (data && ["ready", "waiting", "installing"].includes(data.state)) {
+    renderReadyUpdateCard(data);
+    return true;
+  }
+  return false;
+}
+
+async function restartToUpdate() {
+  const buttons = [document.getElementById("btn-update-toast-restart"), document.getElementById("btn-update-restart")];
+  buttons.forEach((b) => { if (b) b.disabled = true; });
+  try {
+    const data = await safeFetchJson("/api/updates/install", { method: "POST" });
+    if (!data || data.success === false) throw new Error((data && data.error) || "Could not restart to update.");
+    const view = { ...data, origin: "auto", state: data.state || "installing" };
+    renderReadyUpdateCard(view);
+    showUpdateToast(view);
+    scheduleAutoUpdatePoll(1500);
+  } catch (err) {
+    buttons.forEach((b) => { if (b) b.disabled = false; });
+    if (typeof vfToast === "function") vfToast(err.message || "Could not restart to update.", true);
+  }
+}
+
+async function updateLater() {
+  _autoUpdateToastDismissed = true;
+  hideUpdateToast();
+  try {
+    const data = await safeFetchJson("/api/updates/later", { method: "POST" });
+    if (data && data.success !== false) renderReadyUpdateCard(data);
+  } catch (_) {}
+}
+
+try {
+  setTimeout(() => {
+    loadAutoUpdateSetting();
+    pollAutoUpdate();
+  }, 3000);
 } catch (_) {}

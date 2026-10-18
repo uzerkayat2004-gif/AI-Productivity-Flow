@@ -505,6 +505,12 @@ def register_runtime_controller(controller) -> None:
     """Register the running engine without making the standalone API import it."""
     global runtime_controller
     runtime_controller = controller
+    try:
+        from voice_flow.app_updater import get_manager
+        # Restart to update waits while dictation or a media job is running.
+        get_manager().busy_check = settings_busy_reason
+    except Exception:
+        pass
 
 
 def _read_notebooklm_storage_state(profile: str) -> tuple[bool, str | None, str | None, dict]:
@@ -1160,6 +1166,10 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
         if path == "/api/updates/progress":
             from voice_flow.app_updater import get_manager
             self.send_json_response(get_manager().status())
+            return
+        if path == "/api/updates/auto":
+            from voice_flow.app_updater import auto_update_enabled
+            self.send_json_response({"success": True, "enabled": auto_update_enabled()})
             return
         if path == "/api/components/status":
             # App-managed runtime pieces (Node 22 for Video Flow on Windows).
@@ -4177,14 +4187,39 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
 
         elif path == "/api/updates/install":
+            # Restart to update. Waits for dictation, recording, and Audio/Video
+            # Flow jobs to finish before it restarts.
             from voice_flow.app_updater import UpdateError, get_manager
             try:
-                self.send_json_response(get_manager().begin_install())
+                manager = get_manager()
+                if manager.busy_check is None:
+                    manager.busy_check = settings_busy_reason
+                self.send_json_response(manager.request_restart())
             except UpdateError as exc:
                 payload = get_manager().status()
                 payload["success"] = False
                 payload["error"] = str(exc)
                 self.send_json_response(payload, 409)
+            return
+
+        elif path == "/api/updates/later":
+            from voice_flow.app_updater import UpdateError, get_manager
+            try:
+                self.send_json_response(get_manager().defer())
+            except UpdateError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 409)
+            return
+
+        elif path == "/api/updates/auto":
+            from voice_flow.app_updater import set_auto_update_enabled
+            enabled = data.get("enabled") if isinstance(data, dict) else None
+            if not isinstance(enabled, bool):
+                self.send_json_response({"success": False, "error": "enabled must be true or false"}, 400)
+                return
+            try:
+                self.send_json_response({"success": True, "enabled": set_auto_update_enabled(enabled)})
+            except OSError as exc:
+                self.send_json_response({"success": False, "error": str(exc)}, 500)
             return
 
         elif path == "/api/updates/fallback":

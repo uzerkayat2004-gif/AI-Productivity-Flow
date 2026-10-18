@@ -53,6 +53,16 @@ MAC_FULL_ZIP_NAME = "AI-Productivity-Flow-macOS.zip"
 WINDOWS_INSTALLER_FLAGS = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
 
 DOWNLOAD_TIMEOUT_SECONDS = 30.0
+# Automatic updates: first check a while after launch (startup stays fast),
+# then every few hours. Failed checks (offline, rate limited) retry later.
+AUTO_CHECK_FIRST_DELAY_SECONDS = 120.0
+AUTO_CHECK_INTERVAL_SECONDS = 6 * 60 * 60.0
+AUTO_RETRY_SECONDS = 30 * 60.0
+AUTO_IDLE_POLL_SECONDS = 2.0
+# Background downloads pause a little after each chunk so they never hog the line.
+AUTO_CHUNK_PAUSE_SECONDS = 0.01
+AUTO_SETTINGS_NAME = "auto_update.json"
+APPLY_ON_LAUNCH_NAME = "apply-on-launch.json"
 MARKER_WAIT_SECONDS = 90.0
 CHUNK_BYTES = 64 * 1024
 
@@ -656,6 +666,40 @@ def extract_app_zip(zip_path: Path, dest_parent: Path) -> tuple[Path, dict[str, 
     return staged, manifest
 
 
+def inspect_app_zip(zip_path: Path) -> dict[str, Any]:
+    """Check an app-update zip without extracting it; return its manifest.
+
+    Same rules as :func:`extract_app_zip` (safe paths, a manifest, the app's
+    ``main.py``), so a background download is only staged when the restart
+    would accept it.
+    """
+    manifest: dict[str, Any] | None = None
+    has_main = False
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            for info in archive.infolist():
+                name = info.filename.replace("\\", "/").lstrip("/")
+                if not name or name.endswith("/"):
+                    continue
+                parts = Path(name).parts
+                if ".." in parts or name.startswith("/"):
+                    raise UpdateError("Update package contains an unsafe path.", retryable=False)
+                if name == "manifest.json":
+                    payload = json.loads(archive.read(info).decode("utf-8"))
+                    if not isinstance(payload, dict):
+                        raise UpdateError("Update manifest was not valid.", retryable=False)
+                    manifest = payload
+                elif name == "voice_flow/main.py":
+                    has_main = True
+    except zipfile.BadZipFile as exc:
+        raise UpdateError("Update package is damaged.", retryable=False) from exc
+    if manifest is None:
+        raise UpdateError("Update package is missing its manifest.", retryable=False)
+    if not has_main:
+        raise UpdateError("Update package did not contain the app.", retryable=False)
+    return manifest
+
+
 def _directory_writable(path: Path) -> bool:
     parent = path if path.is_dir() else path.parent
     try:
@@ -1098,12 +1142,17 @@ def quit_for_update(helper_pid: int | None = None) -> None:
 
 
 class UpdateManager:
-    """One in-app download at a time, with progress the settings page can poll."""
+    """One in-app download at a time, with progress the settings page can poll.
+
+    ``origin`` is ``manual`` (the user pressed Update now) or ``auto`` (the
+    background checker staged a small app update by itself).
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._thread: threading.Thread | None = None
+        self._restart_thread: threading.Thread | None = None
         self.plan: dict[str, Any] | None = None
         self.state = "idle"
         self.downloaded = 0
@@ -1111,10 +1160,17 @@ class UpdateManager:
         self.error = ""
         self.path: Path | None = None
         self.message = ""
+        self.origin = "manual"
+        self.deferred = False
+        self.busy_reason = ""
+        # Returns a short reason while dictation, recording, or a media job
+        # is running; None when the app is idle. Set by the API server.
+        self.busy_check: Callable[[], str | None] | None = None
 
     def remember(self, plan: dict[str, Any] | None) -> None:
         with self._lock:
-            if self.state in {"downloading", "verifying"}:
+            # Never swap the plan under a download or a staged/installing update.
+            if self.state in {"downloading", "verifying", "ready", "waiting", "installing"}:
                 return
             self.plan = plan
 
@@ -1125,7 +1181,7 @@ class UpdateManager:
             percent = 0.0
             if total:
                 percent = max(0.0, min(100.0, (downloaded / total) * 100.0))
-            elif self.state in {"ready", "installing", "manual"}:
+            elif self.state in {"ready", "waiting", "installing", "manual"}:
                 percent = 100.0
             label = ""
             if self.state == "downloading":
@@ -1158,11 +1214,16 @@ class UpdateManager:
                 "kind": plan.get("kind"),
                 "size_label": plan.get("size_label"),
                 "asset_name": plan.get("asset_name"),
+                "latest_version": plan.get("version"),
+                "origin": self.origin,
+                "deferred": self.deferred,
+                "busy_reason": self.busy_reason or None,
+                "auto_update_enabled": auto_update_enabled(),
             }
 
-    def start(self) -> dict[str, Any]:
+    def start(self, origin: str = "manual") -> dict[str, Any]:
         with self._lock:
-            if self.state == "downloading":
+            if self.state in {"downloading", "verifying"}:
                 return self.status()
             plan = self.plan
             if not plan or not plan.get("download_url"):
@@ -1173,6 +1234,9 @@ class UpdateManager:
                 assert_public_release_url(str(plan["sha256_url"]))
             self._cancel.clear()
             self.state = "downloading"
+            self.origin = "auto" if origin == "auto" else "manual"
+            self.deferred = False
+            self.busy_reason = ""
             self.downloaded = 0
             self.total = plan.get("size_bytes")
             self.error = ""
@@ -1182,16 +1246,28 @@ class UpdateManager:
             self._thread.start()
         return self.status()
 
+    def wait(self, timeout: float | None = None) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout)
+
     def cancel(self) -> dict[str, Any]:
         self._cancel.set()
         with self._lock:
             if self.state == "downloading":
                 self.state = "cancelled"
                 self.error = "Download cancelled."
+            elif self.state == "waiting":
+                self.state = "ready"
+                self.busy_reason = ""
+                self.message = ""
         return self.status()
 
     def _download(self) -> None:
         plan = self.plan or {}
+        background = self.origin == "auto"
+        if background:
+            _lower_current_thread_priority()
         name = Path(str(plan.get("asset_name") or "update.bin")).name
         dest_dir = Path(tempfile.gettempdir()) / "AI-Productivity-Flow" / "updates"
         dest = dest_dir / name
@@ -1203,6 +1279,8 @@ class UpdateManager:
                     self.downloaded = done
                     if total:
                         self.total = total
+                if background and AUTO_CHUNK_PAUSE_SECONDS:
+                    time.sleep(AUTO_CHUNK_PAUSE_SECONDS)
 
             download_file(str(plan["download_url"]), dest, progress=_progress, cancel_event=self._cancel)
             if self._cancel.is_set():
@@ -1219,17 +1297,36 @@ class UpdateManager:
             checksum_path = dest.with_name(dest.name + ".sha256")
             download_file(sha_url, checksum_path, timeout=DOWNLOAD_TIMEOUT_SECONDS)
             verify_sha256(dest, checksum_path.read_text(encoding="utf-8", errors="replace"))
+            if background and plan.get("kind") == "app":
+                # Same manifest rules the restart applies, checked now so a
+                # package the restart would refuse is never offered.
+                try:
+                    manifest = inspect_app_zip(dest)
+                    remote = runtime_fingerprint_from_manifest(manifest)
+                    installed = installed_runtime_fingerprint(str(plan.get("platform") or current_platform()))
+                    if not runtimes_match(installed, remote):
+                        raise UpdateError(
+                            "This package needs a newer runtime. Download the full installer.",
+                            retryable=False,
+                        )
+                except UpdateError:
+                    dest.unlink(missing_ok=True)
+                    raise
             with self._lock:
                 self.path = dest
                 self.state = "ready"
                 self.downloaded = dest.stat().st_size
                 self.total = self.downloaded
                 self.message = "Download verified."
+            if background:
+                log.info("[autoupdate] Update %s downloaded and verified; ready to restart.", plan.get("version") or "")
         except UpdateCancelled:
             with self._lock:
                 self.state = "cancelled"
                 self.error = "Download cancelled."
         except UpdateError as exc:
+            if background:
+                log.info("[autoupdate] Background download not staged: %s", exc)
             with self._lock:
                 if self.state != "cancelled":
                     self.state = "failed"
@@ -1240,6 +1337,104 @@ class UpdateManager:
                 self.state = "failed"
                 self.error = _network_message(exc)
 
+    # -- restart -----------------------------------------------------------
+    def _current_busy_reason(self) -> str | None:
+        check = self.busy_check
+        if check is None:
+            return None
+        try:
+            reason = check()
+        except Exception:
+            return "Busy"
+        return str(reason) if reason else None
+
+    def request_restart(self) -> dict[str, Any]:
+        """Restart to update now, or as soon as dictation and media jobs finish."""
+        with self._lock:
+            if self.state not in {"ready", "waiting"} or self.path is None or not self.plan:
+                raise UpdateError("Download and verify the update before installing it.")
+        reason = self._current_busy_reason()
+        if not reason:
+            return self.begin_install()
+        with self._lock:
+            self.state = "waiting"
+            self.busy_reason = reason
+            self.message = "Restarts when you're done."
+            running = self._restart_thread is not None and self._restart_thread.is_alive()
+            if not running:
+                self._restart_thread = threading.Thread(
+                    target=self._restart_when_idle, name="AppUpdateRestartWhenIdle", daemon=True
+                )
+                self._restart_thread.start()
+        log.info("[autoupdate] Restart requested while busy (%s); waiting until idle.", reason)
+        return self.status()
+
+    def _restart_when_idle(self, poll: float | None = None) -> None:
+        interval = AUTO_IDLE_POLL_SECONDS if poll is None else poll
+        while True:
+            with self._lock:
+                if self.state != "waiting":
+                    return
+            reason = self._current_busy_reason()
+            if not reason:
+                break
+            with self._lock:
+                self.busy_reason = reason
+            time.sleep(interval)
+        with self._lock:
+            if self.state != "waiting":
+                return
+            self.state = "ready"
+            self.busy_reason = ""
+        log.info("[autoupdate] App is idle; restarting to update.")
+        try:
+            self.begin_install()
+        except Exception as exc:
+            log.warning("[autoupdate] Restart to update failed: %s", exc)
+            with self._lock:
+                if self.state not in {"failed", "installing"}:
+                    self.state = "failed"
+                    self.error = str(exc)
+
+    def defer(self) -> dict[str, Any]:
+        """User chose Later: install the staged small update on the next launch."""
+        with self._lock:
+            if self.state not in {"ready", "waiting"} or self.path is None or not self.plan:
+                raise UpdateError("No update is ready.")
+            plan = dict(self.plan)
+            archive = self.path
+            if self.state == "waiting":
+                self.state = "ready"
+            self.busy_reason = ""
+            self.deferred = True
+        if plan.get("kind") == "app":
+            try:
+                state = _auto_state_dir()
+                state.mkdir(parents=True, exist_ok=True)
+                marker = state / APPLY_ON_LAUNCH_NAME
+                marker.write_text(
+                    json.dumps(
+                        {"archive": str(archive), "plan": plan, "from_version": VERSION},
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                log.info("[autoupdate] Update deferred; it installs on the next launch.")
+            except OSError as exc:
+                log.info("[autoupdate] Could not save the deferred update (%s); keeping the notice.", exc)
+        return self.status()
+
+    def adopt_staged(self, plan: dict[str, Any], archive: Path, origin: str = "auto") -> None:
+        with self._lock:
+            self.plan = dict(plan)
+            self.path = archive
+            self.state = "ready"
+            self.origin = origin
+            size = archive.stat().st_size if archive.is_file() else 0
+            self.downloaded = size
+            self.total = size or None
+            self.error = ""
+
     def begin_install(self) -> dict[str, Any]:
         with self._lock:
             if self.state != "ready" or self.path is None or not self.plan:
@@ -1247,6 +1442,7 @@ class UpdateManager:
             plan = dict(self.plan)
             image = self.path
         kind = plan.get("kind")
+        _clear_apply_on_launch(self._state_dir_or_none())
         if kind == "app":
             return self._begin_app_install(plan, image)
         mac_image = str(image).endswith((".dmg", ".zip")) and plan.get("platform") == "mac"
@@ -1341,6 +1537,13 @@ class UpdateManager:
             self.message = "Restarting to update…"
         return {"success": True, "state": "installing", "message": self.message}
 
+    @staticmethod
+    def _state_dir_or_none() -> Path | None:
+        try:
+            return update_state_dir()
+        except Exception:
+            return None
+
     def _ensure_state_dir(self) -> Path:
         state = update_state_dir()
         if state is None:
@@ -1392,6 +1595,245 @@ _manager = UpdateManager()
 
 def get_manager() -> UpdateManager:
     return _manager
+
+
+# ---------------------------------------------------------------------------
+# Automatic updates
+# ---------------------------------------------------------------------------
+
+
+def _auto_settings_path() -> Path:
+    from voice_flow.paths import data_dir
+
+    return data_dir() / AUTO_SETTINGS_NAME
+
+
+def auto_update_enabled() -> bool:
+    """On by default. ``APF_AUTO_UPDATE=0`` or the Settings toggle turns it off."""
+    env = os.environ.get("APF_AUTO_UPDATE", "").strip().lower()
+    if env in {"0", "off", "false", "no"}:
+        return False
+    try:
+        data = json.loads(_auto_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(data, dict):
+        return True
+    return data.get("enabled", True) is not False
+
+
+def set_auto_update_enabled(enabled: bool) -> bool:
+    path = _auto_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"enabled": bool(enabled)}), encoding="utf-8")
+    log.info("[autoupdate] Automatic updates turned %s.", "on" if enabled else "off")
+    if not enabled:
+        _clear_apply_on_launch(_auto_state_dir())
+        with _manager._lock:
+            _manager.deferred = False
+    return bool(enabled)
+
+
+def _auto_state_dir() -> Path:
+    try:
+        state = update_state_dir()
+    except Exception:
+        state = None
+    return state or Path(tempfile.gettempdir()) / "AI-Productivity-Flow" / "updates"
+
+
+def _clear_apply_on_launch(state: Path | None) -> None:
+    for folder in {state, _auto_state_dir()}:
+        if folder is None:
+            continue
+        try:
+            (folder / APPLY_ON_LAUNCH_NAME).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _lower_current_thread_priority() -> None:
+    """Background I/O and CPU priority for this thread (Windows); nice elsewhere is process-wide, so skip."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        THREAD_MODE_BACKGROUND_BEGIN = 0x00010000
+        kernel32.SetThreadPriority(kernel32.GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN)
+    except Exception:
+        pass
+
+
+def apply_deferred_update_on_launch(manager: UpdateManager | None = None) -> bool:
+    """If the user chose Later, install the staged small update now, at launch.
+
+    Uses the same helper as Restart to update (swap, relaunch, confirm, roll
+    back if the new copy does not start). The marker is removed first, so a
+    failed attempt can never loop. Returns True when the app is restarting.
+    """
+    manager = manager or _manager
+    marker = _auto_state_dir() / APPLY_ON_LAUNCH_NAME
+    if not marker.is_file():
+        return False
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
+    archive = Path(str(data.get("archive") or ""))
+    if not auto_update_enabled():
+        log.info("[autoupdate] Deferred update skipped: automatic updates are off.")
+        return False
+    if not plan or plan.get("kind") != "app" or not archive.is_file():
+        log.info("[autoupdate] Deferred update skipped: the staged file is gone.")
+        return False
+    from voice_flow.update_checker import is_version_newer
+
+    target = str(plan.get("version") or "")
+    if target and not is_version_newer(VERSION, target):
+        log.info("[autoupdate] Deferred update %s is already installed.", target)
+        return False
+    if data.get("from_version") and data.get("from_version") != VERSION:
+        log.info("[autoupdate] Deferred update skipped: the app changed since it was staged.")
+        return False
+    try:
+        inspect_app_zip(archive)
+    except UpdateError as exc:
+        log.info("[autoupdate] Deferred update skipped: %s", exc)
+        return False
+    log.info("[autoupdate] Installing the update the user deferred (%s) before opening.", target)
+    manager.adopt_staged(plan, archive, origin="auto")
+    try:
+        manager.begin_install()
+    except Exception as exc:
+        log.warning("[autoupdate] Deferred install did not start: %s", exc)
+        return False
+    return True
+
+
+class AutoUpdater:
+    """Checks GitHub in the background and stages small app updates.
+
+    Never downloads the full installer: that stays a button in Settings.
+    Offline, rate limits, and server errors are silent; it tries again later.
+    """
+
+    def __init__(
+        self,
+        manager: UpdateManager | None = None,
+        *,
+        check: Callable[[], dict[str, Any]] | None = None,
+        enabled: Callable[[], bool] | None = None,
+    ) -> None:
+        self.manager = manager or _manager
+        self._check = check
+        self._enabled = enabled or auto_update_enabled
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.last_outcome = ""
+        # Versions whose background download failed twice are left to the
+        # manual Update now button, so a bad file is not fetched every 30 min.
+        self._failures: dict[str, int] = {}
+
+    def _run_check(self) -> dict[str, Any]:
+        if self._check is not None:
+            return self._check()
+        from voice_flow.update_checker import check_for_updates
+
+        return check_for_updates(force=True)
+
+    def run_once(self, wait: bool = False) -> str:
+        """One check. Returns what happened, for logs and tests."""
+        outcome = self._run_once(wait)
+        self.last_outcome = outcome
+        return outcome
+
+    def _run_once(self, wait: bool) -> str:
+        if not self._enabled():
+            return "disabled"
+        if self.manager.state in {"downloading", "verifying", "ready", "waiting", "installing"}:
+            return "busy"
+        try:
+            result = self._run_check()
+        except Exception as exc:
+            log.info("[autoupdate] Check skipped: %s", exc)
+            return "offline"
+        if not result or not result.get("checked") or result.get("error"):
+            log.info("[autoupdate] Check did not complete (%s); will try later.", (result or {}).get("error") or "no answer")
+            return "offline"
+        if not result.get("update_available"):
+            log.info("[autoupdate] Up to date (%s).", VERSION)
+            return "up-to-date"
+        plan = dict(result.get("update_plan") or {})
+        plan.setdefault("version", result.get("latest_version"))
+        if plan.get("kind") != "app":
+            # The full installer is ~500 MB: never fetch it silently.
+            self.manager.remember(plan or None)
+            log.info("[autoupdate] Update %s needs the full installer; showing the button only.", plan.get("version"))
+            return "full-only"
+        version = str(plan.get("version") or "")
+        if self._failures.get(version, 0) >= 2:
+            self.manager.remember(plan)
+            return "gave-up"
+        self.manager.remember(plan)
+        if self.manager.plan != plan:
+            return "busy"
+        try:
+            self.manager.start(origin="auto")
+        except UpdateError as exc:
+            log.info("[autoupdate] Background download not started: %s", exc)
+            return "failed"
+        log.info("[autoupdate] Downloading update %s in the background (%s).", plan.get("version"), plan.get("size_label"))
+        if wait:
+            self.manager.wait()
+            if self.manager.state == "ready":
+                return "staged"
+            self._failures[version] = self._failures.get(version, 0) + 1
+            return "failed"
+        return "downloading"
+
+    def _loop(self, first_delay: float, interval: float) -> None:
+        delay = first_delay
+        while not self._stop.wait(delay):
+            outcome = self.run_once(wait=True)
+            delay = AUTO_RETRY_SECONDS if outcome in {"offline", "failed"} else interval
+            delay = min(delay, interval)
+
+    def start(self, first_delay: float = AUTO_CHECK_FIRST_DELAY_SECONDS, interval: float = AUTO_CHECK_INTERVAL_SECONDS) -> bool:
+        if self._thread is not None and self._thread.is_alive():
+            return False
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, args=(first_delay, interval), name="apf-auto-update", daemon=True
+        )
+        self._thread.start()
+        log.info("[autoupdate] Background checks scheduled (first in %.0fs, then every %.0fh).", first_delay, interval / 3600)
+        return True
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+_auto_updater: AutoUpdater | None = None
+
+
+def schedule_auto_updates(first_delay: float | None = None) -> bool:
+    """Start background update checks once per process (from the engine)."""
+    global _auto_updater
+    if os.environ.get("APF_AUTO_UPDATE", "").strip().lower() in {"0", "off", "false", "no"}:
+        return False
+    if _auto_updater is None:
+        _auto_updater = AutoUpdater(_manager)
+    delay = AUTO_CHECK_FIRST_DELAY_SECONDS if first_delay is None else float(first_delay)
+    return _auto_updater.start(first_delay=delay)
 
 
 def main(argv: list[str] | None = None) -> int:
