@@ -35,7 +35,7 @@ _RATE_LIMIT_RETRY_SECONDS = 5 * 3600
 _RATE_LIMIT_META_KEYS = (
     "mode", "title", "source_name", "model_ref", "theme", "visual_direction",
     "allow_external_ai", "allow_local_fallback", "voice", "duration_seconds",
-    "target_duration_seconds", "video_engine", "provider", "format", "style", "style_prompt", "language",
+    "target_duration_seconds", "video_engine", "provider", "format", "requested_format", "style", "style_prompt", "language",
     "focus", "source_url", "source_file", "profile", "notebook_id",
     "source_id", "task_id",
 )
@@ -952,6 +952,7 @@ class VideoFlowService:
                 "video_engine": video_engine,
                 "provider": options.get("provider") or video_engine,
                 "format": options.get("format") if options.get("format") not in (None, "", "auto") else (options.get("requested_format") or options.get("format")),
+                "requested_format": options.get("requested_format"),
                 "style": options.get("style"),
                 "style_prompt": options.get("style_prompt"),
                 "language": options.get("language"),
