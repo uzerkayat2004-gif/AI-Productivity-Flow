@@ -51,9 +51,16 @@ def _default_runner(command: Sequence[str], timeout: float | None = 60.0) -> sub
         "check": False,
         "shell": False,
     }
+    argv = list(command)
+    kwargs["stdin"] = subprocess.DEVNULL
     if os.name == "nt" or sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-    return subprocess.run(list(command), **kwargs)
+        try:
+            from .login_flow import cli_child_argv_env
+            argv, kwargs["env"] = cli_child_argv_env(argv)
+        except Exception:
+            argv = list(command)
+    return subprocess.run(argv, **kwargs)
 
 
 class NotebookLMMcpClient:

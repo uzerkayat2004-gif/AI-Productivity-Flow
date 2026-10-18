@@ -744,11 +744,17 @@ def auto_sync_from_browser(
             from .login_flow import resolve_notebooklm_cli
             cli = resolve_notebooklm_cli()
             if cli:
+                from .login_flow import cli_child_argv_env
+                ref_argv, ref_env = cli_child_argv_env(
+                    [str(cli), "--profile", profile_name, "auth", "refresh", "--verify", "--allow-headless"]
+                )
                 p_ref = subprocess.run(
-                    [str(cli), "--profile", profile_name, "auth", "refresh", "--verify", "--allow-headless"],
+                    ref_argv,
                     capture_output=True,
                     text=True,
                     timeout=30.0,
+                    stdin=subprocess.DEVNULL,
+                    env=ref_env,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
                 )
                 if p_ref.returncode == 0:
@@ -1406,6 +1412,14 @@ def _run_bounded_process(command: list[str], timeout_seconds: float) -> tuple[in
         "NOTEBOOKLM_HEADLESS_REAUTH_CDP_URL",
     ):
         child_env.pop(key, None)
+    if os.name == "nt":
+        try:
+            from .login_flow import _cli_argv
+            command = _cli_argv(list(command))
+        except Exception:
+            pass
+        child_env.setdefault("PYTHONIOENCODING", "utf-8")
+        child_env.setdefault("PYTHONUTF8", "1")
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,

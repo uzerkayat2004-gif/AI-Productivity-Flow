@@ -289,6 +289,16 @@ def _atomic_write_text(target, content: str) -> None:
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     os.replace(str(tmp), str(target))
+def _cli_spawn(command: Sequence[str]) -> tuple[list[str], dict[str, str] | None]:
+    """Windows: launch ``python -m notebooklm`` (not the pip shim) with a UTF-8 env."""
+    try:
+        from .login_flow import cli_child_argv_env
+        argv, env = cli_child_argv_env(command)
+        return argv, env
+    except Exception:
+        return list(command), None
+
+
 def _run_command(command: Sequence[str], timeout: float | None) -> Any:
     kwargs: dict[str, Any] = {
         "capture_output": True,
@@ -300,13 +310,16 @@ def _run_command(command: Sequence[str], timeout: float | None) -> Any:
         "shell": False,
         "close_fds": True,
     }
+    argv = list(command)
     if os.name == "nt" or sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
         startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
         kwargs["startupinfo"] = startupinfo
-    return subprocess.run(list(command), **kwargs)
+        argv, kwargs["env"] = _cli_spawn(argv)
+    kwargs["stdin"] = subprocess.DEVNULL
+    return subprocess.run(argv, **kwargs)
 
 
 _ORIGINAL_RUN_COMMAND = _run_command
@@ -1031,13 +1044,16 @@ class NotebookLMVideoProvider:
                     "stderr": subprocess.PIPE,
                     "shell": False,
                 }
+                kwargs["stdin"] = subprocess.DEVNULL
+                argv = list(command)
                 if os.name == "nt" or sys.platform == "win32":
                     kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
                     startupinfo = subprocess.STARTUPINFO()
                     startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
                     startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
                     kwargs["startupinfo"] = startupinfo
-                proc = subprocess.Popen(list(command), **kwargs)
+                    argv, kwargs["env"] = _cli_spawn(argv)
+                proc = subprocess.Popen(argv, **kwargs)
                 overflowed = threading.Event()
                 stdout_collector = _BoundedPipeCollector(proc.stdout, MAX_CLI_STDOUT_BYTES, overflowed)
                 stderr_collector = _BoundedPipeCollector(proc.stderr, MAX_CLI_STDERR_BYTES, overflowed)
@@ -1195,7 +1211,7 @@ class NotebookLMVideoProvider:
                 data.get("error"),
                 details_error_message,
                 stderr,
-                "NotebookLM CLI failed",
+                f"NotebookLM CLI failed (exit code {code}, no output)",
             )
             error_code = _text(
                 data.get("code"),
