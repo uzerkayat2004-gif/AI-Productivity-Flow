@@ -504,8 +504,8 @@ def test_about_page_offers_update_now_instead_of_the_github_download():
     assert "/api/updates/progress" in script
     assert "/api/updates/fallback" in script
     assert "Version 1.0" in html
-    assert "build 1.0.9" in html
-    assert "Version 1.0.9" not in html
+    assert "build 1.0.10" in html
+    assert "Version 1.0.10" not in html
     assert "No audio or text is ever sent." in html
     assert "Full installer" not in script
     assert "runtime change" not in html
