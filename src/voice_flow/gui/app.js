@@ -14734,3 +14734,75 @@ try {
     pollAutoUpdate();
   }, 3000);
 } catch (_) {}
+
+
+// v1.0.11: global "Updating…" badge (top right, every page). Updates download
+// in the background and the app restarts by itself once it is idle.
+(function apfGlobalUpdateBadge() {
+  let timer = null;
+  let lastState = "";
+  function render(data) {
+    const badge = document.getElementById("apf-update-badge");
+    const text = document.getElementById("apf-update-badge-text");
+    const fill = document.getElementById("apf-update-badge-fill");
+    if (!badge || !text) return;
+    const state = data && data.state ? String(data.state) : "idle";
+    const appKind = !data.kind || data.kind === "app";
+    let label = "";
+    let showBar = false;
+    let restarting = false;
+    if (state === "downloading") {
+      const pct = Math.round(Number(data.progress || 0));
+      label = pct > 0 ? `Updating… ${pct}%` : "Updating…";
+      showBar = true;
+    } else if (state === "verifying") {
+      label = "Updating… checking";
+      showBar = true;
+    } else if (state === "ready" && appKind && data.auto_update_enabled && !data.deferred) {
+      label = "Update ready · restarting";
+      restarting = true;
+    } else if (state === "waiting") {
+      label = "Update ready · restarts when you're done";
+      restarting = true;
+    } else if (state === "installing") {
+      label = "Restarting to update…";
+      restarting = true;
+    }
+    if (!label) {
+      badge.hidden = true;
+      return;
+    }
+    badge.hidden = false;
+    badge.classList.toggle("is-restarting", restarting);
+    text.textContent = label;
+    const bar = fill ? fill.parentElement : null;
+    if (bar) bar.hidden = !showBar;
+    if (fill) fill.style.width = `${Math.max(0, Math.min(100, Number(data.progress || 0)))}%`;
+  }
+  async function tick() {
+    try {
+      const res = await fetch("/api/updates/progress", { cache: "no-store" });
+      const data = await res.json();
+      if (!data) return;
+      render(data);
+      const busy = ["downloading", "verifying", "ready", "waiting", "installing"].includes(String(data.state || ""));
+      const want = busy ? 1000 : 15000;
+      if (busy !== (lastState === "busy")) {
+        lastState = busy ? "busy" : "idle";
+        clearInterval(timer);
+        timer = setInterval(tick, want);
+      }
+    } catch (_) {}
+  }
+  function start() {
+    if (timer) return;
+    timer = setInterval(tick, 15000);
+    lastState = "idle";
+    tick();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+})();

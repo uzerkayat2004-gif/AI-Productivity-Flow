@@ -505,9 +505,7 @@ class VideoFlowEngine:
                 # Self-heal: if the durable master token exists, mint fresh
                 # web cookies headlessly (no browser) and retry once. This is
                 # the "sign in once, keeps working" path.
-                from .notebooklm import login_flow
-
-                heal = login_flow.self_heal(profile=profile)
+                heal = self._recover_notebooklm_auth(profile or provider.profile, provider)
                 if heal.get("ok"):
                     logger.info("NotebookLM auth recovered via master-token remint; retrying")
                     report(12, "Login refreshed automatically — retrying NotebookLM", "auth_check")
@@ -570,6 +568,57 @@ class VideoFlowEngine:
             "document_profile": artifact.document_profile,
         }
 
+    @staticmethod
+    def _recover_notebooklm_auth(profile: Any, provider: Any) -> dict[str, Any]:
+        """Same sign-in recovery Audio Flow uses, so Video does not fail where Audio works.
+
+        1. Master-token remint (no browser). 2. Copy cookies from the user's
+        browser. 3. Headless Playwright cookie sync. Each step is verified.
+        """
+        from .notebooklm import login_flow
+
+        last_error: Any = None
+        try:
+            heal = login_flow.self_heal(profile=profile)
+            if heal.get("ok"):
+                return heal
+            last_error = heal.get("error")
+        except Exception as exc:  # pragma: no cover - defensive
+            last_error = str(exc)
+
+        def _verified() -> bool:
+            try:
+                if hasattr(provider, "sync_storage_state"):
+                    provider.sync_storage_state(force=True)
+                status = provider.check_auth(raise_on_error=False)
+                return bool(getattr(status, "authenticated", False))
+            except Exception:
+                return False
+
+        import os as _os
+        in_tests = bool(_os.environ.get("PYTEST_CURRENT_TEST"))
+        if not in_tests or _os.environ.get("VOICE_FLOW_TEST_AUTO_HEAL"):
+            try:
+                from .notebooklm.browser_sync import auto_sync_from_browser
+
+                res = auto_sync_from_browser(profile=profile)
+                if res.get("success") and _verified():
+                    logger.info("NotebookLM auth recovered from the browser session")
+                    return {"ok": True, "method": "browser_sync"}
+            except Exception as exc:
+                last_error = last_error or str(exc)
+        if not in_tests or _os.environ.get("VOICE_FLOW_TEST_PLAYWRIGHT_HEAL"):
+            try:
+                from .notebooklm.browser_sync import sync_cookies_with_playwright
+
+                res = sync_cookies_with_playwright(profile=profile, headless=True, timeout_seconds=35)
+                if res.get("success") and _verified():
+                    logger.info("NotebookLM auth recovered with a headless cookie sync")
+                    return {"ok": True, "method": "playwright_sync"}
+            except Exception as exc:
+                last_error = last_error or str(exc)
+        return {"ok": False, "error": last_error}
+
     def _auth_fallback_to_local(
         self,
         video_id: str,
@@ -592,7 +641,25 @@ class VideoFlowEngine:
         local_kwargs["fallback_reason"] = "notebooklm_auth_expired"
         local_kwargs["fallback_requested_engine"] = "notebooklm"
         local_kwargs["fallback_error"] = _redact_secret(str(exc))[:300]
-        return self.run(video_id, **local_kwargs)
+        result = self.run(video_id, **local_kwargs)
+        if isinstance(result, dict) and result.get("state") == "failed":
+            # The local engine could not stand in either. Tell the user the
+            # real, fixable reason (NotebookLM sign-in), not a generic
+            # "generation_failed" from the fallback.
+            local_error = str(result.get("error_message") or result.get("message") or "")
+            message = (
+                "NotebookLM sign-in expired. Open Video Flow settings, sign in to "
+                "NotebookLM again, then tap Retry."
+            )
+            result.update(
+                {
+                    "error_code": "auth_expired",
+                    "error_message": message,
+                    "message": message,
+                    "fallback_error": _redact_secret(local_error)[:300],
+                }
+            )
+        return result
 
     def _build_production(
         self,

@@ -84,14 +84,14 @@ def _check_result(kind: str = "app") -> dict:
 
 # --- scheduling -------------------------------------------------------------
 
-def test_background_checks_start_after_two_minutes_then_every_six_hours(monkeypatch):
-    assert app_updater.AUTO_CHECK_FIRST_DELAY_SECONDS == 120.0
-    assert app_updater.AUTO_CHECK_INTERVAL_SECONDS == 6 * 60 * 60
+def test_background_checks_start_after_thirty_seconds_then_hourly(monkeypatch):
+    assert app_updater.AUTO_CHECK_FIRST_DELAY_SECONDS == 30.0
+    assert app_updater.AUTO_CHECK_INTERVAL_SECONDS == 60 * 60
     calls = []
     monkeypatch.setattr(AutoUpdater, "start", lambda self, first_delay, interval=0: calls.append(first_delay) or True)
     monkeypatch.setattr(app_updater, "_auto_updater", None)
     assert app_updater.schedule_auto_updates() is True
-    assert calls == [120.0]
+    assert calls == [30.0]
     monkeypatch.setenv("APF_AUTO_UPDATE", "0")
     assert app_updater.schedule_auto_updates() is False
 
@@ -366,3 +366,43 @@ def test_installer_uses_the_logo_and_ties_shortcuts_to_the_app_id():
     assert f'#define MyAppUserModelID "{app_id}"' in iss
     icons = iss.split("[Icons]", 1)[1].split("\n[", 1)[0]
     assert icons.count('AppUserModelID: "{#MyAppUserModelID}"') == 2
+
+
+# --- automatic restart after a verified small update (v1.0.11) -------------
+
+def test_verified_app_update_restarts_by_itself(monkeypatch, tmp_path):
+    monkeypatch.setenv("APF_TEST_AUTO_RESTART", "1")
+    monkeypatch.setattr(app_updater, "AUTO_RESTART_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(app_updater, "auto_update_enabled", lambda: True)
+    manager = app_updater.UpdateManager()
+    calls = []
+    monkeypatch.setattr(manager, "request_restart", lambda: calls.append("restart") or {})
+    manager.plan = {"kind": "app", "version": "9.9.9"}
+    manager.state = "ready"
+    manager._schedule_auto_restart()
+    import time as _t
+    deadline = _t.time() + 3
+    while not calls and _t.time() < deadline:
+        _t.sleep(0.02)
+    assert calls == ["restart"]
+    assert "Restarting" in (manager.message or "")
+
+
+def test_deferred_update_does_not_auto_restart(monkeypatch):
+    monkeypatch.setenv("APF_TEST_AUTO_RESTART", "1")
+    monkeypatch.setattr(app_updater, "AUTO_RESTART_GRACE_SECONDS", 0.05)
+    manager = app_updater.UpdateManager()
+    calls = []
+    monkeypatch.setattr(manager, "request_restart", lambda: calls.append("restart") or {})
+    manager.plan = {"kind": "app"}
+    manager.state = "ready"
+    manager._schedule_auto_restart()
+    manager.deferred = True
+    import time as _t
+    _t.sleep(0.3)
+    assert calls == []
+
+
+def test_unit_tests_never_auto_restart_without_opt_in(monkeypatch):
+    monkeypatch.delenv("APF_TEST_AUTO_RESTART", raising=False)
+    assert app_updater._auto_restart_allowed() is False
