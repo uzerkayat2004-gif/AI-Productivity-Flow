@@ -14495,12 +14495,12 @@ async function checkForAppUpdates(manual = false) {
     }
 
     if (data.update_available) {
-      if (await showStagedUpdateIfAny()) return;
+      if (typeof showStagedUpdateIfAny === "function" && showStagedUpdateIfAny()) return;
       renderUpdateCard(data);
       const plan = data.update_plan || {};
       const sizeNote = plan.size_label && plan.size_label !== "unknown size" ? ` (${plan.size_label})` : "";
       // Automatic updates fetch the small update themselves and then show "Update ready".
-      const autoHandles = plan.kind === "app" && _autoUpdatesEnabled;
+      const autoHandles = plan.kind === "app" && typeof _autoUpdatesEnabled !== "undefined" && _autoUpdatesEnabled;
       if (!manual && !autoHandles && typeof vfToast === "function") {
         vfToast(`Update available${sizeNote}. Open Settings > System to install.`);
       }
@@ -14539,6 +14539,7 @@ try {
 let _autoUpdatesEnabled = true;
 let _autoUpdateTimer = null;
 let _autoUpdateToastDismissed = false;
+let _lastAutoUpdateStatus = null;
 
 async function loadAutoUpdateSetting() {
   try {
@@ -14676,6 +14677,7 @@ async function pollAutoUpdate() {
   try {
     const res = await fetch("/api/updates/progress");
     const data = await res.json();
+    _lastAutoUpdateStatus = data;
     handleAutoUpdateStatus(data);
     const state = data && data.state;
     // Poll faster while something is moving so the bar looks alive.
@@ -14691,15 +14693,13 @@ function scheduleAutoUpdatePoll(ms) {
   _autoUpdateTimer = setTimeout(pollAutoUpdate, ms);
 }
 
-async function showStagedUpdateIfAny() {
-  try {
-    const res = await fetch("/api/updates/progress");
-    const data = await res.json();
-    if (data && ["ready", "waiting", "installing"].includes(data.state)) {
-      renderReadyUpdateCard(data);
-      return true;
-    }
-  } catch (_) {}
+function showStagedUpdateIfAny() {
+  // A verified update is already waiting: show "Update ready", not "Update now".
+  const data = typeof _lastAutoUpdateStatus !== "undefined" ? _lastAutoUpdateStatus : null;
+  if (data && ["ready", "waiting", "installing"].includes(data.state)) {
+    renderReadyUpdateCard(data);
+    return true;
+  }
   return false;
 }
 
