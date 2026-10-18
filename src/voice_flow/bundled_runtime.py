@@ -22,9 +22,24 @@ RUNTIME_FIELDS = (
     "local_ai_engine",
 )
 
+# Every field above is still written to the install manifest and the
+# app-update manifest, because the 1.0.6 and 1.0.7 updaters compare all of
+# them. From 1.0.8 the updater compares only the core fields: a change in an
+# app-managed field no longer forces the full installer, because the app
+# fetches that piece itself (Node 22 for Video Flow: voice_flow.node_component).
+# Python, Whisper and the local AI engine stay core: those genuinely need the
+# full installer.
+APP_MANAGED_FIELDS = ("node",)
+CORE_RUNTIME_FIELDS = tuple(f for f in RUNTIME_FIELDS if f not in APP_MANAGED_FIELDS)
+
 # Keep these aligned with release/assemble_windows_staging.py.
 WINDOWS_PYTHON = "3.12.10"
-WINDOWS_NODE = "22.23.3"
+# Keep the bundled Node at 20.18.1: it is what every v1.0.6 install recorded,
+# and the v1.0.6/v1.0.7 updaters offer the 527 MB installer when it differs.
+# HyperFrames needs Node 22, which the app downloads (node_component), so a
+# newer Node never needs to be bundled. Changing this re-breaks small updates
+# for every install older than 1.0.8.
+WINDOWS_NODE = "20.18.1"
 WINDOWS_HYPERFRAMES = "0.7.96"
 WINDOWS_FFMPEG = "7.1.1"
 WINDOWS_WHISPER = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"

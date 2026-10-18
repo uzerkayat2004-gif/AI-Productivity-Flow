@@ -1161,6 +1161,11 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             from voice_flow.app_updater import get_manager
             self.send_json_response(get_manager().status())
             return
+        if path == "/api/components/status":
+            # App-managed runtime pieces (Node 22 for Video Flow on Windows).
+            from voice_flow import node_component
+            self.send_json_response({"success": True, "node": node_component.component_status()})
+            return
         if path == "/api/auth/status":
             _sync_active_storage()
             from voice_flow.account_manager import get_account_manager

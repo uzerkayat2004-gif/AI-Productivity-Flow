@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from .. import runtime_env
+from .. import node_component, runtime_env
 from .process_manager import ProcessManager, hidden_window_kwargs
 from ..child_processes import new_tree_popen_kwargs
 from ..local_http import no_proxy_environment
@@ -31,7 +31,11 @@ class NarovaRunner:
         self.vendor_root = Path(vendor_root or runtime_env.narova_tool_root()
                                 or Path(__file__).resolve().parents[3] / "third_party" / "narova")
         self.cli_path = self.vendor_root / "tool" / "bin" / "narova.js"
-        self.node_path = node_path or (str(runtime_env.node_executable()) if runtime_env.node_executable() else None) or shutil.which("node")
+        # Windows installs from 1.0.8 bundle Node 20; HyperFrames needs 22,
+        # which the app downloads on its own (voice_flow.node_component).
+        self._node_explicit = bool(node_path)
+        video_node = node_component.video_node_executable()
+        self.node_path = node_path or (str(video_node) if video_node else None) or shutil.which("node")
         bundled_ffmpeg = runtime_env.ffmpeg_executable()
         self.ffmpeg_path = ffmpeg_path or (str(bundled_ffmpeg) if bundled_ffmpeg else None) or shutil.which("ffmpeg")
         self.timeout_seconds = timeout_seconds
@@ -60,6 +64,8 @@ class NarovaRunner:
         progress_callback: Callable[[dict[str, Any]], None],
     ) -> Path:
         project_dir = Path(project_dir)
+        if str(production.get("renderer") or "") == "hyperframes":
+            self._ensure_video_node(progress_callback)
         config_path = self.check(production, project_dir, job_id=job_id, process_manager=process_manager)
         narova_dir = config_path.parent
         renderer = str(production.get("renderer") or "no-browser")
@@ -111,6 +117,32 @@ class NarovaRunner:
             if source.is_file():
                 shutil.copy2(source, captions_dir / name)
         return final_video
+
+    def _ensure_video_node(self, progress_callback: Callable[[dict[str, Any]], None]) -> None:
+        """Get Node 22 before a HyperFrames render when the bundled Node is too old.
+
+        A failure becomes ``render_failed``, so the engine falls back to the
+        portable renderer with a clear note instead of crashing the job.
+        """
+        if self._node_explicit or not node_component.needs_managed_node():
+            return
+        ready = node_component.managed_node_executable()
+        if ready is None:
+            _report(progress_callback, 50, "Preparing Video Flow (downloading Node.js 22, one time)", "directing")
+
+            def _progress(done: int, total: int | None) -> None:
+                if total:
+                    label = f"Preparing Video Flow (downloading Node.js 22: {done // 1048576} of {max(1, total // 1048576)} MB)"
+                else:
+                    label = f"Preparing Video Flow (downloading Node.js 22: {done // 1048576} MB)"
+                _report(progress_callback, 50, label, "directing")
+
+            try:
+                ready = node_component.ensure_managed_node(_progress)
+            except node_component.NodeComponentError as exc:
+                raise EngineError("render_failed", str(exc)) from exc
+        if ready is not None:
+            self.node_path = str(ready)
 
     def _write_project(self, production: dict[str, Any], project_dir: Path) -> Path:
         narova_dir = project_dir / "narova"

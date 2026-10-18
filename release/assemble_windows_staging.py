@@ -10,7 +10,8 @@ build machine used to keep in ``~/apf-release-build/staging``:
             python/        CPython 3.12.10 (python-build-standalone, incl. Tk + pip)
                            + requirements.txt + narova_tts (+ voice_flow, added later
                            by build_windows_release.refresh_app_package)
-            node/          Node.js 22.23.3 (official win-x64 zip)
+            node/          Node.js 20.18.1 (official win-x64 zip; Node 22 for
+                           HyperFrames is an app-managed download)
             hyperframes/   hyperframes@0.7.96 node_modules (installed with the bundled npm)
             narova/tool/   vendored Narova CLI + its node_modules
             ffmpeg/        ffmpeg.exe / ffprobe.exe (gyan.dev essentials 7.1.1) + licenses
@@ -51,12 +52,14 @@ PYTHON_URL = (
 )
 # From the release's SHA256SUMS asset.
 PYTHON_SHA256 = "5ac66ae49a2104efeba985c1dc1cb40987757ee81cc6c7f218d10b801f3276ed"
-NODE_VERSION = "22.23.3"
+# Bundled Node stays 20.18.1 (what v1.0.6 installs recorded), so the
+# v1.0.6/v1.0.7 updaters keep choosing the small app update. HyperFrames
+# 0.7.96 needs Node >= 22; the app downloads the pinned Node 22.23.3 itself
+# (src/voice_flow/node_component.py) before the first full-fidelity render.
+# From https://nodejs.org/dist/v20.18.1/SHASUMS256.txt
+NODE_VERSION = "20.18.1"
 NODE_URL = f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-x64.zip"
-# HyperFrames 0.7.96 refuses to start on Node < 22 ("HyperFrames requires
-# Node.js >= 22"), which made the installer's `browser ensure` step exit 1.
-# From https://nodejs.org/dist/v22.23.3/SHASUMS256.txt
-NODE_SHA256 = "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71"
+NODE_SHA256 = "56e5aacdeee7168871721b75819ccacf2367de8761b78eaceacdecd41e04ca03"
 HYPERFRAMES_VERSION = "0.7.96"
 FFMPEG_VERSION = "7.1.1"
 FFMPEG_URL = (

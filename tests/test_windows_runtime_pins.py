@@ -22,14 +22,19 @@ def _load():
     return module
 
 
-def test_bundled_node_meets_hyperframes_minimum():
-    from voice_flow import bundled_runtime
+def test_hyperframes_gets_a_node_that_meets_its_minimum():
+    """Bundled Node stays 20.18.1 (small updates for v1.0.6 installs); the
+    app-managed download supplies the Node HyperFrames needs."""
+    from voice_flow import bundled_runtime, node_component
 
     staging = _load()
-    assert staging.NODE_VERSION == bundled_runtime.WINDOWS_NODE
+    assert staging.NODE_VERSION == bundled_runtime.WINDOWS_NODE == "20.18.1"
     assert staging.HYPERFRAMES_VERSION == bundled_runtime.WINDOWS_HYPERFRAMES
     minimum = HYPERFRAMES_MIN_NODE_MAJOR[staging.HYPERFRAMES_VERSION]
-    assert int(staging.NODE_VERSION.split(".")[0]) >= minimum
+    assert node_component.HYPERFRAMES_MIN_NODE_MAJOR == minimum
+    assert int(node_component.MANAGED_NODE_VERSION.split(".")[0]) >= minimum
+    assert node_component.MANAGED_NODE_SHA256 == "2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71"
+    assert node_component.MANAGED_NODE_URL.startswith("https://nodejs.org/dist/v22.23.3/")
 
 
 def test_runtime_downloads_are_pinned():

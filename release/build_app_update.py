@@ -58,6 +58,20 @@ def _runtime(platform: str) -> dict[str, str]:
     return runtime_for_platform(platform)
 
 
+def _app_managed(platform: str) -> dict:
+    sys.path.insert(0, str(REPO / "src"))
+    if platform != "win":
+        return {}
+    from voice_flow import node_component
+
+    return {"node": {
+        "version": node_component.MANAGED_NODE_VERSION,
+        "url": node_component.MANAGED_NODE_URL,
+        "sha256": node_component.MANAGED_NODE_SHA256,
+        "used_for": "HyperFrames (Video Flow full-fidelity render)",
+    }}
+
+
 def _package_files() -> list[Path]:
     files: list[Path] = []
     for path in PACKAGE.rglob("*"):
@@ -84,6 +98,9 @@ def build_manifest(platform: str) -> dict:
         "platform": platform,
         "package_root": "voice_flow",
         "runtime": _runtime(platform),
+        # Informational (1.0.8+): pieces the app downloads itself, so their
+        # versions are not part of the full-installer decision.
+        "app_managed": _app_managed(platform),
         "files": sorted(
             f"voice_flow/{path.relative_to(PACKAGE).as_posix()}" for path in files
         ),
