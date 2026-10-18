@@ -474,7 +474,7 @@ class VideoFlowEngine:
             progress_callback=_progress_bridge,
             process_manager=self.process_manager,
             reuse_workspace=bool(kwargs.get("reuse_workspace", False)),
-            allow_local_fallback=allow_fallback,
+            allow_local_fallback=False,  # the engine owns the local fallback (it has the model gateway)
         )
 
         request = VideoRequest(
@@ -496,7 +496,7 @@ class VideoFlowEngine:
             profile=provider.profile,
             retain_notebook=bool(kwargs.get("retain_notebook", True)),
             reuse_workspace=bool(kwargs.get("reuse_workspace", False)),
-            allow_local_fallback=allow_fallback,
+            allow_local_fallback=False,  # the engine owns the local fallback (it has the model gateway)
             document_profile=kwargs.get("document_profile"),
             target_duration_seconds=request_target,
         )
@@ -508,19 +508,34 @@ class VideoFlowEngine:
                 first_code = str(getattr(first_exc, "code", "") or "")
                 first_msg = str(first_exc).lower()
                 retry_as_explainer = (
-                    request.format == "cinematic"
-                    and not self.process_manager.is_cancelled(video_id)
-                    and first_code not in {"cancelled", "auth_expired", "AUTH", "auth_unavailable", "RATE_LIMITED", "rate_limited"}
+                    not self.process_manager.is_cancelled(video_id)
+                    and first_code not in {"cancelled", "auth_expired", "AUTH", "auth_unavailable", "RATE_LIMITED", "rate_limited", "TIMEOUT"}
                     and not any(k in first_msg for k in ("expired", "re-authenticate", "not authenticated", "rate limit", "cancelled"))
                 )
                 if not retry_as_explainer:
                     raise
-                # Cinematic needs Google AI Ultra; on other plans NotebookLM
-                # rejects it. Make the video anyway as a full Explainer.
-                logger.warning("Cinematic generation failed (%s); retrying as explainer", first_exc)
-                report(50, "Cinematic needs Google AI Ultra, making an Explainer video instead", "video_start")
-                request = dataclasses.replace(request, format="explainer", style=style_name)
-                artifact = provider.generate(request)
+                # NotebookLM refused this generation (Cinematic needs Google AI
+                # Ultra; other refusals are often transient). Try once more as a
+                # plain Explainer with a fresh notebook before giving up.
+                logger.warning("NotebookLM generation failed (%s); retrying once as explainer", first_exc)
+                if request.format == "cinematic":
+                    report(50, "Cinematic needs Google AI Ultra, making an Explainer video instead", "video_start")
+                else:
+                    report(50, "NotebookLM had a problem, trying once more", "video_start")
+                request = dataclasses.replace(
+                    request,
+                    format="explainer",
+                    style=style_name if style_name != "custom" else "auto",
+                    style_prompt=None if style_name == "custom" else request.style_prompt,
+                    notebook_id=None,
+                    source_id=None,
+                    task_id=None,
+                )
+                try:
+                    artifact = provider.generate(request)
+                except Exception as second_exc:
+                    setattr(second_exc, "_voice_flow_generation_retried", True)
+                    raise second_exc from first_exc
         except Exception as exc:
             if (
                 self.process_manager.is_cancelled(video_id)
@@ -541,7 +556,7 @@ class VideoFlowEngine:
                         artifact = provider.generate(request)
                     except Exception as retry_exc:
                         setattr(retry_exc, "_voice_flow_retried_after_reauth", True)
-                        if allow_fallback or provider.is_local_fallback_enabled(request):
+                        if allow_fallback:
                             logger.warning("NotebookLM retry after remint failed (%s); falling back to local Visual V2.1 engine", retry_exc)
                             report(15, "NotebookLM login expired — rendering with local engine", "directing")
                             return self._auth_fallback_to_local(video_id, kwargs, source_text, source_file, source_url, title, retry_exc)
@@ -567,10 +582,25 @@ class VideoFlowEngine:
                         "document_profile": artifact.document_profile,
                     }
                 logger.info("NotebookLM self-heal unavailable (%s); continuing to fallback logic", heal.get("error"))
-            if is_auth and (allow_fallback or provider.is_local_fallback_enabled(request)):
+            if is_auth and allow_fallback:
                 logger.warning("NotebookLM auth expired (%s); falling back to local Visual V2.1 engine", exc)
                 report(15, "NotebookLM login expired — rendering with local engine", "directing")
                 return self._auth_fallback_to_local(video_id, kwargs, source_text, source_file, source_url, title, exc)
+            is_rate_limited = "rate" in str(getattr(exc, "code", "") or "").lower() or "rate limit" in str(exc).lower() or "usage limit" in str(exc).lower()
+            if (
+                not is_auth
+                and not is_rate_limited
+                and (getattr(exc, "_voice_flow_generation_retried", False) or str(getattr(exc, "code", "")) == "TIMEOUT")
+                and allow_fallback
+            ):
+                # NotebookLM refused the video twice. Make it with the local
+                # engine instead of leaving the user with a dead card.
+                logger.warning("NotebookLM generation failed twice (%s); falling back to local engine", exc)
+                report(15, "NotebookLM couldn't make this video — rendering with local engine", "directing")
+                return self._auth_fallback_to_local(
+                    video_id, kwargs, source_text, source_file, source_url, title, exc,
+                    reason="notebooklm_generation_failed",
+                )
             raise
 
         self.process_manager.raise_if_cancelled(video_id)
@@ -656,8 +686,9 @@ class VideoFlowEngine:
         source_url: str | None,
         title: str,
         exc: Exception,
+        reason: str = "notebooklm_auth_expired",
     ) -> dict[str, Any]:
-        """Re-run the job on the local engine after a NotebookLM auth failure."""
+        """Re-run the job on the local engine after NotebookLM could not make it."""
         local_kwargs = dict(kwargs)
         local_kwargs["provider"] = "visual-v2.1"
         local_kwargs["video_engine"] = "visual-v2.1"
@@ -666,7 +697,7 @@ class VideoFlowEngine:
         # for NotebookLM and why the local engine took over, so the UI
         # can show a badge instead of pretending the request succeeded.
         # Redact first: provider diagnostics can echo key material.
-        local_kwargs["fallback_reason"] = "notebooklm_auth_expired"
+        local_kwargs["fallback_reason"] = reason
         local_kwargs["fallback_requested_engine"] = "notebooklm"
         local_kwargs["fallback_error"] = _redact_secret(str(exc))[:300]
         result = self.run(video_id, **local_kwargs)
@@ -675,6 +706,22 @@ class VideoFlowEngine:
             # real, fixable reason (NotebookLM sign-in), not a generic
             # "generation_failed" from the fallback.
             local_error = str(result.get("error_message") or result.get("message") or "")
+            if reason == "notebooklm_generation_failed":
+                nlm_reason = str(getattr(exc, "message", "") or str(exc) or "").strip()
+                message = (
+                    "NotebookLM couldn't make this video"
+                    + (f" ({_redact_secret(nlm_reason)[:160]})" if nlm_reason else "")
+                    + ". Wait a few minutes and tap Retry, or try a shorter document."
+                )
+                result.update(
+                    {
+                        "error_code": str(getattr(exc, "code", "") or "notebooklm_generation_failed"),
+                        "error_message": message,
+                        "message": message,
+                        "fallback_error": _redact_secret(local_error)[:300],
+                    }
+                )
+                return result
             message = (
                 "NotebookLM sign-in expired. Open Video Flow settings, sign in to "
                 "NotebookLM again, then tap Retry."

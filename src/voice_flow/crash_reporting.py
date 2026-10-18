@@ -108,7 +108,34 @@ def _scrub_object(obj: Any) -> Any:
 REDACTED = "[redacted]"
 TEST_CRASH_MESSAGE = f"Test crash report from AI Productivity Flow v{VERSION}"
 # The only free-text messages allowed to leave the machine: fixed strings we wrote.
-_SAFE_MESSAGES = frozenset({TEST_CRASH_MESSAGE})
+FLOW_FAILURE_MESSAGE = "Flow job failed"
+_SAFE_MESSAGES = frozenset({TEST_CRASH_MESSAGE, FLOW_FAILURE_MESSAGE})
+
+
+def report_flow_failure(flow: str, error_code: str, stage: str = "", engine: str = "") -> bool:
+    """Send a privacy-safe "job failed" event: fixed message plus short tags.
+
+    No user text leaves the machine: only the flow name, the error code, the
+    last progress stage, and the engine, each trimmed to a short token.
+    """
+    if not _CRASH_REPORTING_INITIALIZED:
+        return False
+    try:
+        import sentry_sdk
+
+        def _tag(value: Any) -> str:
+            text = re.sub(r"[^A-Za-z0-9_.:\- ]", "", str(value or ""))[:60].strip()
+            return text or "unknown"
+
+        with sentry_sdk.new_scope() as scope:
+            scope.set_tag("flow", _tag(flow))
+            scope.set_tag("error_code", _tag(error_code))
+            scope.set_tag("stage", _tag(stage))
+            scope.set_tag("engine", _tag(engine))
+            sentry_sdk.capture_message(FLOW_FAILURE_MESSAGE, level="error")
+        return True
+    except Exception:
+        return False
 
 
 def _safe_message(value: Any) -> str:
