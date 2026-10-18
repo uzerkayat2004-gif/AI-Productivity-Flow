@@ -41,15 +41,15 @@ def test_nearby_dictations_reuse_lfm_until_exact_idle_grace(monkeypatch, isolate
     model, closed = resident_lfm(monkeypatch)
     monkeypatch.setattr(lfm_engine, "_polish_with_lfm_impl", lambda *_args, **_kwargs: "polished")
     assert lfm_engine.polish_with_lfm("first") == "polished"
-    isolated_resources[0] = 109.0
+    isolated_resources[0] = 99.0 + lfm_engine.LFM_WARM_IDLE_SECONDS
     resources.cleanup_idle_models()
     assert closed == []
     assert lfm_engine.polish_with_lfm._cached_llm is model
     assert lfm_engine.polish_with_lfm("second") == "polished"
-    isolated_resources[0] = 118.999
+    isolated_resources[0] = 98.999 + 2 * lfm_engine.LFM_WARM_IDLE_SECONDS
     resources.cleanup_idle_models()
     assert closed == []
-    isolated_resources[0] = 119.0
+    isolated_resources[0] = 99.0 + 2 * lfm_engine.LFM_WARM_IDLE_SECONDS
     resources.cleanup_idle_models()
     assert closed == [True]
     assert lfm_engine.polish_with_lfm._cached_llm is None
@@ -134,6 +134,6 @@ def test_failed_polish_still_releases_lease_after_bounded_grace(monkeypatch, iso
     with pytest.raises(RuntimeError, match="mock inference failed"):
         lfm_engine.polish_with_lfm("hello")
     assert not resources.has_active_model_use("polish")
-    isolated_resources[0] = 110.0
+    isolated_resources[0] = 100.0 + lfm_engine.LFM_WARM_IDLE_SECONDS
     resources.cleanup_idle_models()
     assert closed == [True]
