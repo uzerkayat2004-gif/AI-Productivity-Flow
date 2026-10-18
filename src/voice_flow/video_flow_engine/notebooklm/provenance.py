@@ -49,8 +49,14 @@ def probe_media_file(path: Path | str) -> dict[str, Any]:
         }
         import os
         import sys
+        kwargs["stdin"] = subprocess.DEVNULL
         if os.name == "nt" or sys.platform == "win32":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            try:
+                from .login_flow import cli_child_argv_env
+                cmd, kwargs["env"] = cli_child_argv_env(cmd)
+            except Exception:
+                pass
         res = subprocess.run(cmd, **kwargs)
         if res.returncode != 0:
             return {}

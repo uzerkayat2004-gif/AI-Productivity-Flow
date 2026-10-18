@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .config import (
     get_profile_dir,
@@ -1303,6 +1303,23 @@ def _cli_argv(command: list[str]) -> list[str]:
     if interpreter is None:
         return list(command)
     return [str(interpreter), "-m", "notebooklm", *command[1:]]
+
+
+def cli_child_argv_env(command: Sequence[str]) -> tuple[list[str], dict[str, str]]:
+    """argv + env for any non-login NotebookLM CLI call (generate, poll, download...).
+
+    Same reason as :func:`_cli_argv`: from the installed (pythonw) app the pip
+    ``notebooklm.exe`` shim dies before printing anything, so Audio Flow and
+    Video Flow showed a bare "NotebookLM CLI failed". Run ``python -m
+    notebooklm`` with a UTF-8 child environment instead.
+    """
+    argv = _cli_argv([str(part) for part in command])
+    interpreter = Path(argv[0]) if len(argv) >= 3 and argv[1] == "-m" else None
+    try:
+        usable = interpreter if interpreter is not None and interpreter.is_file() else None
+    except OSError:
+        usable = None
+    return argv, _login_child_env(usable)
 
 
 _FIRST_LOGIN_SHIM = Path(__file__).with_name("first_login_shim.py")

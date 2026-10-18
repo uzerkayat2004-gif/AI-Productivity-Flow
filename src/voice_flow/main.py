@@ -3829,6 +3829,18 @@ class VoiceFlowApp:
         if not text:
             text = self._capture_selected_text_for_video()
         target_mode = "full" if mode == "full" else "summary"
+        ask_on_bar = getattr(self.overlay, "ask_video_treatment", None)
+        if callable(ask_on_bar):
+            # Ask Normal / Cinematic on the floating bar, not a separate window.
+            def _on_choice(choice: str | None) -> None:
+                if not choice:
+                    return
+                video_flow_widget.show_composer(
+                    text or "", target_mode, anchor_bar=self.overlay, video_format=choice,
+                )
+
+            ask_on_bar(_on_choice)
+            return
         video_flow_widget.show_composer(text or "", target_mode, anchor_bar=self.overlay, ask_treatment=True)
 
     def _capture_selected_text_for_video(self) -> str:

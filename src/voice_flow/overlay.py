@@ -284,6 +284,10 @@ class FloatingOverlayBar:
         # True while a text selection is live — expands bar without hover so
         # the user can click "⋯ Video" immediately after selecting text.
         self._selection_expanded = False
+        # Video style choice shown on the bar itself (Normal / Cinematic).
+        # Holds the callback while the choice is open, else None.
+        self._treatment_callback: Callable[[str | None], None] | None = None
+        self._treatment_generation = 0
 
         # Redraw throttle: skip frames where nothing meaningful changed.
         self._last_draw_at = 0.0
@@ -1123,10 +1127,52 @@ class FloatingOverlayBar:
         def _do():
             self.selected_text = ""
             self._selection_generation += 1
-            self._selection_expanded = False  # Collapse back to rest pill
+            self._selection_expanded = self._treatment_active()  # Collapse back to rest pill
             if self.state == "READY":
                 self._draw()
         self._run_on_ui(_do)
+
+    def ask_video_treatment(self, callback: Callable[[str | None], None], timeout_ms: int = 30000) -> None:
+        """Ask Normal or Cinematic on the floating bar, then call ``callback``.
+
+        ``callback`` gets "explainer", "cinematic", or None when the user
+        cancels or the choice times out. Called on the UI thread.
+        """
+        def _do():
+            previous = self._treatment_callback
+            self._treatment_callback = callback
+            self._treatment_generation += 1
+            generation = self._treatment_generation
+            self._selection_expanded = True
+            if previous is not None:
+                try:
+                    previous(None)
+                except Exception:
+                    pass
+            self._draw_if_available()
+            if self.root and timeout_ms > 0:
+                self.root.after(timeout_ms, lambda: self._expire_treatment(generation))
+
+        self._run_on_ui(_do)
+
+    def _treatment_active(self) -> bool:
+        return getattr(self, "_treatment_callback", None) is not None
+
+    def _expire_treatment(self, generation: int) -> None:
+        if self._treatment_active() and generation == self._treatment_generation:
+            self._finish_treatment(None)
+
+    def _finish_treatment(self, choice: str | None) -> None:
+        callback = self._treatment_callback
+        self._treatment_callback = None
+        self._treatment_generation += 1
+        self._selection_expanded = bool(self.selected_text)
+        self._draw_if_available()
+        if callback is not None:
+            try:
+                callback(choice)
+            except Exception:
+                pass
 
     def show_video_progress(self, video_id: str, progress: int = 0, stage: str = "Creating video") -> None:
         """Show persistent progress while a video renders."""
@@ -1273,6 +1319,8 @@ class FloatingOverlayBar:
     def _clear_selection_if_current(self, generation: int) -> None:
         if generation == self._selection_generation and not self._is_mouse_over:
             self.selected_text = ""
+            if self._treatment_active():
+                return
             self._selection_expanded = False
             if self.state == "READY":
                 self._draw()
@@ -1584,6 +1632,8 @@ class FloatingOverlayBar:
                 self.on_audio_stop()
             self.clear_selected_text()
             self.show_ready()
+        elif self.state == "READY" and self._treatment_active() and zone in ("speak", "video_flow", "settings"):
+            self._finish_treatment({"speak": "explainer", "video_flow": "cinematic"}.get(zone))
         elif self.state == "READY":
             selected = self.selected_text
             if zone == "video_status" and self.video_status in {"ready", "failed"} and self.video_job_id:
@@ -2012,6 +2062,7 @@ class FloatingOverlayBar:
             self._hover_zone,
             getattr(self, "_is_mouse_over", False),
             getattr(self, "_selection_expanded", False),
+            getattr(self, "_treatment_callback", None) is not None,
             self.video_status,
             self.video_stage,
             self.video_progress,
@@ -2131,6 +2182,8 @@ class FloatingOverlayBar:
         return needed
 
     def _video_zone_width(self) -> int:
+        if self._treatment_active():
+            return 82
         return 78 if self._notebooklm_needs_sign_in() else self.video_action_width
 
     def _start_notebooklm_sign_in(self) -> None:
@@ -2189,6 +2242,19 @@ class FloatingOverlayBar:
         # Settings zone highlight (hover only)
         if self._hover_zone == "settings":
             self._draw_pill(settings_left + 2, action_top + 3, content_width - 2, h - 3, hover_radius, self.ORANGE_FAINT, self.ORANGE_ACCENT)
+
+        if self._treatment_active():
+            # Video style choice: Normal | Cinematic | x, on the bar itself.
+            normal_fill = self.ACCENT_ORANGE if self._hover_zone == "speak" else self.INK
+            c.create_text(video_left / 2, cy, text="Normal video", fill=normal_fill, font=(config.bar_font_family, 9, "bold"), anchor="center")
+            c.create_line(video_left, action_top + 7, video_left, h - 7, fill=self.BORDER, width=1)
+            if self._hover_zone != "video_flow":
+                self._draw_pill(video_left + 2, action_top + 3, settings_left - 2, h - 3, hover_radius, self.ORANGE_FAINT, self.ORANGE_FAINT)
+            c.create_text(video_left + self._video_zone_width() / 2, cy, text="Cinematic", fill=self.ACCENT_ORANGE, font=(config.bar_font_family, 8, "bold"), anchor="center")
+            c.create_line(settings_left, action_top + 7, settings_left, h - 7, fill=self.BORDER, width=1)
+            close_fill = self.ACCENT_ORANGE if self._hover_zone == "settings" else self.INK
+            c.create_text(settings_left + settings_width / 2, cy, text="\u2715", fill=close_fill, font=(config.bar_font_family, 9, "bold"), anchor="center")
+            return
 
         # "Click to speak" label — dimmed when selection mode (video is the intent)
         speak_fill = self.ACCENT_ORANGE if self._hover_zone == "speak" else (self.BORDER if sel_active else self.INK)
