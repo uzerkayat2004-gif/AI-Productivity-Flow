@@ -308,10 +308,11 @@ def onboarding_phase(page, win) -> None:
         note = ""
         status = "ok"
         if i == 1:
-            mac_clip = "scene_2_mac_mixed.mp3" in clips
-            mac_note = "coming to Mac soon" in text
-            status = "ok" if (mac_clip and mac_note) else "fail"
-            note = f"mac clip loaded={mac_clip} note shown={mac_note}"
+            # Video Flow works on Mac: the regular scene plays, with no "coming soon" line.
+            plain_clip = "scene_2_mixed.mp3" in clips
+            no_soon = "coming to Mac soon" not in text and "coming soon" not in text.lower()
+            status = "ok" if (plain_clip and no_soon) else "fail"
+            note = f"scene_2 clip loaded={plain_clip} no coming-soon text={no_soon}"
         if "Ctrl + Win" in text:
             status, note = "fail", note + " shows Ctrl + Win on Mac"
         record(f"onboarding: tour scene {i+1}", status, f"{note} clips={clips}", shot(page, f"onb-tour-scene-{i+1}"))

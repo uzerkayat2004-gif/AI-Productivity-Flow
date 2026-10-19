@@ -26,7 +26,7 @@ Concise, checkable facts about AI Productivity Flow (Version 1.0). Public docume
   - **Read Mode**: Spoken reader that articulates selected text with human cadence.
   - **Summary Mode**: Multi-depth summaries (Short, Balanced, Deep Dive).
   - Voices: Microsoft Edge Neural (default, free, online: text is sent to Microsoft), ElevenLabs, Cartesia, OpenAI, Google Cloud TTS.
-- **Video Flow** (coming to Mac soon, available on Windows now):
+- **Video Flow** (Windows and macOS):
   - Source input → AI planning → Creative Director & scene authoring → dynamic layout solver → controlled rendering (Code2Video / Narova / WebGL) + synchronized narration.
   - Direct 1080p MP4 compilation automatically exported to user Downloads.
   - Google NotebookLM research synchronization.

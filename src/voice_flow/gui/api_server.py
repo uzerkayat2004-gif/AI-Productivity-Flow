@@ -68,7 +68,6 @@ from voice_flow.runtime_contract import RUNTIME_CONTRACT_VERSION, RUNTIME_FEATUR
 from voice_flow.runtime_guard import runtime_is_compatible
 from voice_flow.local_server import LoopbackHTTPServer, require_loopback_host
 from voice_flow.video_flow_service import get_video_flow_service
-from voice_flow.video_flow_platform import video_flow_supported, video_flow_unsupported_payload
 
 # Video Flow POST routes that start or re-run a render. Refused on macOS,
 # where the render toolchain is not bundled yet. NotebookLM sign-in and the
@@ -2739,12 +2738,6 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
             return
 
         path = urllib.parse.urlparse(self.path).path
-
-        if path in VIDEO_FLOW_RENDER_POST_PATHS and not video_flow_supported():
-            # macOS build ships no Video Flow render toolchain yet; refuse
-            # before any job, analyzer, or Windows-only code is reached.
-            self.send_json_response(video_flow_unsupported_payload(), 501)
-            return
 
         if path in {"/auth/logout", "/auth/desktop/session", "/api/auth/google", "/api/auth/google/start", "/api/auth/register", "/api/auth/login", "/api/auth/switch", "/api/auth/logout", "/api/app/restart", "/api/storage/clear-audio-cache", "/api/overlay/reset-and-refresh"}:
             reason = settings_busy_reason()

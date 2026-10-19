@@ -136,12 +136,15 @@ def test_v106_windows_install_gets_the_small_zip_for_v108(monkeypatch, tmp_path)
                               old.runtime_fingerprint_from_manifest(manifest))
 
 
-def test_v106_mac_install_gets_the_small_zip_for_v108(monkeypatch, tmp_path):
+def test_v106_mac_install_takes_the_full_image_once_video_flow_ships(monkeypatch, tmp_path):
+    """From 1.0.14 the Mac .app bundles Node, HyperFrames and ffmpeg for Video
+    Flow, so an older Mac install (which recorded them as not bundled) must
+    take the full disk image once instead of the small app zip."""
     old = _old_updater(monkeypatch, "v1_0_6_bundled_runtime.py.txt")
     plan = _old_plan(old, "mac", tmp_path)
-    assert plan["kind"] == "app", plan["reason"]
-    assert plan["asset_name"] == "AI-Productivity-Flow-app-update-mac.zip"
-    assert _v108_manifest("mac")["runtime"]["node"] == "not-bundled"
+    assert plan["kind"] != "app", plan
+    runtime = _v108_manifest("mac")["runtime"]
+    assert runtime["ffmpeg"] != "not-bundled" and runtime["hyperframes"] != "not-bundled"
 
 
 def test_v107_windows_install_needs_the_full_installer_once(monkeypatch, tmp_path):
@@ -154,9 +157,10 @@ def test_v107_windows_install_needs_the_full_installer_once(monkeypatch, tmp_pat
     assert plan["size_bytes"] == FULL_SIZE
 
 
-def test_v107_mac_install_gets_the_small_zip(monkeypatch, tmp_path):
+def test_v107_mac_install_takes_the_full_image_once_video_flow_ships(monkeypatch, tmp_path):
+    """1.0.14 bundles the Video Flow toolchain in the Mac .app: full image once."""
     old = _old_updater(monkeypatch, "v1_0_7_bundled_runtime.py.txt")
-    assert _old_plan(old, "mac", tmp_path)["kind"] == "app"
+    assert _old_plan(old, "mac", tmp_path)["kind"] == "full"
 
 
 def test_v108_manifest_keeps_every_field_for_old_updaters_and_lists_node22():

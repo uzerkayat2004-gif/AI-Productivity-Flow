@@ -34,7 +34,7 @@ AUDIO_FILES = [
     "scene_3_mixed.mp3",
     "scene_4_mixed.mp3",
     "scene_5_mixed.mp3",
-    "scene_2_mac_mixed.mp3",  # Mac cut of scene 2: Video Flow is coming to Mac soon
+    "vf_guide_step4_mac_mixed.mp3",  # Mac cut of VF guide step 4 ("anywhere on your Mac")
 ]
 
 

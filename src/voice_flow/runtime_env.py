@@ -139,16 +139,45 @@ def pythonw_executable() -> str | None:
     return None
 
 
+def _mac_runtime_binary(*parts: str) -> Path | None:
+    runtime = mac_bundle_runtime_dir()
+    if runtime is None:
+        return None
+    candidate = runtime.joinpath(*parts)
+    return candidate if candidate.is_file() else None
+
+
+def app_runtime_root() -> Path | None:
+    """The private runtime folder of the packaged app on either platform.
+
+    Windows: ``<install>/runtime`` (runtime-manifest.json). macOS:
+    ``AI Productivity Flow.app/Contents/Resources/runtime`` (build-manifest.json).
+    None when running from source.
+    """
+    return runtime_root() or mac_bundle_runtime_dir()
+
+
+def is_packaged_app() -> bool:
+    """True for the installed Windows app and the macOS .app (not source runs)."""
+    return app_runtime_root() is not None
+
+
 def node_executable() -> Path | None:
-    return _runtime_binary("node", "node.exe")
+    return _runtime_binary("node", "node.exe") or _mac_runtime_binary("node", "bin", "node")
 
 
 def ffmpeg_executable() -> Path | None:
-    return _runtime_binary("ffmpeg", "ffmpeg.exe")
+    return _runtime_binary("ffmpeg", "ffmpeg.exe") or _mac_runtime_binary("ffmpeg", "ffmpeg")
 
 
 def ffprobe_executable() -> Path | None:
-    return _runtime_binary("ffmpeg", "ffprobe.exe")
+    return _runtime_binary("ffmpeg", "ffprobe.exe") or _mac_runtime_binary("ffmpeg", "ffprobe")
+
+
+def ffmpeg_dir() -> Path | None:
+    """Folder holding the private ffmpeg/ffprobe, to lead a child's PATH."""
+    exe = ffmpeg_executable()
+    return exe.parent if exe else None
 
 
 def _mac_app_runtime_root() -> Path | None:
@@ -207,7 +236,7 @@ def browser_executable() -> Path | None:
 
 def narova_tool_root() -> Path | None:
     """Vendored Narova tool root (contains tool/bin/narova.js)."""
-    runtime = runtime_root()
+    runtime = app_runtime_root()
     if runtime is not None:
         root = runtime / "narova"
         return root if (root / "tool" / "bin" / "narova.js").is_file() else None
@@ -266,8 +295,10 @@ def render_browser_cache() -> Path | None:
     for base in (home / ".cache" / "hyperframes" / "chrome" / "chrome-headless-shell",
                  home / ".cache" / "puppeteer" / "chrome-headless-shell"):
         if base.is_dir():
-            for exe in base.rglob("chrome-headless-shell.exe"):
-                return exe
+            name = "chrome-headless-shell.exe" if sys.platform == "win32" else "chrome-headless-shell"
+            for exe in base.rglob(name):
+                if exe.is_file():
+                    return exe
     return None
 
 
@@ -303,7 +334,7 @@ def ensure_render_browser(log=None, *, background: bool = False) -> bool:
             log(f"render browser provisioning skipped: {exc}")
         return False
     node = node_component.video_node_executable()
-    runtime = runtime_root()
+    runtime = app_runtime_root()
     if node is None or runtime is None:
         return False
     cli = runtime / "hyperframes" / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs"
@@ -342,7 +373,7 @@ def schedule_render_browser_prefetch(delay_seconds: float | None = None) -> bool
     of them is missing. Returns True when a prefetch was scheduled.
     """
     global _RENDER_BROWSER_PREFETCH_SCHEDULED
-    if sys.platform != "win32" or not is_installed():
+    if not ((sys.platform == "win32" and is_installed()) or mac_bundle_runtime_dir() is not None):
         return False
     if os.environ.get("VOICE_FLOW_RENDER_BROWSER_PREFETCH", "1").strip().lower() in ("0", "off", "false", "no"):
         return False
@@ -375,7 +406,19 @@ def preflight_problems() -> list[str]:
     """Missing/unusable packaged components (empty list = healthy)."""
     runtime = runtime_root()
     if runtime is None:
-        return []
+        mac = mac_bundle_runtime_dir()
+        if mac is None:
+            return []
+        problems = [label for label, exe in (
+            ("node-runtime", node_executable()),
+            ("ffmpeg", ffmpeg_executable()),
+            ("ffprobe", ffprobe_executable()),
+        ) if exe is None]
+        if narova_tool_root() is None:
+            problems.append("narova")
+        if render_browser_cache() is None:
+            problems.append("render-browser")
+        return problems
     problems: list[str] = []
     checks = {
         "python-runtime": runtime / "python" / "pythonw.exe",

@@ -630,6 +630,132 @@ def bundle_nemo_speech(runtime_dir: Path, python_bin: Path | None = None) -> Pat
     return dylib
 
 
+# ---------------------------------------------------------------------------
+# Video Flow toolchain (macOS arm64): Node 22, HyperFrames, Narova, ffmpeg
+# ---------------------------------------------------------------------------
+# Keep aligned with src/voice_flow/bundled_runtime.py (MAC_NODE, MAC_FFMPEG,
+# MAC_HYPERFRAMES); the app-update fingerprint must match what is bundled.
+VF_NODE_VERSION = "22.23.3"
+VF_NODE_URL = f"https://nodejs.org/dist/v{VF_NODE_VERSION}/node-v{VF_NODE_VERSION}-darwin-arm64.tar.gz"
+VF_NODE_SHA256 = "23b25245dcfb9af7262f8ff142e9e2e0af025368117329e7a7458a51e5922f53"  # nodejs.org SHASUMS256.txt
+VF_FFMPEG_VERSION = "9.0.2"
+_VF_FFMPEG_BASE = "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2"
+VF_FFMPEG_URL = f"{_VF_FFMPEG_BASE}/ffmpeg.zip"
+VF_FFMPEG_SHA256 = "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924"
+VF_FFPROBE_URL = f"{_VF_FFMPEG_BASE}/ffprobe.zip"
+VF_FFPROBE_SHA256 = "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6"
+VF_HYPERFRAMES_VERSION = "0.7.96"
+
+
+def _vf_npm(node: Path, args: list[str], cwd: Path) -> None:
+    npm_cli = node.parent.parent / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+    env = dict(os.environ)
+    env["PATH"] = str(node.parent) + os.pathsep + env.get("PATH", "")
+    env["PUPPETEER_SKIP_DOWNLOAD"] = "1"  # the render browser is fetched per user, not bundled
+    subprocess.run([str(node), str(npm_cli), *args, "--no-audit", "--no-fund"], cwd=str(cwd), env=env, check=True)
+
+
+def bundle_video_flow_toolchain(runtime_dir: Path, python_bin: Path | None = None) -> dict:
+    """Ship what Video Flow's renderer needs inside the .app, like Windows does.
+
+    runtime/node/bin/node      Node 22 (HyperFrames needs >= 22)
+    runtime/ffmpeg/ffmpeg|ffprobe  static arm64 builds (martin-riedl.de, GPL)
+    runtime/hyperframes/       hyperframes node_modules
+    runtime/narova/tool/       vendored Narova CLI
+    narova_tts (+ piper) in the bundled Python, for narration.
+    The render browser (chrome-headless-shell) is fetched per user on first
+    use by ``hyperframes browser ensure``, as on Windows.
+    """
+    info: dict = {}
+    extract = DIST_DIR / ".vf-extract"
+    shutil.rmtree(extract, ignore_errors=True)
+    extract.mkdir(parents=True, exist_ok=True)
+
+    # Node
+    archive = _download_verified(VF_NODE_URL, VF_NODE_SHA256, f"node-v{VF_NODE_VERSION}-darwin-arm64.tar.gz")
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(path=extract)
+    node_dir = runtime_dir / "node"
+    shutil.rmtree(node_dir, ignore_errors=True)
+    shutil.move(str(extract / f"node-v{VF_NODE_VERSION}-darwin-arm64"), str(node_dir))
+    for junk in ("include", "share", "CHANGELOG.md", "README.md"):
+        target = node_dir / junk
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.is_file():
+            target.unlink()
+    node = node_dir / "bin" / "node"
+    node.chmod(0o755)
+    print("Bundled Node:", subprocess.run([str(node), "--version"], capture_output=True, text=True).stdout.strip())
+    info["node"] = VF_NODE_VERSION
+
+    # ffmpeg / ffprobe
+    ff_dir = runtime_dir / "ffmpeg"
+    shutil.rmtree(ff_dir, ignore_errors=True)
+    ff_dir.mkdir(parents=True)
+    for url, sha, name in ((VF_FFMPEG_URL, VF_FFMPEG_SHA256, "ffmpeg"), (VF_FFPROBE_URL, VF_FFPROBE_SHA256, "ffprobe")):
+        zpath = _download_verified(url, sha, f"{name}-{VF_FFMPEG_VERSION}-arm64.zip")
+        with zipfile.ZipFile(zpath) as zf:
+            member = next(m for m in zf.namelist() if m.rsplit("/", 1)[-1] == name)
+            (ff_dir / name).write_bytes(zf.read(member))
+        (ff_dir / name).chmod(0o755)
+    line = subprocess.run([str(ff_dir / "ffmpeg"), "-version"], capture_output=True, text=True).stdout.splitlines()[:1]
+    print("Bundled ffmpeg:", line)
+    (ff_dir / "SOURCE.txt").write_text(
+        f"ffmpeg/ffprobe {VF_FFMPEG_VERSION} static macOS arm64 builds from {_VF_FFMPEG_BASE}\n"
+        "Licensed under the GNU GPL v3 (built with --enable-gpl --enable-version3). Source: https://ffmpeg.org/download.html\n",
+        encoding="utf-8",
+    )
+    info["ffmpeg"] = VF_FFMPEG_VERSION
+
+    # HyperFrames
+    hf = runtime_dir / "hyperframes"
+    shutil.rmtree(hf, ignore_errors=True)
+    hf.mkdir(parents=True)
+    (hf / "package.json").write_text(json.dumps({
+        "name": "apf-hyperframes-runtime", "private": True,
+        "dependencies": {"hyperframes": VF_HYPERFRAMES_VERSION},
+    }, indent=2), encoding="utf-8")
+    _vf_npm(node, ["install", "--omit=dev"], hf)
+    if not (hf / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs").is_file():
+        raise RuntimeError("HyperFrames install did not produce bin/hyperframes.mjs")
+    info["hyperframes"] = VF_HYPERFRAMES_VERSION
+
+    # Narova CLI
+    source = REPO_ROOT / "third_party" / "narova"
+    narova = runtime_dir / "narova"
+    shutil.rmtree(narova, ignore_errors=True)
+    narova.mkdir(parents=True)
+    for name in ("LICENSE", "README.md"):
+        if (source / name).is_file():
+            shutil.copy2(source / name, narova / name)
+    shutil.copytree(
+        source / "tool", narova / "tool",
+        ignore=shutil.ignore_patterns("node_modules", "__pycache__", "*.pyc", "evals", "live-tests", "tests"),
+    )
+    manifest = json.loads((narova / "tool" / "package.json").read_text(encoding="utf-8"))
+    if manifest.get("dependencies"):
+        lock = narova / "tool" / "package-lock.json"
+        _vf_npm(node, ["ci" if lock.is_file() else "install", "--omit=dev"], narova / "tool")
+
+    # narova_tts into the bundled Python
+    if python_bin is not None and python_bin.is_file():
+        site = subprocess.run(
+            [str(python_bin), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        narova_py = source / "tool" / "py"
+        dest = Path(site) / "narova_tts"
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(narova_py / "narova_tts", dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        piper = subprocess.run([str(python_bin), "-m", "pip", "install", "-r", str(narova_py / "requirements.txt")],
+                               capture_output=True, text=True)
+        if piper.returncode != 0:
+            print("WARNING: narova piper backend not installed:\n" + (piper.stderr or "")[-1500:])
+    shutil.rmtree(extract, ignore_errors=True)
+    return info
+
+
 def bundle_native_engines(target_arch: str | None = None) -> None:
     """Bundle llama-server (S1-mini polish) and NeMo-Speech (Nemotron) for macOS arm64."""
     arch = (target_arch or platform.machine()).lower()
@@ -641,6 +767,14 @@ def bundle_native_engines(target_arch: str | None = None) -> None:
     bundle_llama_server(runtime_dir)
     bundle_nemo_speech(runtime_dir, runtime_dir / "python" / "bin" / "python3")
     shutil.rmtree(DIST_DIR / ".engine-extract", ignore_errors=True)
+    vf = bundle_video_flow_toolchain(runtime_dir, runtime_dir / "python" / "bin" / "python3")
+    manifest_path = runtime_dir / "build-manifest.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data["video_flow"] = vf
+        manifest_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"Warning: could not record the Video Flow toolchain in the manifest: {exc}")
 
 
 # ---------------------------------------------------------------------------

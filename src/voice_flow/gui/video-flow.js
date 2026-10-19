@@ -3383,8 +3383,7 @@ async function analyzeSourceDocument(immediate = false) {
 
   // macOS has no Video Flow render toolchain yet (server answers 501): keep
   // the local estimate and make no background request while typing/pasting.
-  const vfGated = typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac();
-  if (text && text.trim() && !vfGated) {
+  if (text && text.trim()) {
     try {
       const data = await safeFetchJson("/api/video-flow/analyze-source", {
         method: "POST",
@@ -3471,10 +3470,6 @@ async function loadVideoSourceFile(file) {
   const title = document.getElementById("vf-title-input");
   try {
     if (extension === ".docx" || extension === ".pdf") {
-      if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
-        if (typeof vfShowVideoFlowMacNote === "function") vfShowVideoFlowMacNote();
-        return;
-      }
       if (label) label.textContent = "Extracting " + file.name + "…";
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -4112,10 +4107,6 @@ function askVideoTreatmentChoice() {
 }
 
 async function generateVideoFlow() {
-  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
-    vfToast("Video Flow is coming to Mac soon, available on Windows now", true);
-    return;
-  }
   const sourceInput = document.getElementById("vf-source-input");
   const titleInput = document.getElementById("vf-title-input");
   const button = document.getElementById("vf-generate-button");

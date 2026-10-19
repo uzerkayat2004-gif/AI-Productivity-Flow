@@ -922,7 +922,6 @@ function resumeInterruptedGuide(feature, pageId) {
 }
 
 function scheduleAutomaticGuide(feature, pageId) {
-  if (feature === "video" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) return;
   if (!isOnboardingAccountChanging() && resumeInterruptedGuide(feature, pageId)) return;
   if (isOnboardingAccountChanging() || _automaticGuideAttempts.has(feature)) return;
   // A guide the user has already seen never starts again by itself
@@ -1009,10 +1008,6 @@ function initNavigation() {
   navItems.forEach(item => {
     item.addEventListener("click", () => {
       const pageId = item.getAttribute("data-page");
-      if (pageId === "videoflow" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
-        vfShowVideoFlowMacNote();
-        return;
-      }
       const isSwitching = currentPageId !== pageId;
       switchPage(pageId, { userInitiated: true });
       // Keep the requested page until account authority confirms a first-run guide.
@@ -7145,10 +7140,6 @@ async function toggleClickToPasteSetting(checked) {
 }
 
 async function toggleVideoFlowFeature(checked) {
-  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
-    vfShowVideoFlowMacNote();
-    return;
-  }
   try {
     await fetch("/api/settings/update", {
       method: "POST",
@@ -7216,28 +7207,6 @@ const ONBOARDING_NARRATION_TIMELINES = {
         "start": 8.65,
         "end": 16.76,
         "text": "It uses your own NotebookLM account. Just sign in with Google: no API keys, nothing to pay."
-      }
-    ],
-    "beats": {}
-  },
-  "scene_2_mac": {
-    "duration": 14.156,
-    "speechEnd": 13.11,
-    "lines": [
-      {
-        "start": 0.45,
-        "end": 1.85,
-        "text": "Meet Video Flow!"
-      },
-      {
-        "start": 1.85,
-        "end": 8.78,
-        "text": "Paste any text or select an article, and it becomes an animated explainer video with a voiceover."
-      },
-      {
-        "start": 8.78,
-        "end": 14.16,
-        "text": "Video Flow is coming to Mac soon. It's available on Windows now."
       }
     ],
     "beats": {}
@@ -7581,6 +7550,28 @@ const ONBOARDING_NARRATION_TIMELINES = {
     ],
     "beats": {}
   },
+  "vf_guide_step4_mac": {
+    "duration": 11.995,
+    "speechEnd": 10.94,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.92,
+        "text": "Finally, Video Flow works anywhere on your Mac."
+      },
+      {
+        "start": 3.92,
+        "end": 7.63,
+        "text": "Highlight text on any page, and tap the floating button."
+      },
+      {
+        "start": 7.63,
+        "end": 11.99,
+        "text": "Your video is made in the background while you keep working."
+      }
+    ],
+    "beats": {}
+  },
   "voiceflow_guide_step4_mac": {
     "duration": 10.992,
     "speechEnd": 9.94,
@@ -7628,7 +7619,7 @@ const ONBOARDING_PAGE_MAP = {
 
 const scene1Timeline = ONBOARDING_NARRATION_TIMELINES.scene_1.lines;
 
-// Scene 2 has a Mac cut: Video Flow is coming to Mac soon, so the voiceover says so.
+// A scene may have a Mac cut (`scene_N_mac`) when its voiceover differs on Mac.
 function onboardingClipKey(slideIdx) {
   const key = `scene_${slideIdx + 1}`;
   const isMac = typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
@@ -9360,10 +9351,12 @@ const VIDEOFLOW_GUIDE_STEPS = [
     desc: "Highlight text anywhere on screen and tap the floating button; your video is made in the background.",
     targetId: "vf-guide-screen-sim",
     isSimulation: true,
-    spotlightLabel: "Screen & Windows Shortcut",
+    spotlightLabel: "Screen & Shortcut Workflow",
     nextLabel: "Finish & Start Creating 🚀",
     audioSrc: "assets/onboarding/vf_guide_step4_mixed.mp3",
-    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step4.lines
+    audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3",
+    timeline: ONBOARDING_NARRATION_TIMELINES.vf_guide_step4.lines,
+    timelineMac: ONBOARDING_NARRATION_TIMELINES.vf_guide_step4_mac.lines
   }
 ];
 
@@ -9820,11 +9813,6 @@ function prevVideoFlowGuideStep() {
 }
 
 function startVideoFlowGuide(startStep) {
-  // No Video Flow guide on Mac until Video Flow ships there.
-  if (typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()) {
-    vfShowVideoFlowMacNote();
-    return;
-  }
   setOnboardingFlag("vf_onboarding.vf_guided", "1");
   if (typeof switchPage === "function") {
     switchPage("videoflow", { skipGuideTrigger: true, fromGuide: true });
@@ -13970,76 +13958,8 @@ function vfIsMacPlatform() {
 }
 window.vfIsMacPlatform = vfIsMacPlatform;
 
-// Video Flow is Windows-only for now: the macOS build bundles no render
-// toolchain (ffmpeg/node/Narova). On Mac the entry, page, welcome-tour card
-// and guide say so instead of offering a feature that cannot run. The page
-// itself stays reachable (disabled) because Audio Flow's NotebookLM sign-in
-// and the shared provider keys live on it.
-const VF_MAC_GATE_NOTE = "Video Flow is coming to Mac soon, available on Windows now";
-
-function vfVideoFlowGatedOnMac() {
-  return typeof vfIsMacPlatform === "function" && vfIsMacPlatform();
-}
-
-function vfShowVideoFlowMacNote() {
-  if (typeof showToast === "function") showToast(VF_MAC_GATE_NOTE);
-}
-
-function vfApplyMacVideoFlowGate() {
-  if (!vfVideoFlowGatedOnMac()) return;
-  document.body.classList.add("vf-mac-gated");
-
-  const navItem = document.querySelector('.sidebar .nav-item[data-page="videoflow"]');
-  if (navItem && !navItem.classList.contains("vf-mac-disabled")) {
-    navItem.classList.add("vf-mac-disabled");
-    navItem.setAttribute("aria-disabled", "true");
-    navItem.setAttribute("title", VF_MAC_GATE_NOTE);
-    const note = document.createElement("small");
-    note.className = "vf-mac-gate-nav-note";
-    note.textContent = VF_MAC_GATE_NOTE;
-    navItem.appendChild(note);
-  }
-
-  const page = document.getElementById("page-videoflow");
-  if (page && !document.getElementById("vf-mac-gate-note")) {
-    const banner = document.createElement("div");
-    banner.id = "vf-mac-gate-note";
-    banner.className = "vf-mac-gate-note";
-    banner.setAttribute("role", "status");
-    banner.textContent = VF_MAC_GATE_NOTE;
-    const heading = page.querySelector(".vf-page-heading");
-    if (heading && heading.parentNode === page) heading.after(banner);
-    else page.prepend(banner);
-  }
-  ["vf-generate-button", "toggle-video-flow-feature", "toggle-video-flow"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.disabled = true;
-      el.setAttribute("aria-disabled", "true");
-      el.setAttribute("title", VF_MAC_GATE_NOTE);
-    }
-  });
-  const generateSub = document.getElementById("vf-generate-subtext");
-  if (generateSub) generateSub.textContent = VF_MAC_GATE_NOTE;
-
-  // Welcome tour: the Video Flow card and its demo slide carry the note.
-  const tourCard = document.querySelector("#card-feature-1 .s1-card-titles small");
-  if (tourCard) tourCard.textContent = VF_MAC_GATE_NOTE;
-  const startDesc = document.getElementById("s5-start-desc");
-  if (startDesc) startDesc.textContent = "Tour complete! Read mode and Voice Flow work right away with built-in voices and local models. Summary just needs a Google sign-in for NotebookLM.";
-  // v1.0.3: the note replaces the subtitle (same one line) instead of adding a
-  // second line, which the demo monitor covered at 1440x900.
-  const tourSub = document.querySelector(".s2-sub");
-  if (tourSub && !tourSub.classList.contains("vf-mac-gate-tour-note")) {
-    tourSub.id = "vf-mac-gate-tour-note";
-    tourSub.classList.add("vf-mac-gate-tour-note");
-    tourSub.textContent = "Paste any text or select an article and get an animated explainer video with voiceover. " + VF_MAC_GATE_NOTE + ".";
-  }
-}
-window.vfApplyMacVideoFlowGate = vfApplyMacVideoFlowGate;
 
 async function initPlatformAdaptation() {
-  vfApplyMacVideoFlowGate();
   try {
     const res = await fetch("/api/platform/info");
     if (!res.ok) return;

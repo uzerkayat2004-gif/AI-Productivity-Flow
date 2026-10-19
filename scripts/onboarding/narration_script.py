@@ -44,13 +44,6 @@ CLIPS = {
             "It uses your own NotebookLM account. Just sign in with Google: no API keys, nothing to pay.",
         ],
     },
-    "scene_2_mac": {
-        "lines": [
-            "Meet Video Flow!",
-            "Paste any text or select an article, and it becomes an animated explainer video with a voiceover.",
-            "Video Flow is coming to Mac soon. It's available on Windows now.",
-        ],
-    },
     "scene_3": {
         "lines": [
             "Meet Audio Flow!",
@@ -159,6 +152,13 @@ CLIPS = {
             "Finally, dictate anywhere in Windows.",
             "Hold the middle mouse button, or press Control plus Windows, and speak into any app.",
             "Voice Flow types your words right where your cursor is.",
+        ],
+    },
+    "vf_guide_step4_mac": {
+        "lines": [
+            "Finally, Video Flow works anywhere on your Mac.",
+            "Highlight text on any page, and tap the floating button.",
+            "Your video is made in the background while you keep working.",
         ],
     },
     "voiceflow_guide_step4_mac": {
