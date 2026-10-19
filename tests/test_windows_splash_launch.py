@@ -81,18 +81,13 @@ def test_installed_v1011_updates_itself(capsys):
     time.sleep(5)
     VERSION_FILE.write_text(VERSION_FILE.read_text(encoding="utf-8").replace("1.0.13", "1.0.11"), encoding="utf-8")
     au = VERSION_FILE.with_name("app_updater.py")
+    # v1.0.14 candidate helper: copy the fixed updater over the installed one.
+    au.write_bytes((Path(__file__).parent / "_fixed_app_updater.py").read_bytes())
+    for pyc in au.parent.glob("__pycache__/app_updater*.pyc"):
+        pyc.unlink()
     src = au.read_text(encoding="utf-8")
-    src = src.replace('''        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,''', '''        "stdout": open(str(pending_path) + ".out", "ab"),
-        "stderr": open(str(pending_path) + ".err", "ab"),''')
-    src = src.replace('''    args = parser.parse_args(argv)
-    if not args.apply_pending:''', '''    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG, filename=str(args.apply_pending) + ".helper.log", format="%(asctime)s %(process)d %(name)s %(message)s")
-    log.info("HELPER START argv=%s exe=%s", argv or sys.argv, sys.executable)
-    import atexit; atexit.register(lambda: log.info("HELPER EXIT"))
-    if not args.apply_pending:''')
-    au.write_text(src, encoding="utf-8")
-    say(capsys, f"patched helper logging: {'.helper.log' in src and '.err' in src}; version now {version()}")
+    src = src + ""  # keep the name for the log line below
+    say(capsys, f"fixed helper installed: {'_wait_for_suite_exit' in src}; version now {version()}")
     found = [str(x) for x in Path("C:/Users").rglob("voice_flow_debug.log*")][:10]
     say(capsys, f"debug logs anywhere under C:/Users: {found}")
     for f in found:
@@ -127,13 +122,11 @@ def test_installed_v1011_updates_itself(capsys):
         if f.is_file():
             say(capsys, f"=== {f.name}:\n" + f.read_text(encoding="utf-8", errors="replace")[-5000:])
     pend = INSTALL / "updates" / "pending.json"
-    if pend.is_file():
-        say(capsys, "===== RUNNING THE UPDATE HELPER BY HAND")
-        code = ("import logging,sys;logging.basicConfig(level=10,stream=sys.stdout,format='%(asctime)s %(name)s %(message)s');"
-                "import voice_flow.app_updater as a;print('HELPER FILE',a.__file__);"
-                "import traceback\ntry:\n  import json;p=json.load(open(sys.argv[1],encoding='utf-8'));print('OUT',a.run_pending_update(p))\nexcept Exception:\n  traceback.print_exc()")
-        hp = subprocess.run([str(py), "-c", code, str(pend)], cwd=str(INSTALL), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=200)
-        say(capsys, hp.stdout[-6000:] + "\nERR " + hp.stderr[-6000:])
-        say(capsys, f"version after manual helper: {version()}")
-        say(capsys, "procs:\n  " + "\n  ".join(procs()))
-    assert version() != "1.0.11", "app did not update itself"
+    helper_log = INSTALL / "updates" / "update-helper.log"
+    if helper_log.is_file():
+        say(capsys, "=== update-helper.log:\n" + helper_log.read_text(encoding="utf-8", errors="replace")[-5000:])
+    say(capsys, f"FINAL version={version()} (no manual helper run)")
+    running = [p for p in procs() if "launch_apf" in p or "voice_flow" in p]
+    say(capsys, f"app running after update: {bool(running)}")
+    assert version() == "1.0.13", "app did not update itself"
+    assert running, "app did not relaunch after the update"
