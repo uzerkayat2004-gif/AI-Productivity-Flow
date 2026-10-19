@@ -329,7 +329,17 @@ def onboarding_phase(page, win) -> None:
     page.evaluate("document.querySelector(\".sidebar .nav-item[data-page='videoflow']\").click()")
     page.wait_for_timeout(4000)
     vf_guide = page.evaluate("!document.getElementById('videoflow-guide-overlay').classList.contains('hidden')")
-    record("onboarding: no Video Flow guide on Mac", "fail" if vf_guide else "ok", f"videoflow guide visible={vf_guide}", shot(page, "onb-videoflow-no-guide"))
+    record("onboarding: Video Flow guide starts on first open (Mac)", "ok" if vf_guide else "fail", f"videoflow guide visible={vf_guide}", shot(page, "onb-videoflow-guide"))
+    if vf_guide:
+        page.evaluate("gotoVideoFlowGuideStep(4)")
+        page.wait_for_timeout(5000)
+        info = page.evaluate("""() => ({src: (_vfGuideAudioPlayer && _vfGuideAudioPlayer.currentSrc || '').split('/').pop(),
+          text: document.getElementById('videoflow-guide-overlay').innerText})""")
+        ok = info["src"] == "vf_guide_step4_mac_mixed.mp3" and "Windows" not in info["text"]
+        record("onboarding: Video Flow step 4 uses the Mac clip", "ok" if ok else "fail",
+               f"src={info['src']} text={info['text'][:200]!r}", shot(page, "onb-videoflow-guide-step4"))
+    page.evaluate("() => { try { stopVideoFlowGuide(true); } catch(e){} }")
+    page.wait_for_timeout(800)
     page.evaluate(dismiss)
     page.evaluate("document.getElementById('voiceflow-nav-toggle').click()")
     page.wait_for_timeout(4000)

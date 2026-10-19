@@ -13968,7 +13968,6 @@ async function initPlatformAdaptation() {
     window.vfPlatformInfo = info;
 
     const isMac = !!info.is_macos;
-    vfApplyMacVideoFlowGate();
 
     // 0. Microphone dialog subtitle (index.html ships the Windows wording)
     const micSubtitle = document.getElementById("mic-dialog-subtitle");

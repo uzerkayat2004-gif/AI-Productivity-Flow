@@ -36,7 +36,7 @@ def test_gate_module_and_hooks_are_gone():
     assert not (SRC / "video_flow_platform.py").exists()
     for rel in ("gui/api_server.py", "main.py", "video_flow_widget.py", "gui/app.js", "gui/video-flow.js"):
         text = (SRC / rel).read_text(encoding="utf-8")
-        assert "video_flow_supported" not in text and "vfVideoFlowGatedOnMac" not in text, rel
+        assert "video_flow_supported" not in text and "vfVideoFlowGatedOnMac" not in text and "vfApplyMacVideoFlowGate" not in text, rel
     assert not (SRC / "gui" / "assets" / "onboarding" / "scene_2_mac_mixed.mp3").exists()
 
 
