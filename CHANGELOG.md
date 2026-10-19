@@ -3,6 +3,20 @@
 All notable changes to **AI Productivity Flow** are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased (branch feat/nebius-nemotron)
+
+### Nebius Token Factory + NVIDIA Nemotron
+- New provider: **Nebius Token Factory** (OpenAI-compatible, `https://api.tokenfactory.nebius.com/v1/`, Bearer key). Add the key under Video Flow → Providers or set `NEBIUS_API_KEY`. **Test** calls `/v1/models`.
+- Nemotron model routing. Fast tier (`nvidia/Nemotron-3_5-Lightning`, fallback `nvidia/nemotron-3-super-120b-a12b`) handles Voice Flow polishing, voice commands and Audio Flow summaries. Reasoning tier (`nvidia/Nemotron-3-Ultra-550b-a55b`, fallback `nvidia/nemotron-3-super-120b-a12b`) handles Video Flow planning, creative direction and scene authoring.
+- Model ids are checked against the account's `/v1/models` list at runtime; an id that is not served falls back to the next Nemotron model. Each tier can be overridden on the Nebius provider page.
+- Nemotron `<think>` blocks are removed from answers before they are used.
+
+### Video Flow
+- Optional **Research with web sources** (Tavily). With a Tavily key and the box ticked, the planner gets the top web sources for the topic and the plan keeps their titles and links. Off by default; without a key nothing is searched.
+
+### Unchanged
+- Existing providers and the offline fallbacks work as before. No key means no Nebius or Tavily calls.
+
 ## 1.0.4 - 2026-10-17
 
 ### Updates

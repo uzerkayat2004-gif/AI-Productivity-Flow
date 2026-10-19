@@ -20,7 +20,7 @@ Concise, checkable facts about AI Productivity Flow (Version 1.0). Public docume
 - **AI text polishing & rewriting**:
   - Downloadable on-device S1-mini by Superwhisper and Liquid LFM 2.5 350M via llama.cpp (cleanup only; voice commands need a cloud polish model).
   - Windows AI Text Rewriter where supported by hardware.
-  - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Ollama.
+  - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Ollama, Nebius Token Factory (NVIDIA Nemotron; branch `feat/nebius-nemotron`, not released yet).
 - **Audio Flow**:
   - **Trigger**: select text, then click the Listen button next to it or the floating bar. Mac also has a hotkey, Control+Option+L (read the selection; press again to stop). Mac needs Accessibility to read the selection.
   - **Read Mode**: Spoken reader that articulates selected text with human cadence.
@@ -31,6 +31,7 @@ Concise, checkable facts about AI Productivity Flow (Version 1.0). Public docume
   - Direct 1080p MP4 compilation automatically exported to user Downloads.
   - Google NotebookLM research synchronization.
   - Guaranteed offline deterministic fallback layout.
+  - Optional web research with Tavily for AI planning (off by default; needs a Tavily key; branch `feat/nebius-nemotron`, not released yet).
 - **Security & Storage**:
   - Provider API keys and settings stored locally in SQLite (`~/.voice_flow/voice_flow.db`).
   - Full backups (`.flowvault`) encrypted with AES-256-GCM.
