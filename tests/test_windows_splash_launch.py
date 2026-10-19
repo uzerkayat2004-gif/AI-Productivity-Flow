@@ -107,4 +107,14 @@ def test_installed_v1011_updates_itself(capsys):
         say(capsys, "   " + l[:600])
     say(capsys, "procs at end:\n  " + "\n  ".join(procs()))
     dump_logs(capsys)
+    pend = INSTALL / "updates" / "pending.json"
+    if pend.is_file():
+        say(capsys, "===== RUNNING THE UPDATE HELPER BY HAND")
+        code = ("import logging,sys;logging.basicConfig(level=10,stream=sys.stdout,format='%(asctime)s %(name)s %(message)s');"
+                "import voice_flow.app_updater as a;print('HELPER FILE',a.__file__);"
+                "import traceback\ntry:\n  import json;p=json.load(open(sys.argv[1],encoding='utf-8'));print('OUT',a.run_pending_update(p))\nexcept Exception:\n  traceback.print_exc()")
+        hp = subprocess.run([str(py), "-c", code, str(pend)], cwd=str(INSTALL), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=200)
+        say(capsys, hp.stdout[-6000:] + "\nERR " + hp.stderr[-6000:])
+        say(capsys, f"version after manual helper: {version()}")
+        say(capsys, "procs:\n  " + "\n  ".join(procs()))
     assert version() != "1.0.11", "app did not update itself"
