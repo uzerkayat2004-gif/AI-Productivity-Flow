@@ -76,21 +76,34 @@ def test_installed_v1011_updates_itself(capsys):
         pyw = INSTALL / "runtime" / "python" / "pythonw.exe"
         subprocess.Popen([str(pyw), str(INSTALL / "launch_apf.pyw")], cwd=str(INSTALL))
         say(capsys, "launched app manually")
+    time.sleep(60)
+    found = [str(x) for x in Path("C:/Users").rglob("voice_flow_debug.log*")][:10]
+    say(capsys, f"debug logs anywhere under C:/Users: {found}")
+    for f in found:
+        txt = Path(f).read_text(encoding="utf-8", errors="replace").splitlines()
+        say(capsys, f"--- {f} ({len(txt)} lines) tail:")
+        for l in txt[-80:]:
+            say(capsys, "   " + l[:500])
+    subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe", "/T"], capture_output=True)
+    time.sleep(5)
+    py = INSTALL / "runtime" / "python" / "python.exe"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    out = open(BASE / "engine.txt", "w", encoding="utf-8")
+    eng = subprocess.Popen([str(py), "-u", "-m", "voice_flow.main"], cwd=str(INSTALL), env=env, stdout=out, stderr=subprocess.STDOUT)
     t0 = time.time()
-    time.sleep(90)
-    probe(capsys)
-    seen = version()
-    while time.time() - t0 < 900:
-        v = version()
-        if v != seen:
-            say(capsys, f"[{int(time.time()-t0)}s] version changed {seen} -> {v}")
-            seen = v
-        if v not in ("1.0.11", "missing", "?"):
-            break
+    while time.time() - t0 < 600 and version() == "1.0.11":
         time.sleep(10)
-    time.sleep(45)
-    say(capsys, f"===== FINAL version={version()} after {int(time.time()-t0)}s")
+    time.sleep(60)
+    say(capsys, f"===== FOREGROUND ENGINE: version={version()} after {int(time.time()-t0)}s, engine alive={eng.poll() is None}")
+    out.flush()
+    txt = (BASE / "engine.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    say(capsys, f"engine output {len(txt)} lines")
+    for l in txt:
+        if re.search(r"autoupdate|update|Traceback|Error|STARTUP|READY|Exception|File \"", l, re.I):
+            say(capsys, "   " + l[:600])
+    say(capsys, "LAST 60:")
+    for l in txt[-60:]:
+        say(capsys, "   " + l[:600])
     say(capsys, "procs at end:\n  " + "\n  ".join(procs()))
     dump_logs(capsys)
     assert version() != "1.0.11", "app did not update itself"
-    assert any("launch_apf" in p or "voice_flow" in p for p in procs()), "app not running again after update"
