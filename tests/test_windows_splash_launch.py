@@ -34,10 +34,23 @@ def procs():
     return [l for l in r.stdout.splitlines() if l.strip()]
 
 
+def probe(capsys):
+    py = INSTALL / "runtime" / "python" / "python.exe"
+    code = ("import json;from voice_flow.update_checker import check_for_updates as c;"
+            "from voice_flow import app_updater as a;r=c(force=True);"
+            "print('PROBE', json.dumps({k:r.get(k) for k in ('current_version','latest_version','update_available','checked','error')}));"
+            "print('PLAN', json.dumps(r.get('update_plan'), default=str)[:1500]);"
+            "print('PKG', a.installed_package_dir(), 'STATE', a.update_state_dir(), 'AUTO', a.auto_update_enabled())")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    r = subprocess.run([str(py), "-c", code], capture_output=True, text=True, env=env, timeout=120)
+    say(capsys, r.stdout[-4000:] + "\nERR " + r.stderr[-3000:])
+
+
 def dump_logs(capsys):
-    for p in sorted(LOGS.glob("*.log*")) if LOGS.is_dir() else []:
+    say(capsys, f"home={Path.home()} logs_exists={LOGS.is_dir()} files={[str(x) for x in (Path.home()/'.voice_flow').rglob('*.log*')][:30]}")
+    for p in sorted((Path.home()/'.voice_flow').rglob("*.log*")):
         lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        hits = [l for l in lines if re.search(r"autoupdate|update|Traceback|Error|STARTUP", l, re.I)]
+        hits = [l for l in lines if re.search(r"autoupdate|update|Traceback|Error|STARTUP|READY", l, re.I)]
         say(capsys, f"--- {p.name}: {len(lines)} lines, {len(hits)} relevant")
         for l in hits[-150:]:
             say(capsys, "   " + l[:600])
@@ -64,6 +77,8 @@ def test_installed_v1011_updates_itself(capsys):
         subprocess.Popen([str(pyw), str(INSTALL / "launch_apf.pyw")], cwd=str(INSTALL))
         say(capsys, "launched app manually")
     t0 = time.time()
+    time.sleep(90)
+    probe(capsys)
     seen = version()
     while time.time() - t0 < 900:
         v = version()
