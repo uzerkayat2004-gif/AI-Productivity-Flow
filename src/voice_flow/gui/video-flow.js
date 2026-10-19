@@ -513,10 +513,7 @@ async function checkNotebookLMAuth(showToast = false) {
       recovery_in_progress: Boolean(data.recovery_in_progress),
     };
 
-    if (vfNlmAuthStatus.authenticated && vfNlmAuthStatus.email && vfNlmAuthStatus.email !== vfNlmPlanEmail) {
-      vfNlmPlanEmail = vfNlmAuthStatus.email;
-      vfLoadNotebookLMPlan(true);
-    }
+    if (typeof vfRecheckNotebookLMPlanFor === "function") vfRecheckNotebookLMPlanFor(vfNlmAuthStatus);
 
     if (vfNlmAuthStatus.recovery_state === "restoring" && typeof document !== "undefined" && document.visibilityState !== "hidden") {
       // Renewal may include CLI verification plus passive and browser-profile
@@ -4067,6 +4064,14 @@ function vfLoadNotebookLMPlan(force = false) {
       return vfNlmPlan;
     });
   return vfNlmPlanPromise;
+}
+
+// A new signed-in account may be on a different plan: check it again.
+function vfRecheckNotebookLMPlanFor(status) {
+  if (status && status.authenticated && status.email && status.email !== vfNlmPlanEmail) {
+    vfNlmPlanEmail = status.email;
+    vfLoadNotebookLMPlan(true);
+  }
 }
 
 async function vfCinematicAvailable() {
