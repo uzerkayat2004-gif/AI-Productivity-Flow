@@ -492,7 +492,15 @@ class VideoFlowScreenWidget:
 
     @staticmethod
     def catalog_format_options() -> list[dict[str, str]]:
-        return list(NOTEBOOKLM_FORMAT_OPTIONS)
+        # Cinematic needs Google AI Ultra: only list it for a confirmed
+        # Ultra account.
+        try:
+            from voice_flow.video_flow_engine.notebooklm.account_plan import cinematic_allowed_now
+
+            ultra = cinematic_allowed_now()
+        except Exception:
+            ultra = False
+        return [opt for opt in NOTEBOOKLM_FORMAT_OPTIONS if ultra or opt["ref"] != "cinematic"]
 
     @staticmethod
     def catalog_style_options() -> list[dict[str, str]]:
@@ -1891,7 +1899,8 @@ class VideoFlowScreenWidget:
                 "visual_direction": focus_text,
                 "document_profile": profile_dict,
                 "duration_seconds": duration_sec,
-                "allow_external_ai": True,
+                # Same as the main window: NotebookLM needs no AI planner key.
+                "allow_external_ai": False,
                 "allow_local_fallback": True,
             }
         else:

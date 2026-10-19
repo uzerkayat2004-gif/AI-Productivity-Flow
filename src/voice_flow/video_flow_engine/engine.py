@@ -282,6 +282,15 @@ class VideoFlowEngine:
 
 
     @staticmethod
+    def _cinematic_allowed(profile: Any) -> bool:
+        try:
+            from voice_flow.video_flow_engine.notebooklm.account_plan import cinematic_allowed
+
+            return cinematic_allowed(str(profile) if profile else None)
+        except Exception:
+            return False
+
+    @staticmethod
     def _resolve_auto_format(kwargs: Mapping[str, Any]) -> str:
         """Resolve the Auto-Adaptive format to a concrete NotebookLM format.
 
@@ -388,6 +397,12 @@ class VideoFlowEngine:
         explicit_cinematic = str(kwargs.get("requested_format") or "").strip().lower() == "cinematic"
         if format_name == "cinematic" and not explicit_cinematic:
             logger.info("Auto-Adaptive resolved to cinematic; using explainer (cinematic needs AI Ultra)")
+            format_name = "explainer"
+        if format_name == "cinematic" and not self._cinematic_allowed(kwargs.get("profile")):
+            # Only a confirmed Google AI Ultra account can make Cinematic. The
+            # UI no longer offers it to anyone else; this guards old retries
+            # and the floating bar.
+            logger.info("Cinematic requested without a confirmed AI Ultra plan; using explainer")
             format_name = "explainer"
         style_name = str(kwargs.get("style") or "auto").strip().lower()
         if style_name not in VIDEO_STYLES:
