@@ -87,7 +87,8 @@ def test_installed_v1011_updates_itself(capsys):
     subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe", "/T"], capture_output=True)
     time.sleep(5)
     py = INSTALL / "runtime" / "python" / "python.exe"
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "VIRTUAL_ENV", "PYTEST", "VOICE_FLOW", "APF_", "CI", "GITHUB_ACTIONS"))}
+    env["PYTHONIOENCODING"] = "utf-8"
     out = open(BASE / "engine.txt", "w", encoding="utf-8")
     eng = subprocess.Popen([str(py), "-u", "-m", "voice_flow.main"], cwd=str(INSTALL), env=env, stdout=out, stderr=subprocess.STDOUT)
     t0 = time.time()
