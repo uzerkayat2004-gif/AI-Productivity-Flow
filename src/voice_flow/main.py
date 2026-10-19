@@ -3829,6 +3829,20 @@ class VoiceFlowApp:
         if not text:
             text = self._capture_selected_text_for_video()
         target_mode = "full" if mode == "full" else "summary"
+        # Normal / Cinematic is only a choice on Google AI Ultra. Everyone
+        # else (Free, Pro, Plus, or plan unknown) gets a Normal video with no
+        # question.
+        try:
+            from voice_flow.video_flow_engine.notebooklm.account_plan import cinematic_allowed_now
+
+            offer_cinematic = cinematic_allowed_now()
+        except Exception:
+            offer_cinematic = False
+        if not offer_cinematic:
+            video_flow_widget.show_composer(
+                text or "", target_mode, anchor_bar=self.overlay, video_format="explainer",
+            )
+            return
         ask_on_bar = getattr(self.overlay, "ask_video_treatment", None)
         if callable(ask_on_bar):
             # Ask Normal / Cinematic on the floating bar, not a separate window.

@@ -1108,7 +1108,17 @@ class VideoFlowService:
             job = self.get(job_id)
             if job is None or job.state in _TERMINAL_STATES:
                 return
-            gateway = self._gateway_for(request.get("model_ref")) if request.get("allow_external_ai") else None
+            gateway = None
+            if request.get("allow_external_ai"):
+                try:
+                    gateway = self._gateway_for(request.get("model_ref"))
+                except Exception as exc:
+                    # No AI planning key is set up (a fresh install has none).
+                    # That only affects the optional AI storyboard: NotebookLM
+                    # needs no planner, and the local engine has a basic one.
+                    # Never fail the whole video over it.
+                    logging.getLogger(__name__).info("Video Flow AI planner unavailable (%s); continuing without it", _redact(str(exc)))
+                    gateway = None
             engine = self._engine_factory(model_gateway=gateway)
             with self._lock:
                 existing = self._engines.get(job_id)

@@ -68,6 +68,8 @@ def test_generation_failure_retries_once_then_succeeds(monkeypatch, tmp_path):
 
 def test_generation_failing_twice_uses_local_engine(monkeypatch, tmp_path):
     eng, calls, fallbacks = _engine_with_failing_notebooklm(monkeypatch, tmp_path, fail_times=2)
+    # An Ultra account asked for Cinematic (v1.0.13 only lets Ultra ask).
+    monkeypatch.setattr(type(eng), "_cinematic_allowed", staticmethod(lambda profile: True))
     result = eng.run("vf-test2", source_text="Some text to explain.", provider="notebooklm",
                      format="cinematic", requested_format="cinematic", projects_root=str(tmp_path))
     assert [c[1] for c in calls if c[0] == "generate"] == ["cinematic", "explainer"]

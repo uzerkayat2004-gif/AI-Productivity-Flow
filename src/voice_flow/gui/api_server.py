@@ -1757,6 +1757,27 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                             "load_balance_mode": video_flow_provider_service.get_setting(f"load_balance:{provider_id}", str(entry.get("load_balance_mode") or "priority"))})
                 else:
                     self.send_json_response({"success": False, "error": str(exc)}, 400)
+        elif path == "/api/video-flow/notebooklm/plan":
+            # Which Google AI plan the signed-in NotebookLM account has. Only
+            # a confirmed Ultra plan gets the Normal / Cinematic choice.
+            try:
+                from voice_flow.video_flow_engine.notebooklm.account_plan import get_account_plan
+
+                params = urllib.parse.parse_qs(parsed.query)
+                profile_param = (params.get("profile", [None])[0] or "").strip() or None
+                if profile_param and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", profile_param):
+                    profile_param = None
+                refresh = (params.get("refresh", ["0"])[0] or "").lower() in ("1", "true", "yes")
+                plan = get_account_plan(profile_param, refresh=refresh)
+                self.send_json_response({
+                    "success": True,
+                    "plan": plan.get("plan"),
+                    "tier": plan.get("tier"),
+                    "is_ultra": bool(plan.get("is_ultra")),
+                    "cinematic_available": bool(plan.get("cinematic_available")),
+                })
+            except Exception:
+                self.send_json_response({"success": True, "plan": "unknown", "tier": None, "is_ultra": False, "cinematic_available": False})
         elif path == "/api/video-flow/notebooklm/status":
             try:
                 from voice_flow.video_flow_engine.notebooklm import (

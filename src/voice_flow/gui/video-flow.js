@@ -27,6 +27,9 @@ let vfxConnTestStatus = {};
 // NotebookLM Integration State
 let vfSelectedEngine = "notebooklm";
 let vfSelectedFormat = "auto";
+let vfNlmPlan = null;
+let vfNlmPlanPromise = null;
+let vfNlmPlanEmail = null;
 // NotebookLM visual style; "auto" until the user picks one (generateVideoFlow reads it).
 let vfSelectedStyle = "auto";
 // The browser must never paint a saved cookie as Connected.  A connection is
@@ -510,6 +513,11 @@ async function checkNotebookLMAuth(showToast = false) {
       recovery_in_progress: Boolean(data.recovery_in_progress),
     };
 
+    if (vfNlmAuthStatus.authenticated && vfNlmAuthStatus.email && vfNlmAuthStatus.email !== vfNlmPlanEmail) {
+      vfNlmPlanEmail = vfNlmAuthStatus.email;
+      vfLoadNotebookLMPlan(true);
+    }
+
     if (vfNlmAuthStatus.recovery_state === "restoring" && typeof document !== "undefined" && document.visibilityState !== "hidden") {
       // Renewal may include CLI verification plus passive and browser-profile
       // recovery. Keep the view polling for the full 120-second service SLA.
@@ -945,6 +953,8 @@ async function loadVideoFlow() {
     }
     vfCatalog = catalogData;
     vfCatalogLoaded = true;
+    vfApplyNotebookLMPlan();
+    vfLoadNotebookLMPlan(false);
     vfVideos = (historyData.videos || []).slice(0, 50);
     renderVideoHistory();
     renderVideoCatalog();
@@ -4029,6 +4039,44 @@ function isVideoModelExternal(modelRef) {
   });
 }
 
+// Cinematic needs Google AI Ultra. Only a confirmed Ultra account sees the
+// Normal / Cinematic choice; Free, Pro, Plus and "unknown" get Normal directly.
+
+function vfApplyNotebookLMPlan() {
+  const ultra = Boolean(vfNlmPlan && vfNlmPlan.cinematic_available);
+  document.querySelectorAll('.vf-format-card[data-format="cinematic"]').forEach((card) => {
+    card.classList.toggle("hidden", !ultra);
+  });
+  if (!ultra && vfSelectedFormat === "cinematic" && typeof selectNotebookLMFormat === "function") {
+    try { selectNotebookLMFormat("explainer"); } catch (_) {}
+  }
+}
+
+function vfLoadNotebookLMPlan(force = false) {
+  if (vfNlmPlanPromise && !force) return vfNlmPlanPromise;
+  const profile = encodeURIComponent((vfNlmAuthStatus && vfNlmAuthStatus.profile) || "video-flow-experiment");
+  vfNlmPlanPromise = safeFetchJson(`/api/video-flow/notebooklm/plan?profile=${profile}${force ? "&refresh=1" : ""}`)
+    .then((data) => {
+      vfNlmPlan = data && data.success ? data : { cinematic_available: false, plan: "unknown" };
+      vfApplyNotebookLMPlan();
+      return vfNlmPlan;
+    })
+    .catch(() => {
+      vfNlmPlan = { cinematic_available: false, plan: "unknown" };
+      vfApplyNotebookLMPlan();
+      return vfNlmPlan;
+    });
+  return vfNlmPlanPromise;
+}
+
+async function vfCinematicAvailable() {
+  const plan = await Promise.race([
+    vfLoadNotebookLMPlan(false),
+    new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+  ]);
+  return Boolean(plan && plan.cinematic_available);
+}
+
 function askVideoTreatmentChoice() {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -4081,7 +4129,7 @@ async function generateVideoFlow() {
   if (button) button.disabled = true;
 
   if (vfSelectedEngine === "notebooklm") {
-    const treatment = await askVideoTreatmentChoice();
+    const treatment = (await vfCinematicAvailable()) ? await askVideoTreatmentChoice() : "explainer";
     if (!treatment) {
       if (button) button.disabled = false;
       return;

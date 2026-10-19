@@ -28,7 +28,8 @@ def tk_root():
 
 
 def test_notebooklm_formats_and_styles_catalog() -> None:
-    formats = VideoFlowScreenWidget.catalog_format_options()
+    with patch("voice_flow.video_flow_engine.notebooklm.account_plan.cinematic_allowed_now", return_value=True):
+        formats = VideoFlowScreenWidget.catalog_format_options()
     format_refs = [f['ref'] for f in formats]
     assert format_refs == ['auto', 'brief', 'short', 'explainer', 'cinematic']
     assert any('Auto-Adaptive (Recommended)' in f['label'] for f in formats)
