@@ -168,9 +168,12 @@ class VideoArtifact:
     document_profile: Mapping[str, Any] | None = None
     fallback: bool = False
     target_duration_seconds: float | None = None
+    # The name NotebookLM gave the finished video (it names it from the topic).
+    artifact_title: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "artifact_title": self.artifact_title,
             "notebook_id": self.notebook_id,
             "task_id": self.task_id,
             "artifact_id": self.artifact_id,

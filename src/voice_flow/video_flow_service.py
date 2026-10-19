@@ -896,9 +896,10 @@ class VideoFlowService:
         if source_text and len(source_text) > 100_000:
             raise ValueError("source_text exceeds the 100000-character limit")
         video_engine = _normalise_video_engine(video_engine or options.get("provider"))
-        if not str(title or "").strip():
-            # Auto-name from the source's main topic (first meaningful line),
-            # like every mainstream app does when the user leaves the name blank.
+        title_auto = not str(title or "").strip()
+        if title_auto:
+            # Auto-name from the source's main topic. When NotebookLM makes the
+            # video, its own topic title replaces this once the video is ready.
             title = _derive_video_title(source_text)
         if duration_seconds is not None:
             try:
@@ -937,6 +938,7 @@ class VideoFlowService:
             message="Queued",
             meta={
                 "title": _redact(title),
+                "title_auto": title_auto,
                 "source_name": _redact(source_name),
                 "output_path": str(self._output_path(job_id)),
                 "source_text": source_text,
@@ -1265,6 +1267,11 @@ class VideoFlowService:
                 )
                 return
             meta_updates: dict[str, Any] = {"output_path": str(output)}
+            topic_title = _notebooklm_topic_title(result)
+            if topic_title:
+                current = self.store.get(job_id)
+                if current is not None and (current.meta or {}).get("title_auto"):
+                    meta_updates["title"] = topic_title
             if result.get("provenance") is not None:
                 meta_updates["provenance"] = result.get("provenance")
             if result.get("duration_seconds") is not None:
@@ -1487,21 +1494,84 @@ def _normalise_video_engine(value: Any) -> str:
         return "visual-v2.1"
     raise ValueError("video_engine must be visual-v2.1, native, or notebooklm")
 
+_GENERIC_TITLES = {
+    "video overview", "untitled", "untitled notebook", "untitled video", "notebook",
+    "pasted text", "selected text", "copied text", "new notebook", "overview",
+}
+
+_TITLE_FILLER = re.compile(
+    r"^(?:so|okay|ok|well|hi|hello|hey|note|notes|summary|title|topic|subject|re|fwd?)\s*[:,\-\u2013\u2014]\s*",
+    re.IGNORECASE,
+)
+_TITLE_LEADS = re.compile(
+    r"^(?:in this (?:article|post|guide|video|document|essay|paper|blog post),?\s*(?:we(?:'ll| will)? (?:look at|explore|discuss|cover|learn about|talk about)\s*)?|"
+    r"this (?:article|post|guide|document|essay|paper|text) (?:is about|explains|covers|describes|looks at|discusses)\s+|"
+    r"let(?:'s| us) (?:talk about|look at|explore|discuss)\s+|"
+    r"(?:today|here),?\s*(?:we(?:'ll| will| are going to)?|i(?:'ll| will| am going to)?) (?:talk about|look at|explore|discuss|explain|cover)\s+)",
+    re.IGNORECASE,
+)
+
+
+def _notebooklm_topic_title(result: Mapping[str, Any] | Any) -> str:
+    """NotebookLM's own name for the finished video, when it is a real topic."""
+    if not isinstance(result, Mapping):
+        return ""
+    artifact = result.get("artifact")
+    value = ""
+    if isinstance(artifact, Mapping):
+        value = str(artifact.get("artifact_title") or "")
+    value = value or str(result.get("artifact_title") or "")
+    value = " ".join(value.split()).strip(" \"'")
+    if not value or value.lower() in _GENERIC_TITLES or len(value) < 3:
+        return ""
+    return value[:100]
+
+
+def _tidy_title(text: str) -> str:
+    text = _TITLE_FILLER.sub("", text.strip())
+    text = _TITLE_LEADS.sub("", text).strip()
+    text = text.strip(" \t\"'`*_#:;,-\u2013\u2014")
+    text = re.sub(r"[.!?\u2026]+$", "", text).strip()
+    words = text.split()
+    if len(words) > 9:
+        text = " ".join(words[:9])
+        text = re.sub(r"[,;:\-\u2013\u2014]+$", "", text).strip() + "..."
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    return text
+
+
 def _derive_video_title(source_text: str) -> str:
-    """Derive a human title from the source's main topic."""
-    import re as _re
-    for raw in (source_text or "").splitlines():
-        line = _re.sub(r"^#+\s*", "", (raw or "").strip())
-        line = _re.sub(r"^[\*\-\u2022\d\.\s]+", "", line).strip()
-        line = _re.sub(r"\*+", "", line).strip()
-        if len(line) >= 8:
-            out = " ".join(line.split()[:9]).strip()
-            return (out[:57].rstrip() + "...") if len(out) > 60 else out
-    text = _re.sub(r"\s+", " ", (source_text or "")).strip()
+    """Name the video after the source's topic.
+
+    Order: a markdown heading or "Title:" line, then a short heading-like first
+    line, then the first sentence with filler such as "In this article" cut.
+    """
+    lines = [(raw or "").strip() for raw in (source_text or "").splitlines()]
+    lines = [line for line in lines if line]
+    for line in lines[:40]:
+        heading = re.match(r"^#{1,3}\s+(.+)$", line)
+        labelled = re.match(r"^(?:title|topic|subject)\s*[:\-]\s*(.+)$", line, re.IGNORECASE)
+        found = heading or labelled
+        if found:
+            title = _tidy_title(re.sub(r"\*+", "", found.group(1)))
+            if len(title) >= 3 and title.lower() not in _GENERIC_TITLES:
+                return title
+    if lines:
+        first = re.sub(r"^[\*\-\u2022\d\.\)\s]+", "", lines[0])
+        first = re.sub(r"\*+", "", first).strip()
+        words = first.split()
+        heading_like = 2 <= len(words) <= 12 and not re.search(r"[.!?,;]$", first)
+        if heading_like and len(lines) > 1:
+            title = _tidy_title(first)
+            if len(title) >= 3 and title.lower() not in _GENERIC_TITLES:
+                return title
+    text = re.sub(r"\s+", " ", re.sub(r"[#*`>_]+", " ", source_text or "")).strip()
     if text:
-        sentence = _re.split(r"(?<=[.!?])\s", text)[0]
-        out = " ".join(sentence.split()[:9]).strip()
-        return (out[:57].rstrip() + "...") if len(out) > 60 else out
+        sentence = re.split(r"(?<=[.!?])\s", text)[0]
+        title = _tidy_title(sentence)
+        if len(title) >= 3:
+            return title
     return "Video Overview"
 
 def _split_model_ref(model_ref: str | None) -> tuple[str, str]:

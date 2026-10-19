@@ -605,6 +605,28 @@ def _assert_safe_target(path: Path) -> None:
     raise UpdateError("Refusing to change files in the user data folder.", retryable=False)
 
 
+RENAME_RETRY_SECONDS = 30.0
+
+
+def _rename_with_retry(source: Path, dest: Path, timeout: float | None = None) -> None:
+    """os.rename, retried while Windows still holds a file open (antivirus, a
+    closing process). Raises the last error after ``timeout`` seconds."""
+    limit = RENAME_RETRY_SECONDS if timeout is None else timeout
+    deadline = time.monotonic() + limit
+    while True:
+        try:
+            os.rename(source, dest)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) not in (5, 32, 33) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
 def apply_staged_package(staging: Path, target: Path, backup: Path) -> None:
     """Put ``staging`` in ``target``'s place, keeping the previous tree as ``backup``."""
     _assert_safe_target(target)
@@ -616,9 +638,9 @@ def apply_staged_package(staging: Path, target: Path, backup: Path) -> None:
     moved = False
     try:
         if target.exists():
-            os.rename(target, backup)
+            _rename_with_retry(target, backup)
             moved = True
-        os.rename(staging, target)
+        _rename_with_retry(staging, target)
     except OSError as exc:
         if moved and backup.exists() and not target.exists():
             os.rename(backup, target)
@@ -826,16 +848,109 @@ def install_mac_image(
         shutil.rmtree(mount, ignore_errors=True)
 
 
-def _wait_for_pid(pid: int, timeout: float = 30.0) -> None:
+def _pid_alive(pid: int) -> bool:
+    """True while ``pid`` is running.
+
+    Never ``os.kill(pid, 0)`` on Windows: there it is TerminateProcess, and for
+    a process it cannot open it raises at once, which made the helper think the
+    app had already quit and try to swap files the app still had open.
+    """
+    if not pid or pid <= 0:
+        return False
+    try:
+        import psutil
+
+        try:
+            proc = psutil.Process(pid)
+            return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+        except psutil.AccessDenied:
+            return True
+    except ImportError:
+        pass
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return ctypes.GetLastError() == 5  # access denied: it exists
+            try:
+                code = ctypes.c_ulong()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return True
+                return code.value == 259  # STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _wait_for_pid(pid: int, timeout: float = 60.0) -> None:
     if not pid or pid == os.getpid():
         return
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except OSError:
+        if not _pid_alive(pid):
             return
-        time.sleep(0.2)
+        time.sleep(0.25)
+    log.warning("App process %s still running after %.0fs; continuing.", pid, timeout)
+
+
+_SUITE_MARKERS = (
+    "voice_flow.watchdog",
+    "voice_flow.main",
+    "voice_flow.gui.desktop_launcher",
+    "launch_apf.pyw",
+)
+
+
+def _suite_processes() -> list[Any]:
+    try:
+        import psutil
+    except ImportError:
+        return []
+    found = []
+    me = os.getpid()
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            if proc.info.get("pid") == me:
+                continue
+            command = " ".join(proc.info.get("cmdline") or [])
+            if "--apply-pending" in command or "pytest" in command:
+                continue
+            if any(marker in command for marker in _SUITE_MARKERS):
+                found.append(proc)
+        except Exception:
+            continue
+    return found
+
+
+def _wait_for_suite_exit(timeout: float = 30.0) -> None:
+    """Wait until the window, engine, and watchdog are gone; end stragglers."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _suite_processes():
+            return
+        time.sleep(0.5)
+    for proc in _suite_processes():
+        try:
+            log.info("Ending leftover app process %s before updating.", proc.pid)
+            proc.kill()
+        except Exception:
+            pass
+    time.sleep(1.0)
 
 
 def _clear_watchdog_flag() -> None:
@@ -863,6 +978,8 @@ def run_pending_update(
     starter = launch or _spawn
     marker_waiter = wait_for_marker or _wait_for_marker
     waiter(int(pending.get("wait_pid") or 0))
+    if wait_for_exit is None:
+        _wait_for_suite_exit()
     _clear_watchdog_flag()
     kind = pending.get("kind")
     if kind == "installer":
@@ -1876,12 +1993,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.apply_pending:
         return 2
+    try:
+        # The helper runs windowless; keep its story next to pending.json.
+        logging.basicConfig(
+            level=logging.INFO,
+            filename=str(Path(args.apply_pending).with_name("update-helper.log")),
+            format="%(asctime)s %(process)d %(levelname)s %(message)s",
+        )
+    except Exception:
+        pass
+    log.info("Update helper started (waiting for pid %s).", args.wait_pid)
     pending = json.loads(args.apply_pending.read_text(encoding="utf-8"))
     if args.wait_pid:
         pending["wait_pid"] = args.wait_pid
     pending.setdefault("pending_path", str(args.apply_pending))
     try:
         outcome = run_pending_update(pending)
+        log.info("Update helper finished: %s", outcome)
     except Exception:
         log.exception("Could not apply the update")
         command = list(pending.get("relaunch") or pending.get("command") or [])
