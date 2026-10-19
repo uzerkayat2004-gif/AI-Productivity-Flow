@@ -31,8 +31,11 @@ def installed():
         urllib.request.urlretrieve(URL, exe)
     r = subprocess.run([str(exe), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", f"/DIR={INSTALL}", f"/LOG={BASE/'install.log'}"], timeout=1500)
     time.sleep(10)
-    subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe", "/T"], capture_output=True)
-    subprocess.run(["taskkill", "/F", "/IM", "python.exe", "/T"], capture_output=True)
+    # Stop only the app the installer launched (never this pytest's own python).
+    subprocess.run(["powershell", "-NoProfile", "-Command",
+                    f"Get-Process | Where-Object {{ $_.Path -like '{INSTALL}*' }} | Stop-Process -Force"],
+                   capture_output=True)
+    time.sleep(3)
     pkg = SITE if SITE.is_dir() else next(INSTALL.rglob("voice_flow/_version.py")).parent
     shutil.copytree(ROOT / "src" / "voice_flow", pkg, dirs_exist_ok=True)
     return {"rc": r.returncode, "pkg": str(pkg)}
