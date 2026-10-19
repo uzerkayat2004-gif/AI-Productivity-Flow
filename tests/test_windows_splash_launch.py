@@ -7,7 +7,7 @@ import os, re, subprocess, time, urllib.request
 from pathlib import Path
 import pytest
 
-URL = "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/download/v1.0.11/AI-Productivity-Flow-Setup-x64.exe"
+URL = "https://github.com/uzerkayat2004-gif/AI-Productivity-Flow/releases/download/v1.0.13/AI-Productivity-Flow-Setup-x64.exe"
 BASE = Path(os.environ.get("RUNNER_TEMP", "C:/qa")) / "apfau"
 INSTALL = BASE / "app"
 VERSION_FILE = INSTALL / "runtime" / "python" / "Lib" / "site-packages" / "voice_flow" / "_version.py"
@@ -76,7 +76,23 @@ def test_installed_v1011_updates_itself(capsys):
         pyw = INSTALL / "runtime" / "python" / "pythonw.exe"
         subprocess.Popen([str(pyw), str(INSTALL / "launch_apf.pyw")], cwd=str(INSTALL))
         say(capsys, "launched app manually")
-    time.sleep(60)
+    time.sleep(30)
+    subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe", "/T"], capture_output=True)
+    time.sleep(5)
+    VERSION_FILE.write_text(VERSION_FILE.read_text(encoding="utf-8").replace("1.0.13", "1.0.11"), encoding="utf-8")
+    au = VERSION_FILE.with_name("app_updater.py")
+    src = au.read_text(encoding="utf-8")
+    src = src.replace('''        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,''', '''        "stdout": open(str(pending_path) + ".out", "ab"),
+        "stderr": open(str(pending_path) + ".err", "ab"),''')
+    src = src.replace('''    args = parser.parse_args(argv)
+    if not args.apply_pending:''', '''    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG, filename=str(args.apply_pending) + ".helper.log", format="%(asctime)s %(process)d %(name)s %(message)s")
+    log.info("HELPER START argv=%s exe=%s", argv or sys.argv, sys.executable)
+    import atexit; atexit.register(lambda: log.info("HELPER EXIT"))
+    if not args.apply_pending:''')
+    au.write_text(src, encoding="utf-8")
+    say(capsys, f"patched helper logging: {'.helper.log' in src and '.err' in src}; version now {version()}")
     found = [str(x) for x in Path("C:/Users").rglob("voice_flow_debug.log*")][:10]
     say(capsys, f"debug logs anywhere under C:/Users: {found}")
     for f in found:
@@ -92,7 +108,7 @@ def test_installed_v1011_updates_itself(capsys):
     out = open(BASE / "engine.txt", "w", encoding="utf-8")
     eng = subprocess.Popen([str(py), "-u", "-m", "voice_flow.main"], cwd=str(INSTALL), env=env, stdout=out, stderr=subprocess.STDOUT)
     t0 = time.time()
-    while time.time() - t0 < 600 and version() == "1.0.11":
+    while time.time() - t0 < 420 and version() == "1.0.11":
         time.sleep(10)
     time.sleep(60)
     say(capsys, f"===== FOREGROUND ENGINE: version={version()} after {int(time.time()-t0)}s, engine alive={eng.poll() is None}")
@@ -107,6 +123,9 @@ def test_installed_v1011_updates_itself(capsys):
         say(capsys, "   " + l[:600])
     say(capsys, "procs at end:\n  " + "\n  ".join(procs()))
     dump_logs(capsys)
+    for f in sorted((INSTALL / "updates").glob("pending.json*")) + [Path.home()/".voice_flow"/"terminate_debug.log"]:
+        if f.is_file():
+            say(capsys, f"=== {f.name}:\n" + f.read_text(encoding="utf-8", errors="replace")[-5000:])
     pend = INSTALL / "updates" / "pending.json"
     if pend.is_file():
         say(capsys, "===== RUNNING THE UPDATE HELPER BY HAND")
