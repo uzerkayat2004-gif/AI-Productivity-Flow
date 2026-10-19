@@ -203,10 +203,11 @@ def test_native_engines_skipped_for_intel_target(tmp_path, monkeypatch, capsys):
     called = []
     monkeypatch.setattr(builder, "bundle_llama_server", lambda *a: called.append("llama"))
     monkeypatch.setattr(builder, "bundle_nemo_speech", lambda *a: called.append("nemo"))
+    monkeypatch.setattr(builder, "bundle_video_flow_toolchain", lambda *a: called.append("video") or {})
     builder.bundle_native_engines("x86_64")
     assert called == []
     builder.bundle_native_engines("aarch64")
-    assert called == ["llama", "nemo"]
+    assert called == ["llama", "nemo", "video"]
 
 
 # --------------------------------------------------------------------------
