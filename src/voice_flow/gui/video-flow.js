@@ -903,7 +903,7 @@ const vfProviderIcons = {
   vertex_ai: "V", gemini: "✦", openrouter: "↔", nvidia_nim: "N",
   opencode_zen: "Z", anthropic: "A", openai: "◎", groq: "G",
   together: "T", cloudflare: "☁", ollama: "◉", lm_studio: "LM",
-  llama_cpp: "L", local: "💻",
+  llama_cpp: "L", local: "💻", nebius: "N", tavily: "T",
 }
 
 function vfJsArg(value) {
@@ -2410,7 +2410,7 @@ function openVideoModelPicker(context = "video_flow") {
     // shared picker must only offer models from those providers.
     const AUDIO_SUMMARY_PROVIDERS = new Set([
       "gemini", "openai", "groq", "together", "openrouter",
-      "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic",
+      "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic", "nebius",
     ]);
     const candidates = (typeof vfCatalog !== "undefined" && vfCatalog && Array.isArray(vfCatalog.models)) ? vfCatalog.models : [];
     const allowed = candidates.filter(m =>
@@ -4320,6 +4320,7 @@ async function generateVideoFlow() {
           mode: selectedMode?.value || "summary",
           model_ref: modelRef,
           allow_external_ai: consent,
+          research_web: Boolean(consent && document.getElementById("vf-research-web")?.checked),
           theme: themeSelect?.value || "auto",
           visual_direction: visualDirection?.value || "",
           format: resolvedFormat,
@@ -4609,6 +4610,10 @@ function updateVideoExternalConsent(modelRef) {
   if (!isVideoModelExternal(modelRef)) {
     row.style.display = "none";
     checkbox.checked = false;
+    const researchRow = document.getElementById("vf-research-web-row");
+    const researchBox = document.getElementById("vf-research-web");
+    if (researchRow) researchRow.style.display = "none";
+    if (researchBox) researchBox.checked = false;
     return;
   }
   let refs = [modelRef];
@@ -4619,6 +4624,16 @@ function updateVideoExternalConsent(modelRef) {
   row.style.display = "flex";
   checkbox.checked = false;
   copy.textContent = "The source text will be sent to " + (names.join(", ") || "the selected providers") + " for scene planning. Voice narration and rendering remain on this PC.";
+  const researchRow = document.getElementById("vf-research-web-row");
+  if (researchRow) {
+    // Only offered when a Tavily key is saved and connected.
+    const show = vfTavilyConnected();
+    researchRow.style.display = show ? "flex" : "none";
+    if (!show) {
+      const box = document.getElementById("vf-research-web");
+      if (box) box.checked = false;
+    }
+  }
 }
 async function vfPost(path, body = {}) {
   const data = await safeFetchJson(path, {
@@ -4870,6 +4885,19 @@ function renderVideoProviderDetails() {
   }
   html += '</div>';
 
+  // Nebius Token Factory: which Nemotron model serves which job.
+  if (provider.id === "nebius") {
+    html += vfNebiusRoutingCard(data.nebius_routing || {});
+  }
+  // Tavily is a research source, not a model provider: no model list.
+  if (provider.kind === "research") {
+    html += '<div class="nine-router-card"><h2 class="models-title-9r">How it is used</h2>' +
+      '<div style="font-size:12px;color:var(--text-muted);line-height:1.5;">When a Tavily key is saved here, Video Flow shows a <strong>Research with web sources</strong> option. ' +
+      'If you tick it, the planner looks up a few web sources about your topic, uses them to check facts, and keeps their titles and links in the plan. Nothing is searched when the box is off.</div></div>';
+    root.innerHTML = html;
+    return;
+  }
+
   // AVAILABLE MODELS CARD (9Router style)
   html += '<div class="nine-router-card">';
   html += '<div class="models-header-9r">';
@@ -4888,6 +4916,53 @@ function renderVideoProviderDetails() {
   html += '</div>';
 
   root.innerHTML = html;
+}
+
+function vfNebiusRoutingCard(routing) {
+  const tiers = routing.tiers || {};
+  const row = function (tier, label, job) {
+    const t = tiers[tier] || {};
+    const defaults = (t.defaults || []).join(" \u2192 ");
+    return '<div style="margin-bottom:12px;">' +
+      '<label for="vf-nebius-' + tier + '" style="display:block;font-size:12px;font-weight:700;margin-bottom:4px;">' + vfEscape(label) + '</label>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">' + vfEscape(job) + ' Default: ' + vfEscape(defaults) + '. Now using: <strong>' + vfEscape(t.resolved || "") + '</strong></div>' +
+      '<input id="vf-nebius-' + tier + '" type="text" placeholder="Leave empty to use the default" value="' + vfEscape(t.override || "") + '" style="width:100%;padding:7px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface-2);color:var(--text);">' +
+    '</div>';
+  };
+  let note = routing.validated
+    ? "Checked against your account's model list."
+    : "Not checked yet: press Test on a connection to load your account's model list.";
+  if (routing.env_key) note += " A NEBIUS_API_KEY environment key is also available.";
+  return '<div class="nine-router-card">' +
+    '<h2 class="models-title-9r">NVIDIA Nemotron model routing</h2>' +
+    '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + vfEscape(note) + ' If a model is not served, the closest Nemotron model your account has is used instead.</div>' +
+    row("fast", "Fast tier", "Voice Flow polishing, voice commands and Audio Flow summaries.") +
+    row("reasoning", "Reasoning tier", "Video Flow planning, creative direction and scene authoring.") +
+    '<button class="btn-primary" style="padding:7px 16px;font-size:12px;" onclick="vfSaveNebiusRouting()">Save routing</button>' +
+  '</div>';
+}
+
+async function vfSaveNebiusRouting() {
+  try {
+    await vfPost("/api/video-flow/providers/settings", {
+      provider: "nebius",
+      load_balance_mode: (vfCurrentProviderDetails && vfCurrentProviderDetails.load_balance_mode) || "priority",
+      nebius_model_fast: document.getElementById("vf-nebius-fast")?.value || "",
+      nebius_model_reasoning: document.getElementById("vf-nebius-reasoning")?.value || "",
+    });
+    vfToast("Nemotron routing saved.");
+  } catch (error) {
+    vfToast(error.message || "Could not save routing.", true);
+  }
+  await refreshCurrentVideoProviderDetail("nebius");
+}
+
+function vfTavilyConnected() {
+  const cat = (typeof vfCatalog !== "undefined" && vfCatalog) ? vfCatalog : {};
+  const groups = Array.isArray(cat.providers) ? cat.providers
+    : ((cat.provider_groups && Array.isArray(cat.provider_groups.api_key)) ? cat.provider_groups.api_key : []);
+  const entry = groups.find(item => item && item.id === "tavily");
+  return Boolean(entry && entry.status === "connected");
 }
 
 async function refreshCurrentVideoProviderDetail(providerId) {

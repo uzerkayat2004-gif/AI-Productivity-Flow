@@ -399,6 +399,40 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ),
         passthrough_models=True,
     ),
+    "nebius": ProviderSpec(
+        id="nebius",
+        alias="nebius",
+        ui_alias="nebius",
+        display=ProviderDisplay(
+            name="Nebius Token Factory",
+            icon="cpu",
+            color="#D9FE5A",
+            website="https://tokenfactory.nebius.com",
+            notice=ProviderNotice(
+                text="OpenAI-compatible Token Factory serving NVIDIA Nemotron models.",
+                api_key_url="https://tokenfactory.nebius.com/",
+            ),
+        ),
+        category="apikey",
+        thinking_config=ProviderThinkingConfig(
+            options=["low", "medium", "high"], default_mode="low"
+        ),
+        transport=ProviderTransport(
+            format="openai",
+            base_url="https://api.tokenfactory.nebius.com/v1/chat/completions",
+            validate_url="https://api.tokenfactory.nebius.com/v1/models",
+            auth_header="bearer",
+        ),
+        models=[
+            ProviderModel("nvidia/Nemotron-3_5-Lightning", "Nemotron 3.5 Lightning (fast tier)"),
+            ProviderModel("nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B"),
+            ProviderModel("nvidia/Nemotron-3-Ultra-550b-a55b", "Nemotron 3 Ultra 550B (reasoning tier)"),
+        ],
+        models_fetcher=ProviderModelsFetcher(
+            url="https://api.tokenfactory.nebius.com/v1/models", type="openai"
+        ),
+        passthrough_models=True,
+    ),
 }
 
 

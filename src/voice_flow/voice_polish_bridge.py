@@ -126,6 +126,10 @@ def can_execute_model(model_ref: str) -> bool:
                 pass
             return True
 
+        if provider == "nebius":
+            # Saved Token Factory connection or NEBIUS_API_KEY.
+            from voice_flow import nebius_provider
+            return nebius_provider.has_api_key(video_flow_provider_service)
         if provider not in _PLANNING_ENDPOINTS:
             return False
         now = time.time()
@@ -282,6 +286,9 @@ def _request_polish(
             # different credential and account, so it cannot be used as an
             # implicit alias after an OAuth request is unavailable or fails.
             return None
+        elif provider == "nebius":
+            # Voice polishing and voice commands use the fast Nemotron tier.
+            gateway = ProviderModelGateway._from_video_provider_service(provider, model, tier="fast")
         else:
             gateway = ProviderModelGateway._from_video_provider_service(provider, model)
         if gateway is None:
@@ -313,6 +320,11 @@ def _request_polish(
                 timeout_seconds=max(0.05, float(timeout_seconds) - 0.15),
             )
             _diagnostic.status = status
+            if result and provider == "nebius":
+                from voice_flow.nebius_provider import strip_reasoning
+                result = strip_reasoning(result) or None
+                if result is None:
+                    _diagnostic.status = "empty_response"
             return result
         return gateway.request_isolated(
             prompt=prompt,

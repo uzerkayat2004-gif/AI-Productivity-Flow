@@ -5447,7 +5447,20 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     entry["load_balance_mode"] = mode
                     storage.add_video_flow_custom_provider(entry)
             video_flow_provider_service.set_setting(f"load_balance:{provider}", mode)
-            self.send_json_response({"success": True, "load_balance_mode": mode})
+            response = {"success": True, "load_balance_mode": mode}
+            if provider == "nebius" and any(k in data for k in ("nebius_model_fast", "nebius_model_reasoning")):
+                # Per-tier Nemotron overrides; empty restores the default.
+                from voice_flow import nebius_provider
+                try:
+                    for tier in nebius_provider.TIERS:
+                        key = nebius_provider.SETTING_KEYS[tier]
+                        if key in data:
+                            nebius_provider.set_tier_override(tier, str(data.get(key) or ""), video_flow_provider_service)
+                except ValueError as exc:
+                    self.send_json_response({"success": False, "error": str(exc)}, 400)
+                    return
+                response["nebius_routing"] = nebius_provider.routing_summary(service=video_flow_provider_service)
+            self.send_json_response(response)
 
 
         elif path == "/api/video-flow/oauth/start":
@@ -6808,7 +6821,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     for key in ("mode", "title", "source_name", "model_ref", "theme", "visual_direction",
                                 "allow_external_ai", "allow_local_fallback", "voice", "duration_seconds",
                                 "video_engine", "provider", "format", "style", "style_prompt", "language",
-                                "focus", "source_url", "source_file", "profile", "notebook_id", "source_id", "task_id"):
+                                "focus", "source_url", "source_file", "profile", "notebook_id", "source_id", "task_id",
+                                "research_web"):
                         if meta.get(key) is not None:
                             kwargs[key] = meta.get(key)
                     new_job = service.queue(str(meta.get("source_text") or ""), **kwargs)

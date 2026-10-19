@@ -37,7 +37,7 @@ _RATE_LIMIT_META_KEYS = (
     "allow_external_ai", "allow_local_fallback", "voice", "duration_seconds",
     "target_duration_seconds", "video_engine", "provider", "format", "requested_format", "style", "style_prompt", "language",
     "focus", "source_url", "source_file", "profile", "notebook_id",
-    "source_id", "task_id",
+    "source_id", "task_id", "research_web",
 )
 _RESET_TIME_RE = re.compile(r"resets?\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)?", re.I)
 
@@ -98,6 +98,8 @@ _PLANNING_ENDPOINTS = {
     "nvidia_nim": "https://integrate.api.nvidia.com/v1/chat/completions",
     "nim": "https://integrate.api.nvidia.com/v1/chat/completions",
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    # Nebius Token Factory (NVIDIA Nemotron); see voice_flow.nebius_provider.
+    "nebius": "https://api.tokenfactory.nebius.com/v1/chat/completions",
     "antigravity": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     "agy": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
 }
@@ -553,7 +555,7 @@ class ProviderModelGateway:
             elif preferred_provider and preferred_provider not in ("local", ""):
                 requested_provider, requested_model = preferred_provider, preferred_model
             else:
-                for cand in ("openai_codex", "gemini", "openai", "openrouter", "anthropic", "groq"):
+                for cand in ("openai_codex", "gemini", "openai", "openrouter", "anthropic", "groq", "nebius"):
                     gw = cls._from_video_provider_service(cand, "")
                     if gw is not None:
                         return gw
@@ -581,7 +583,7 @@ class ProviderModelGateway:
         connections = storage.get_provider_connections("groq") if hasattr(storage, "get_provider_connections") else []
         connection = next((item for item in connections if item.get("is_active")), None)
         if not connection or not str(connection.get("api_key") or "").strip():
-            for cand in ("openai_codex", "gemini", "openai", "openrouter", "anthropic"):
+            for cand in ("openai_codex", "gemini", "openai", "openrouter", "anthropic", "nebius"):
                 gw = cls._from_video_provider_service(cand, "")
                 if gw is not None:
                     return gw
@@ -641,13 +643,51 @@ class ProviderModelGateway:
         return cls(api_key=key, provider=provider_id, model_id=model_id, endpoint=endpoint, max_output_tokens=8_192)
 
     @classmethod
-    def _from_video_provider_service(cls, provider_id: str, model_id: str) -> "ProviderModelGateway | None":
+    def _from_nebius(cls, model_id: str, tier: str) -> "ProviderModelGateway | None":
+        """Nebius Token Factory gateway with Nemotron tier routing.
+
+        The key is a saved Video Flow connection or ``NEBIUS_API_KEY``; with
+        neither there is no gateway and no request. ``model_id`` may be a
+        concrete model or a tier alias (``nemotron-fast``/``nemotron-reasoning``);
+        either way it is checked against ``/v1/models`` and replaced by the
+        tier's served Nemotron model when the account does not serve it.
+        """
+        from voice_flow import nebius_provider
+
+        api_key = nebius_provider.resolve_api_key()
+        if not api_key:
+            return None
+        # Video Flow planning can wait for the model list; Voice polishing
+        # (fast tier) must not, so it uses the cached list and warms it.
+        blocking = tier != nebius_provider.TIER_FAST
+        resolved = nebius_provider.resolve_model(
+            model_id,
+            default_tier=tier,
+            api_key=api_key,
+            blocking=blocking,
+            timeout=8.0,
+        )
+        return cls(
+            api_key=api_key,
+            provider="nebius",
+            model_id=resolved,
+            endpoint=nebius_provider.CHAT_COMPLETIONS_URL,
+            max_output_tokens=8_192 if tier == nebius_provider.TIER_FAST else 16_000,
+        )
+
+    @classmethod
+    def _from_video_provider_service(cls, provider_id: str, model_id: str, *, tier: str = "reasoning") -> "ProviderModelGateway | None":
         """Build a gateway from an isolated Video Flow provider connection.
 
         Only providers with an OpenAI-compatible chat-completions endpoint
-        (built-in map or a connection base_url) can plan.
+        (built-in map or a connection base_url) can plan. ``tier`` only
+        matters for Nebius: Video Flow plans on the reasoning tier, Voice and
+        Audio Flow pass the fast tier.
         """
         from voice_flow.video_flow_providers import video_flow_provider_service
+
+        if provider_id == "nebius":
+            return cls._from_nebius(model_id, tier)
 
         if provider_id == "codex":
             provider_id = "openai_codex"
@@ -800,6 +840,11 @@ class ProviderModelGateway:
                 message += f" — {detail}"
             raise RuntimeError(message)
         content = str(response["content"])
+        if self._provider == "nebius":
+            # Nemotron may return its reasoning inline; keep only the answer.
+            from voice_flow.nebius_provider import strip_reasoning
+
+            content = strip_reasoning(content) or ""
         _append_provider_log(job_id, self._provider, self._model_id, "success", len(prompt), len(content), {"http_status": response.get("http_status")})
         return content
 
@@ -963,6 +1008,7 @@ class VideoFlowService:
                 "notebook_id": options.get("notebook_id"),
                 "source_id": options.get("source_id"),
                 "task_id": options.get("task_id"),
+                "research_web": bool(options.get("research_web") is True),
                 "document_profile": (
                     options["document_profile"].to_dict()
                     if hasattr(options.get("document_profile"), "to_dict")

@@ -93,6 +93,11 @@ class Code2VideoRunner:
                 reference_image_path=None,
             )
             outline_prompt += _request_context(options)
+            research_sources = _research_sources(options)
+            if research_sources:
+                from voice_flow.tavily_research import format_for_prompt
+
+                outline_prompt += format_for_prompt(research_sources)
             outline = self._request_json(outline_prompt, project_dir, options)
             _validate_outline(outline)
             _write_json(project_dir / "plan" / "outline.json", outline)
@@ -113,6 +118,11 @@ class Code2VideoRunner:
                 ],
                 "sections": storyboard["sections"],
             }
+            if research_sources:
+                from voice_flow.tavily_research import public_sources
+
+                # Keep the web sources the plan was built with, for credits.
+                result["research_sources"] = public_sources(research_sources)
         except EngineError:
             if not bool(options.get("allow_fallback") or options.get("allow_local_fallback")):
                 raise
@@ -299,6 +309,14 @@ def _cap_planning_source(source_text: str) -> str:
 def _compact_outline_json(outline: dict[str, Any]) -> str:
     """Serialize the outline without indentation to keep stage-2 prompts small."""
     return json.dumps(outline, ensure_ascii=False, separators=(",", ":"))
+
+
+def _research_sources(options: dict[str, Any]) -> list[dict[str, Any]]:
+    """Web sources gathered for this plan (optional Tavily research)."""
+    sources = options.get("research_sources")
+    if not isinstance(sources, list):
+        return []
+    return [item for item in sources if isinstance(item, dict) and item.get("url")][:8]
 
 
 def _request_context(options: dict[str, Any]) -> str:

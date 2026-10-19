@@ -55,12 +55,14 @@ PROVIDERS: tuple[dict[str, Any], ...] = (
     {"id": "gemini", "name": "Google Gemini", "category": "api_key", "prefix": "gemini", "icon": "✦", "auth": "api_key", "description": "Gemini API free-tier and paid keys.", "get_key_url": "https://aistudio.google.com/apikey"},
     {"id": "openrouter", "name": "OpenRouter", "category": "api_key", "prefix": "openrouter", "icon": "↔", "auth": "api_key", "description": "A broad catalog including free-routed models.", "get_key_url": "https://openrouter.ai/settings/keys"},
     {"id": "nvidia_nim", "name": "NVIDIA NIM", "category": "api_key", "prefix": "nim", "icon": "N", "auth": "api_key", "description": "NVIDIA-hosted open model endpoints.", "get_key_url": "https://build.nvidia.com/settings/api-keys"},
+    {"id": "nebius", "name": "Nebius Token Factory", "category": "api_key", "prefix": "nebius", "icon": "N", "auth": "api_key", "description": "OpenAI-compatible Token Factory serving NVIDIA Nemotron models.", "get_key_url": "https://tokenfactory.nebius.com/", "env_key": "NEBIUS_API_KEY"},
     {"id": "opencode_zen", "name": "OpenCode Zen", "category": "api_key", "prefix": "zen", "icon": "Z", "auth": "api_key", "description": "OpenCode Zen model access.", "get_key_url": "https://opencode.ai/auth"},
     {"id": "anthropic", "name": "Anthropic API", "category": "api_key", "prefix": "anthropic", "icon": "A", "auth": "api_key", "description": "Claude models with an Anthropic API key.", "get_key_url": "https://console.anthropic.com/settings/keys"},
     {"id": "openai", "name": "OpenAI API", "category": "api_key", "prefix": "openai", "icon": "◎", "auth": "api_key", "description": "OpenAI models with a project API key.", "get_key_url": "https://platform.openai.com/api-keys"},
     {"id": "groq", "name": "Groq", "category": "api_key", "prefix": "groq", "icon": "G", "auth": "api_key", "description": "Fast hosted open models.", "get_key_url": "https://console.groq.com/keys"},
     {"id": "together", "name": "Together AI", "category": "api_key", "prefix": "together", "icon": "T", "auth": "api_key", "description": "Hosted open and specialist models.", "get_key_url": "https://api.together.ai/settings/api-keys"},
     {"id": "cloudflare", "name": "Cloudflare Workers AI", "category": "api_key", "prefix": "cloudflare", "icon": "☁", "auth": "api_key", "description": "Workers AI models using account-scoped credentials.", "get_key_url": "https://dash.cloudflare.com/profile/api-tokens"},
+    {"id": "tavily", "name": "Tavily Web Research", "category": "api_key", "prefix": "tavily", "icon": "T", "auth": "api_key", "kind": "research", "description": "Optional web sources for Video Flow planning. Not a model provider.", "get_key_url": "https://app.tavily.com", "env_key": "TAVILY_API_KEY"},
     {"id": "ollama", "name": "Ollama", "category": "local", "prefix": "ollama", "icon": "◉", "auth": "local", "description": "Models running locally through Ollama.", "default_base_url": "http://127.0.0.1:11434"},
     {"id": "lm_studio", "name": "LM Studio", "category": "local", "prefix": "lmstudio", "icon": "LM", "auth": "local", "description": "LM Studio's local OpenAI-compatible server.", "default_base_url": "http://127.0.0.1:1234/v1"},
     {"id": "llama_cpp", "name": "llama.cpp", "category": "local", "prefix": "llamacpp", "icon": "L", "auth": "local", "description": "A local llama.cpp OpenAI-compatible server.", "default_base_url": "http://127.0.0.1:8080/v1"},
@@ -300,6 +302,11 @@ DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("nvidia_nim", "nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B", ("reasoning", "code")),
     ("nvidia_nim", "nvidia/nemotron-3-nano-30b-a3b", "Nemotron 3 Nano 30B", ("reasoning", "code")),
     ("nvidia_nim", "moonshotai/kimi-k2.6", "Kimi K2.6", ("vision", "reasoning", "code")),
+    ("nebius", "nemotron-fast", "Nemotron auto (fast tier)", ("reasoning",)),
+    ("nebius", "nemotron-reasoning", "Nemotron auto (reasoning tier)", ("reasoning", "code")),
+    ("nebius", "nvidia/Nemotron-3_5-Lightning", "Nemotron 3.5 Lightning 30B A3B", ("reasoning", "code")),
+    ("nebius", "nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B A12B", ("reasoning", "code")),
+    ("nebius", "nvidia/Nemotron-3-Ultra-550b-a55b", "Nemotron 3 Ultra 550B A55B", ("reasoning", "code")),
     ("opencode_zen", "deepseek-v4-flash-free", "DeepSeek V4 Flash Free", ("reasoning", "code")),
     ("opencode_zen", "nemotron-3-ultra-free", "Nemotron 3 Ultra Free", ("reasoning", "code")),
     ("opencode_zen", "laguna-s-2.1-free", "Laguna S 2.1 Free", ("reasoning", "code")),
@@ -486,6 +493,12 @@ class VideoFlowProviderService:
             "active_count": sum(1 for item in connections if item["is_active"]),
             "status": "connected" if any(item["is_active"] and item["status"] in {"connected", "ready", "active"} for item in connections) else "disconnected",
         })
+        env_key = str(provider.get("env_key") or "")
+        if env_key and public["status"] != "connected" and not public["active_count"] and str(os.environ.get(env_key) or "").strip():
+            # A key exported in the environment counts as a connection so its
+            # models can be picked; saved connections always take priority.
+            public["status"] = "connected"
+            public["env_key_in_use"] = True
         if provider["category"] == "oauth":
             oauth = self.oauth_status(provider["id"], refresh=(provider["id"] == "antigravity"))
             public["oauth_status"] = oauth
@@ -502,7 +515,16 @@ class VideoFlowProviderService:
             "connections": self.list_connections(provider_id),
             "models": self.list_models(provider_id, include_inactive=True),
             "load_balance_mode": self.get_setting(f"load_balance:{provider_id}", "priority"),
+            **({"nebius_routing": self._nebius_routing()} if provider_id == "nebius" else {}),
         }
+
+    def _nebius_routing(self) -> dict[str, Any]:
+        try:
+            from voice_flow import nebius_provider
+
+            return nebius_provider.routing_summary(service=self)
+        except Exception:
+            return {}
 
     def add_connection(
         self,
@@ -699,6 +721,18 @@ class VideoFlowProviderService:
             elif provider_id == "vertex_ai":
                 url = "https://aiplatform.googleapis.com/v1/publishers/google/models?key=" + urllib.parse.quote(key)
                 request = urllib.request.Request(url, method="GET")
+            elif provider_id == "nebius":
+                # Token Factory: GET /v1/models also warms the model list the
+                # Nemotron router validates against.
+                from voice_flow import nebius_provider
+
+                result = nebius_provider.check_connection(key, timeout=30)
+                self.update_connection(connection_id, status="connected", last_latency_ms=int(result.get("latency_ms") or 0))
+                return result
+            elif provider_id == "tavily":
+                from voice_flow.tavily_research import USAGE_URL
+
+                request = urllib.request.Request(USAGE_URL, headers={"Authorization": f"Bearer {key}"}, method="GET")
             elif provider_id == "cloudflare":
                 account_id = str(metadata.get("account_id", "")).strip()
                 if not account_id:
@@ -713,6 +747,7 @@ class VideoFlowProviderService:
                     "together": "https://api.together.xyz/v1/models",
                     "openrouter": "https://openrouter.ai/api/v1/models",
                     "nvidia_nim": "https://integrate.api.nvidia.com/v1/models",
+                    "nebius": "https://api.tokenfactory.nebius.com/v1/models",
                     "opencode_zen": "https://opencode.ai/zen/v1/models",
                 }
                 url = model_endpoints.get(provider_id)

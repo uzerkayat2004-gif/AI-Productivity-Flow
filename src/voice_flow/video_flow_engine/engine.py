@@ -55,6 +55,38 @@ class VideoFlowEngine:
         self.renderer = renderer
         self.model_gateway = model_gateway
 
+    @staticmethod
+    def _gather_research_sources(
+        source_text: str,
+        kwargs: dict[str, Any],
+        project_dir: Path,
+        report: Callable[..., Any],
+    ) -> list[dict[str, Any]]:
+        """Optional Tavily web research ("Research with web sources").
+
+        Runs only when the user ticked the box *and* allowed external AI
+        planning for this video; without a Tavily key it is a no-op. Any
+        failure leaves planning exactly as it was without research.
+        """
+        try:
+            from voice_flow import tavily_research
+
+            if not (tavily_research.research_requested(kwargs) and kwargs.get("allow_external_ai") is True):
+                return []
+            report(12, "Researching web sources", "understanding")
+            sources = tavily_research.gather_sources(source_text, kwargs)
+            if sources:
+                path = project_dir / "plan" / "research_sources.json"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps({"provider": "tavily", "sources": tavily_research.public_sources(sources)}, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            return sources
+        except Exception as exc:
+            logger.warning("Video Flow web research skipped (%s)", exc.__class__.__name__)
+            return []
+
     def run(self, video_id: str, **kwargs: Any) -> dict[str, Any]:
         callback: Callable[[dict[str, Any]], None] = kwargs.get("progress_callback") or (lambda _: None)
         report_context: dict[str, Path | None] = {"log_path": None}
@@ -116,6 +148,9 @@ class VideoFlowEngine:
                     "duration_seconds": duration_sec,
                 }
             )
+            research_sources = self._gather_research_sources(source_text, kwargs, project_dir, report)
+            if research_sources:
+                planner_options["research_sources"] = research_sources
             planner = self.planner or Code2VideoRunner(gateway=self.model_gateway)
             renderer = self.renderer or NarovaRunner()
             storyboard = planner.plan(source_text, **planner_options)

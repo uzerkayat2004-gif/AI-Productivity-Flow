@@ -86,6 +86,8 @@ OPENAI_COMPATIBLE_PROVIDERS = {
     "deepseek": ("https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
     "openrouter": ("https://openrouter.ai/api/v1/chat/completions", "openrouter/free"),
     "nvidia_nim": ("https://integrate.api.nvidia.com/v1/chat/completions", "meta/llama-3.1-8b-instruct"),
+    # Nebius Token Factory: the fast Nemotron tier (voice_flow.nebius_provider).
+    "nebius": ("https://api.tokenfactory.nebius.com/v1/chat/completions", "nvidia/Nemotron-3_5-Lightning"),
 }
 # Plain dictation must not lose the speaker's content. If the polished output
 # retains fewer words than this fraction of the source's non-filler words, it

@@ -329,6 +329,9 @@ class AudioSummaryService:
         if provider == "claude_code":
             return self._call_cli(["claude", "-p"], prompt)
 
+        if provider == "nebius":
+            return self._call_nebius(model_id, prompt)
+
         connections = [
             conn for conn in video_flow_provider_service.active_connections(provider)
             if video_flow_provider_service.connection_is_healthy(conn)
@@ -409,6 +412,7 @@ class AudioSummaryService:
             "together": "https://api.together.xyz/v1",
             "openrouter": "https://openrouter.ai/api/v1",
             "nvidia_nim": "https://integrate.api.nvidia.com/v1",
+            "nebius": "https://api.tokenfactory.nebius.com/v1",
             "opencode_zen": "https://opencode.zen/v1",
         }
         base_url = connection.get("metadata", {}).get("base_url") or base_urls.get(provider, "https://api.openai.com/v1")
@@ -431,6 +435,28 @@ class AudioSummaryService:
         if choices and "message" in choices[0]:
             return str(choices[0]["message"].get("content", ""))
         raise AudioSummaryError(f"{provider} API returned no message content.")
+
+    def _call_nebius(self, model_id: str, prompt: str) -> str:
+        """Audio Flow summaries/explanations on the fast Nemotron tier."""
+        from voice_flow import nebius_provider
+
+        api_key = nebius_provider.resolve_api_key(video_flow_provider_service)
+        if not api_key:
+            raise AudioSummaryError("No Nebius Token Factory key is set (add one in Video Flow providers or set NEBIUS_API_KEY).")
+        resolved = nebius_provider.resolve_model(
+            model_id,
+            default_tier=nebius_provider.TIER_FAST,
+            api_key=api_key,
+            settings_getter=video_flow_provider_service.get_setting,
+            timeout=8.0,
+        )
+        content = self._call_openai_compatible(
+            "nebius", resolved, api_key, prompt, {"metadata": {"base_url": nebius_provider.BASE_URL}}
+        )
+        cleaned = nebius_provider.strip_reasoning(content) or ""
+        if not cleaned:
+            raise AudioSummaryError("Nebius returned no answer text.")
+        return cleaned
 
     def _call_anthropic(self, model_id: str, secret: str, prompt: str) -> str:
         url = "https://api.anthropic.com/v1/messages"

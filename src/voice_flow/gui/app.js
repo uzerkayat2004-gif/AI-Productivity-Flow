@@ -3940,7 +3940,7 @@ const FLOW_PICKER_CONTEXTS = {
       if (typeof vfCatalog === "undefined" || !vfCatalog || !Array.isArray(vfCatalog.models)) return [];
       const AUDIO_SUMMARY_PROVIDERS = new Set([
         "gemini", "openai", "groq", "together", "openrouter",
-        "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic",
+        "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic", "nebius",
       ]);
       return vfCatalog.models.filter((m) =>
         m.available !== false && AUDIO_SUMMARY_PROVIDERS.has(String(m.provider || "").toLowerCase()));
