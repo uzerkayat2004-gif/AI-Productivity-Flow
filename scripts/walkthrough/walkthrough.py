@@ -348,7 +348,46 @@ def onboarding_phase(page, win) -> None:
     page.wait_for_timeout(800)
 
 
+_VF_PROC = None
+_VF_DEADLINE = time.monotonic() + 23 * 60  # inside the 25 min watchdog
+
+
+def start_video_flow_e2e() -> None:
+    """Make a real local video with the installed app's Python, in the background."""
+    global _VF_PROC
+    app = os.environ.get("APP_PATH", "/Applications/AI Productivity Flow.app")
+    res = Path(app) / "Contents" / "Resources"
+    py = res / "runtime" / "python" / "bin" / "python3"
+    driver = Path(__file__).with_name("vf_mac_driver.py")
+    if not py.is_file():
+        record("video flow e2e: start", "fail", f"bundled python missing at {py}")
+        return
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(res / "src")
+    env["AI_PRODUCTIVITY_FLOW_ROOT"] = str(res)
+    log = open(OUT / "video-flow-e2e.txt", "w")
+    _VF_PROC = subprocess.Popen([str(py), str(driver), str(OUT / "vf-e2e")], cwd=str(res), env=env,
+                                stdout=log, stderr=subprocess.STDOUT)
+    record("video flow e2e: start", "info", f"pid {_VF_PROC.pid}")
+
+
+def finish_video_flow_e2e(limit: float = 900) -> None:
+    if _VF_PROC is None:
+        return
+    try:
+        _VF_PROC.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        _VF_PROC.kill()
+    text = (OUT / "video-flow-e2e.txt").read_text(errors="replace")
+    ok = "RESULT_OK" in text
+    lines = [l for l in text.splitlines() if l.split(" ", 1)[0] in ("NODE", "FFMPEG", "FFPROBE", "NAROVA", "PREFLIGHT", "RENDER_BROWSER_ENSURE", "TITLE", "FINAL", "MP4", "PROBE")]
+    thumb = OUT / "vf-e2e" / "thumb.jpg"
+    record("video flow e2e: local video made on this Mac", "ok" if ok else "fail", " ; ".join(lines)[:1500],
+           str(thumb) if thumb.is_file() else None)
+
+
 def main() -> int:
+    start_video_flow_e2e()
     from playwright.sync_api import sync_playwright
 
     if not wait_api():
@@ -671,6 +710,9 @@ def main() -> int:
             floating_bar("after-bar-click")
             api("/api/record/toggle", {"recording": False})
 
+        # ---- Video Flow end to end (started in the background at the top)
+        finish_video_flow_e2e(limit=max(60.0, _VF_DEADLINE - time.monotonic()))
+
         # ---- native window at the end (did the real app window survive all this?)
         record("native window at end", "info", json.dumps(main_window()), native_shot("end"))
         browser.close()
@@ -690,6 +732,12 @@ if __name__ == "__main__":
     except Exception:
         record("walkthrough crashed", "error", traceback.format_exc())
     finally:
+        if not any(r["step"].startswith("video flow e2e: local") for r in results):
+            try:
+                signal.alarm(0)
+                finish_video_flow_e2e(limit=max(30.0, _VF_DEADLINE - time.monotonic()))
+            except Exception:
+                record("video flow e2e: collect", "error", traceback.format_exc())
         (OUT / "results.json").write_text(json.dumps(results, indent=2, default=str))
         (OUT / "console.json").write_text(json.dumps(console, indent=2))
         (OUT / "http-errors.json").write_text(json.dumps(http_errors, indent=2))
