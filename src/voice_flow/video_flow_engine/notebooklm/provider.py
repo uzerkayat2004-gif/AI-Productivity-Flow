@@ -1957,6 +1957,20 @@ class NotebookLMVideoProvider:
             raise NotebookLMVideoError("DOWNLOAD_FAILED", f"No non-empty MP4 at {target}")
         return target
 
+    def artifact_title(self, notebook_id: str, artifact_id: str) -> str | None:
+        """The title NotebookLM gave a finished video. Best effort: None on any error."""
+        try:
+            data = self._invoke(("artifact", "get", artifact_id, "--notebook", notebook_id), timeout=45)
+        except Exception as exc:
+            logger.info("NotebookLM artifact title not available: %s", exc)
+            return None
+        title = ""
+        if isinstance(data, Mapping):
+            inner = data.get("artifact") if isinstance(data.get("artifact"), Mapping) else data
+            title = _text(inner.get("title")) or ""
+        title = " ".join(title.split()).strip()
+        return title[:120] or None
+
     def generate(self, request: VideoRequest) -> VideoArtifact:
         """Execute full end-to-end NotebookLM video generation pipeline with phase telemetry."""
         t0 = time.perf_counter()
@@ -2230,6 +2244,7 @@ class NotebookLMVideoProvider:
             self._emit("download_start", phase="download", elapsed=round(time.perf_counter() - t0, 4), elapsed_seconds=round(time.perf_counter() - t0, 4))
             self._check_cancelled(request.job_id)
             output = self.download_video(notebook_id, task_id, request.output_path)
+            nlm_title = self.artifact_title(notebook_id, task_id)
             t_download = time.perf_counter() - t_download_start
             self._emit(
                 "download_complete",
@@ -2295,6 +2310,7 @@ class NotebookLMVideoProvider:
                         "audio_codec": media_info.get("audio_codec"),
                         "timings": timings,
                         "document_profile": doc_profile,
+                        "artifact_title": nlm_title,
                         "fallback": False,
                         "target_duration_seconds": request_target_duration
                         if request_target_duration is not None

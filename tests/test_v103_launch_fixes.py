@@ -46,7 +46,7 @@ def test_installer_page_flow_is_installing_then_finish():
     assert "AppVerName={#MyAppName} {#MyAppDisplayVersion}" in ISS
     messages = ISS.split("[Messages]", 1)[1].split("[", 1)[0]
     assert "Version 1.0" in messages
-    assert "1.0.13" not in messages
+    assert "1.0.14" not in messages
     assert "InnerNotebook" not in ISS
     assert "ForeColor" not in ISS
     splash = (ROOT / "src" / "voice_flow" / "gui" / "early_splash.py").read_text(encoding="utf-8")
@@ -86,7 +86,7 @@ def test_crash_reporting_is_on_until_the_user_opts_out():
         conn.commit()
     assert is_crash_reporting_enabled() is True
     assert SENTRY_DSN.startswith("https://")
-    assert VERSION == "1.0.13"
+    assert VERSION == "1.0.14"
     storage.save_setting("anonymous_crash_reports", False)
     assert is_crash_reporting_enabled() is False
     assert init_crash_reporting(force=False) is False
@@ -216,4 +216,4 @@ def test_packaged_crash_release_matches_version():
     text = (ROOT / "src" / "voice_flow" / "crash_reporting.py").read_text(encoding="utf-8")
     assert "SENTRY_DSN" in text
     assert f"ai-productivity-flow@{{VERSION}}" in text or "ai-productivity-flow@" in text
-    assert VERSION == "1.0.13"
+    assert VERSION == "1.0.14"

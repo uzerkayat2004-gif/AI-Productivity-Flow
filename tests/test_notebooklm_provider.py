@@ -500,7 +500,9 @@ class NotebookLMProviderTests(unittest.TestCase):
             self.assertEqual(artifact.notebook_id, "existing-nb-999")
             commands_joined = [" ".join(c) for c in fake.commands]
             self.assertFalse(any(" create " in f" {c} " for c in commands_joined))
-            self.assertEqual(len(fake.commands), 5)
+            # 5 pipeline calls + 1 "artifact get" for NotebookLM's topic title (v1.0.14)
+            self.assertEqual(len(fake.commands), 6)
+            self.assertIn("artifact get", commands_joined[-1])
 
     def test_generate_skips_create_notebook_when_workspace_reuse_enabled(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -535,7 +537,9 @@ class NotebookLMProviderTests(unittest.TestCase):
             self.assertEqual(artifact.notebook_id, "cached-nb-777")
             commands_joined = [" ".join(c) for c in fake.commands]
             self.assertFalse(any(" create " in f" {c} " for c in commands_joined))
-            self.assertEqual(len(fake.commands), 5)
+            # 5 pipeline calls + 1 "artifact get" for NotebookLM's topic title (v1.0.14)
+            self.assertEqual(len(fake.commands), 6)
+            self.assertIn("artifact get", commands_joined[-1])
 
     def test_workspace_notebook_cache_methods(self):
         with tempfile.TemporaryDirectory() as directory:
