@@ -3653,6 +3653,7 @@ const VOICEFLOW_POLICY_PROVIDER_NAMES = {
   elevenlabs: "ElevenLabs Voice", deepgram: "Deepgram Speech",
   assemblyai: "AssemblyAI", speechmatics: "Speechmatics",
   nvidia: "NVIDIA NIM", nvidia_nim: "NVIDIA NIM",
+  nebius: "Nebius Token Factory",
   antigravity: "Antigravity", agy: "Antigravity",
   local: "Local Models",
 };
@@ -3935,7 +3936,7 @@ const FLOW_PICKER_CONTEXTS = {
       if (typeof vfCatalog === "undefined" || !vfCatalog || !Array.isArray(vfCatalog.models)) return [];
       const AUDIO_SUMMARY_PROVIDERS = new Set([
         "gemini", "openai", "groq", "together", "openrouter",
-        "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic",
+        "nvidia_nim", "nim", "nebius", "opencode_zen", "cloudflare", "anthropic",
       ]);
       return vfCatalog.models.filter((m) =>
         m.available !== false && AUDIO_SUMMARY_PROVIDERS.has(String(m.provider || "").toLowerCase()));

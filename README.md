@@ -138,7 +138,7 @@ Voice Flow lets you speak naturally and injects clean, formatted text directly i
 * **On-Device & Cloud AI Polish**:
   * Downloadable on-device polish models (**S1-mini by Superwhisper**, **Liquid LFM 2.5 350M**) via llama.cpp for private text cleanup.
   * Windows AI Text Rewriter where supported by hardware.
-  * Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Ollama) for smart cleanup, conversational rewriting, and prompt formulation.
+  * Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Nebius Token Factory, Ollama) for smart cleanup, conversational rewriting, and prompt formulation.
 * **Voice Commands**: Commands such as "make this an email" or "summarize this" need a cloud polish model (for example Gemini with your own API key). Local polish (S1-mini, LFM) cleans up your dictation but does not run commands.
 * **"Hey Voice Flow"**: This works inside a normal dictation, not as an always-on listener. Press your dictation hotkey, then say something like "Hey Voice Flow, make this an email..." The app only listens while you are dictating.
 * **Personal Dictionary & Snippets**: Add custom acronyms, jargon, and snippet abbreviations that expand automatically with cross-process memory.

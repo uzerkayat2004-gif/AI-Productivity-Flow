@@ -55,6 +55,7 @@ PROVIDERS: tuple[dict[str, Any], ...] = (
     {"id": "gemini", "name": "Google Gemini", "category": "api_key", "prefix": "gemini", "icon": "✦", "auth": "api_key", "description": "Gemini API free-tier and paid keys.", "get_key_url": "https://aistudio.google.com/apikey"},
     {"id": "openrouter", "name": "OpenRouter", "category": "api_key", "prefix": "openrouter", "icon": "↔", "auth": "api_key", "description": "A broad catalog including free-routed models.", "get_key_url": "https://openrouter.ai/settings/keys"},
     {"id": "nvidia_nim", "name": "NVIDIA NIM", "category": "api_key", "prefix": "nim", "icon": "N", "auth": "api_key", "description": "NVIDIA-hosted open model endpoints.", "get_key_url": "https://build.nvidia.com/settings/api-keys"},
+    {"id": "nebius", "name": "Nebius Token Factory", "category": "api_key", "prefix": "nebius", "icon": "N", "auth": "api_key", "description": "OpenAI-compatible hosted open models (Nemotron, DeepSeek, Qwen).", "get_key_url": "https://tokenfactory.nebius.com/"},
     {"id": "opencode_zen", "name": "OpenCode Zen", "category": "api_key", "prefix": "zen", "icon": "Z", "auth": "api_key", "description": "OpenCode Zen model access.", "get_key_url": "https://opencode.ai/auth"},
     {"id": "anthropic", "name": "Anthropic API", "category": "api_key", "prefix": "anthropic", "icon": "A", "auth": "api_key", "description": "Claude models with an Anthropic API key.", "get_key_url": "https://console.anthropic.com/settings/keys"},
     {"id": "openai", "name": "OpenAI API", "category": "api_key", "prefix": "openai", "icon": "◎", "auth": "api_key", "description": "OpenAI models with a project API key.", "get_key_url": "https://platform.openai.com/api-keys"},
@@ -300,6 +301,10 @@ DEFAULT_MODELS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("nvidia_nim", "nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B", ("reasoning", "code")),
     ("nvidia_nim", "nvidia/nemotron-3-nano-30b-a3b", "Nemotron 3 Nano 30B", ("reasoning", "code")),
     ("nvidia_nim", "moonshotai/kimi-k2.6", "Kimi K2.6", ("vision", "reasoning", "code")),
+    ("nebius", "nvidia/Nemotron-3_5-Lightning", "Nemotron 3.5 Lightning", ("reasoning", "code")),
+    ("nebius", "nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B", ("reasoning", "code")),
+    ("nebius", "deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash", ("reasoning", "code")),
+    ("nebius", "Qwen/Qwen3-235B-A22B-Instruct-2507", "Qwen3 235B Instruct", ("reasoning",)),
     ("opencode_zen", "deepseek-v4-flash-free", "DeepSeek V4 Flash Free", ("reasoning", "code")),
     ("opencode_zen", "nemotron-3-ultra-free", "Nemotron 3 Ultra Free", ("reasoning", "code")),
     ("opencode_zen", "laguna-s-2.1-free", "Laguna S 2.1 Free", ("reasoning", "code")),
@@ -713,6 +718,7 @@ class VideoFlowProviderService:
                     "together": "https://api.together.xyz/v1/models",
                     "openrouter": "https://openrouter.ai/api/v1/models",
                     "nvidia_nim": "https://integrate.api.nvidia.com/v1/models",
+                    "nebius": "https://api.tokenfactory.nebius.com/v1/models",
                     "opencode_zen": "https://opencode.ai/zen/v1/models",
                 }
                 url = model_endpoints.get(provider_id)

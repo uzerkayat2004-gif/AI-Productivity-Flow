@@ -20,7 +20,7 @@ Concise, checkable facts about AI Productivity Flow (Version 1.0). Public docume
 - **AI text polishing & rewriting**:
   - Downloadable on-device S1-mini by Superwhisper and Liquid LFM 2.5 350M via llama.cpp (cleanup only; voice commands need a cloud polish model).
   - Windows AI Text Rewriter where supported by hardware.
-  - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Ollama.
+  - Optional cloud LLMs: Gemini, Claude, OpenAI, Groq, Nebius Token Factory, Ollama.
 - **Audio Flow**:
   - **Trigger**: select text, then click the Listen button next to it or the floating bar. Mac also has a hotkey, Control+Option+L (read the selection; press again to stop). Mac needs Accessibility to read the selection.
   - **Read Mode**: Spoken reader that articulates selected text with human cadence.

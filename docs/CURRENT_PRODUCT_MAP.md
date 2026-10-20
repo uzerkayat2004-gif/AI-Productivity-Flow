@@ -7,7 +7,7 @@
 - **Platform**: Video Flow works on Windows and macOS. (The Mac app is Apple Silicon only, M1 or newer.)
 - **Inputs**: Selected text, pasted text, documents (`.txt`, `.md`, `.csv`, `.json`, `.html`, `.htm`, `.xml`, `.rtf`, `.docx`, `.pdf` ≤ 8 MB), Google NotebookLM notebooks.
 - **Modes**: `summary` and `full`.
-- **Planning**: AI-driven concept extraction and pedagogical structuring via user's connected model (Groq, Gemini, OpenAI, Claude, Together, Ollama) or local fallback.
+- **Planning**: AI-driven concept extraction and pedagogical structuring via user's connected model (Groq, Gemini, OpenAI, Claude, Together, Nebius Token Factory, Ollama) or local fallback.
 - **Creative Director**: Pacing calculations, scene diversity rules, layout solver (`layout_solver_v21.py`), dynamic card hierarchy.
 - **Scene Authoring**: Structured scene programs (`statement`, `process`, `comparison`, `metric`, `diagram`).
 - **Rendering Pipeline**: Narova / Code2Video / Canvas-WebGL composition; FFmpeg normalization to 1920×1080 H.264/AAC MP4.
@@ -33,7 +33,7 @@
 - **AI Text Polish**:
   - Downloadable on-device S1-mini by Superwhisper and Liquid LFM 2.5 350M via llama.cpp (cleanup only; voice commands need a cloud polish model).
   - Windows AI Text Rewriter where supported by hardware.
-  - Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Ollama).
+  - Optional cloud LLMs (Gemini, Claude, OpenAI, Groq, Nebius Token Factory, Ollama).
   - Deterministic cleanup fallback always available.
 - **Voice commands**: "Hey Voice Flow, ..." is spoken inside a hotkey dictation (no always-on listener) and needs a cloud polish model.
 - **Insertion**: System-wide clipboard injection into active target window (Ctrl+V on Windows, Cmd+V on macOS).
