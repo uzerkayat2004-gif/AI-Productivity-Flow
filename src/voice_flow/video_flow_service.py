@@ -98,6 +98,7 @@ _PLANNING_ENDPOINTS = {
     "nvidia_nim": "https://integrate.api.nvidia.com/v1/chat/completions",
     "nim": "https://integrate.api.nvidia.com/v1/chat/completions",
     "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    "nebius": "https://api.tokenfactory.nebius.com/v1/chat/completions",
     "antigravity": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     "agy": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
 }
@@ -800,6 +801,10 @@ class ProviderModelGateway:
                 message += f" — {detail}"
             raise RuntimeError(message)
         content = str(response["content"])
+        if self._provider == "nebius":
+            # Some Token Factory models return inline <think> reasoning.
+            from voice_flow.nebius_provider import strip_reasoning
+            content = strip_reasoning(content) or ""
         _append_provider_log(job_id, self._provider, self._model_id, "success", len(prompt), len(content), {"http_status": response.get("http_status")})
         return content
 

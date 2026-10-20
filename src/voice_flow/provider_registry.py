@@ -399,6 +399,41 @@ PROVIDERS_REGISTRY: dict[str, ProviderSpec] = {
         ),
         passthrough_models=True,
     ),
+    "nebius": ProviderSpec(
+        id="nebius",
+        alias="nebius",
+        ui_alias="nebius",
+        display=ProviderDisplay(
+            name="Nebius Token Factory",
+            icon="cpu",
+            color="#052B42",
+            website="https://tokenfactory.nebius.com",
+            notice=ProviderNotice(
+                text="OpenAI-compatible hosted open models (Nemotron, DeepSeek, Qwen).",
+                api_key_url="https://tokenfactory.nebius.com/",
+            ),
+        ),
+        category="apikey",
+        thinking_config=ProviderThinkingConfig(
+            options=["low", "medium", "high"], default_mode="medium"
+        ),
+        transport=ProviderTransport(
+            format="openai",
+            base_url="https://api.tokenfactory.nebius.com/v1/chat/completions",
+            validate_url="https://api.tokenfactory.nebius.com/v1/models",
+            auth_header="bearer",
+        ),
+        models=[
+            ProviderModel("nvidia/Nemotron-3_5-Lightning", "Nemotron 3.5 Lightning"),
+            ProviderModel("nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super 120B"),
+            ProviderModel("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash"),
+            ProviderModel("Qwen/Qwen3-235B-A22B-Instruct-2507", "Qwen3 235B Instruct"),
+        ],
+        models_fetcher=ProviderModelsFetcher(
+            url="https://api.tokenfactory.nebius.com/v1/models", type="openai"
+        ),
+        passthrough_models=True,
+    ),
 }
 
 

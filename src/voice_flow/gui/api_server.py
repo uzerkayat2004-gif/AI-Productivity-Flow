@@ -8264,6 +8264,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     base = "https://api.together.xyz/v1"
                 elif provider in ("nvidia_nim", "nim", "nvidia"):
                     base = "https://integrate.api.nvidia.com/v1"
+                elif provider == "nebius":
+                    base = "https://api.tokenfactory.nebius.com/v1"
                 elif provider in ("opencode_zen", "zen"):
                     base = "https://opencode.ai/zen/v1"
                 elif provider == "ollama":
@@ -8510,7 +8512,7 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     except urllib.error.HTTPError as fallback_err:
                         raise fallback_err from gemini_err
                     raise gemini_err
-            elif provider in ("openai", "groq", "deepseek", "mistral", "openrouter", "together", "together_ai", "nvidia", "nvidia_nim"):
+            elif provider in ("openai", "groq", "deepseek", "mistral", "openrouter", "together", "together_ai", "nvidia", "nvidia_nim", "nebius"):
                 if not model_id:
                     return self.verify_api_key(provider, key)
                 base = "https://api.openai.com/v1"
@@ -8529,6 +8531,8 @@ class VoiceFlowApiHandler(SimpleHTTPRequestHandler):
                     base = "https://api.together.xyz/v1"
                 elif provider in ("nvidia", "nvidia_nim"):
                     base = "https://integrate.api.nvidia.com/v1"
+                elif provider == "nebius":
+                    base = "https://api.tokenfactory.nebius.com/v1"
 
                 target_model = model_id.strip()
                 if provider == "openrouter":

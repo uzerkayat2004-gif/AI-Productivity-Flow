@@ -900,7 +900,7 @@ async function disconnectNotebookLM() {
 const VF_PERMANENT_CONFIRMATION = "DELETE_VIDEO_FROM_THIS_PC";
 const vfProviderIcons = {
   claude_code: "✺", antigravity: "A", openai_codex: "◎",
-  vertex_ai: "V", gemini: "✦", openrouter: "↔", nvidia_nim: "N",
+  vertex_ai: "V", gemini: "✦", openrouter: "↔", nvidia_nim: "N", nebius: "N",
   opencode_zen: "Z", anthropic: "A", openai: "◎", groq: "G",
   together: "T", cloudflare: "☁", ollama: "◉", lm_studio: "LM",
   llama_cpp: "L", local: "💻",
@@ -2410,7 +2410,7 @@ function openVideoModelPicker(context = "video_flow") {
     // shared picker must only offer models from those providers.
     const AUDIO_SUMMARY_PROVIDERS = new Set([
       "gemini", "openai", "groq", "together", "openrouter",
-      "nvidia_nim", "nim", "opencode_zen", "cloudflare", "anthropic",
+      "nvidia_nim", "nim", "nebius", "opencode_zen", "cloudflare", "anthropic",
     ]);
     const candidates = (typeof vfCatalog !== "undefined" && vfCatalog && Array.isArray(vfCatalog.models)) ? vfCatalog.models : [];
     const allowed = candidates.filter(m =>

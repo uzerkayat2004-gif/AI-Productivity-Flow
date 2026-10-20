@@ -313,6 +313,12 @@ def _request_polish(
                 timeout_seconds=max(0.05, float(timeout_seconds) - 0.15),
             )
             _diagnostic.status = status
+            if result and provider == "nebius":
+                # Some Token Factory models return inline <think> reasoning.
+                from voice_flow.nebius_provider import strip_reasoning
+                result = strip_reasoning(result)
+                if result is None:
+                    _diagnostic.status = "empty_response"
             return result
         return gateway.request_isolated(
             prompt=prompt,

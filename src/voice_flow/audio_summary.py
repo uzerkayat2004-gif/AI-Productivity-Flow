@@ -352,7 +352,7 @@ class AudioSummaryService:
                 started = time.monotonic()
                 if provider == "gemini":
                     result = self._call_gemini(model_id, secret, prompt)
-                elif provider in ("openai", "groq", "together", "openrouter", "nvidia_nim", "opencode_zen", "cloudflare"):
+                elif provider in ("openai", "groq", "together", "openrouter", "nvidia_nim", "nebius", "opencode_zen", "cloudflare"):
                     result = self._call_openai_compatible(provider, model_id, secret, prompt, connection)
                 elif provider == "anthropic":
                     result = self._call_anthropic(model_id, secret, prompt)
@@ -409,6 +409,7 @@ class AudioSummaryService:
             "together": "https://api.together.xyz/v1",
             "openrouter": "https://openrouter.ai/api/v1",
             "nvidia_nim": "https://integrate.api.nvidia.com/v1",
+            "nebius": "https://api.tokenfactory.nebius.com/v1",
             "opencode_zen": "https://opencode.zen/v1",
         }
         base_url = connection.get("metadata", {}).get("base_url") or base_urls.get(provider, "https://api.openai.com/v1")
@@ -429,7 +430,12 @@ class AudioSummaryService:
             body = json.loads(resp.read().decode("utf-8"))
         choices = body.get("choices", [])
         if choices and "message" in choices[0]:
-            return str(choices[0]["message"].get("content", ""))
+            content = str(choices[0]["message"].get("content", ""))
+            if provider == "nebius":
+                # Some Token Factory models return inline <think> reasoning.
+                from voice_flow.nebius_provider import strip_reasoning
+                content = strip_reasoning(content) or ""
+            return content
         raise AudioSummaryError(f"{provider} API returned no message content.")
 
     def _call_anthropic(self, model_id: str, secret: str, prompt: str) -> str:
