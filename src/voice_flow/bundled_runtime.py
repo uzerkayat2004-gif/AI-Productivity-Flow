@@ -5,9 +5,9 @@ copy that is already installed. The Windows and macOS build scripts record
 the same values into the install manifest, and the small update package
 repeats them so the updater can compare before it downloads.
 
-Mac does not bundle Node, HyperFrames, or ffmpeg inside the .app. Those
-fields stay ``not-bundled`` so a release that starts shipping them no longer
-matches and the updater uses the full disk image.
+From 1.0.14 the Mac .app bundles Node, HyperFrames and ffmpeg for Video
+Flow. Older Mac installs recorded ``not-bundled`` for them, so their updater
+sees the change and takes the full disk image, as intended.
 """
 
 from __future__ import annotations
@@ -51,6 +51,10 @@ MAC_WHISPER = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
 MAC_LLAMA_CPP = "b11696"
 MAC_NEMO_SPEECH = "0.2.0"
 MAC_LOCAL_AI = f"llama.cpp {MAC_LLAMA_CPP}; nemo-speech {MAC_NEMO_SPEECH}"
+# Video Flow toolchain inside the .app (scripts/build_macos_app.py VF_*).
+MAC_NODE = "22.23.3"
+MAC_HYPERFRAMES = "0.7.96"
+MAC_FFMPEG = "9.0.2"
 
 # third_party/narova/package.json. The build refuses to pack if this drifts.
 NAROVA_VERSION = "0.31.14"
@@ -72,10 +76,10 @@ def windows_runtime() -> dict[str, str]:
 def mac_runtime() -> dict[str, str]:
     return {
         "python": MAC_PYTHON,
-        "node": NOT_BUNDLED,
-        "hyperframes": NOT_BUNDLED,
+        "node": MAC_NODE,
+        "hyperframes": MAC_HYPERFRAMES,
         "narova": NAROVA_VERSION,
-        "ffmpeg": NOT_BUNDLED,
+        "ffmpeg": MAC_FFMPEG,
         "whisper": MAC_WHISPER,
         "local_ai_engine": MAC_LOCAL_AI,
     }

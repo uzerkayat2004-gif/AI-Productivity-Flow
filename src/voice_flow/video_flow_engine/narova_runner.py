@@ -91,7 +91,7 @@ class NarovaRunner:
             error_code="render_failed",
         )
         _report(progress_callback, 80, "Rendering", "buffering")
-        if renderer == "hyperframes" and runtime_env.is_installed():
+        if renderer == "hyperframes" and runtime_env.is_packaged_app():
             # Packaged app: the render browser is per-user provisioned; make
             # sure it exists before the browser render (no-op when cached).
             runtime_env.ensure_render_browser()
@@ -261,12 +261,18 @@ def _safe_environment() -> dict[str, str]:
     # created) and the bundled hyperframes tree replaces npx resolution.
     # narova_tts and the narova CLI resolve ffmpeg via PATH, so the private
     # ffmpeg directory leads the subprocess PATH (never the system PATH).
-    if runtime_env.is_installed():
-        runtime = runtime_env.runtime_root()
-        environment["NAROVA_PYTHON"] = runtime_env.python_executable()
+    if runtime_env.is_packaged_app():
+        runtime = runtime_env.app_runtime_root()
+        environment["NAROVA_PYTHON"] = (
+            runtime_env.python_executable() if runtime_env.is_installed() else runtime_env.native_worker_python()
+        )
         environment["NAROVA_HF_MODULES"] = str(runtime / "hyperframes")
-        ff_dir = runtime / "ffmpeg"
-        environment["PATH"] = str(ff_dir) + os.pathsep + environment.get("PATH", "")
+        prefixes = [d for d in (runtime_env.ffmpeg_dir(),) if d]
+        node = runtime_env.node_executable()
+        if node is not None and sys.platform == "darwin":
+            prefixes.append(node.parent)  # narova/hyperframes spawn `node` by name
+        if prefixes:
+            environment["PATH"] = os.pathsep.join(str(p) for p in prefixes) + os.pathsep + environment.get("PATH", "")
     else:
         extra_paths = [
             Path(r"C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin"),

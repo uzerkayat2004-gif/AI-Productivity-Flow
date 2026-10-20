@@ -58,30 +58,6 @@
     "beats": {},
     "bgm_trim_db": -0.013
   },
-  "scene_2_mac": {
-    "duration": 14.156,
-    "speech_end": 13.11,
-    "words": 32,
-    "lines": [
-      {
-        "start": 0.45,
-        "end": 1.85,
-        "text": "Meet Video Flow!"
-      },
-      {
-        "start": 1.85,
-        "end": 8.78,
-        "text": "Paste any text or select an article, and it becomes an animated explainer video with a voiceover."
-      },
-      {
-        "start": 8.78,
-        "end": 14.16,
-        "text": "Video Flow is coming to Mac soon. It's available on Windows now."
-      }
-    ],
-    "beats": {},
-    "bgm_trim_db": 0.011
-  },
   "scene_3": {
     "duration": 16.188,
     "speech_end": 15.14,
@@ -450,6 +426,30 @@
     ],
     "beats": {},
     "bgm_trim_db": 0.023
+  },
+  "vf_guide_step4_mac": {
+    "duration": 11.995,
+    "speech_end": 10.94,
+    "words": 29,
+    "lines": [
+      {
+        "start": 0.45,
+        "end": 3.92,
+        "text": "Finally, Video Flow works anywhere on your Mac."
+      },
+      {
+        "start": 3.92,
+        "end": 7.63,
+        "text": "Highlight text on any page, and tap the floating button."
+      },
+      {
+        "start": 7.63,
+        "end": 11.99,
+        "text": "Your video is made in the background while you keep working."
+      }
+    ],
+    "beats": {},
+    "bgm_trim_db": 0.141
   },
   "voiceflow_guide_step4_mac": {
     "duration": 10.992,

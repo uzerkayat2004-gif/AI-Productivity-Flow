@@ -125,16 +125,19 @@ def test_seen_flags_flush_to_backend_on_exit() -> None:
 
 # ---------- 8. Mac ----------
 
-def test_no_video_flow_guide_on_mac() -> None:
-    assert "vf_guide_step4_mac" not in APP_JS
-    assert not list(ASSETS.glob("vf_guide_*mac*"))
-    assert "vfVideoFlowGatedOnMac()" in _fn("startVideoFlowGuide")
-    assert 'feature === "video" && typeof vfVideoFlowGatedOnMac === "function" && vfVideoFlowGatedOnMac()' in _fn("scheduleAutomaticGuide")
+def test_video_flow_guide_runs_on_mac_with_a_mac_voiceover() -> None:
+    assert "vfVideoFlowGatedOnMac" not in APP_JS
+    assert "vfVideoFlowGatedOnMac" not in _fn("startVideoFlowGuide")
+    assert "vfVideoFlowGatedOnMac" not in _fn("scheduleAutomaticGuide")
+    assert (ASSETS / "vf_guide_step4_mac_mixed.mp3").exists()
+    mac = " ".join(l["text"] for l in CLIPS["vf_guide_step4_mac"]["lines"])
+    assert "on your Mac" in mac and "Windows" not in mac
+    assert 'audioSrcMac: "assets/onboarding/vf_guide_step4_mac_mixed.mp3"' in APP_JS
 
 
-def test_mac_clips_exist_for_tour_scene2_and_voice_shortcut() -> None:
-    assert "scene_2_mac" in CLIPS and (ASSETS / "scene_2_mac_mixed.mp3").exists()
-    assert "coming to Mac soon" in " ".join(l["text"] for l in CLIPS["scene_2_mac"]["lines"])
+def test_mac_tour_has_no_coming_soon_cut() -> None:
+    assert "scene_2_mac" not in CLIPS and not (ASSETS / "scene_2_mac_mixed.mp3").exists()
+    assert "coming to Mac soon" not in json.dumps(CLIPS)
     mac = " ".join(l["text"] for l in CLIPS["voiceflow_guide_step4_mac"]["lines"])
     assert "Command plus Option" in mac and "Windows" not in mac
     assert "Control plus Windows" in " ".join(l["text"] for l in CLIPS["voiceflow_guide_step4"]["lines"])
@@ -187,7 +190,7 @@ def test_one_voice_one_rate_for_every_clip() -> None:
     assert meta["voice"] == "en-US-AndrewMultilingualNeural"
     assert re.fullmatch(r"[+-]\d+%", meta["rate"])
     used = set(re.findall(r'assets/onboarding/(\w+)_mixed\.mp3', APP_JS))
-    used |= {f"scene_{i}" for i in range(1, 6)} | {"scene_2_mac"}
+    used |= {f"scene_{i}" for i in range(1, 6)}
     assert used <= set(CLIPS), used - set(CLIPS)
 
 

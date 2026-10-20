@@ -308,10 +308,11 @@ def onboarding_phase(page, win) -> None:
         note = ""
         status = "ok"
         if i == 1:
-            mac_clip = "scene_2_mac_mixed.mp3" in clips
-            mac_note = "coming to Mac soon" in text
-            status = "ok" if (mac_clip and mac_note) else "fail"
-            note = f"mac clip loaded={mac_clip} note shown={mac_note}"
+            # Video Flow works on Mac: the regular scene plays, with no "coming soon" line.
+            plain_clip = "scene_2_mixed.mp3" in clips
+            no_soon = "coming to Mac soon" not in text and "coming soon" not in text.lower()
+            status = "ok" if (plain_clip and no_soon) else "fail"
+            note = f"scene_2 clip loaded={plain_clip} no coming-soon text={no_soon}"
         if "Ctrl + Win" in text:
             status, note = "fail", note + " shows Ctrl + Win on Mac"
         record(f"onboarding: tour scene {i+1}", status, f"{note} clips={clips}", shot(page, f"onb-tour-scene-{i+1}"))
@@ -328,7 +329,17 @@ def onboarding_phase(page, win) -> None:
     page.evaluate("document.querySelector(\".sidebar .nav-item[data-page='videoflow']\").click()")
     page.wait_for_timeout(4000)
     vf_guide = page.evaluate("!document.getElementById('videoflow-guide-overlay').classList.contains('hidden')")
-    record("onboarding: no Video Flow guide on Mac", "fail" if vf_guide else "ok", f"videoflow guide visible={vf_guide}", shot(page, "onb-videoflow-no-guide"))
+    record("onboarding: Video Flow guide starts on first open (Mac)", "ok" if vf_guide else "fail", f"videoflow guide visible={vf_guide}", shot(page, "onb-videoflow-guide"))
+    if vf_guide:
+        page.evaluate("gotoVideoFlowGuideStep(4)")
+        page.wait_for_timeout(5000)
+        info = page.evaluate("""() => ({src: (_vfGuideAudioPlayer && _vfGuideAudioPlayer.currentSrc || '').split('/').pop(),
+          text: document.getElementById('videoflow-guide-overlay').innerText})""")
+        ok = info["src"] == "vf_guide_step4_mac_mixed.mp3" and "Windows" not in info["text"]
+        record("onboarding: Video Flow step 4 uses the Mac clip", "ok" if ok else "fail",
+               f"src={info['src']} text={info['text'][:200]!r}", shot(page, "onb-videoflow-guide-step4"))
+    page.evaluate("() => { try { stopVideoFlowGuide(true); } catch(e){} }")
+    page.wait_for_timeout(800)
     page.evaluate(dismiss)
     page.evaluate("document.getElementById('voiceflow-nav-toggle').click()")
     page.wait_for_timeout(4000)
@@ -347,7 +358,46 @@ def onboarding_phase(page, win) -> None:
     page.wait_for_timeout(800)
 
 
+_VF_PROC = None
+_VF_DEADLINE = time.monotonic() + 23 * 60  # inside the 25 min watchdog
+
+
+def start_video_flow_e2e() -> None:
+    """Make a real local video with the installed app's Python, in the background."""
+    global _VF_PROC
+    app = os.environ.get("APP_PATH", "/Applications/AI Productivity Flow.app")
+    res = Path(app) / "Contents" / "Resources"
+    py = res / "runtime" / "python" / "bin" / "python3"
+    driver = Path(__file__).with_name("vf_mac_driver.py")
+    if not py.is_file():
+        record("video flow e2e: start", "fail", f"bundled python missing at {py}")
+        return
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(res / "src")
+    env["AI_PRODUCTIVITY_FLOW_ROOT"] = str(res)
+    log = open(OUT / "video-flow-e2e.txt", "w")
+    _VF_PROC = subprocess.Popen([str(py), str(driver), str(OUT / "vf-e2e")], cwd=str(res), env=env,
+                                stdout=log, stderr=subprocess.STDOUT)
+    record("video flow e2e: start", "info", f"pid {_VF_PROC.pid}")
+
+
+def finish_video_flow_e2e(limit: float = 900) -> None:
+    if _VF_PROC is None:
+        return
+    try:
+        _VF_PROC.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        _VF_PROC.kill()
+    text = (OUT / "video-flow-e2e.txt").read_text(errors="replace")
+    ok = "RESULT_OK" in text
+    lines = [l for l in text.splitlines() if l.split(" ", 1)[0] in ("NODE", "FFMPEG", "FFPROBE", "NAROVA", "PREFLIGHT", "RENDER_BROWSER_ENSURE", "TITLE", "FINAL", "MP4", "PROBE")]
+    thumb = OUT / "vf-e2e" / "thumb.jpg"
+    record("video flow e2e: local video made on this Mac", "ok" if ok else "fail", " ; ".join(lines)[:1500],
+           str(thumb) if thumb.is_file() else None)
+
+
 def main() -> int:
+    start_video_flow_e2e()
     from playwright.sync_api import sync_playwright
 
     if not wait_api():
@@ -670,6 +720,9 @@ def main() -> int:
             floating_bar("after-bar-click")
             api("/api/record/toggle", {"recording": False})
 
+        # ---- Video Flow end to end (started in the background at the top)
+        finish_video_flow_e2e(limit=max(60.0, _VF_DEADLINE - time.monotonic()))
+
         # ---- native window at the end (did the real app window survive all this?)
         record("native window at end", "info", json.dumps(main_window()), native_shot("end"))
         browser.close()
@@ -689,6 +742,12 @@ if __name__ == "__main__":
     except Exception:
         record("walkthrough crashed", "error", traceback.format_exc())
     finally:
+        if not any(r["step"].startswith("video flow e2e: local") for r in results):
+            try:
+                signal.alarm(0)
+                finish_video_flow_e2e(limit=max(30.0, _VF_DEADLINE - time.monotonic()))
+            except Exception:
+                record("video flow e2e: collect", "error", traceback.format_exc())
         (OUT / "results.json").write_text(json.dumps(results, indent=2, default=str))
         (OUT / "console.json").write_text(json.dumps(console, indent=2))
         (OUT / "http-errors.json").write_text(json.dumps(http_errors, indent=2))

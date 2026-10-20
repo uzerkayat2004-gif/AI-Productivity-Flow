@@ -364,14 +364,14 @@ def test_api_me_optional_probe_is_not_an_error():
     assert sent[1][0] == 401
 
 
-def test_video_page_makes_no_render_calls_when_gated_on_mac():
+def test_video_page_analyzes_and_uploads_on_mac_too():
+    """Video Flow runs on macOS: no Mac gate before analysis or document upload."""
     js = (SRC / "voice_flow" / "gui" / "video-flow.js").read_text()
     assert 'fetch("/api/me?optional=1"' in js
     i = js.index("async function analyzeSourceDocument")
     body = js[i:i + 2000]
-    assert "vfVideoFlowGatedOnMac" in body and "!vfGated" in body
-    j = js.index('"/api/video-flow/documents/extract"')
-    assert "vfVideoFlowGatedOnMac" in js[j - 900:j]
+    assert "vfVideoFlowGatedOnMac" not in body and "vfGated" not in body
+    assert "vfVideoFlowGatedOnMac" not in js
 
 
 def test_pyobjc_classes_have_valid_selector_prototypes():

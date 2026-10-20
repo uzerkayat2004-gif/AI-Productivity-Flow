@@ -27,8 +27,14 @@ def probe_media_file(path: Path | str) -> dict[str, Any]:
     if not path_obj.is_file() or path_obj.stat().st_size <= 0:
         return {}
     try:
+        try:
+            from voice_flow import runtime_env as _rt
+
+            _probe = _rt.ffprobe_executable()
+        except Exception:
+            _probe = None
         cmd = [
-            "ffprobe",
+            str(_probe) if _probe else "ffprobe",
             "-v",
             "error",
             "-show_entries",
