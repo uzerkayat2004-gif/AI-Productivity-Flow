@@ -1,0 +1,1101 @@
+name: macOS e2e release test
+
+# Installs the published macOS release on a GitHub-hosted Apple Silicon runner
+# and exercises it the way a user would. This workflow does not modify the app.
+# Product failures are recorded in the uploaded report; the job fails only when
+# the harness itself could not install the DMG or reach a healthy backend.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release tag to install"
+        required: false
+        default: v1.0.4
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/macos-e2e-release-test.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-e2e-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-e2e:
+    name: Published macOS arm64 release
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || 'v1.0.4' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@v4
+
+      - name: Prepare output and show the runner
+        run: |
+          set -euo pipefail
+          mkdir -p out/shots out/logs out/crash out/fixtures
+          {
+            echo "runner_arch=$(uname -m)"
+            sw_vers
+            echo "---- displays ----"
+            system_profiler SPDisplaysDataType || true
+            echo "---- chrome ----"
+            ls -d "/Applications/Google Chrome.app" "$HOME/Applications/Google Chrome.app" 2>/dev/null || echo "Google Chrome.app not found"
+          } | tee out/system.txt
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "HARNESS FAIL: this job must run on Apple Silicon (got $(uname -m))" | tee out/harness-error.txt
+            exit 1
+          fi
+
+      - name: Download the published macOS assets
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"
+          echo "Downloading ${RELEASE_TAG} from ${BASE}"
+          assets=(
+            AI-Productivity-Flow-macOS.dmg
+            AI-Productivity-Flow-macOS.dmg.sha256
+            AI-Productivity-Flow-macOS.zip
+            AI-Productivity-Flow-macOS.zip.sha256
+            AI-Productivity-Flow-app-update-mac.zip
+            AI-Productivity-Flow-app-update-mac.zip.sha256
+            AI-Productivity-Flow-app-update-mac.manifest.json
+          )
+          for name in "${assets[@]}"; do
+            echo "GET $name"
+            curl -fL --retry 5 --retry-delay 2 -o "$name" "$BASE/$name"
+          done
+          ls -lh "${assets[@]}" | tee out/download-ls.txt
+
+      - name: SHA-check the DMG, zip, and app-update zip
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import hashlib, pathlib, sys
+          def digest(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as fh:
+                  for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+          def expected(path):
+              token = pathlib.Path(path).read_text(encoding="utf-8").strip().split()
+              if not token:
+                  raise SystemExit(f"empty checksum file: {path}")
+              return token[0].lower()
+          rows = []
+          failed = False
+          for name in (
+              "AI-Productivity-Flow-macOS.dmg",
+              "AI-Productivity-Flow-macOS.zip",
+              "AI-Productivity-Flow-app-update-mac.zip",
+          ):
+              got = digest(name)
+              want = expected(name + ".sha256")
+              ok = got == want
+              failed = failed or not ok
+              rows.append(f"{'PASS' if ok else 'FAIL'} {name}\n  actual   {got}\n  expected {want}")
+          text = "\n".join(rows) + "\n"
+          pathlib.Path("out/sha256.txt").write_text(text, encoding="utf-8")
+          print(text)
+          if failed:
+              sys.exit(1)
+          PY
+
+      - name: Mount the DMG, install the app, and strip quarantine
+        id: install
+        run: |
+          set -euo pipefail
+          MOUNT="/Volumes/APF-e2e"
+          hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
+          hdiutil attach AI-Productivity-Flow-macOS.dmg -nobrowse -readonly -mountpoint "$MOUNT" | tee out/mount.txt
+          APP_SRC=$(find "$MOUNT" -maxdepth 3 -name "*.app" -print -quit)
+          if [ -z "${APP_SRC:-}" ]; then
+            echo "HARNESS FAIL: no .app inside the DMG" | tee out/harness-error.txt
+            exit 1
+          fi
+          echo "Found $APP_SRC" | tee -a out/mount.txt
+          DEST="/Applications"
+          if [ ! -w "$DEST" ]; then
+            DEST="$HOME/Applications"
+            mkdir -p "$DEST"
+          fi
+          NAME=$(basename "$APP_SRC")
+          rm -rf "$DEST/$NAME"
+          ditto "$APP_SRC" "$DEST/$NAME"
+          xattr -dr com.apple.quarantine "$DEST/$NAME" || true
+          hdiutil detach "$MOUNT" || true
+          echo "APP_PATH=$DEST/$NAME" >> "$GITHUB_ENV"
+          echo "$DEST/$NAME" > out/app-path.txt
+          {
+            echo "installed=$DEST/$NAME"
+            echo "---- quarantine ----"
+            xattr -l "$DEST/$NAME" || true
+            echo "---- codesign ----"
+            codesign -dv --verbose=2 "$DEST/$NAME" 2>&1 || true
+            echo "---- spctl ----"
+            spctl -a -vv "$DEST/$NAME" 2>&1 || true
+            EXE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$DEST/$NAME/Contents/Info.plist")
+            echo "executable=$EXE"
+            file "$DEST/$NAME/Contents/MacOS/$EXE" || true
+            lipo -archs "$DEST/$NAME/Contents/MacOS/$EXE" 2>&1 || true
+            echo "---- info plist version ----"
+            /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$DEST/$NAME/Contents/Info.plist" || true
+            /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$DEST/$NAME/Contents/Info.plist" || true
+            /usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$DEST/$NAME/Contents/Info.plist" || true
+          } | tee out/install.txt
+          if xattr -l "$DEST/$NAME" 2>/dev/null | grep -q "com.apple.quarantine"; then
+            echo "FAIL quarantine still present" | tee out/quarantine.txt
+            exit 1
+          fi
+          echo "PASS quarantine attribute removed" | tee out/quarantine.txt
+
+      - name: Set up the screenshot driver
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright Chromium
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install playwright pillow
+          python -m playwright install chromium
+
+      - name: Write the end-to-end driver
+        run: |
+          cat > "$RUNNER_TEMP/macos_e2e.py" << 'PY'
+          """Drive the installed AI Productivity Flow macOS build. No app files are modified."""
+          from __future__ import annotations
+
+          import json
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+          import traceback
+          import urllib.error
+          import urllib.request
+          import wave
+          from pathlib import Path
+
+          OUT = Path("out").resolve()
+          SHOTS = OUT / "shots"
+          SHOTS.mkdir(parents=True, exist_ok=True)
+          BASE = "http://127.0.0.1:8991"
+          NOTES: list[str] = []
+          STEPS: list[dict] = []
+          N = 0
+
+
+          def save_steps() -> None:
+              (OUT / "steps.json").write_text(json.dumps(STEPS, indent=2), encoding="utf-8")
+              (OUT / "screenshot-notes.md").write_text(
+                  "# Screenshot notes\n\n" + "\n".join(f"- {line}" for line in NOTES) + "\n",
+                  encoding="utf-8",
+              )
+
+
+          def record(step: str, status: str, detail: str = "", **extra) -> None:
+              row = {"step": step, "status": status, "detail": str(detail)[:2000], **extra}
+              STEPS.append(row)
+              save_steps()
+              print(f"[{status.upper():>4}] {step}: {row['detail']}", flush=True)
+
+
+          def next_name(slug: str) -> str:
+              global N
+              N += 1
+              safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in slug)[:70].strip("-")
+              return f"{N:03d}-{safe}.png"
+
+
+          def native_capture(slug: str, note: str) -> str:
+              name = next_name(slug)
+              path = SHOTS / name
+              proc = subprocess.run(["screencapture", "-x", str(path)], capture_output=True, text=True)
+              size = path.stat().st_size if path.is_file() else 0
+              status = "pass" if proc.returncode == 0 and size > 1000 else "fail"
+              detail = f"exit={proc.returncode} bytes={size} stderr={proc.stderr.strip()[:300]}"
+              NOTES.append(f"{name}: {note} ({detail})")
+              record(f"screencapture {slug}", status, detail, shot=name)
+              return name
+
+
+          def window_list() -> list[dict]:
+              helper = OUT / "window-list"
+              if not helper.is_file():
+                  return []
+              try:
+                  raw = subprocess.run([str(helper), "windows"], capture_output=True, text=True, timeout=15).stdout
+                  data = json.loads(raw or "[]")
+                  return data if isinstance(data, list) else []
+              except Exception as exc:
+                  return [{"error": repr(exc)}]
+
+
+          def api(path: str, body: dict | None = None, timeout: float = 20.0):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(
+                  BASE + path,
+                  data=data,
+                  method="GET" if body is None else "POST",
+                  headers={"Content-Type": "application/json", "Accept": "application/json"},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as resp:
+                      raw = resp.read()
+                      try:
+                          return resp.status, json.loads(raw.decode("utf-8", "replace"))
+                      except Exception:
+                          return resp.status, raw[:500].decode("utf-8", "replace")
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read()
+                  try:
+                      parsed = json.loads(raw.decode("utf-8", "replace"))
+                  except Exception:
+                      parsed = raw[:500].decode("utf-8", "replace")
+                  return exc.code, parsed
+              except Exception as exc:
+                  return None, repr(exc)
+
+
+          def listener_pids() -> list[int]:
+              proc = subprocess.run(["lsof", "-nP", "-iTCP:8991", "-sTCP:LISTEN", "-t"], capture_output=True, text=True)
+              pids = []
+              for line in proc.stdout.split():
+                  if line.strip().isdigit():
+                      pids.append(int(line.strip()))
+              return sorted(set(pids))
+
+
+          def app_processes(app_path: str) -> str:
+              proc = subprocess.run(["ps", "-ax", "-o", "pid=,ppid=,command="], capture_output=True, text=True)
+              lines = [line.rstrip() for line in proc.stdout.splitlines() if "Productivity" in line or "voice_flow" in line or app_path in line]
+              return "\n".join(lines[:40])
+
+
+          def compile_window_helper() -> None:
+              source = OUT / "window-list.swift"
+              source.write_text(
+                  """
+          import CoreGraphics
+          import Foundation
+          let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+          var rows: [[String: Any]] = []
+          for w in list {
+            let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
+            rows.append([
+              "owner": w[kCGWindowOwnerName as String] as? String ?? "",
+              "pid": (w[kCGWindowOwnerPID as String] as? NSNumber)?.intValue ?? 0,
+              "name": w[kCGWindowName as String] as? String ?? "",
+              "id": (w[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0,
+              "layer": (w[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0,
+              "w": (b["Width"] as? NSNumber)?.doubleValue ?? 0,
+              "h": (b["Height"] as? NSNumber)?.doubleValue ?? 0,
+            ])
+          }
+          let data = try! JSONSerialization.data(withJSONObject: rows)
+          FileHandle.standardOutput.write(data)
+          """,
+                  encoding="utf-8",
+              )
+              proc = subprocess.run(["swiftc", str(source), "-o", str(OUT / "window-list")], capture_output=True, text=True)
+              record("compile window helper", "pass" if proc.returncode == 0 else "fail", (proc.stderr or proc.stdout)[:500])
+
+
+          def wait_health(seconds: int = 120) -> tuple[bool, float | None]:
+              start = time.time()
+              deadline = start + seconds
+              while time.time() < deadline:
+                  code, _body = api("/api/runtime", timeout=2)
+                  if code == 200:
+                      return True, time.time() - start
+                  time.sleep(1)
+              return False, None
+
+
+          def main_window_seen() -> bool:
+              for row in window_list():
+                  owner = str(row.get("owner", ""))
+                  name = str(row.get("name", ""))
+                  if "Productivity" in owner or "Productivity" in name or "voice" in owner.lower():
+                      if float(row.get("w") or 0) > 200 and float(row.get("h") or 0) > 200:
+                          return True
+              return False
+
+
+          def phase_launch(app_path: str) -> int | None:
+              native_capture("desktop-before-launch", "Desktop before the app is opened.")
+              started = time.time()
+              subprocess.run(["open", app_path], check=False)
+              health_ok = False
+              health_s = None
+              window_s = None
+              deadline = time.time() + 90
+              while time.time() < deadline:
+                  if health_s is None:
+                      code, _body = api("/api/runtime", timeout=2)
+                      if code == 200:
+                          health_s = time.time() - started
+                          health_ok = True
+                  if window_s is None and main_window_seen():
+                      window_s = time.time() - started
+                  if health_ok and window_s is not None:
+                      break
+                  time.sleep(1)
+              if not health_ok:
+                  exe = subprocess.run(
+                      ["/usr/libexec/PlistBuddy", "-c", "Print CFBundleExecutable", f"{app_path}/Contents/Info.plist"],
+                      capture_output=True, text=True,
+                  ).stdout.strip()
+                  record("open(1) reached backend", "fail", "no /api/runtime within 90s; launching the executable directly")
+                  log = open(OUT / "app-stdout.txt", "w", encoding="utf-8")
+                  subprocess.Popen(
+                      [f"{app_path}/Contents/MacOS/{exe}"],
+                      stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                  )
+                  health_ok, health_s = wait_health(90)
+                  if main_window_seen():
+                      window_s = health_s
+              pids = listener_pids()
+              record(
+                  "time to backend health",
+                  "pass" if health_ok else "fail",
+                  f"seconds={health_s}",
+                  seconds=health_s,
+              )
+              record(
+                  "time to main window",
+                  "pass" if window_s is not None else "fail",
+                  f"seconds={window_s} windows={json.dumps(window_list())[:800]}",
+                  seconds=window_s,
+              )
+              native_capture("native-after-launch", "Native screen after launch, before any page driving.")
+              time.sleep(8)
+              code, body = api("/api/runtime", timeout=5)
+              alive = bool(pids) and all(_pid_alive(pid) for pid in pids)
+              record(
+                  "app stays up and answers a second health check",
+                  "pass" if code == 200 and alive else "fail",
+                  f"http={code} listener_pids={pids} body={json.dumps(body, default=str)[:400]}",
+              )
+              (OUT / "launch-timing.json").write_text(json.dumps({
+                  "health_seconds": health_s,
+                  "window_seconds": window_s,
+                  "listener_pids": pids,
+              }, indent=2), encoding="utf-8")
+              return pids[0] if pids else None
+
+
+          def _pid_alive(pid: int) -> bool:
+              try:
+                  os.kill(pid, 0)
+                  return True
+              except OSError:
+                  return False
+
+
+          def phase_single_instance(app_path: str, listener: int | None) -> None:
+              before = listener_pids()
+              before_ps = app_processes(app_path)
+              subprocess.run(["open", app_path], check=False)
+              time.sleep(8)
+              after = listener_pids()
+              after_ps = app_processes(app_path)
+              (OUT / "processes-before-second-open.txt").write_text(before_ps + "\n", encoding="utf-8")
+              (OUT / "processes-after-second-open.txt").write_text(after_ps + "\n", encoding="utf-8")
+              one_listener = len(after) == 1 and (listener is None or after == [listener] or after == before)
+              record(
+                  "second open keeps a single backend instance",
+                  "pass" if one_listener else "fail",
+                  f"before={before} after={after}",
+              )
+              code, _body = api("/api/runtime", timeout=5)
+              record(
+                  "backend still healthy after second open",
+                  "pass" if code == 200 else "fail",
+                  f"http={code}",
+              )
+
+
+          def phase_updater_api() -> None:
+              code, body = api("/api/updates/check?force=1", timeout=30)
+              (OUT / "updates-check.json").write_text(json.dumps(body, indent=2, default=str), encoding="utf-8")
+              current = ""
+              latest = ""
+              available = None
+              if isinstance(body, dict):
+                  current = str(body.get("current_version") or "")
+                  latest = str(body.get("latest_version") or "")
+                  available = body.get("update_available")
+              up_to_date = current == "1.0.4" and available is False and latest.split("-")[0] == "1.0.4"
+              record(
+                  "updater reports v1.0.4 is up to date",
+                  "pass" if code == 200 and up_to_date else "fail",
+                  f"http={code} current={current} latest={latest} update_available={available}",
+              )
+              code_v, version_body = api("/api/version", timeout=15)
+              (OUT / "api-version.json").write_text(json.dumps(version_body, indent=2, default=str), encoding="utf-8")
+              record("GET /api/version", "pass" if code_v == 200 else "fail", json.dumps(version_body, default=str)[:500])
+
+
+          def shot(page, slug: str, note: str, full: bool = False) -> None:
+              name = next_name(slug)
+              try:
+                  page.screenshot(path=str(SHOTS / name), full_page=full)
+                  NOTES.append(f"{name}: {note}")
+                  record(f"screenshot {slug}", "pass", note, shot=name)
+              except Exception as exc:
+                  NOTES.append(f"{name}: FAILED {note} ({exc})")
+                  record(f"screenshot {slug}", "fail", f"{note} {exc}")
+
+
+          def js(page, script: str, arg=None):
+              try:
+                  if arg is None:
+                      return page.evaluate(script)
+                  return page.evaluate(script, arg)
+              except Exception as exc:
+                  return {"__error": str(exc).splitlines()[-1][:400]}
+
+
+          def phase_pages() -> None:
+              from playwright.sync_api import sync_playwright
+
+              native_capture("native-before-pages", "Native screen while the real app window is up, before the headless page tour.")
+              with sync_playwright() as pw:
+                  browser = pw.chromium.launch(headless=True)
+                  page = browser.new_page(viewport={"width": 1440, "height": 900}, device_scale_factor=1)
+                  page.goto(BASE + "/index.html", wait_until="load", timeout=60000)
+                  page.wait_for_timeout(4000)
+                  record("app UI loaded from its own URL", "pass", page.title())
+
+                  js(page, "() => { try { stopOnboardingNarration(); } catch (e) {} }")
+                  for i in range(5):
+                      js(page, "(i) => { if (typeof replayOnboarding === 'function' && i === 0) replayOnboarding(); if (typeof gotoOnboardingSlide === 'function') gotoOnboardingSlide(i); }", i)
+                      page.wait_for_timeout(1200)
+                      js(page, "() => { try { stopOnboardingNarration(); } catch (e) {} }")
+                      text = js(page, "() => (document.getElementById('onboarding-overlay') || document.body).innerText.slice(0, 500)")
+                      note = f"Onboarding tour scene {i + 1}."
+                      if i == 1:
+                          mac = isinstance(text, str) and "coming to Mac" in text
+                          record("onboarding scene 2 says Video Flow is coming to Mac", "pass" if mac else "fail", str(text)[:300])
+                          note += " Scene 2 should say Video Flow is coming to Mac."
+                      shot(page, f"onboarding-scene-{i + 1}", note)
+                      if i == 0:
+                          subprocess.run(["open", os.environ.get("APP_PATH", "")], check=False)
+                          native_capture("native-onboarding", "Native screen during first launch. The real window is usually still on the welcome tour because hosted runners often refuse assistive clicks.")
+
+                  js(page, """() => {
+                    try { finishOnboarding({skipped: true}); } catch (e) {}
+                    try { stopAudioFlowGuide(true); } catch (e) {}
+                    try { stopVoiceFlowGuide(true); } catch (e) {}
+                    try { stopVideoFlowGuide(true); } catch (e) {}
+                  }""")
+                  page.wait_for_timeout(600)
+
+                  guide_plan = [
+                      ("audio", "startAudioFlowGuide", "gotoAudioFlowGuideStep", 4, "Audio Flow feature guide"),
+                      ("voice", "startVoiceFlowGuide", "gotoVoiceFlowGuideStep", 4, "Voice Flow feature guide"),
+                  ]
+                  for slug, start, goto, count, label in guide_plan:
+                      started = js(page, f"() => {{ if (typeof {start} === 'function') {{ {start}(); return 'started'; }} return 'missing'; }}")
+                      record(f"{label} start", "pass" if started == "started" else "fail", str(started))
+                      for step in range(1, count + 1):
+                          js(page, f"(n) => {{ if (typeof {goto} === 'function') {goto}(n); }}", step)
+                          page.wait_for_timeout(700)
+                          js(page, "() => { try { stopAudioFlowGuideAudio && stopAudioFlowGuideAudio(); } catch (e) {} try { stopVoiceFlowGuideAudio && stopVoiceFlowGuideAudio(); } catch (e) {} }")
+                          title = js(page, """() => {
+                            const ids = ['af-guide-title','voiceflow-guide-title','vf-guide-title'];
+                            for (const id of ids) { const el = document.getElementById(id); if (el && el.innerText.trim()) return el.innerText.trim(); }
+                            const card = document.querySelector('#audioflow-guide-overlay:not(.hidden), #voiceflow-guide-overlay:not(.hidden)');
+                            return card ? card.innerText.slice(0, 180) : '';
+                          }""")
+                          shot(page, f"guide-{slug}-step-{step}", f"{label} step {step} of {count}. {title}")
+                      stop_call = "stopAudioFlowGuide(true)" if slug == "audio" else "stopVoiceFlowGuide(true)"
+                      js(page, "() => { try { " + stop_call + "; } catch (e) {} }")
+
+                  video_start = js(page, """() => {
+                    if (typeof switchPage === 'function') switchPage('videoflow');
+                    if (typeof vfApplyMacVideoFlowGate === 'function') vfApplyMacVideoFlowGate();
+                    const before = document.getElementById('videoflow-guide-overlay');
+                    const wasHidden = !before || before.classList.contains('hidden');
+                    if (typeof startVideoFlowGuide === 'function') startVideoFlowGuide();
+                    const overlay = document.getElementById('videoflow-guide-overlay');
+                    const guideOpen = !!overlay && !overlay.classList.contains('hidden');
+                    const text = (document.getElementById('page-videoflow') || document.body).innerText;
+                    return {wasHidden, guideOpen, coming: text.includes('coming to Mac'), text: text.slice(0, 400)};
+                  }""")
+                  (OUT / "video-guide-result.json").write_text(json.dumps(video_start, indent=2, default=str), encoding="utf-8")
+                  coming = isinstance(video_start, dict) and video_start.get("coming") is True
+                  guide_blocked = isinstance(video_start, dict) and video_start.get("guideOpen") is False
+                  record("Video Flow page says coming to Mac", "pass" if coming else "fail", json.dumps(video_start, default=str)[:500])
+                  record("Video Flow feature guide does not open on Mac", "pass" if guide_blocked else "fail", json.dumps(video_start, default=str)[:500])
+                  shot(page, "video-flow-coming-to-mac", "Video Flow page on Mac, including the coming-to-Mac note. The feature guide stays closed.")
+
+                  pages = [
+                      ("home", "Home"),
+                      ("insights", "Insights"),
+                      ("dictionary", "Dictionary"),
+                      ("style", "Style"),
+                      ("providers", "Voice Flow"),
+                      ("audioflow", "Audio Flow"),
+                      ("videoflow", "Video Flow"),
+                  ]
+                  for theme in ("light", "dark"):
+                      js(page, """(theme) => {
+                        if (typeof paintTheme === 'function') paintTheme(theme);
+                        else document.documentElement.setAttribute('data-theme', theme);
+                        try { finishOnboarding({skipped:true}); } catch (e) {}
+                        try { stopAudioFlowGuide(true); } catch (e) {}
+                        try { stopVoiceFlowGuide(true); } catch (e) {}
+                        try { stopVideoFlowGuide(true); } catch (e) {}
+                        try { closeSettings(); } catch (e) {}
+                      }""", theme)
+                      page.wait_for_timeout(400)
+                      for pid, label in pages:
+                          js(page, "(pid) => { if (typeof switchPage === 'function') switchPage(pid); }", pid)
+                          page.wait_for_timeout(500)
+                          shot(page, f"page-{pid}-{theme}", f"{label} page in {theme} mode, served by the installed app.")
+                      for tab, label in (("general", "General"), ("system", "System"), ("account", "Account")):
+                          js(page, "(tab) => { if (typeof openSettings === 'function') openSettings(tab); }", tab)
+                          page.wait_for_timeout(500)
+                          shot(page, f"settings-{tab}-{theme}", f"Settings, {label} tab, {theme} mode.")
+                          if tab == "system":
+                              js(page, """() => {
+                                const titles = [...document.querySelectorAll('.preference-section-title')];
+                                const about = titles.find(t => /About/.test(t.textContent || ''));
+                                if (about) about.scrollIntoView({block: 'start'});
+                              }""")
+                              page.wait_for_timeout(300)
+                              about = js(page, """() => ({
+                                version: (document.querySelector('.about-version-badge') || {}).textContent || '',
+                                build: (document.querySelector('.about-build-id') || {}).textContent || '',
+                                privacy: (document.getElementById('crash-reports-privacy-copy') || {}).textContent || ''
+                              })""")
+                              record(f"About & Updates visible ({theme})", "pass" if isinstance(about, dict) and "1.0" in str(about.get("version")) else "fail", json.dumps(about))
+                              shot(page, f"settings-about-updates-{theme}", f"Settings system tab scrolled to About & Updates, {theme} mode. Badge text: {about}")
+                              js(page, """() => { const row = document.getElementById('privacy-crash-row'); if (row) row.scrollIntoView({block: 'center'}); }""")
+                              page.wait_for_timeout(200)
+                              shot(page, f"settings-privacy-{theme}", f"Settings Privacy row (crash reports) in {theme} mode.")
+                      js(page, "() => { try { closeSettings(); } catch (e) {} }")
+                      js(page, """() => {
+                        if (typeof switchPage === 'function') switchPage('providers');
+                        const card = document.getElementById('vf-first-run-models');
+                        if (card) { card.classList.remove('hidden'); card.hidden = false; }
+                        const bell = document.getElementById('vf-notice-bell');
+                        if (bell) bell.hidden = false;
+                      }""")
+                      page.wait_for_timeout(400)
+                      copy = js(page, "() => (document.getElementById('vf-first-run-models-copy') || {}).textContent || ''")
+                      record(f"Voice Flow model notice card ({theme})", "pass" if isinstance(copy, str) and "Whisper" in copy else "fail", str(copy)[:300])
+                      shot(page, f"voice-model-notice-{theme}", f"Voice Flow model notice card on the Voice Flow page, {theme} mode.")
+
+                  browser.close()
+              native_capture("native-after-pages", "Native screen after the headless page tour. The real window was not clicked through.")
+
+
+          def phase_notebooklm() -> None:
+              status_code, status = api("/api/video-flow/notebooklm/status", timeout=20)
+              (OUT / "notebooklm-status-before.json").write_text(json.dumps(status, indent=2, default=str), encoding="utf-8")
+              record("NotebookLM status before sign-in", "pass" if status_code == 200 else "fail", json.dumps(status, default=str)[:600])
+              before_windows = window_list()
+              before_pids = set(_matching_pids("Chrome|Chromium|Microsoft Edge|Safari|playwright|notebooklm"))
+              code, body = api("/api/video-flow/notebooklm/auth/start", {
+                  "profile": "video-flow-experiment",
+                  "mode": "cli",
+                  "direct": True,
+                  "browser": "chrome",
+                  "browser_timeout": 90,
+                  "switch_account": False,
+              }, timeout=30)
+              (OUT / "notebooklm-start.json").write_text(json.dumps(body, indent=2, default=str), encoding="utf-8")
+              launched = isinstance(body, dict) and bool(body.get("launched") or body.get("success"))
+              record("NotebookLM login spawn accepted", "pass" if code == 200 and launched else "fail", f"http={code} body={json.dumps(body, default=str)[:700]}")
+              opened = False
+              last_state = None
+              if not launched:
+                  record("NotebookLM login opened a browser window", "fail", "spawn was not accepted, so no browser was expected")
+              for _ in range(0 if not launched else 15):
+                  time.sleep(2)
+                  _state_code, last_state = api("/api/video-flow/notebooklm/auth/state", timeout=10)
+                  windows = window_list()
+                  new_windows = [w for w in windows if w not in before_windows and _looks_like_browser(w)]
+                  new_pids = set(_matching_pids("Chrome|Chromium|Microsoft Edge|Safari|playwright|notebooklm")) - before_pids
+                  window_flag = isinstance(last_state, dict) and isinstance(last_state.get("login"), dict) and last_state["login"].get("window_opened") is True
+                  if new_windows or new_pids or window_flag:
+                      opened = True
+                      record("NotebookLM login opened a browser window", "pass", f"new_windows={new_windows[:4]} new_pids={sorted(new_pids)} state={json.dumps(last_state, default=str)[:500]}")
+                      break
+              if not opened:
+                  record("NotebookLM login opened a browser window", "fail", f"state={json.dumps(last_state, default=str)[:800]} windows={json.dumps(window_list())[:800]}")
+              native_capture("notebooklm-login-screen", "Native screen while the NotebookLM sign-in spawn is in progress. No Google account is entered.")
+              health, _health_body = api("/api/runtime", timeout=5)
+              record("app stays alive during NotebookLM sign-in", "pass" if health == 200 else "fail", f"http={health}")
+              cancel_code, cancel_body = api("/api/video-flow/notebooklm/auth/cancel", {"profile": "video-flow-experiment"}, timeout=20)
+              (OUT / "notebooklm-cancel.json").write_text(json.dumps(cancel_body, indent=2, default=str), encoding="utf-8")
+              record("NotebookLM sign-in cancelled without signing in", "pass" if cancel_code == 200 else "fail", f"http={cancel_code} body={json.dumps(cancel_body, default=str)[:400]}")
+              subprocess.run(["osascript", "-e", 'tell application "Google Chrome" to quit'], check=False)
+              time.sleep(1)
+
+
+          def _looks_like_browser(row: dict) -> bool:
+              text = f"{row.get('owner', '')} {row.get('name', '')}".lower()
+              return any(token in text for token in ("chrome", "chromium", "edge", "safari", "playwright", "notebook"))
+
+
+          def _matching_pids(pattern: str) -> list[int]:
+              proc = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True)
+              import re
+              found = []
+              rx = re.compile(pattern, re.I)
+              for line in proc.stdout.splitlines():
+                  parts = line.strip().split(None, 1)
+                  if len(parts) == 2 and parts[0].isdigit() and rx.search(parts[1]):
+                      found.append(int(parts[0]))
+              return found
+
+
+          def stop_app(listener: int | None) -> None:
+              if listener:
+                  try:
+                      os.kill(listener, signal.SIGTERM)
+                  except OSError:
+                      pass
+              subprocess.run(["pkill", "-f", "AI Productivity Flow.app/Contents"], check=False)
+              deadline = time.time() + 25
+              while time.time() < deadline and listener_pids():
+                  time.sleep(1)
+              if listener_pids():
+                  subprocess.run(["pkill", "-9", "-f", "AI Productivity Flow.app/Contents"], check=False)
+                  time.sleep(2)
+              record("app stopped before the offline transcriber run", "pass" if not listener_pids() else "fail", f"listeners={listener_pids()}")
+
+
+          def write_wav(path: Path, samples: list[int], rate: int = 16000) -> None:
+              path.parent.mkdir(parents=True, exist_ok=True)
+              with wave.open(str(path), "w") as handle:
+                  handle.setnchannels(1)
+                  handle.setsampwidth(2)
+                  handle.setframerate(rate)
+                  import struct
+                  handle.writeframes(b"".join(struct.pack("<h", max(-32767, min(32767, s))) for s in samples))
+
+
+          def make_fixtures() -> None:
+              speech = OUT / "fixtures" / "speech.wav"
+              say = subprocess.run(
+                  ["say", "-v", "Samantha", "-o", str(speech), "--data-format=LEI16@16000",
+                   "The trial period ends in May. Please email the design team about the meeting tomorrow."],
+                  capture_output=True, text=True,
+              )
+              if say.returncode != 0 or not speech.is_file():
+                  aiff = OUT / "fixtures" / "speech.aiff"
+                  subprocess.run(["say", "-v", "Samantha", "-o", str(aiff), "The trial period ends in May. Please email the design team about the meeting tomorrow."], check=False)
+                  subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", str(aiff), str(speech)], check=False)
+              record("speech WAV fixture", "pass" if speech.is_file() and speech.stat().st_size > 1000 else "fail", f"say_exit={say.returncode} bytes={speech.stat().st_size if speech.is_file() else 0} stderr={say.stderr[:200]}")
+              rate = 16000
+              write_wav(OUT / "fixtures" / "silence.wav", [0] * (rate * 3))
+              import random
+              noise = [int(random.Random(1).uniform(-1200, 1200)) for _ in range(rate * 3)]
+              write_wav(OUT / "fixtures" / "noise.wav", noise)
+              record("silence and noise fixtures", "pass", "3s silence and 3s low-level noise at 16 kHz")
+
+
+          def bundled_python(app_path: str) -> tuple[str, dict]:
+              resources = Path(app_path) / "Contents" / "Resources"
+              python = resources / "runtime" / "python" / "bin" / "python3"
+              env = os.environ.copy()
+              env["PYTHONDONTWRITEBYTECODE"] = "1"
+              env["PYTHONPATH"] = os.pathsep.join([
+                  str(resources / "src"),
+                  str(resources / "runtime" / "site-packages"),
+                  str(resources / "runtime" / "python" / "lib" / "python3.11" / "site-packages"),
+                  env.get("PYTHONPATH", ""),
+              ])
+              env["PATH"] = str(resources / "runtime" / "python" / "bin") + os.pathsep + env.get("PATH", "")
+              env["VOICE_FLOW_DATA_DIR"] = str(OUT / "transcriber-home")
+              return str(python), env
+
+
+          def phase_transcribe(app_path: str) -> None:
+              make_fixtures()
+              python, env = bundled_python(app_path)
+              if not Path(python).is_file():
+                  record("installed transcriber pipeline", "fail", f"bundled python missing at {python}")
+                  return
+              script = OUT / "transcribe_probe.py"
+              script.write_text(TRANSCRIBE_PROBE, encoding="utf-8")
+              proc = subprocess.run([python, str(script), str(OUT / "fixtures"), str(OUT / "transcribe.json")], cwd=str(Path.home()), env=env, capture_output=True, text=True, timeout=600)
+              (OUT / "transcribe-stdout.txt").write_text(proc.stdout[-20000:], encoding="utf-8")
+              (OUT / "transcribe-stderr.txt").write_text(proc.stderr[-20000:], encoding="utf-8")
+              if proc.returncode != 0 or not (OUT / "transcribe.json").is_file():
+                  record("installed transcriber pipeline", "fail", f"exit={proc.returncode} stderr={proc.stderr[-800:]}")
+                  return
+              report = json.loads((OUT / "transcribe.json").read_text(encoding="utf-8"))
+              for row in report.get("clips", []):
+                  record(
+                      f"transcribe {row.get('name')}",
+                      row.get("status", "fail"),
+                      f"seconds={row.get('seconds')} audio_seconds={row.get('audio_seconds')} text={row.get('text')!r} repeated={row.get('repeated')} known_copies={row.get('known_copies')}",
+                      seconds=row.get("seconds"),
+                  )
+              record("transcriber model", "info", json.dumps(report.get("model"), default=str)[:500])
+
+
+          def phase_dry_run(app_path: str) -> None:
+              python, env = bundled_python(app_path)
+              token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+              if token:
+                  env["GH_TOKEN"] = token
+              script = OUT / "update_dry_run.py"
+              script.write_text(UPDATE_PROBE, encoding="utf-8")
+              proc = subprocess.run(
+                  [python, str(script), app_path, os.environ.get("RELEASE_TAG", "v1.0.4"), os.environ.get("GITHUB_REPOSITORY", ""), str(OUT / "update-dry-run.json")],
+                  cwd=str(Path.home()), env=env, capture_output=True, text=True, timeout=120,
+              )
+              (OUT / "update-dry-run-stdout.txt").write_text(proc.stdout[-20000:], encoding="utf-8")
+              (OUT / "update-dry-run-stderr.txt").write_text(proc.stderr[-8000:], encoding="utf-8")
+              path = OUT / "update-dry-run.json"
+              if proc.returncode != 0 or not path.is_file():
+                  record("dry-run app-only update plan", "fail", f"exit={proc.returncode} stderr={proc.stderr[-600:]}")
+                  return
+              body = json.loads(path.read_text(encoding="utf-8"))
+              kind = ((body.get("described") or {}).get("update_plan") or {}).get("kind")
+              record(
+                  "dry-run app-only update plan",
+                  "pass" if kind == "app" else "fail",
+                  json.dumps(body.get("described", {}).get("update_plan"), default=str)[:800],
+              )
+              record("dry-run did not replace the installed app", "pass" if body.get("app_mtime_unchanged") else "fail", f"mtime_unchanged={body.get('app_mtime_unchanged')}")
+
+
+          def phase_hark(app_path: str) -> None:
+              python, env = bundled_python(app_path)
+              script = OUT / "hark_probe.py"
+              script.write_text(HARK_PROBE, encoding="utf-8")
+              proc = subprocess.run([python, str(script), app_path, str(OUT / "hark-installed.json")], cwd=str(Path.home()), env=env, capture_output=True, text=True, timeout=120)
+              (OUT / "hark-probe-stdout.txt").write_text(proc.stdout[-20000:], encoding="utf-8")
+              (OUT / "hark-probe-stderr.txt").write_text(proc.stderr[-8000:], encoding="utf-8")
+              record("installed-app Hark probe", "pass" if proc.returncode == 0 else "fail", f"exit={proc.returncode} stderr={proc.stderr[-400:]}")
+
+
+          def phase_logs(app_path: str) -> None:
+              home = Path.home() / ".voice_flow"
+              log_dir = OUT / "logs"
+              if home.is_dir():
+                  for path in home.rglob("*"):
+                      if not path.is_file() or path.stat().st_size > 8_000_000:
+                          continue
+                      name = path.name.lower()
+                      if any(token in name for token in ("cookie", "token", "storage_state", "secret")):
+                          continue
+                      if path.suffix.lower() not in {".log", ".txt", ".json"} and "log" not in name:
+                          continue
+                      target = log_dir / (path.name if not (log_dir / path.name).exists() else f"{path.parent.name}-{path.name}")
+                      try:
+                          target.write_bytes(path.read_bytes())
+                      except OSError:
+                          pass
+                  (log_dir / "data-dir-listing.txt").write_text("\n".join(str(p.relative_to(home)) for p in home.rglob("*")), encoding="utf-8")
+              bundle_logs = list(Path(app_path).rglob("voice_flow_debug.log")) + list(Path(app_path).rglob("crash_log.txt"))
+              record("app bundle was not used as the log directory", "pass" if not bundle_logs else "fail", ", ".join(str(p) for p in bundle_logs) or "no debug log inside the bundle")
+              crash_dir = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+              copied = []
+              if crash_dir.is_dir():
+                  for path in crash_dir.iterdir():
+                      if path.is_file() and path.stat().st_size < 5_000_000:
+                          dest = OUT / "crash" / path.name
+                          try:
+                              dest.write_bytes(path.read_bytes())
+                              copied.append(path.name)
+                          except OSError:
+                              pass
+              (OUT / "crash-list.txt").write_text("\n".join(copied) or "(none)\n", encoding="utf-8")
+              record("crash reports collected", "info", ", ".join(copied) or "none")
+
+
+          def write_summary() -> None:
+              counts: dict[str, int] = {}
+              for row in STEPS:
+                  counts[row["status"]] = counts.get(row["status"], 0) + 1
+              lines = ["# macOS v1.0.4 end-to-end results", "", f"counts: {counts}", "", "| step | status | detail |", "|---|---|---|"]
+              for row in STEPS:
+                  detail = row["detail"].replace("\n", " ").replace("|", "/")
+                  lines.append(f"| {row['step']} | {row['status']} | {detail[:240]} |")
+              (OUT / "SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+              harness_fail = any(
+                  row["status"] == "fail" and row["step"] in {
+                      "time to backend health",
+                      "SHA-check is recorded outside this script",
+                  }
+                  for row in STEPS
+              )
+              health = next((row for row in STEPS if row["step"] == "time to backend health"), None)
+              (OUT / "harness.json").write_text(json.dumps({
+                  "backend_healthy": bool(health and health["status"] == "pass"),
+                  "step_counts": counts,
+              }, indent=2), encoding="utf-8")
+              if harness_fail:
+                  print("harness marked a critical failure", flush=True)
+
+
+          TRANSCRIBE_PROBE = r'''
+          import json, os, sys, time, wave
+          from pathlib import Path
+          os.environ["HF_HUB_OFFLINE"] = "1"
+          import numpy as np
+          from voice_flow.transcriber import Transcriber
+          from voice_flow.stt_guard import known_phrase_copies, repeated_sentence
+          from voice_flow import runtime_env
+
+          fixtures = Path(sys.argv[1])
+          dest = Path(sys.argv[2])
+
+          def load_wav(path):
+              with wave.open(str(path)) as handle:
+                  rate = handle.getframerate()
+                  channels = handle.getnchannels()
+                  width = handle.getsampwidth()
+                  raw = handle.readframes(handle.getnframes())
+              if width != 2:
+                  raise RuntimeError(f"{path} sample width {width}")
+              audio = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+              if channels > 1:
+                  audio = audio.reshape(-1, channels).mean(axis=1)
+              if rate != 16000 and len(audio):
+                  target = max(1, int(len(audio) * 16000 / rate))
+                  audio = np.interp(np.linspace(0, len(audio) - 1, target), np.arange(len(audio)), audio).astype(np.float32)
+              return np.ascontiguousarray(audio, dtype=np.float32)
+
+          bundled = runtime_env.whisper_model_path()
+          if bundled is None:
+              dest.write_text(json.dumps({"model": None, "clips": [], "error": "bundled whisper model missing"}), encoding="utf-8")
+              raise SystemExit("bundled base.en model was not in the app")
+          engine = Transcriber()
+          warmup = load_wav(fixtures / "silence.wav")[:16000]
+          started = time.perf_counter()
+          engine.transcribe(warmup, model_ref="local/faster-whisper-base.en")
+          warmup_seconds = round(time.perf_counter() - started, 3)
+          print(json.dumps({"name": "warmup", "seconds": warmup_seconds}), flush=True)
+          clips = [{"name": "warmup", "status": "info", "seconds": warmup_seconds, "audio_seconds": 1.0, "text": "", "repeated": None, "known_copies": 0}]
+          for name in ("silence", "speech", "noise"):
+              audio = load_wav(fixtures / f"{name}.wav")
+              started = time.perf_counter()
+              text = engine.transcribe(audio, model_ref="local/faster-whisper-base.en")
+              elapsed = time.perf_counter() - started
+              text = str(text or "").strip()
+              repeated = repeated_sentence(text)
+              known = known_phrase_copies(text)
+              audio_seconds = float(len(audio) / 16000.0)
+              ok = repeated is None and known < 3
+              if name == "speech":
+                  ok = ok and bool(text) and "thank you for watching" not in text.lower()
+              else:
+                  ok = ok and known == 0 and not text.lower().startswith("thank")
+              clips.append({
+                  "name": name,
+                  "status": "pass" if ok else "fail",
+                  "seconds": round(elapsed, 3),
+                  "audio_seconds": round(audio_seconds, 3),
+                  "text": text,
+                  "repeated": repeated,
+                  "known_copies": known,
+              })
+              print(json.dumps(clips[-1]), flush=True)
+          dest.write_text(json.dumps({"model": str(bundled), "clips": clips}, indent=2), encoding="utf-8")
+          '''
+
+          UPDATE_PROBE = r'''
+          import json, os, sys, urllib.request
+          from pathlib import Path
+          from voice_flow.app_updater import describe_update
+
+          app_path, tag, repo, dest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          marker = Path(app_path) / "Contents" / "Info.plist"
+          before = marker.stat().st_mtime_ns
+          url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+          headers = {"User-Agent": "AI-Productivity-Flow-e2e", "Accept": "application/vnd.github+json"}
+          token = os.environ.get("GH_TOKEN") or ""
+          if token:
+              headers["Authorization"] = f"Bearer {token}"
+          req = urllib.request.Request(url, headers=headers)
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              payload = json.loads(resp.read().decode())
+          described = describe_update(payload.get("assets") or [], platform="mac")
+          after = marker.stat().st_mtime_ns
+          out = {
+              "tag": payload.get("tag_name"),
+              "described": described,
+              "app_mtime_unchanged": before == after,
+          }
+          Path(dest).write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
+          plan = (described or {}).get("update_plan") or {}
+          print(json.dumps({k: plan.get(k) for k in ("kind", "asset_name", "reason", "runtime_changed")}, default=str))
+          '''
+
+          HARK_PROBE = r'''
+          import json, sys
+          from pathlib import Path
+          from voice_flow.text_processing import apply_spoken_punctuation, collapse_stutter_fragments
+
+          app_path = Path(sys.argv[1])
+          phrases = [
+              "the trial period ends in May",
+              "a comma separated list",
+              "new line of products",
+              "what a question mark on his face",
+              "send it today period",
+          ]
+          stutters = [
+              "My. Ag. My agent",
+              "Q? Q. Quest? Question.",
+              "So the plan is. Is to ship. Ship on Friday.",
+          ]
+          src = app_path / "Contents" / "Resources" / "src"
+          needles = {
+              "bundle_debug_log": "voice_flow_debug.log",
+              "google_fonts": "fonts.googleapis.com",
+              "include_local_variables": "include_local_variables",
+              "private_mode": "private_mode",
+              "no_proxy": "NO_PROXY",
+              "windll": "ctypes.windll",
+          }
+          hits = {key: [] for key in needles}
+          if src.is_dir():
+              for path in src.rglob("*"):
+                  if path.suffix.lower() not in {".py", ".js", ".html"} or path.stat().st_size > 2_000_000:
+                      continue
+                  try:
+                      text = path.read_text(encoding="utf-8", errors="ignore")
+                  except OSError:
+                      continue
+                  for key, needle in needles.items():
+                      if needle in text:
+                          hits[key].append(str(path.relative_to(src)))
+          report = {
+              "spoken_punctuation": {phrase: apply_spoken_punctuation(phrase) for phrase in phrases},
+              "stutter": {phrase: collapse_stutter_fragments(phrase) for phrase in stutters},
+              "source_hits": {key: values[:12] for key, values in hits.items()},
+          }
+          Path(sys.argv[2]).write_text(json.dumps(report, indent=2), encoding="utf-8")
+          print(json.dumps(report["spoken_punctuation"], indent=2))
+          print(json.dumps(report["stutter"], indent=2))
+          '''
+
+
+          def main() -> int:
+              app_path = os.environ["APP_PATH"]
+              compile_window_helper()
+              listener = phase_launch(app_path)
+              if listener is None:
+                  write_summary()
+                  return 0
+              phase_single_instance(app_path, listener)
+              phase_updater_api()
+              try:
+                  phase_pages()
+              except Exception:
+                  record("page screenshots", "fail", traceback.format_exc()[-1500:])
+              try:
+                  phase_notebooklm()
+              except Exception:
+                  record("NotebookLM login spawn", "fail", traceback.format_exc()[-1500:])
+              phase_logs(app_path)
+              stop_app(listener)
+              try:
+                  phase_hark(app_path)
+              except Exception:
+                  record("installed-app Hark probe", "fail", traceback.format_exc()[-1500:])
+              try:
+                  phase_dry_run(app_path)
+              except Exception:
+                  record("dry-run app-only update plan", "fail", traceback.format_exc()[-1500:])
+              try:
+                  phase_transcribe(app_path)
+              except Exception:
+                  record("installed transcriber pipeline", "fail", traceback.format_exc()[-1500:])
+              phase_logs(app_path)
+              write_summary()
+              return 0
+
+
+          if __name__ == "__main__":
+              try:
+                  raise SystemExit(main())
+              except Exception:
+                  record("driver crashed", "fail", traceback.format_exc()[-2000:])
+                  write_summary()
+                  raise
+          PY
+          python -m py_compile "$RUNNER_TEMP/macos_e2e.py"
+
+      - name: Launch, exercise, and record the installed app
+        run: |
+          set -euo pipefail
+          # Keep the GUI session awake for screencapture and the login window.
+          caffeinate -dimsu -t 5400 >/dev/null 2>&1 &
+          python "$RUNNER_TEMP/macos_e2e.py"
+
+      - name: Collect runner diagnostics
+        if: always()
+        run: |
+          set +e
+          mkdir -p out/logs out/crash
+          find "$HOME/.voice_flow" -type f \( -name "*.log" -o -name "*.txt" \) -size -8M -exec cp {} out/logs/ \;
+          cp "$HOME/Library/Logs/DiagnosticReports/"* out/crash/ 2>/dev/null || true
+          ls -la out out/shots out/logs out/crash > out/artifact-listing.txt 2>&1 || true
+          echo "steps:" 
+          python3 - << 'PY' || true
+          import json
+          from pathlib import Path
+          p = Path("out/steps.json")
+          if not p.is_file():
+              print("no steps.json")
+              raise SystemExit
+          for row in json.loads(p.read_text()):
+              print(f"{row['status'].upper():4} {row['step']}: {row['detail'][:180]}")
+          PY
+
+      - name: Upload screenshots, logs, and the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-e2e-${{ github.run_id }}
+          path: |
+            out/**
+            !out/window-list
+            !out/window-list.swift
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail the job when the harness could not test the app
+        if: always()
+        run: |
+          python3 - << 'PY'
+          import json, sys
+          from pathlib import Path
+          harness = Path("out/harness.json")
+          sha = Path("out/sha256.txt")
+          install = Path("out/install.txt")
+          problems = []
+          if not sha.is_file() or "FAIL" in sha.read_text():
+              problems.append("DMG/zip SHA check did not pass")
+          if not install.is_file():
+              problems.append("app was not installed")
+          if not harness.is_file() or not json.loads(harness.read_text()).get("backend_healthy"):
+              problems.append("backend never became healthy")
+          if problems:
+              print("HARNESS FAILED")
+              for item in problems:
+                  print(" -", item)
+              sys.exit(1)
+          print("Harness completed. Product results are in out/SUMMARY.md.")
+          PY
