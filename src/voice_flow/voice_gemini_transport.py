@@ -94,7 +94,7 @@ class _GeminiSession:
                 pass
         self.connection = None
 
-    def request_locked(self, model: str, prompt: str, timeout_seconds: float, speed_mode: object = "balanced") -> str | None:
+    def request_locked(self, model: str, prompt: str, timeout_seconds: float, speed_mode: object = "balanced", system_prompt: str | None = None) -> str | None:
         """Run while the cache lease (``lock``) is held by the caller."""
         started_at = time.monotonic()
         status = "network_error"
@@ -134,10 +134,13 @@ class _GeminiSession:
                 generation_config["thinkingConfig"] = {
                     "thinkingLevel": thinking_level
                 }
-            body = json.dumps({
+            payload = {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": generation_config,
-            }).encode("utf-8")
+            }
+            if system_prompt is not None:
+                payload["system_instruction"] = {"parts": [{"text": system_prompt}]}
+            body = json.dumps(payload).encode("utf-8")
             path = "/v1beta/models/" + quote(model, safe="/-_.") + ":generateContent"
             set_remaining_timeout()
             self.connection.request("POST", path, body=body, headers={
@@ -183,7 +186,8 @@ class _GeminiSession:
 
 
 def request_gemini_polish(
-    *, api_key: str, model: str, prompt: str, timeout_seconds: float, speed_mode: object = "balanced"
+    *, api_key: str, model: str, prompt: str, timeout_seconds: float, speed_mode: object = "balanced",
+    system_prompt: str | None = None
 ) -> str | None:
     """Use a connection keyed by the exact selected credential and model."""
     if not api_key or not model or timeout_seconds <= 0:
@@ -222,6 +226,8 @@ def request_gemini_polish(
     # release request. A previously timed-out session can adopt fresh TLS too.
     if session.connection is None:
         session.connection = _take_warm_connection()
+    if system_prompt is not None:
+        return session.request_locked(model, prompt, timeout_seconds, speed_mode, system_prompt=system_prompt)
     return session.request_locked(model, prompt, timeout_seconds, speed_mode)
 
 
