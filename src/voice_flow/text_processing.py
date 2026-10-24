@@ -40,7 +40,13 @@ def apply_spoken_punctuation(text: str) -> str:
 # Optional comma on either side is part of the filler, so "so, um, I think"
 # becomes "so I think" instead of "so, I think" or "so,  I think".
 _FILLER_RE = re.compile(
-    r"(?:[ \t]*,[ \t]*)?\b(um|uh|er|ah|hmm)\b(?:[ \t]*,)?[ \t]*",
+    r"(?:[ \t]*,[ \t]*)?\b(um+|uh+|er|ah|hm{2,})\b(?:[ \t]*,)?[ \t]*",
+    re.IGNORECASE,
+)
+# A filler that occupies a whole sentence owns its closing punctuation.
+# Mid-sentence punctuation remains meaningful ("send it, um. tomorrow").
+_FILLER_SENTENCE_RE = re.compile(
+    r"(?:^|(?<=[.!?\n]))[ \t]*(um+|uh+|er|ah|hm{2,})[ \t]*[.!?]+(?=[ \t\n]|$)[ \t]*",
     re.IGNORECASE,
 )
 # Internal lower-to-upper transitions (parseJSON, iPhone) and an acronym
@@ -147,7 +153,6 @@ def _repair_unambiguous_agreement(segment: str) -> str:
         (r"\b(you|we|they)\s+has\b", r"\1 have"),
         (r"\b(you|we|they)\s+does\b", r"\1 do"),
         (r"\b(he|she|it)\s+are\b", r"\1 is"),
-        (r"\b(he|she|it)\s+were\b", r"\1 was"),
         (r"\b(this|that)\s+are\b", r"\1 is"),
         (r"\b(these|those)\s+is\b", r"\1 are"),
     ):
@@ -164,6 +169,10 @@ def _strip_filler(match: "re.Match[str]") -> str:
     removed.
     """
     word = match.group(1)
+    # ASCII "um" commonly represents micrometres after a numeric value.
+    # Keep the unit, including decimals, signs, and ranges; never guess intent.
+    if word.lower() == "um" and re.search(r"\d[ \t]*$", match.string[:match.start(1)]):
+        return match.group(0)
     if word.isupper():
         return match.group(0)
     return " "
@@ -176,6 +185,7 @@ def cleanup_text(text: str, level: str, preserve_repetitions: bool = False) -> s
     text = text.strip()
 
     def clean_unprotected(segment: str) -> str:
+        segment = _FILLER_SENTENCE_RE.sub(_strip_filler, segment)
         segment = _FILLER_RE.sub(_strip_filler, segment)
         segment = re.sub(r"(?:^|,)\s*you know\s*(?=,|$)", lambda m: "," if m.group(0).startswith(",") else "", segment, flags=re.I)
         for pattern, replacement in (
