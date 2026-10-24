@@ -150,18 +150,23 @@ def can_execute_model(model_ref: str) -> bool:
 
 
 def request_polish(
-    model_ref: str, prompt: str, *, timeout_seconds: float, speed_mode: object = None
+    model_ref: str, prompt: str, *, timeout_seconds: float, speed_mode: object = None,
+    system_prompt: str | None = None
 ) -> str | None:
-    """Execute the selected adapter and retain its per-thread outcome."""
+    """Execute the selected adapter; keep optional trusted policy separate."""
     _diagnostic.status = "unavailable"
-    result = _request_polish(model_ref, prompt, timeout_seconds=timeout_seconds, speed_mode=speed_mode)
+    kwargs = {"timeout_seconds": timeout_seconds, "speed_mode": speed_mode}
+    if system_prompt is not None:
+        kwargs["system_prompt"] = system_prompt
+    result = _request_polish(model_ref, prompt, **kwargs)
     if result:
         _diagnostic.status = "ok"
     return result
 
 
 def _request_polish(
-    model_ref: str, prompt: str, *, timeout_seconds: float, speed_mode: object = None
+    model_ref: str, prompt: str, *, timeout_seconds: float, speed_mode: object = None,
+    system_prompt: str | None = None
 ) -> str | None:
     """Run *model_ref* through its exact Video Flow adapter.
 
@@ -173,6 +178,7 @@ def _request_polish(
     supported thinking level matches the policy captured for this dictation.
     """
     provider, model = _parts(model_ref)
+    combined_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt is not None else prompt
     if not provider or not model:
         return None
 
@@ -180,7 +186,7 @@ def _request_polish(
     if provider in ("microsoft", "windows") or model_ref in ("microsoft/windows-ai-text-rewriter", "windows/text-rewriter", "local/windows-ai-text-rewriter"):
         from voice_flow import windows_ai_rewriter
         if windows_ai_rewriter.is_windows_ai_available():
-            return windows_ai_rewriter.rewrite_text(prompt, timeout_seconds=timeout_seconds)
+            return windows_ai_rewriter.rewrite_text(combined_prompt, timeout_seconds=timeout_seconds)
         return None
 
     # Liquid LFM 2.5 350M local execution
@@ -190,8 +196,8 @@ def _request_polish(
             # The bridge receives the cloud-shaped request.  LFM gets its own
             # compact policy plus this trusted style/task directive.
             return lfm_engine.polish_with_lfm(
-                prompt,
-                instruction=lfm_engine._trusted_instruction("", prompt),
+                combined_prompt,
+                instruction=lfm_engine._trusted_instruction("", combined_prompt),
                 timeout_seconds=timeout_seconds,
             )
         return None
@@ -201,7 +207,7 @@ def _request_polish(
         from voice_flow import s1_engine
         if s1_engine.is_s1_downloaded():
             return s1_engine.polish_with_s1(
-                prompt,
+                combined_prompt,
                 timeout_seconds=timeout_seconds,
             )
         return None
@@ -251,6 +257,8 @@ def _request_polish(
                             "generationConfig": _antigravity_generation_config(model, speed_mode),
                         },
                     }
+                    if system_prompt is not None:
+                        ccpa_body["request"]["systemInstruction"] = {"parts": [{"text": system_prompt}]}
                     ccpa_req = _urq.Request(
                         "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
                         data=_json.dumps(ccpa_body).encode("utf-8"),
@@ -290,6 +298,7 @@ def _request_polish(
         if getattr(gateway, "_provider", "") == "gemini":
             from voice_flow.voice_gemini_transport import request_gemini_polish, last_transport_diagnostic
 
+            system_kwargs = {"system_prompt": system_prompt} if system_prompt is not None else {}
             result = request_gemini_polish(
                 api_key=str(getattr(gateway, "_api_key", "") or ""),
                 model=str(getattr(gateway, "_model_id", "") or model),
@@ -298,6 +307,7 @@ def _request_polish(
                 # socket is retired before it can hold the Voice lane busy.
                 timeout_seconds=max(0.05, float(timeout_seconds) - 0.15),
                 speed_mode=speed_mode,
+                **system_kwargs,
             )
             _diagnostic.status = last_transport_diagnostic().get("status", "error")
             return result
@@ -309,7 +319,8 @@ def _request_polish(
             result, status = request_chat(
                 endpoint=endpoint, api_key=str(getattr(gateway, "_api_key", "") or ""),
                 model=str(getattr(gateway, "_model_id", "") or model),
-                messages=[{"role": "user", "content": prompt}],
+                messages=([{"role": "system", "content": system_prompt}] if system_prompt is not None else [])
+                         + [{"role": "user", "content": prompt}],
                 timeout_seconds=max(0.05, float(timeout_seconds) - 0.15),
             )
             _diagnostic.status = status
@@ -320,8 +331,10 @@ def _request_polish(
                 if result is None:
                     _diagnostic.status = "empty_response"
             return result
+        # Specialized workers still accept a single prompt. Preserve their
+        # established policy plus content payload without dropping either.
         return gateway.request_isolated(
-            prompt=prompt,
+            prompt=combined_prompt,
             model_ref=model_ref,
             max_tokens=4_096,
             timeout_seconds=max(0.05, float(timeout_seconds)),

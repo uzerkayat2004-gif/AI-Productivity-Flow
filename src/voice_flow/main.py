@@ -457,7 +457,7 @@ def _offer_microphone_settings() -> None:
     return
 
 # Polish outcomes that mean a spoken command was NOT carried out.
-_COMMAND_NOT_PERFORMED = frozenset({"local", "model_not_downloaded", "timeout", "provider_failure", "fidelity_reject", "command_unfulfilled"})
+_COMMAND_NOT_PERFORMED = frozenset({"local", "model_not_downloaded", "timeout", "provider_failure", "rate_limited", "fidelity_reject", "command_unfulfilled"})
 
 
 def _polish_outcome_label(outcome: str) -> str:
@@ -475,6 +475,7 @@ def _polish_outcome_label(outcome: str) -> str:
         "polishing_off": "Polishing off",
         "timeout": "AI timed out — basic cleanup applied",
         "provider_failure": "AI unavailable — basic cleanup applied",
+        "rate_limited": "AI rate/quota limit — your text was kept",
         "fidelity_reject": "AI output rejected — basic cleanup applied",
         "command_unfulfilled": "Voice command not done — your full text was kept",
     }.get(str(outcome or ""), "AI unavailable — basic cleanup applied")
@@ -2165,7 +2166,7 @@ class VoiceFlowApp:
         # can fulfill recognizable dictation. The polisher's safe payload has
         # already received grammar cleanup and its single dictionary pass.
         # Never edit the rejected model candidate or enter this lane while OFF.
-        local_attempt_failed = observed_outcome["value"] in {"provider_failure", "fidelity_reject", "command_unfulfilled"} or (
+        local_attempt_failed = observed_outcome["value"] in {"provider_failure", "rate_limited", "fidelity_reject", "command_unfulfilled"} or (
             observed_outcome["value"] == "timeout" and attempt_info["lfm_bridge_attempted"]
         )
         s1_prompt_cleanup = False
@@ -2203,7 +2204,7 @@ class VoiceFlowApp:
         # after a disabled/failed AI attempt, because a style or command did
         # not actually run; do deliver the safe fallback instead of throwing
         # it away and pasting the raw transcript.
-        if deterministic_format or observed_outcome["value"] in {"timeout", "provider_failure", "fidelity_reject", "command_unfulfilled", "disabled", "polishing_off"}:
+        if deterministic_format or observed_outcome["value"] in {"timeout", "provider_failure", "rate_limited", "fidelity_reject", "command_unfulfilled", "disabled", "polishing_off"}:
             overrides = command_overrides if isinstance(command_overrides, dict) else {}
             supported_email_overrides = set(overrides).issubset({"tone", "formality"})
             can_use_local_structure = (
