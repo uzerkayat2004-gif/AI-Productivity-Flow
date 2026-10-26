@@ -216,6 +216,14 @@ def apply_punctuation_policy(
 
     # Check if text already has explicit terminal punctuation
     has_terminal_punct = bool(re.search(r"[.!?]$", text.strip()))
+    # An email closing is not another sentence. In particular, avoid turning
+    # the model's "Best regards," into "Best regards,." after acceptance.
+    has_email_closing = bool(re.search(
+        r"\n[ \t]*(?:(?:best|kind) regards|regards|sincerely|thank you|thanks),"
+        r"[ \t]*(?:\n[ \t]*[\w.'-]+(?:[ \t]+[\w.'-]+){0,3})?[ \t]*\Z",
+        text.rstrip(), re.IGNORECASE,
+    ))
+    has_terminal_punct = has_terminal_punct or has_email_closing
 
     # 1. Question Mark Detection
     is_question = bool(_QUESTION_STARTERS.search(text.strip())) and not has_terminal_punct

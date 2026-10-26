@@ -111,7 +111,7 @@ _WAKE_RE = re.compile(
     r"|(?:hay|hey)\s+voiced\s+what"
     # Deliberate wake prefix plus a narrow ASR substitution for "Voice Flow".
     # The alias is accepted only with an explicit hey/ok/okay prefix.
-    r"|(?:hey|ok|okay)\s*[,.:!\-—]?\s*vice[\s\-]{0,3}flows?"
+    r"|(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:vice[\s\-]{0,3}flows?|voiced\s+flow)"
     # A narrow ASR alias for "Voice Flow". _is_wake_at additionally requires
     # a command immediately after it and a clause boundary before it.
     r"|voice[\s-]?low"
@@ -248,12 +248,12 @@ def _is_wake_at(text: str, match: re.Match) -> bool:
         # still requires a known command immediately after the alias.
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.fullmatch(
-        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*vice[\s\-]{0,3}flows?",
+        r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:vice[\s\-]{0,3}flows?|voiced\s+flow)",
         matched,
         re.IGNORECASE,
     ):
-        # "Vice Flow" is a specific ASR substitution. Require an explicit
-        # wake prefix and a known imperative immediately after the alias.
+        # "Vice Flow" / "voiced flow" are specific ASR substitutions. Require
+        # an explicit wake prefix and a known imperative right after the alias.
         return bool(_PREFIX_ONLY_WAKE_CONTINUATION_RE.match(text[match.end():]))
     if re.fullmatch(
         r"(?:hey|ok|okay)\s*[,.:!\-—]?\s*(?:why|wise|boys?|nice|choice|voice)[\s\-,]{0,3}(?:slow|flo|flu|flows?)",

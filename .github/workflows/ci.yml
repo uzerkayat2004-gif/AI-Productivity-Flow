@@ -27,6 +27,10 @@ jobs:
           pip install -e .
           pip install pytest pytest-asyncio pytest-timeout cryptography pillow
 
+      - name: Run Voice Flow regression tests
+        run: |
+          pytest tests/test_voice_transform_fidelity.py tests/test_voice_trusted_transport.py tests/test_voice_command_finalization.py tests/test_voice_command_voiced_flow.py tests/test_voice_command_voiced_flow_finalization.py tests/test_voice_command_semantic_verification.py tests/test_voice_command_rate_limit.py tests/test_off_local_cleanup_reliability.py tests/test_text_processing.py tests/test_local_sentence_cleanup.py -v --timeout=60
+
       - name: Run Platform Tests
         run: |
           pytest tests/test_platform_layer.py -vv -s --timeout=30
@@ -90,6 +94,10 @@ jobs:
           pip install -e .
           pip install pytest pytest-asyncio pytest-timeout pillow dmgbuild
           brew install create-dmg || true
+
+      - name: Run Voice Flow regression tests
+        run: |
+          pytest tests/test_voice_transform_fidelity.py tests/test_voice_trusted_transport.py tests/test_voice_command_finalization.py tests/test_voice_command_voiced_flow.py tests/test_voice_command_voiced_flow_finalization.py tests/test_voice_command_semantic_verification.py tests/test_voice_command_rate_limit.py tests/test_off_local_cleanup_reliability.py tests/test_text_processing.py tests/test_local_sentence_cleanup.py -v --timeout=60
 
       - name: Verify core package import
         run: |
